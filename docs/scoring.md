@@ -19,6 +19,18 @@ positive reasons; do not infer clean from absence or assign a substitute number.
 The quality view and all scoring/unrated invariants remain mandatory even when
 numeric quality is unavailable throughout a production snapshot.
 
+## Dataset-credit amendment `release-scope-v3` — 2026-11-08
+
+The current release scope retains v2's optional numeric quality and permits
+reviewed legally required dataset credits in a separate global frontend display.
+Credits describe included real datasets only. They are neither risk evidence nor
+a per-IP provenance claim and never enter VIA3 records or lookup answers. An
+attribution-required source may pass rights admission when its reviewed global
+credits satisfy the actual terms; every other source/coverage test still applies.
+Source counts, brand names and credit entries cannot create independent evidence
+votes, confidence or numeric quality. Model revision 1 and all formulas remain
+unchanged.
+
 ## Observation, scope and independence
 
 Reject nonfinite or out-of-range evidence inputs. Reliability is
@@ -61,7 +73,7 @@ different canonical bytes.
 ## Coverage and numeric quality
 
 This section controls whether an individual result may publish a number. Under
-`release-scope-v2`, missing complete assessment families do not themselves block
+`release-scope-v3` (retaining v2), missing complete assessment families do not themselves block
 production release; they leave numeric quality unrated.
 
 A layer is `assessed` only when current, admitted, complete evidence covers its

@@ -1,6 +1,6 @@
 schema_version: 3
 description: 'VanSail IP Atlas: download-only catalog. Proxy subscriptions yield public literal IP evidence only;
-  stale or uncertain sources are not published. No source names or provenance in browser artifacts.'
+  stale or uncertain sources are not published. No per-IP provenance; reviewed dataset credits are global only.'
 build:
   profile: github-actions-private-standard
   incremental: true
@@ -210,7 +210,7 @@ build:
   release:
     atomic_manifest_pointer: current.json
     frontend_api_calls: false
-    retain_attribution: false
+    retain_attribution: true
     verify_all_chunks_before_publish: true
     owner_signoff_required: true
     owner_signoff_file: configs/release-approval.yaml
@@ -233,7 +233,7 @@ build:
     pages_build_work: none-ci-prebuild-only
     publish_no_source_provenance: true
     public_provenance: false
-    public_source_rights_policy: internal-approval-only; skip any source whose terms require UI attribution
+    public_source_rights_policy: reviewed-redistribution-with-required-global-dataset-credits
     maximum_snapshot_age_hours: 720
     hosted_regression_required: true
     hosted_performance_required: true
@@ -378,7 +378,8 @@ build:
     active_requires_fixture: true
     active_requires_publication_proof: true
     active_requires_public_redistribution: true
-    active_forbidden_if_attribution_required: true
+    active_forbidden_if_attribution_required: false
+    active_requires_reviewed_attribution_when_required: true
     unknown_independence_defaults_to_one_family: true
     runtime_state_is_not_persisted: true
     authoritative_publication_headers: []
@@ -394,7 +395,8 @@ source_defaults:
   output_source_metadata: false
   requires_observed_fixture: true
   requires_publication_proof: true
-  requires_public_redistribution_without_attribution: true
+  requires_public_redistribution_without_attribution: false
+  requires_reviewed_attribution_when_required: true
   active_without_fixture_forbidden: true
   unknown_freshness_action: quarantine-and-withdraw
 sources:
@@ -4792,4 +4794,4 @@ sources:
   public_fields: []
   field_mappings: {}
   signals: []
-contract_revision: 1
+contract_revision: 2

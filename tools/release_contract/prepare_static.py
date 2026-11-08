@@ -27,6 +27,7 @@ from tools.release_contract.contracts import (
     scan_frontend_text, scan_public_records, sha256, tree_inventory, verify_manifest,
 )
 from tools.release_contract.nuxt_timestamps import canonicalize_operational_times
+from tools.release_contract.dataset_credits import validate_credit_tree, write_synthetic_credit_tree
 
 ROOT = Path(__file__).resolve().parents[2]
 INLINE_SCRIPT = re.compile(r"<script\b([^>]*)>([\s\S]*?)</script\s*>", re.IGNORECASE)
@@ -196,7 +197,19 @@ def freeze_csp(public: Path) -> int:
 
 
 def scan_frontend(public: Path, private_values: tuple[str, ...] = ()) -> None:
+    credits = set()
+    if (public / "dataset-credits.json").exists() or (public / "_atlas/credits").exists():
+        pointer = parse_canonical((public / "_atlas/current.json").read_bytes())
+        modes = {}
+        for manifest_path in (public / "_atlas/releases").glob("*/manifest.json"):
+            manifest = parse_canonical(manifest_path.read_bytes())
+            if manifest.get("release_id") != manifest_path.parent.name:
+                raise ContractError("dataset credits cannot bind an unrelated manifest")
+            modes[manifest_path.parent.name] = manifest.get("mode")
+        credits = validate_credit_tree(public, pointer.get("release_id"), modes)
     for path in public.rglob("*"):
+        if path.relative_to(public).as_posix() in credits:
+            continue  # Only independently validated global credit fields are exempt.
         if not path.is_file() or "_atlas" in path.relative_to(public).parts:
             continue
         if path.suffix == ".map" or path.name in ("sources.yaml", "descriptor.json"):
@@ -259,8 +272,14 @@ def prepare(atlas: Path, public: Path, now: int) -> dict:
         raise ContractError("atlas destination cannot be a symlink")
     # Stage outside the deploy tree. Every recursive cleanup target is verified
     # against this exact generated-output parent before any removal.
+    credit_index = public / "dataset-credits.json"
+    if credit_index.is_symlink() or credit_index.exists() and (not credit_index.is_file() or credit_index.stat().st_size > 4096):
+        raise ContractError("unsafe existing dataset credit index")
     stage = Path(tempfile.mkdtemp(prefix="atlas-stage-", dir=public.parent)).resolve()
     previous = None
+    previous_index = None
+    target_replaced = False
+    index_managed = False
     try:
         shutil.copytree(atlas, stage / "_atlas")
         verify_atlas(stage / "_atlas", now)
@@ -268,6 +287,14 @@ def prepare(atlas: Path, public: Path, now: int) -> dict:
             previous = stage / "previous"
             os.replace(target, previous)
         os.replace(stage / "_atlas", target)
+        target_replaced = True
+        if credit_index.exists():
+            previous_index = stage / "previous-dataset-credits.json"
+            os.replace(credit_index, previous_index)
+        index_managed = True
+        modes = {path.parent.name: parse_canonical(path.read_bytes())["mode"]
+                 for path in (target / "releases").glob("*/manifest.json")}
+        write_synthetic_credit_tree(public, metadata["release_id"], modes)
         normalized_timestamps = canonicalize_operational_times(public, metadata["valid_from"])
         hashes = freeze_csp(public)
         verify_software_notices(public)
@@ -283,6 +310,12 @@ def prepare(atlas: Path, public: Path, now: int) -> dict:
                 failed = stage / "failed"
                 os.replace(target, failed)
             os.replace(previous, target)
+        elif target_replaced and target.exists():
+            os.replace(target, stage / "failed")
+        if previous_index is not None and previous_index.exists():
+            os.replace(previous_index, credit_index)
+        elif index_managed and credit_index.exists():
+            credit_index.unlink()
         raise
     finally:
         if stage.parent != public.parent.resolve() or not stage.name.startswith("atlas-stage-"):

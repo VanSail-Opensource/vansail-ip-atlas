@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
+	"vansail-ip-atlas/internal/intelligence"
 )
 
 type fieldTargets []string
@@ -54,11 +55,12 @@ type catalogSource struct {
 	} `yaml:"trust"`
 	Dependencies []string `yaml:"depends_on"`
 	Rights       struct {
-		Status       string `yaml:"status"`
-		Distribution string `yaml:"distribution"`
-		EvidenceURL  string `yaml:"evidence_url"`
-		ReviewBasis  string `yaml:"review_basis"`
-		Attribution  *bool  `yaml:"attribution_required"`
+		Status              string                           `yaml:"status"`
+		Distribution        string                           `yaml:"distribution"`
+		EvidenceURL         string                           `yaml:"evidence_url"`
+		ReviewBasis         string                           `yaml:"review_basis"`
+		AttributionRequired *bool                            `yaml:"attribution_required"`
+		Attribution         *intelligence.DatasetAttribution `yaml:"attribution"`
 	} `yaml:"license"`
 	Parser struct {
 		ID      string `yaml:"id"`
@@ -134,7 +136,7 @@ func DecodeCatalog(reader io.Reader) ([]Source, error) {
 		}
 		output = append(output, Source{ID: raw.ID, Family: raw.Family, Category: raw.Category, Admission: raw.State, URL: raw.Download.URL, Format: raw.Download.Format, MaxCompressedBytes: raw.Download.Maximum << 20,
 			MaxAge: age, Weight: raw.Trust.Weight, Dependencies: append([]string(nil), raw.Dependencies...),
-			Rights:      Rights{raw.Rights.Status, raw.Rights.Distribution, raw.Rights.EvidenceURL, raw.Rights.ReviewBasis, raw.Rights.Attribution},
+			Rights:      Rights{Status: raw.Rights.Status, Distribution: raw.Rights.Distribution, EvidenceURL: raw.Rights.EvidenceURL, ReviewBasis: raw.Rights.ReviewBasis, AttributionRequired: raw.Rights.AttributionRequired, Attribution: raw.Rights.Attribution},
 			Parser:      Parser{raw.Parser.ID, raw.Parser.Schema, raw.Parser.Version},
 			Fixture:     Fixture{raw.Fixture.Status, raw.Fixture.Path, raw.Fixture.SHA256, raw.Fixture.Parser, raw.Fixture.Schema, raw.Fixture.TestedAt, raw.Fixture.Observed, raw.Fixture.Synthetic},
 			Publication: Publication{raw.Publication.Kind, raw.Publication.Locator, raw.Publication.Field}, Coverage: raw.Coverage.Kind, Scope: raw.Scope, PublicFields: append([]string(nil), raw.PublicFields...), Fields: append([]string(nil), raw.Fields...), FieldMappings: mappings})

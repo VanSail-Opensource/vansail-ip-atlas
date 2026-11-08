@@ -1,5 +1,6 @@
 # VanSail IP Atlas — frontend, privacy and Cloudflare Pages deployment.
 schema_version: 3
+contract_revision: 2
 app:
   name: VanSail IP Atlas
   identifier: vansail-ip-atlas
@@ -80,8 +81,9 @@ navigation:
   preserve_q_on_navigation: true
   no_duplicate_displays: true
   single_fact_owner: true
-  no_source_or_credits_panel: true
-  no_source_names_or_inspired_by_labels: true
+  no_per_ip_source_or_credits_panel: true
+  no_source_names_in_ip_results: true
+  no_inspired_by_labels: true
   minimum_text: true
   icon_first: true
   mobile_first: true
@@ -106,7 +108,16 @@ design:
   layout: [large-negative-space, low-density, progressive-disclosure, stacked-panels]
   transitions: [subtle-spring, opacity, translate, graph-path-highlight]
   theme_skins_separate_css_tokens: true
-  do_not_show_source_attribution_in_ui: true
+  dataset_attribution_display: global-footer-details
+dataset_credits:
+  enabled: true
+  placement: global-footer-details
+  current_index: /dataset-credits.json
+  object_root: /_atlas/credits/
+  only_included_reviewed_datasets: true
+  per_ip_attribution: false
+  max_entries: 256
+  max_document_kib: 1024
 motion:
   framework: motion-v
   nuxt_module: motion-v/nuxt

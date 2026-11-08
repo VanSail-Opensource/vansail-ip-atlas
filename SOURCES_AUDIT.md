@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This audit documents how **retained** bulk datasets are interpreted, tested and reconciled. There is no public source catalog in the site, nor a source/provenance section in the binary output. The compiler retains internal origin family, timestamp and rights status to stop duplicate observations and stale feeds from corrupting reputation.
+This audit documents how **retained** bulk datasets are interpreted, tested and reconciled. There is no per-IP source catalog or source/provenance section in the binary output. Under the user-approved `release-scope-v3`, one global dataset-credit display contains reviewed notices for included datasets. The compiler retains internal origin family, timestamp and rights status to stop duplicate observations and stale feeds from corrupting reputation.
 
 ## Canonical source categories
 
@@ -22,13 +22,13 @@ This audit documents how **retained** bulk datasets are interpreted, tested and 
 
 **Cloudflare ProxyIP:** only the full `Xiaobei09/proxyip/data/valid/all.txt` list is represented. Do not fetch optional quality, region, streaming, China reachability or reputation enrichment from the same project. Treat every emitted public IP as a proxy observation, not as a verified exit IP. Ignore annotations.
 
-**Proxy subscription collector:** all 21 repositories share the sole independence key `public-subscription-aggregators`. Repositories, mirrors and protocol partitions never create separate scoring votes. A direct downloadable file, observed schema, exact publication proof and no-attribution redistribution decision are required before activation. Do not include HTTP/SOCKS public proxy scraping feeds as another copy of the same intelligence.
+**Proxy subscription collector:** all 21 repositories share the sole independence key `public-subscription-aggregators`. Repositories, mirrors and protocol partitions never create separate scoring votes. A direct downloadable file, observed schema, exact publication proof and reviewed redistribution decision are required before activation. Required attribution must be resolved with reviewed global-credit metadata. Do not include HTTP/SOCKS public proxy scraping feeds as another copy of the same intelligence.
 
 **Origin and Tier-1:** CAIDA relationships and current RIB observations serve different purposes. CAIDA inference labels `upstream`, `peer`, `customer` and other relationship classes; RIB paths establish observed adjacency and origin visibility. Source-derived Tier-1 candidates must satisfy provider-free status, globally significant cone/degree and peer-core support. No fixed-ASN allowlist.
 
 **Freshness:** source publication timestamp must be verifiable and within 720 hours; HTTP read time does not count. A stale source is quarantined, its exact and prefix observations removed from the next build, and dependent risk, ASN and `/24` aggregates recomputed. Missing source content must not persist as a residual output record.
 
-**Rights:** public compilation can count as redistribution. Since the product intentionally has no public source credits, only enable sources for which this output is permitted. Keep license/rights metadata in the internal source registry rather than in the page or published shard.
+**Rights:** public compilation can count as redistribution. Required attribution is now permitted only through reviewed notices in the shared global display; it does not waive redistribution, derivative-use or placement restrictions. Sources whose terms cannot be met remain ineligible. Detailed rights evidence, source IDs and lineage stay private; VIA3 and IP lookup facts remain free of source metadata.
 
 ## Proxy subscription decoder fixtures
 

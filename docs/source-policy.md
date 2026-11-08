@@ -1,5 +1,19 @@
 # Source Admission and Freshness Policy
 
+## Current release scope `release-scope-v3` — 2026-11-08
+
+The user explicitly approved dataset credit display. Reviewed, legally required
+attribution may appear in one global shared frontend display and its dedicated
+static artifact for real datasets included in the frozen release. This replaces
+the earlier blanket no-credit admission condition. It permits only approved
+credit names, plain text and attribution/license URLs; source IDs, per-IP
+provenance and source metadata in VIA3/lookup answers remain private.
+
+`release-scope-v3` retains the numeric-quality amendment below: numeric quality
+is optional for release, and all existing coverage rules still govern any number.
+The current private capability report uses schema version 3 and
+`release_scope: release-scope-v3`.
+
 ## Approved release scope `release-scope-v2` — 2026-11-08
 
 The user removed complete risk-assessment feeds as a production-release
@@ -16,7 +30,7 @@ change the scoring model.
 
 - `candidate`: cataloged but not fixture-tested.
 - `fixture_tested`: observed payload and parser fixture passed.
-- `rights_approved`: a recorded redistribution decision permits the proposed derived product. This peer milestone alone does not establish explicit no-attribution permission or fixture certification.
+- `rights_approved`: a recorded redistribution decision permits the proposed derived product. This peer milestone alone does not establish attribution compliance or fixture certification.
 - `active`: fixture-tested, rights-approved, and eligible for the current build.
 - `retired`: withdrawn or legally excluded.
 
@@ -47,13 +61,35 @@ Unknown fields are rejected. A source cannot be active without a validated fixtu
 
 Source scopes are exactly `exact_ip`, `prefix`, `asn`, `asn_edge`, `path`. Historical `exact`, `exact-ip` and `asn-edge` spellings are rejected after this explicit catalog normalization. Public relationship classes are exactly `transit_upstream`, `peer`, `customer`, `sibling`, `unknown`; `provider_transit` is rejected. Internal `c2`, `scanner`, and `cloudflare_proxyip` signals map to `command_control`, `scanning`, and `proxy` reason bits, respectively. Assignment is `assignment_mode`; it is independent of anycast and `ipv4_directed_broadcast`.
 
-An active source requires all of: nonempty parser ID/schema/version, an observed real fixture under `fixtures/source-certification/`, matching parser/schema and SHA-256, UTC test time, explicit field mappings, exact asset/discovery, explicit evidence family/coverage, and reviewed distribution permission with `attribution_required: false`. A `missing` fixture cannot carry a hash, observation claim or test date. Synthetic contract fixtures and `fixtures/source-samples/` never certify a source. `attribution_required: null` means unresolved; this revision sets no source to false and promotes no admission state. Rights/fixture milestones are peers and are independently checked on activation.
+An active source requires all of: nonempty parser ID/schema/version, an observed real fixture under `fixtures/source-certification/`, matching parser/schema and SHA-256, UTC test time, explicit field mappings, exact asset/discovery, explicit evidence family/coverage, and reviewed distribution permission. Attribution must be explicitly resolved: `attribution_required: false` records that no public credit is required; `true` requires valid reviewed `license.attribution` metadata and a global display that satisfies its obligations; `null` remains unresolved and blocks admission. A `missing` fixture cannot carry a hash, observation claim or test date. Synthetic contract fixtures and `fixtures/source-samples/` never certify a source. This scope amendment promotes no admission state. Rights/fixture milestones are peers and are independently checked on activation.
+
+Source contract revision 2 adds the closed `license.attribution` object with
+required `name`, `text`, `url` and optional `license_url`. Name is 1–128 characters,
+plain text is 1–2048 characters, and URLs are at most 2048 characters, public
+HTTPS destinations without credentials/private addresses, queries, fragments,
+backslashes or raw angle brackets/quotes. Name/text are trimmed NFC Unicode
+without controls, formatting controls or invalid surrogates. Subscription URIs,
+private-key headers and credential-token markers remain forbidden in all fields.
+HTML-looking literal text is escaped for display and never interpreted as markup.
+Metadata requires a
+reviewed allowed license, rights evidence URL and recorded review basis. Terms
+requiring more notice/link obligations than this display can satisfy remain
+ineligible until a reviewed compatible representation exists. Exact credit bytes
+participate in private policy/source fingerprints and candidate approval; a changed
+or withdrawn obligation invalidates prior eligibility and rebuilds release credits.
+
+The private report may bind eligible attribution metadata to `source_id` in
+`dataset_attributions`. That internal binding is never copied to a public credit.
+The packager selects only actual included real dataset contributions, strips IDs
+and private lineage, deduplicates identical reviewed credit entries and emits the
+dedicated global credit artifact. Merely cataloged, candidate, missing, stale,
+withdrawn or synthetic datasets cannot acquire a displayed inclusion credit.
 
 `fixtures/source-certification/adapter-certifications.json` is a reviewed build-private ledger, initially empty. A fixture milestone additionally matches its source ID, parser/schema/version, fixture hash/test time and current internal Go implementation hash in that ledger. Unknown parser strings and changed implementations cannot qualify by flipping YAML booleans. The ledger records independently reviewed parser-run evidence; the policy evaluator does not fabricate a parser run or discover licensing permission. Future source certification must execute the observed parser and review the corresponding evidence before adding an entry.
 
 The P0 policy evaluator accepts trusted payload-verifier results only; it is not a network ingestor or proof verifier. P2 must construct these results from actual downloaded bytes, their schema validation, current policy, and asset-specific metadata. The CLI intentionally supplies no such results and consequently reports no current sources. A config label or checked-in report cannot produce a current payload. Build-private reports include config hashes, decisions and missing capabilities and must never enter `web/` or a deploy artifact.
 
-The capability report counts distinct `evidence_family` values, explicit canonical fields and signal mappings. Numeric quality needs the same two complete families assessing all four layers to qualify for numeric publication. Under `release-scope-v2`, the private report uses schema version 2, carries `release_scope: release-scope-v2`, marks this row `required: false` and reports `status: unrated` when unqualified; that optional row does not block production eligibility. Every other capability remains required. Usage cannot qualify from a provider name or a datacenter reason. The Pages row cannot qualify from config booleans; exact candidate evidence, preview and approval verification remain separate mandatory gates. Missing runtime evidence blocks each required data capability even if a source is statically active; it leaves optional numeric quality unrated.
+The capability report counts distinct `evidence_family` values, explicit canonical fields and signal mappings. Numeric quality needs the same two complete families assessing all four layers to qualify for numeric publication. The current schema-version-3 report carries `release_scope: release-scope-v3`, retains the v2 numeric-quality row as `required: false` and reports `status: unrated` when unqualified; that optional row does not block production eligibility. Every other capability remains required. Usage cannot qualify from a provider name or a datacenter reason. The Pages row cannot qualify from config booleans; exact candidate evidence, preview and approval verification remain separate mandatory gates. Missing runtime evidence blocks each required data capability even if a source is statically active; it leaves optional numeric quality unrated.
 
 ## Event clocks, runtime failures and retraction
 
@@ -108,7 +144,15 @@ Only literal public IPs are accepted. Credentials, ports, protocols, transports,
 
 ## Rights
 
-Public hosting of a derived database can constitute redistribution. Sources requiring public attribution or prohibiting redistribution are excluded. OpenStreetMap tile attribution is a map-service requirement and is not database provenance.
+Public hosting of a derived database can constitute redistribution. Sources
+prohibiting the proposed redistribution remain excluded. Under `release-scope-v3`,
+public attribution is permitted through the reviewed global dataset credits when
+that placement and content satisfy the actual license and upstream obligations.
+Attribution does not waive redistribution, share-alike or other applicable terms.
+The renderer escapes plain text and renders only reviewed safe links; it executes
+no downloaded HTML or script. Credits make no per-IP provenance assertion and
+cause no automatic request to a publisher. OpenStreetMap tile attribution remains
+a separate map-service condition; software distribution notices are also separate.
 
 ## Production Capability Gate
 
@@ -120,7 +164,7 @@ Production is blocked unless approved current sources exist for every required c
 - proxy/risk reasons and exact `/24` observations;
 - current MRT paths, directed relationships, origin data, and RPKI for BGP/Tier-1.
 
-Numeric quality is optional under `release-scope-v2`. Two independent complete
+Numeric quality remains optional under `release-scope-v3` (retaining v2). Two independent complete
 risk-assessment families covering all required layers remain necessary for a
 non-null score, but are not necessary to release supported reasons and unrated
 quality. The reason display, null-score semantics and scoring invariant tests

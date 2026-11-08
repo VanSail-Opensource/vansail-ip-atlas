@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"url": "https://publisher.example/data", "valid": true},
+    {"url": "https://publisher.example/license%20terms", "valid": true},
+    {"url": "https://8.8.8.8/license", "valid": true},
+    {"url": "https://[2606:4700:4700::1111]/license", "valid": true},
+    {"url": "https://[::ffff:8.8.8.8]/license", "valid": true},
+    {"url": "https://publisher.example/%zz", "valid": false},
+    {"url": "https://publisher.example/%", "valid": false},
+    {"url": "https://publisher.example/%0", "valid": false},
+    {"url": "http://publisher.example/license", "valid": false},
+    {"url": "https://secret@publisher.example/license", "valid": false},
+    {"url": "https://publisher.example/license?secret=1", "valid": false},
+    {"url": "https://publisher.example/license#section", "valid": false},
+    {"url": "https://publisher.example./license", "valid": false},
+    {"url": "https://publisher.internal/license", "valid": false},
+    {"url": "https://127.0.0.1/license", "valid": false},
+    {"url": "https://192.0.0.9/license", "valid": false},
+    {"url": "https://100.64.0.1/license", "valid": false},
+    {"url": "https://[2001:1::1]/license", "valid": false},
+    {"url": "https://[2002:808:808::]/license", "valid": false},
+    {"url": "https://[3fff::1]/license", "valid": false},
+    {"url": "https://[::ffff:127.0.0.1]/license", "valid": false},
+    {"url": "https://publisher.example/<notice>", "valid": false},
+    {"url": "https://publisher.example/ghp_synthetic", "valid": false},
+    {"url": "https://publisher.example/github_pat_synthetic", "valid": false}
+  ]
+}

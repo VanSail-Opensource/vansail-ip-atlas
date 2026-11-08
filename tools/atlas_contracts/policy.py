@@ -5,11 +5,15 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import re
+import unicodedata
+import ipaddress
+from urllib.parse import urlsplit
 
 HEX = re.compile(r"^[0-9a-f]{64}$")
 UTC_TIMESTAMP = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?Z$")
 LAYERS = ("exact", "explicit_prefix", "asn", "neighbors24")
-RELEASE_SCOPE = "release-scope-v2"
+RELEASE_SCOPE = "release-scope-v3"
+CREDIT_SECRET = re.compile(r"(?:vless|vmess|trojan|ss|ssr|hy|hy2|hysteria|hysteria2|tuic|anytls)://|-----BEGIN[^\r\n]*PRIVATE KEY-----|(?:gh[pousr]_|github_pat_)", re.IGNORECASE)
 
 
 def adapter_code_hash(root):
@@ -101,13 +105,64 @@ def fixture_issues(source, root: Path):
     return issues
 
 
+def attribution_url(value):
+    from .config import safe_https
+    if (not isinstance(value, str) or not 1 <= len(value) <= 2048 or not value.isascii()
+            or not value.startswith("https://") or any(ch in value for ch in "<>\"'") or not safe_https(value)
+            or re.search(r"%(?![0-9A-Fa-f]{2})", value) or CREDIT_SECRET.search(value)):
+        return False
+    host = urlsplit(value).hostname
+    if host.endswith("."):
+        return False
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return True
+    if address.version == 6 and address.ipv4_mapped:
+        address = address.ipv4_mapped
+    # Match the production Go literal-public-IP exclusions, including special
+    # prefixes Python's version-dependent is_global property may classify
+    # differently. This validates a displayed link without resolving any host.
+    special = ("0.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "192.0.0.0/24", "192.0.2.0/24",
+               "192.88.99.0/24", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4",
+               "2001::/23", "2001:db8::/32", "2002::/16", "3fff::/20")
+    return (address.is_global and not address.is_multicast and not address.is_private
+            and not any(address in ipaddress.ip_network(prefix) for prefix in special)
+            and (address.version == 4 or address in ipaddress.ip_network("2000::/3")))
+
+
+def attribution_issues(value):
+    """Validate the reviewed plain-text global credit boundary, never IP facts."""
+    if (not isinstance(value, dict) or not {"name", "text", "url"}.issubset(value)
+            or set(value) - {"name", "text", "url", "license_url"}):
+        return ["reviewed_dataset_attribution_required"]
+    for name, maximum in (("name", 128), ("text", 2048)):
+        text = value[name]
+        if (not isinstance(text, str) or not 1 <= len(text) <= maximum or text.strip() != text
+                or unicodedata.normalize("NFC", text) != text
+                or CREDIT_SECRET.search(text)
+                or any(unicodedata.category(ch) in ("Cc", "Cf", "Cs") for ch in text)):
+            return ["reviewed_dataset_attribution_required"]
+    for name in ("url", "license_url"):
+        if name not in value:
+            continue
+        if not attribution_url(value[name]):
+            return ["reviewed_dataset_attribution_required"]
+    return []
+
+
 def static_issues(source, root: Path):
     issues = fixture_issues(source, root)
     rights, proof = source["license"], source["publication_proof"]
     if (rights["status"] != "reviewed" or rights["distribution"] != "allow"
-            or rights.get("attribution_required") is not False
             or not rights.get("evidence_url") or not rights.get("review_basis")):
-        issues.append("explicit_no_attribution_rights_required")
+        issues.append("reviewed_redistribution_rights_required")
+    if type(rights.get("attribution_required")) is not bool:
+        issues.append("explicit_attribution_requirement_required")
+    if "attribution" in rights:
+        issues.extend(attribution_issues(rights["attribution"]))
+    elif rights.get("attribution_required") is True:
+        issues.append("reviewed_dataset_attribution_required")
     if proof["kind"] == "unavailable" or not proof.get("locator") or not proof.get("field"):
         issues.append("payload_publication_proof_required")
     if not source.get("public_fields") or not source.get("field_mappings"):
@@ -241,15 +296,19 @@ def capability_report(config, now, root, snapshots=None):
         ("tier1", bool(relations) and len(paths) >= 2, sorted(set(paths + relations)), "relationships_and_two_path_families"),
         ("pages_release", False, [], "exact_artifact_hosted_preview_gates_and_approval_required"),
     ]
-    # User-approved release scope v2 permits an unrated quality view. It does
-    # not weaken the unchanged assessment qualification needed for a number,
+    # User-approved release scope v2 permits an unrated quality view. V3 adds
+    # reviewed global dataset credits without putting provenance into IP facts.
+    # Neither amendment weakens assessment qualification needed for a number,
     # invent negative evidence, or waive any other data/Pages capability gate.
     capabilities = [{"capability": name, "status": "qualified" if ok else "unrated" if name == "numeric_quality" else "blocked",
                      "required": name != "numeric_quality", "families": fs, "requirement": requirement}
                     for name, ok, fs, requirement in rows]
     required = [row for row in capabilities if row["required"]]
-    return {"schema_version": 2, "release_scope": RELEASE_SCOPE, "build_private": True, "evaluated_at": now.isoformat().replace("+00:00", "Z"),
+    attributions = [{"source_id": source["id"], "attribution": dict(source["license"]["attribution"])}
+                    for source in sorted(eligible, key=lambda source: source["id"]) if source["license"].get("attribution")]
+    return {"schema_version": 3, "release_scope": RELEASE_SCOPE, "build_private": True, "evaluated_at": now.isoformat().replace("+00:00", "Z"),
             "source_count": len(config["sources"]), "active_count": sum(s["admission"] == "active" for s in config["sources"]),
             "current_count": len(eligible), "production_eligible": all(row["status"] == "qualified" for row in required),
             "required_capability_count": len(required), "blocked_required_capability_count": sum(row["status"] != "qualified" for row in required),
-            "missing_reason_evidence": missing_reasons, "capabilities": capabilities, "sources": decisions}
+            "missing_reason_evidence": missing_reasons, "capabilities": capabilities, "sources": decisions,
+            "dataset_attributions": attributions}

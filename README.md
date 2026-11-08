@@ -2,7 +2,7 @@
 
 A Go compiler and Nuxt 4 static IP/ASN atlas. The local synthetic application is runnable; real-source qualification, complete production ingestion, hosted gates and production deployment remain blocked. See [implementation status](docs/implementation-status.md) for the exact boundary.
 
-The browser reads indexed, compressed VIA3 objects bundled with the site. It never uses an IP lookup API, resolves subscription hosts, or executes proxy connections. The only external runtime requests are optional OpenStreetMap tiles. All source metadata stays build-private.
+The browser reads indexed, compressed VIA3 objects bundled with the site. It never uses an IP lookup API, resolves subscription hosts, or executes proxy connections. The only external runtime requests are optional OpenStreetMap tiles. IP lookup facts and VIA3 contain no source metadata. A shared footer displays reviewed dataset credits for included data, loaded from the same deployment only when opened; private lineage and source IDs stay private.
 
 ## Local preview
 
@@ -65,7 +65,7 @@ Selected race tests require a CGO-capable toolchain: `go test -race ./internal/.
 
 The catalog still contains 91 entries: 82 candidates, seven rights-approved entries and two retired entries. Zero sources are active; all real parser fixtures remain missing, no source declares complete risk coverage, and no real capability currently qualifies. All 21 subscription repositories share one scoring family. No rights decision, attribution exception or source activation was invented during implementation.
 
-Production requires all required capabilities, real-source schema/freshness/rights certification, complete bulk ingestion/repacking, hosted regression and performance, a verified Pages preview and approval bound to the exact candidate. Under the user-approved `release-scope-v2`, numeric quality is optional: unavailable assessment coverage leaves it unrated and does not block release; positive reasons still appear. Its scoring eligibility rules remain unchanged. `configs/release-approval.yaml` remains default-deny. No GitHub repository, push or deployment is required to use the local synthetic preview.
+Production requires all required capabilities, real-source schema/freshness/rights certification, complete bulk ingestion/repacking, hosted regression and performance, a verified Pages preview and approval bound to the exact candidate. Under user-approved `release-scope-v3`, numeric quality remains optional/unrated without assessment coverage, and reviewed required dataset credits are allowed in the shared footer. Scoring eligibility is unchanged. Attribution requirements must actually be satisfied before a source is admitted; no source was activated by this scope change. `configs/release-approval.yaml` remains default-deny.
 
 The external planner can also compile the small post-fusion engineering fixture:
 

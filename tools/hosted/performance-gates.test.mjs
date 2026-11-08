@@ -44,6 +44,8 @@ test('24-node FPS gate requires complete active pan/zoom/focus measurements', ()
   assert.equal(graph24FPSComparison({ ...graph, visible_nodes: 3 }), 'unmeasured')
   assert.equal(graph24FPSComparison({ ...graph, active_frames: graph.active_frames.slice(0, 2) }), 'unmeasured')
   graph.active_frames[1].complete_second_fps[4] = 49
+  graph.diagnostic_variants_not_acceptance = [{ acceptance_eligible: false,
+    samples: graph.active_frames.map(row => ({ ...row, complete_second_fps: Array(10).fill(240) })) }]
   assert.equal(graph24FPSComparison(graph), 'over_limit')
   graph.active_frames[1].complete_second_fps[4] = NaN
   assert.equal(graph24FPSComparison(graph), 'unmeasured')

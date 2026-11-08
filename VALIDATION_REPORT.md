@@ -6,11 +6,19 @@ Run instructions are in [README.md](README.md); exact implementation boundaries 
 
 ## Subsequent implementation and local verification
 
-The user explicitly removed the two-complete-risk-feed production prerequisite.
-`release-scope-v2` makes numeric quality optional: insufficient coverage remains
+The user explicitly removed the two-complete-risk-feed production prerequisite
+and requested dataset credits. Current `release-scope-v3` keeps quality optional: insufficient coverage remains
 unrated with positive reason flags. Existing scoring qualification and coefficients
 are unchanged. The other 12 required capability rows remain blocked on real
 source qualification; synthetic fixtures do not satisfy them.
+
+Global dataset credits now use reviewed typed metadata, immutable SHA-256 credit
+documents and a revalidated shared index. Source IDs and per-IP provenance never
+enter those documents or VIA3. Synthetic releases always have empty real-credit
+lists. Local Nuxt generation, typechecking, packaging, full Go tests/vet, 105
+Python tests and all 18 UI scenarios passed during this integration; the final
+credits and atomic-rollback regressions add further focused coverage. Hosted
+acceptance of the updated revision remains separate.
 
 The current pass adds the same-clock `compile-state` materializer, bounded XZ
 and ZIP64 ingestion primitives, exact-announcement Go/TypeScript RPKI parity,
@@ -128,11 +136,11 @@ The hero's initial SSR opacity bug was fixed with a JavaScript-disabled regressi
 
 ## Production blockers and remaining work
 
-1. The catalog has 82 candidates, seven rights-approved entries and two retired entries; **zero active/current and zero real parser fixtures**. Under `release-scope-v2`, numeric quality is optional/unrated; **12/12 required capability rows** remain blocked. All 21 subscription repositories share one evidence family. No rights, attribution permission, source activation or publication proof was invented.
+1. The catalog has 82 candidates, seven rights-approved entries and two retired entries; **zero active/current and zero real parser fixtures**. Under `release-scope-v3`, numeric quality is optional/unrated and reviewed required credits are allowed; **12/12 required capability rows** remain blocked. All 21 subscription repositories share one evidence family. No source-use grant, activation or publication proof was invented.
 2. Full admitted-source streaming, discovery/proof coverage, risk/BGP/Tier-1/ASN identity materialization, incremental dirty-partition reuse and source/blob retention/GC are unfinished. Mapping materialization deliberately supports only Geo/Usage/Origins and refuses production; input receipt expiry bounds its synthetic release. Intake has a 100,000-row/64-MiB per-source limit and a 64-MiB complete-state ceiling. Exceeding a bound rejects the build instead of truncating facts. Hash-only anti-replay audit retention also needs production policy review alongside no-renewal guarantees.
 3. Runtime MRT remains disabled pending the max-two-source, sequential, shared-1-GiB cold-acquisition coordinator. TABLE_DUMP_V2 unicast/ADDPATH and separate BGP4MP/AS4 event parsing exist; transactional update replay remains unfinished. XZ/ZIP64 have bounded engineering security coverage; real adapters still need source-specific certification. Trusted subscription per-item publication verification is still missing.
 4. Full-source schema/freshness/redistribution qualification, whole-process RSS/physical disk high-water, full/changed/no-change runtime, hot/cold lookup populations, 24-node graph performance, field/lab INP, interaction CLS, complete browser memory/allocation accounting and hosted accessibility remain unmeasured. The known Go lookup failure stays blocking.
-5. Direct software notices are included. The Windows dependency audit copied 567 package notices and proved all 25 missing installed-package notices are absent from the client/worker module graphs; every runtime package has a copied notice. Hosted builds independently check their complete emitted code tree. No IP dataset attribution exception was granted.
+5. Direct software notices are included. The Windows dependency audit copied 567 package notices and proved all 25 missing installed-package notices are absent from the client/worker module graphs; every runtime package has a copied notice. Hosted builds independently check their complete emitted code tree. The user-approved dataset-credit exception is documented separately; it grants no dataset rights.
 6. Initial hosted integration and Pages preview upload ran as recorded above. Exact-revision preview acceptance and the remaining mandatory production gates still require evidence. No production upload or rollback verification ran. Exact-hash approval remains false; P7 production promotion/rollback is unfinished.
 
 No production release or full-plan completion is declared by this report.

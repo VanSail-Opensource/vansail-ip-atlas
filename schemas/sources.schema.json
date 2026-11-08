@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:vansail:contract:sources:3:1",
+  "$id": "urn:vansail:contract:sources:3:2",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -8,7 +8,7 @@
       "const": 3
     },
     "contract_revision": {
-      "const": 1
+      "const": 2
     },
     "description": {
       "type": "string",
@@ -762,7 +762,7 @@
             },
             "retain_attribution": {
               "type": "boolean",
-              "const": false
+              "const": true
             },
             "verify_all_chunks_before_publish": {
               "type": "boolean",
@@ -850,7 +850,7 @@
             },
             "public_source_rights_policy": {
               "type": "string",
-              "const": "internal-approval-only; skip any source whose terms require UI attribution"
+              "const": "reviewed-redistribution-with-required-global-dataset-credits"
             },
             "maximum_snapshot_age_hours": {
               "type": "integer",
@@ -1329,6 +1329,10 @@
             },
             "active_forbidden_if_attribution_required": {
               "type": "boolean",
+              "const": false
+            },
+            "active_requires_reviewed_attribution_when_required": {
+              "type": "boolean",
               "const": true
             },
             "unknown_independence_defaults_to_one_family": {
@@ -1355,6 +1359,7 @@
             "active_requires_publication_proof",
             "active_requires_public_redistribution",
             "active_forbidden_if_attribution_required",
+            "active_requires_reviewed_attribution_when_required",
             "unknown_independence_defaults_to_one_family",
             "runtime_state_is_not_persisted",
             "authoritative_publication_headers",
@@ -1428,6 +1433,10 @@
         },
         "requires_public_redistribution_without_attribution": {
           "type": "boolean",
+          "const": false
+        },
+        "requires_reviewed_attribution_when_required": {
+          "type": "boolean",
           "const": true
         },
         "active_without_fixture_forbidden": {
@@ -1451,6 +1460,7 @@
         "requires_observed_fixture",
         "requires_publication_proof",
         "requires_public_redistribution_without_attribution",
+        "requires_reviewed_attribution_when_required",
         "active_without_fixture_forbidden",
         "unknown_freshness_action"
       ]
@@ -6875,6 +6885,17 @@
                   "boolean",
                   "null"
                 ]
+              },
+              "attribution": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "name": {"type": "string", "minLength": 1, "maxLength": 128},
+                  "text": {"type": "string", "minLength": 1, "maxLength": 2048},
+                  "url": {"type": "string", "minLength": 1, "maxLength": 2048, "pattern": "^https://"},
+                  "license_url": {"type": "string", "minLength": 1, "maxLength": 2048, "pattern": "^https://"}
+                },
+                "required": ["name", "text", "url"]
               }
             },
             "required": [

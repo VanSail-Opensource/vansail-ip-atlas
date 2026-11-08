@@ -88,7 +88,7 @@ jobs:
         working-directory: web
         run: npm exec --yes --package pnpm@12.18.0 -- pnpm install --frozen-lockfile --ignore-scripts
       - name: Bundled Zstandard TypeScript regression
-        run: node --test tools/query_contract/query.test.mjs tools/query_contract/via3.test.mjs web/tests/zstd.test.ts web/tests/bgpGraph.test.ts tools/hosted/performance-gates.test.mjs tools/release_contract/bundle_licenses.test.mjs
+        run: node --test tools/query_contract/query.test.mjs tools/query_contract/via3.test.mjs web/tests/zstd.test.ts web/tests/bgpGraph.test.ts web/tests/datasetCredits.test.ts tools/hosted/performance-gates.test.mjs tools/release_contract/bundle_licenses.test.mjs
       - name: Native support diagnostic (mechanism replaced by explicit amendment)
         continue-on-error: true
         run: node tools/hosted/codec-probe.mjs

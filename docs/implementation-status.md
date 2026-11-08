@@ -1,14 +1,21 @@
 # Local implementation checkpoint — 2026-11-08
 
-The local synthetic stack is implemented and under regression review. **The full P0–P7 plan and production release are not complete.** Implementation is being prepared for the public `VanSail-Opensource/vansail-ip-atlas` repository. Source captures stay local and ignored; only source-free engineering fixtures enter Git. Hosted delivery evidence is recorded separately below when it actually runs.
+The synthetic stack is implemented and undergoing hosted regression in the public `VanSail-Opensource/vansail-ip-atlas` repository. **The full P0–P7 plan and production release are not complete.** Source captures stay local and ignored; only engineering fixtures enter Git. Dated hosted delivery evidence is recorded in `VALIDATION_REPORT.md`.
 
 ## Current implementation pass
 
-The user removed the mandatory complete-risk-feed release prerequisite during
-this pass. `release-scope-v2` makes numeric quality optional for production;
+The user removed the mandatory complete-risk-feed release prerequisite and then
+requested dataset credits. Current `release-scope-v3` keeps numeric quality optional;
 insufficient assessment still yields `quality=null` and retains positive reasons.
 Existing scoring qualification, weights and thresholds are unchanged. Every
 remaining required capability still needs current approved real-source evidence.
+
+Reviewed attribution is now permitted in one lazy-loaded global footer display.
+Credit text/links are bound to private source receipts and a content-addressed
+public credit document; source IDs and per-IP provenance remain prohibited.
+Synthetic releases have no real dataset credits. The updated local compiler,
+packager and 18 browser scenarios pass, including shared credits without query
+parameters or external requests. Required source fixtures remain unqualified.
 
 - Added `atlas compile-state`, connecting all eight existing normalized record kinds to deterministic engineering materialization: quality regions, ASN context, sparse `/24`, origin-specific RPKI, retained paths and directed relationships. It binds the exact intake/config/certification clock and receipts at publication, rechecks withdrawal and expiry, and refuses production mode. Full bulk streaming, real ASN labels and provenance-qualified Tier-1 history remain required.
 - Fixed exact-announcement RPKI lookup in both Go and the browser. An unrelated more-specific RPKI row cannot hide the selected announcement's own result. Twelve shared compressed IPv4/IPv6, inherited-overlay and MOAS cases cover this behavior without changing the wire schema.
@@ -59,7 +66,7 @@ unmeasured. All three earlier LCP failures are retained with their original resu
 
 ## Blocking work still required
 
-1. **Real-source certification:** 91 sources remain at 82 candidate, seven rights-approved and two retired; zero active, zero fixture-tested and no complete risk-coverage family. Numeric quality is optional/unrated under `release-scope-v2`; the other 12 required production capability rows remain blocked. Explicit no-attribution permission, exact payload publication proof and observed parser certification are still missing. Subscription items without a verified upstream item clock are quarantined.
+1. **Real-source certification:** 91 sources remain at 82 candidate, seven rights-approved and two retired; zero active, zero fixture-tested and no complete risk-coverage family. Numeric quality is optional/unrated under `release-scope-v3`; the other 12 required capability rows remain blocked. Redistribution and required-credit compliance, exact payload publication proof and observed parser certification still need source-specific evidence. Subscription items without a verified upstream item clock are quarantined.
 2. **Complete production ingestion and materialization:** the external planner and bounded reviewed intake now exist, and `compile-state` materializes all eight current normalized kinds. Full real-adapter discovery/proof coverage, streamed private state, ASN identity and qualified Tier-1 history remain unfinished. The mapper preserves constant quality regions rather than propagating exact risk from an ancestor's first address. Intake still caps each source at 100,000 rows/64 MiB and complete normalized state at 64 MiB. The new materializer has an explicit bounded engineering population; it is not full bulk ingestion. Cache blob retention/GC, changed-partition reuse and full recompilation require actual-source capacity evidence.
 3. **Format/parser scope:** XZ/ZIP64 now have bounded synthetic integrity/security coverage, but real adapters still need individual schema/freshness/rights certification. TABLE_DUMP_V2 IPv4/IPv6 unicast/ADDPATH and the separate BGP4MP event parser are engineering components; live update feeds still require a disk-backed session/withdrawal replay reducer. Tier-1 history eligibility must be supplied from revalidated source receipts; a primitive or event parser does not certify a historical snapshot.
 4. **Full mandatory quality/performance:** broaden the shared corpus and actual-browser failure/cache/late-query checks, qualify all schemas, measure process-group RSS and scratch, cold/changed/no-change builds, full lookup distributions, 24-node graph performance, real accessibility/INP and the standard hosted baseline. Investigate failed measurements; never enlarge gates to force a pass.

@@ -75,10 +75,88 @@ try {
       assert.equal(await initial.locator('.hero-inner').evaluate(node => getComputedStyle(node).opacity), '1')
     } finally { await isolated.close() }
   })
+  await test('global dataset credits stay release scoped and reveal no synthetic data associations', async () => {
+    const isolated = await browser.newContext({ serviceWorkers: 'block' })
+    const creditRequests = [], external = [], atlasRequests = []
+    isolated.on('request', request => {
+      const url = new URL(request.url())
+      if (url.origin !== new URL(base).origin && url.protocol !== 'data:') external.push(url.origin)
+      if (url.pathname.startsWith('/_atlas/')) atlasRequests.push(url.pathname)
+      if (url.pathname === '/dataset-credits.json' || /^\/_atlas\/credits\/[0-9a-f]{64}\.json$/.test(url.pathname)) {
+        creditRequests.push(url.pathname)
+        assert.equal(url.search, '', 'A dataset-credit request must never carry the lookup query')
+        assert.equal(url.hash, '')
+        assert(!request.headers().referer, 'A credit request must not carry a query-bearing referrer')
+      }
+    })
+    try {
+      const creditsPage = await isolated.newPage()
+      creditsPage.on('pageerror', error => report.errors.push(error.message))
+      await creditsPage.goto(`${base}/ip/`)
+      await creditsPage.getByRole('textbox', { name: 'IP address or ASN' }).waitFor()
+      const details = creditsPage.getByTestId('dataset-credits')
+      assert.equal(await details.count(), 1)
+      assert.equal(await details.locator('summary').innerText(), 'Dataset credits')
+      assert.equal(creditRequests.length, 0, 'Credits must load only after the user opens them')
+      assert.equal(atlasRequests.length, 0, 'The unopened hero must not request atlas data')
+      let expectedCreditPath
+      const openAndAssertEmptyCredits = async () => {
+        const indexResponse = creditsPage.waitForResponse(response => new URL(response.url()).pathname === '/dataset-credits.json')
+        const documentResponse = creditsPage.waitForResponse(response => /^\/_atlas\/credits\/[0-9a-f]{64}\.json$/.test(new URL(response.url()).pathname))
+        await details.locator('summary').click()
+        const indexResult = await indexResponse
+        assert.equal(indexResult.status(), 200)
+        const index = await indexResult.json()
+        assert.deepEqual(Object.keys(index).sort(), ['current_release_id', 'format_version', 'releases'])
+        assert.equal(index.format_version, 1)
+        assert.equal(index.current_release_id, report.release_id)
+        assert(index.releases.length >= 1 && index.releases.length <= 2)
+        const entry = index.releases.find(entry => entry.release_id === report.release_id)
+        assert(entry, 'Credits index must contain the currently pinned release')
+        assert.deepEqual(Object.keys(entry).sort(), ['credits_path', 'credits_sha256', 'release_id'])
+        assert.match(entry.credits_sha256, /^[0-9a-f]{64}$/)
+        assert.equal(entry.credits_path, `/_atlas/credits/${entry.credits_sha256}.json`)
+        expectedCreditPath = entry.credits_path
+        const response = await documentResponse
+        assert.equal(response.status(), 200)
+        assert.equal(new URL(response.url()).pathname, entry.credits_path)
+        const bytes = await response.body()
+        assert.equal(createHash('sha256').update(bytes).digest('hex'), entry.credits_sha256)
+        const credit = JSON.parse(bytes)
+        assert.deepEqual(Object.keys(credit).sort(), ['entries', 'format_version', 'mode', 'release_id'])
+        assert.equal(credit.format_version, 1)
+        assert.equal(credit.release_id, report.release_id)
+        assert.equal(credit.mode, 'synthetic')
+        assert.deepEqual(credit.entries, [], 'Candidate datasets are never credited as included synthetic data')
+        await details.getByText('Synthetic preview. No third-party IP datasets are included.', { exact: true }).waitFor()
+        assert.equal(await details.getByTestId('dataset-credit').count(), 0)
+        assert.equal(await details.locator('a').count(), 0)
+        assert.equal(await details.locator('[data-source-id], [data-ip], [data-asn]').count(), 0)
+        assert.equal(await details.evaluate(node => Boolean(node.closest('.view-page'))), false)
+      }
+      await openAndAssertEmptyCredits()
+      assert(atlasRequests.every(path => path.startsWith('/_atlas/credits/')), 'Opening global hero credits must not initiate an IP lookup')
+      const emptyText = await details.innerText()
+      for (const q of ['203.0.113.1', '8.8.8.8']) {
+        await creditsPage.goto(`${base}/ip/quality/?q=${q}`)
+        await creditsPage.locator('.demo-label').waitFor({ timeout: 20000 })
+        assert.equal(await details.count(), 1)
+        await openAndAssertEmptyCredits()
+        assert.equal(await details.innerText(), emptyText, 'Global credits must not vary by queried IP')
+        assert(!(await details.innerText()).includes(q))
+      }
+      assert.deepEqual(creditRequests, ['/dataset-credits.json', expectedCreditPath,
+        '/dataset-credits.json', expectedCreditPath, '/dataset-credits.json', expectedCreditPath])
+      assert.deepEqual(external, [], 'Expanding dataset credits must not contact a dataset origin')
+      report.dataset_credit_checks = { scope: 'global-release-only', mode: 'synthetic', entries: 0,
+        requests: creditRequests, external_requests: 0, query_associations: 0 }
+    } finally { await isolated.close() }
+  })
   for (const view of ['overview', 'quality', 'class-c', 'bgp', 'asn']) {
     await test(`canonical ${view} owner`, async () => {
       await page.goto(`${base}/ip/${view}/?q=203.0.113.1`)
       await page.locator('.demo-label').waitFor({ timeout: 20000 })
+      assert.equal(await page.getByTestId('dataset-credits').count(), 1, 'One shared global credits display per view')
       assert.equal(await page.getByRole('alert').count(), 0)
       const owners = { '.map-panel': 'overview', '.score-value': 'quality', '.ip-grid': 'class-c', '.bgp-graph': 'bgp', '.asn-card': 'asn' }
       await page.locator(Object.keys(owners).find(selector => owners[selector] === view)).first().waitFor({ timeout: 20000 })

@@ -4,6 +4,7 @@ import { resolve, validateOrigin } from '~/lib/query'
 let atlas: AtlasClient | undefined
 export function useAtlas() {
   const route = useRoute()
+  const releaseInfo = useState<{ releaseId: string; validUntil: number } | null>('atlas-release-info', () => null)
   const data = shallowRef<LookupAnswer | null>(null)
   const classC = shallowRef<ClassCAnswer | null>(null)
   const error = ref('')
@@ -16,6 +17,7 @@ export function useAtlas() {
   let interval: ReturnType<typeof setInterval> | undefined
   let ready = false
   function invalidate() {
+    releaseInfo.value = null
     serial++
     active?.abort()
     data.value = null
@@ -25,6 +27,7 @@ export function useAtlas() {
   }
 
   async function load() {
+    releaseInfo.value = null
     const run = ++serial
     active?.abort()
     active = new AbortController()
@@ -69,6 +72,7 @@ export function useAtlas() {
         } else classC.value = cells
       }
       data.value = answer
+      releaseInfo.value = { releaseId: answer.releaseId, validUntil: answer.validUntil }
     } catch (cause) {
       if (run !== serial || active.signal.aborted) return
       const code = cause instanceof Error ? cause.message : ''

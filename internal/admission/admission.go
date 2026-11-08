@@ -43,6 +43,7 @@ type Source struct {
 type Rights struct {
 	Status, Distribution, EvidenceURL, ReviewBasis string
 	AttributionRequired                            *bool
+	Attribution                                    *intelligence.DatasetAttribution
 }
 
 type Parser struct {
@@ -110,6 +111,7 @@ func policy(source Source) intelligence.SourcePolicy {
 	return intelligence.SourcePolicy{ID: source.ID, Family: source.Family,
 		Admission: source.Admission, ProofKind: source.Publication.Kind,
 		AttributionRequired: source.Rights.AttributionRequired,
+		Attribution:         source.Rights.Attribution,
 		ParserVersion:       source.Parser.Version, SchemaVersion: 3, MaxAge: source.MaxAge,
 		Subscription: source.Category == "proxy_subscription_ip", CompleteCoverage: source.Coverage == "complete",
 		Weight: source.Weight, Dependencies: append([]string(nil), source.Dependencies...)}
@@ -145,8 +147,11 @@ func (e *Engine) Ingest(ctx context.Context, source Source, now time.Time, norma
 	if !identity(source.ID) || !identity(source.Family) || source.MaxAge <= 0 || source.MaxAge > 720*time.Hour || math.IsNaN(source.Weight) || math.IsInf(source.Weight, 0) || source.Weight < 0 || source.Weight > 100 || source.MaxCompressedBytes <= 0 || source.MaxCompressedBytes > 1<<30 {
 		return deny("quarantined", "invalid_source_controls")
 	}
-	if source.Rights.Status != "reviewed" || source.Rights.Distribution != "allow" || source.Rights.AttributionRequired == nil || *source.Rights.AttributionRequired || !safeHTTPS(source.Rights.EvidenceURL) || strings.TrimSpace(source.Rights.ReviewBasis) == "" {
-		return deny("quarantined", "explicit_no_attribution_rights_required")
+	if source.Rights.Status != "reviewed" || source.Rights.Distribution != "allow" || source.Rights.AttributionRequired == nil || !safeHTTPS(source.Rights.EvidenceURL) || strings.TrimSpace(source.Rights.ReviewBasis) == "" {
+		return deny("quarantined", "reviewed_redistribution_rights_required")
+	}
+	if *source.Rights.AttributionRequired && source.Rights.Attribution == nil || source.Rights.Attribution != nil && source.Rights.Attribution.Validate() != nil {
+		return deny("quarantined", "reviewed_dataset_attribution_required")
 	}
 	if !safeHTTPS(source.URL) || !validReleaseLocator(source.Publication.Locator, source.URL) || source.Publication.Kind != "github_release" || source.Publication.Field != "published_at" {
 		return deny("quarantined", "unsupported_or_unbound_publication_verifier")

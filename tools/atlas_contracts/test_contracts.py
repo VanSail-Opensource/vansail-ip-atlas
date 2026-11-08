@@ -22,8 +22,9 @@ class ConfigurationTests(unittest.TestCase):
         report = capability_report(self.configs["sources"], utc("2026-11-08T00:00:00Z"), ROOT)
         self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (91, 0, 0))
         self.assertFalse(report["production_eligible"])
-        self.assertEqual(report["schema_version"], 2)
-        self.assertEqual(report["release_scope"], "release-scope-v2")
+        self.assertEqual(report["schema_version"], 3)
+        self.assertEqual(report["release_scope"], "release-scope-v3")
+        self.assertEqual(report["dataset_attributions"], [])
         self.assertEqual(len(report["capabilities"]), 13)
         required = [row for row in report["capabilities"] if row["required"]]
         optional = [row for row in report["capabilities"] if not row["required"]]
@@ -62,6 +63,24 @@ class ConfigurationTests(unittest.TestCase):
             target[path[-1]] = True
             with self.subTest(path=path), self.assertRaises(ContractError):
                 validate_schema("sources", invalid)
+
+    def test_dataset_attribution_schema_is_closed_and_does_not_activate_candidates(self):
+        valid = copy.deepcopy(self.configs["sources"])
+        source = valid["sources"][0]
+        source["license"].update(attribution_required=True, attribution={"name": "Synthetic Dataset", "text": "Copyright Synthetic Author", "url": "https://example.com/data"})
+        validate_schema("sources", valid)
+        validate_sources(valid)
+        for kind in ("unknown", "missing", "oversized"):
+            invalid = copy.deepcopy(valid)
+            credit = invalid["sources"][0]["license"]["attribution"]
+            if kind == "unknown": credit["source_id"] = "private"
+            elif kind == "missing": del credit["text"]
+            elif kind == "oversized": credit["text"] = "x" * 2049
+            with self.subTest(kind=kind), self.assertRaises(ContractError):
+                validate_schema("sources", invalid)
+        report = capability_report(valid, utc("2026-11-08T00:00:00Z"), ROOT)
+        self.assertEqual(report["current_count"], 0)
+        self.assertEqual(report["dataset_attributions"], [])
 
     def test_duplicate_keys_aliases_and_yaml_bombs_rejected(self):
         for content in ["a: 1\na: 2\n", "a: &x [1]\nb: *x\n", "a: " + "[" * 40 + "0" + "]" * 40, "!!python/object:danger {}"]:
@@ -204,6 +223,35 @@ class AdmissionClockTests(unittest.TestCase):
         self.source["license"]["attribution_required"] = False
         self.source["fixture"]["synthetic"] = True
         self.assertEqual(self.state(), "quarantined")
+
+    def test_reviewed_global_attribution_allows_required_credit_and_withdraws_on_removal(self):
+        credit = {"name": "Synthetic Dataset", "text": "Copyright Synthetic Author", "url": "https://example.com/data", "license_url": "https://example.com/license"}
+        self.source["license"].update(attribution_required=True, attribution=credit)
+        self.assertEqual(self.state(), "current")
+        report = capability_report({"sources": [self.source]}, self.now, self.root, {self.source["id"]: self.snapshot})
+        self.assertEqual(report["dataset_attributions"], [{"source_id": self.source["id"], "attribution": credit}])
+        del self.source["license"]["attribution"]
+        self.assertEqual(self.state(), "quarantined")
+        report = capability_report({"sources": [self.source]}, self.now, self.root, {self.source["id"]: self.snapshot})
+        self.assertEqual(report["dataset_attributions"], [])
+
+    def test_attribution_cannot_replace_rights_review_or_contain_unsafe_public_data(self):
+        credit = {"name": "Synthetic Dataset", "text": "Copyright Synthetic Author", "url": "https://example.com/data"}
+        for kind in ("unreviewed", "missing-text", "unknown-field", "private-url", "credentials", "query", "control", "non-nfc"):
+            with self.subTest(kind=kind):
+                rights = copy.deepcopy(self.source["license"])
+                self.source["license"].update(attribution_required=True, attribution=copy.deepcopy(credit))
+                value = self.source["license"]["attribution"]
+                if kind == "unreviewed": self.source["license"]["status"] = "unreviewed"
+                elif kind == "missing-text": del value["text"]
+                elif kind == "unknown-field": value["collector"] = "forbidden"
+                elif kind == "private-url": value["url"] = "https://127.0.0.1/license"
+                elif kind == "credentials": value["url"] = "https://secret@example.com/license"
+                elif kind == "query": value["url"] = "https://example.com/license?secret=1"
+                elif kind == "control": value["text"] = "Copyright\u202eHidden"
+                elif kind == "non-nfc": value["name"] = "Cafe\u0301"
+                self.assertEqual(self.state(), "quarantined")
+                self.source["license"] = rights
 
     def test_fixture_bytes_hash_and_controlled_path(self):
         self.source["fixture"]["sha256"] = "b" * 64

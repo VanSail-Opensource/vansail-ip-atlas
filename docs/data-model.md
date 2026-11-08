@@ -98,7 +98,8 @@ optional for production release. A production snapshot may contain no numeric
 scores while retaining supported positive reasons and observed contributions.
 That state is explicitly unrated; it is not a clean assessment. This amendment
 uses the existing null/presence representation and changes no VIA3 schema or
-scoring-model revision.
+scoring-model revision. The current `release-scope-v3` amendment retains this rule
+and separately permits global dataset credits as defined below.
 
 Numeric quality is IPv4-only in this version. Publishing a non-null score
 requires complete coverage and all four layers exactly as
@@ -174,11 +175,28 @@ city, country codes and the fixed enum labels. Normalize to NFC, trim whitespace
 collapse internal whitespace, reject invalid UTF-8/control/bidi-control text,
 remove URI/email/domain/credential-bearing tokens, and truncate safely at a
 UTF-8 boundary to 256 bytes. If no safe label remains, omit it. Text cannot carry
-hidden source identity. Public source names/IDs/URLs, per-source records,
-collector identities, subscription URI/path/credentials, hostnames, domains,
-ports, protocols, latency, timezone, postal and continent are never serialized.
+hidden source identity. Source names/IDs/URLs, per-source records, collector
+identities, subscription URI/path/credentials, hostnames, domains, ports,
+protocols, latency, timezone, postal and continent are never serialized into
+VIA3 records or lookup answers.
 The permitted BGP ASN sequences are unrelated to forbidden subscription paths.
 OSM tile attribution is the independent map condition, not IP-source provenance.
+
+## Global dataset credits — `release-scope-v3`, 2026-11-08
+
+The user approved a dedicated global shared dataset-credit display. Its static
+artifact contains only reviewed attribution entries for real datasets included in
+that candidate, using `name`, plain `text`, public HTTPS `url` and optional
+`license_url`. The private source-policy binding to source IDs and lineage remains
+build-private. The public artifact contains no IDs, evidence families, raw source
+records, per-field mappings or association to a query/IP/ASN/reason.
+
+This is a frontend credits exception to the earlier blanket source-name/URL ban,
+not a new VIA3 section, lookup field or scoring input. It changes no database
+schema/version or canonical lookup answer. Credit content is bound to the frozen
+candidate and reviewed rights metadata, and must not include unused/candidate
+datasets or claim real dataset inclusion in a synthetic preview. The release
+contract owns inventory, cache identity and exact approval binding.
 
 ## Typed compilation boundary
 

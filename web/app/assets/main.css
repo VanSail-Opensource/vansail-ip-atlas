@@ -1,6 +1,8 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
 
+.site-footer { flex-wrap:wrap; gap:16px 24px; }
+
 :root { --page:#f2f5f1; --ink:#163b34; --secondary:#61746e; --surface:rgba(255,255,255,.64); --line:rgba(49,92,78,.13); --accent:#207d65; --highlight:#75bda1; --shadow:0 12px 60px #214e3910; color-scheme:light; font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
 .dark { --page:#0c1716; --ink:#d8e9e2; --secondary:#93aaa1; --surface:rgba(24,43,38,.56); --line:rgba(165,204,185,.12); --accent:#8ad9b7; --highlight:#497d6a; --shadow:0 12px 60px #0002; color-scheme:dark; }
 * { box-sizing:border-box; } body { margin:0; background:var(--page); color:var(--ink); } button,input,select { font:inherit; } button,a,select { -webkit-tap-highlight-color:transparent; } button,a { touch-action:manipulation; } a { color:inherit; text-decoration:none; } button { cursor:pointer; } :focus-visible { outline:2px solid var(--accent); outline-offset:4px; } .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0; } .skip { position:absolute; z-index:99; left:16px; top:-100px; background:var(--page); padding:12px; } .skip:focus { top:10px; }

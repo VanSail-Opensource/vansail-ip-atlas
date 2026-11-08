@@ -19,7 +19,7 @@ const href = (view: string) => `/ip/${view}${query.value ? `?q=${encodeURICompon
         <NuxtLink v-for="[label, view] in links" :key="view" :to="href(view!)" :class="{ selected: path === `/ip/${view}` }">{{ label }}</NuxtLink>
       </nav>
       <main id="main"><NuxtPage /></main>
-      <footer class="site-footer"><span>VanSail IP Atlas</span><span>Lookups stay in your browser</span></footer>
+      <footer class="site-footer"><span>VanSail IP Atlas</span><DatasetCredits /><span>Lookups stay in your browser</span></footer>
     </div>
   </UApp>
 </template>

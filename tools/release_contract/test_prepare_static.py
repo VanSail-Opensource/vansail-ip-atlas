@@ -5,9 +5,11 @@ import struct
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from tools.release_contract.contracts import ContractError, make_manifest, parse_canonical, sha256
-from tools.release_contract.prepare_static import freeze_csp, scan_frontend, verify_atlas, verify_software_notices
+from tools.release_contract.prepare_static import freeze_csp, scan_frontend, verify_atlas, verify_software_notices, prepare
+from tools.release_contract.dataset_credits import write_synthetic_credit_tree
 
 
 class StaticCandidateTests(unittest.TestCase):
@@ -88,6 +90,28 @@ class StaticCandidateTests(unittest.TestCase):
             (root / "entry.js.map").write_text("{}", encoding="utf-8")
             with self.assertRaises(ContractError):
                 scan_frontend(root)
+
+    def test_failed_packaging_restores_previous_atlas_and_credit_index_together(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            atlas, public = root / "input", root / "public"
+            atlas.mkdir(); public.mkdir()
+            self.atlas(atlas, decoded=9)
+            previous = public / "_atlas"
+            previous.mkdir()
+            self.atlas(previous, decoded=8)
+            old_pointer = (previous / "current.json").read_bytes()
+            old_id = parse_canonical(old_pointer)["release_id"]
+            write_synthetic_credit_tree(public, old_id, {old_id: "synthetic"})
+            old_index = (public / "dataset-credits.json").read_bytes()
+            (public / "_headers").write_text("/*\n  Content-Security-Policy: default-src 'self'; script-src 'self'; object-src 'none'\n", encoding="utf-8")
+            (public / "entry.js").write_text('const label="private-publisher";', encoding="utf-8")
+            with patch("tools.release_contract.prepare_static.inspect_binary", return_value=1), patch("tools.release_contract.prepare_static.known_private_values", return_value=("private-publisher",)):
+                with self.assertRaises(ContractError):
+                    prepare(atlas, public, 150)
+            self.assertEqual((previous / "current.json").read_bytes(), old_pointer)
+            self.assertEqual((public / "dataset-credits.json").read_bytes(), old_index)
+            self.assertEqual(list(root.glob("atlas-stage-*")), [])
 
     def test_software_notice_inventory_detects_postbuild_mutation(self):
         with tempfile.TemporaryDirectory() as directory:

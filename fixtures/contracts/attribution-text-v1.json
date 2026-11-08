@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"text": "Copyright Synthetic Author", "valid": true},
+    {"text": "© Synthetic Dataset — License terms", "valid": true},
+    {"text": "<Dataset> & Author", "valid": true},
+    {"text": "vmess://synthetic-placeholder", "valid": false},
+    {"text": "AnyTLS://synthetic-placeholder", "valid": false},
+    {"text": "Copyright github_pat_synthetic", "valid": false},
+    {"text": "Copyright GHP_synthetic", "valid": false},
+    {"text": "-----BEGIN PRIVATE KEY-----", "valid": false},
+    {"text": "-----BEGIN RSA PRIVATE KEY-----", "valid": false},
+    {"text": "Copyright\u202eHidden", "valid": false},
+    {"text": "Copyright\nHidden", "valid": false},
+    {"text": "Cafe\u0301", "valid": false},
+    {"text": " Copyright Author", "valid": false}
+  ]
+}

@@ -5,11 +5,12 @@ separate admission verifier; no synthetic record is added to the real catalog.
 """
 
 import copy
+import json
 import unittest
 from unittest.mock import patch
 
 from tools.atlas_contracts.config import ContractError, ROOT, load_configs, safe_https, validate_sources
-from tools.atlas_contracts.policy import capability_report, utc
+from tools.atlas_contracts.policy import capability_report, utc, attribution_url, attribution_issues
 
 
 class SourcePolicyAuditTests(unittest.TestCase):
@@ -23,6 +24,20 @@ class SourcePolicyAuditTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 utc(value)
         self.assertEqual(utc("2026-11-08T00:00:00.000001Z").microsecond, 1)
+
+    def test_global_dataset_credit_urls_match_shared_go_corpus(self):
+        corpus = json.loads((ROOT / "fixtures/contracts/attribution-urls-v1.json").read_text(encoding="utf-8"))
+        self.assertEqual(corpus["schema_version"], 1)
+        for item in corpus["cases"]:
+            with self.subTest(url=item["url"]):
+                self.assertEqual(attribution_url(item["url"]), item["valid"])
+
+    def test_global_dataset_credit_text_matches_shared_go_privacy_corpus(self):
+        corpus = json.loads((ROOT / "fixtures/contracts/attribution-text-v1.json").read_text(encoding="utf-8"))
+        self.assertEqual(corpus["schema_version"], 1)
+        for index, item in enumerate(corpus["cases"]):
+            with self.subTest(case=index):
+                self.assertEqual(not attribution_issues({"name": "Synthetic Dataset", "text": item["text"], "url": "https://publisher.example/data"}), item["valid"])
 
     def test_literal_private_and_ambiguous_url_rejected_before_fetch(self):
         for value in ("https://127.0.0.1/x", "https://[::1]/x", "https://10.0.0.1/x",

@@ -2,13 +2,15 @@
 
 This is the **normative** engineering contract for all changes in this repository. The implementation plan explains why; this file specifies what agents and contributors **MUST** do. When conflicts exist, prefer data correctness, no secret leakage, deterministic static deployment, and this v3 specification over older designs.
 
+**User-approved release scope `release-scope-v3` — 2026-11-08:** legally required dataset credits are permitted in one global shared frontend display and its dedicated static credit artifact. They must describe only real datasets included in the immutable candidate. This narrow exception replaces the earlier blanket public-credit prohibition; source IDs, per-IP provenance and source metadata in VIA3/lookup answers remain forbidden. The prior `release-scope-v2` amendment remains in force: numeric quality is optional for release, and inadequate assessment coverage yields `quality=null` with supported positive reasons. Every non-null score still obeys the unchanged scoring coverage rules.
+
 ## 1. Mission, scope, architecture
 
 - Build **VanSail IP Atlas**: Go data compiler, custom compressed read-only VIA3 files, Nuxt 4 static site on Cloudflare Pages.
 - All enrichment is via downloaded bulk datasets. No live IP lookup API, server runtime, Pages Function, network scan, proxy connectivity validation, proxy execution, or DNS resolution of subscription hosts.
 - Every IP lookup must be indexed: adaptive radix O(1) bounded depth or O(log n); ASN index O(1) expected or O(log n). Sorting and external merge during offline compilation may be O(n log n).
 - Target standard private Actions: 2 vCPU, 8 GiB RAM, 14 GiB disk. Protect RSS and scratch budgets; stream expensive inputs.
-- Source metadata must be retained in build-private audit/lineage only. **Never publish source names, source URLs, source IDs, per-source records, collector identifiers, or source attributions in binary database files or frontend bundles.** License and data-rights checks remain mandatory internally; decline to include sources that cannot satisfy this public-output contract.
+- Source metadata must be retained in build-private audit/lineage, with the sole `release-scope-v3` exception for reviewed dataset credit names, plain text and public attribution/license URLs in the dedicated global credit artifact/display. **Never publish source IDs, per-source records, collector identifiers or per-IP provenance; source names/URLs/credits remain forbidden in VIA3, lookup answers and other frontend data.** License and data-rights checks remain mandatory; exclude sources whose obligations cannot be satisfied by the approved global credit display and redistribution contract.
 
 ## 2. Required reading and change protocol
 
@@ -30,8 +32,8 @@ After coding, report modified paths, hosted regression results, benchmarks and a
 - Normalize URLs and hashes, deduplicate exact snapshots, then original publishers and derivation families. Aggregators must never manufacture independent evidence votes.
 - `max_age=720h` measured against a verifiable upstream content-published timestamp. An HTTP `304`, newly downloaded old blob or new local mirror timestamp does **not** reset age. If freshness cannot be established, quarantine the source until reviewed.
 - Exclude stale sources from current compilation, **recompute dirty partitions from surviving sources**, delete expired internal snapshots and output blocks, and prune removed blobs after bounded rollback retention.
-- A source is enabled only after downloadable file validation, observed schema fixture, freshness proof, redistribution/data-rights review and a successful parser test. Public source credits are prohibited: if a source requires such credit, that source cannot be published in this product.
-- Never emit fields from the public denylist: `timezone`, `postal`, `continent`, `collector`, `latency`, `protocol`, `port`, `hostname`, `domain`, `source_id`, `source_name`, `source_url`, credentials, subscription URI, per-source provenance.
+- A source is enabled only after downloadable file validation, observed schema fixture, freshness proof, redistribution/data-rights review and a successful parser test. Explicit `attribution_required: true` additionally requires reviewed `license.attribution` metadata and proof that the global shared display satisfies all applicable credit obligations. An unresolved attribution decision remains ineligible; displaying a credit does not certify a source.
+- Never emit fields from the public fact denylist: `timezone`, `postal`, `continent`, `collector`, `latency`, `protocol`, `port`, `hostname`, `domain`, `source_id`, `source_name`, `source_url`, credentials, subscription URI, per-source provenance. The dedicated global credits use only the reviewed `name`, `text`, `url` and optional `license_url` fields; they do not add a fact/provenance field to VIA3 or a lookup answer.
 - Permitted public facts include country, region, city, coordinates, ASN/network, usage type, quality and reason flags, native/broadcast mode, BGP routes/relationships/T1 candidates, RPKI and `/24` profile. Unknowns stay unknown.
 
 ## 5. Subscription decoder security
@@ -65,7 +67,7 @@ After coding, report modified paths, hosted regression results, benchmarks and a
 
 - VIA3 must be explicitly versioned; header + section offsets + checksums + compressed payload. A changed schema requires version bump, Go/TS golden fixtures, parser parity and migration test.
 - Store independent compressed shards for geo, usage, quality, `/24`, ASN, BGP, and coordinates; dictionary-code common values. Use inherited prefix overlays to preserve LPM across shard boundaries.
-- No publicly available source/provenance section. No timezone, postal, continent, collector, latency, protocol, domain, credentials or proxy URI anywhere in public files.
+- No publicly available VIA3 source/provenance section. No timezone, postal, continent, collector, latency, protocol, domain, credentials or proxy URI fields in public facts. Reviewed attribution/license URLs are allowed solely in the separate global credit artifact/display; credentials and proxy URIs remain forbidden everywhere public.
 - Ensure Go and browser readers have byte-for-byte equivalent canonical lookup answers. Verify every output shard hash before updating a release manifest.
 - Reader must validate length, offsets, checksum, decompression bounds and unknown version before allocation. The browser supports latest stable Chrome only; do not add polyfills or alternate old-browser logic.
 
@@ -75,15 +77,16 @@ After coding, report modified paths, hosted regression results, benchmarks and a
 - **Aesthetic:** minimal words, generous whitespace, layered liquid glass, thin **edge lighting** (masked gradient + focus accent), light/dark modes, accessible contrast. Prefer deliberate transitions rather than decorative infinite loops.
 - `/` MUST redirect with HTTP 302 to `/ip`. `/ip` is a centered hero with exactly one IP/ASN input. Current subviews are under `/ip/*`: `/ip/overview`, `/ip/quality`, `/ip/class-c`, `/ip/bgp`, `/ip/asn`. Reserve `/latency`, `/dns-leak`, `/webrtc`, `/cloudflare`, `/split` without implementation.
 - **No duplicate information displays.** Single canonical home for each view: geo/map in overview, score and reasons in quality, 256-cell grid in class-c, ASN risks in ASN, BGP graph in BGP. Other pages link instead of repeating a chart/card.
-- No source names, "powered by", "inspired by", dataset lists, collector badges or reference project credits shown as IP data. Mandatory OpenStreetMap tile attribution is an independent map condition.
+- Dataset credits appear once through a global shared display, generated only from reviewed attribution obligations of real datasets included in the release. Never show source names, "powered by", "inspired by", dataset lists, collector badges or reference project credits as IP data. Do not map a credit to a queried address, ASN, field or reason. Mandatory OpenStreetMap tile attribution is an independent map condition.
 - OSM coordinates map: lazy Leaflet in overview only. Avoid timezone/postal/continent fields. Do not reveal false precision from city centroid coordinates.
 - BGP SVG: pan/pinch/wheel/fit/keyboard/path-focus. Select routes without reconstructing graph layout. GPU/3D is not an excuse to obscure real network semantics.
-- No runtime API/remote data origin except map tiles. No source metadata is embedded in JS. Keep dark/light color and state parity, reduced-motion, mobile 320/390 and desktop 1280/1440 views.
+- No runtime API/remote data origin except map tiles. Dataset credits are same-origin static data; their reviewed external links are navigation only and are never fetched automatically. Source metadata is not embedded in application JS; the dedicated global credit artifact is the sole frontend data exception. Keep dark/light color and state parity, reduced-motion, mobile 320/390 and desktop 1280/1440 views.
 
 ## 10. Cloudflare Pages deploy rules
 
 - The compiled `_atlas` data directory **MUST** be copied into `web/.output/public` before Direct Upload. No R2/API/network fallback for DB lookup.
 - Validate file budget (<18,500 total) and max individual asset (<24 MiB). Do not split into so many shards that deployment fails. All chunks and manifest refer to the same immutable release.
+- Include and validate the release's global credit artifact in the frozen candidate, full inventory and approval digest. Its exact entries must match included real datasets; empty synthetic previews must not claim real dataset inclusion. A credit change requires a new candidate identity/approval and cache identity that cannot reuse stale credit bytes.
 - `_redirects`: `/ /ip 302`. `_headers`: immutable hash-object caching; short-lived release pointer; secure CSP that permits only necessary OSM tiles.
 - Create a Pages preview deployment and run **hosted tests on the preview URL** before production. Verify no 404 for any manifest chunk and no external IP enrichment requests.
 - Keep rollback-safe last successful deployment until new release verified. Prune aged/inactive data from subsequent deploy trees; no stale records in the current release.
@@ -98,15 +101,15 @@ Every material PR MUST run:
 4. Go/TypeScript lookup parity for IPv4, IPv6, exact records, inherited prefixes, corruption and invalid versions.
 5. Hosted Playwright current-stable Chrome on Cloudflare Pages preview: hero and all `/ip/*` routes, root redirect, light/dark, EdgeGlow, OSM map, score reason chips, Class C keyboard cells, BGP pan/fit/focus, URL deep links, narrow viewports, no duplicate canonical facts.
 6. Hosted performance: RSS and scratch budget, incremental full/changed/no-change runtime, hot/cold lookup p95, initial JS/payload sizes, LCP, INP, CLS, graph responsiveness; compare with versioned baseline after enough samples.
-7. Public output scanner: source IDs/URLs, credentials, domains, protocols/ports, collector/latency/timezone/postal/continent fields forbidden. Zero stale database entries. Manifest content hashes and full static asset inclusion required.
+7. Public output scanner: source IDs, credentials, domains, protocols/ports, collector/latency/timezone/postal/continent fact fields forbidden. Source names/URLs are allowed only as exact reviewed entries in the dedicated global credit artifact/display; the exception never applies to VIA3 or lookup answers. Validate credit completeness, included-dataset binding, safe text/URLs and absence of fabricated/unused credits. Zero stale database entries. Manifest content hashes and full static asset inclusion required.
 
 No automatic release when any mandatory gate fails. Report the gate, sample, and measured failure; do not replace a failing threshold with a larger one without explaining the regression and obtaining review.
 
 ## 12. Completion checklist
 
 - [ ] Correct owner route and no duplicate display
-- [ ] No forbidden public fields or source references
-- [ ] New source has verifiable publication age and reviewed rights
+- [ ] No forbidden public fact fields/provenance; global credits match only included real datasets
+- [ ] New source has verifiable publication age, reviewed rights and any required global credits
 - [ ] Any withdrawn/stale source retracts prior influence
 - [ ] No decoded non-IP hostname or credential survives
 - [ ] Score/ASN/`/24` invariants and deterministic output verified

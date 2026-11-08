@@ -1,8 +1,14 @@
-# Release and deployment contract v3.1 (P0 amendment)
+# Release and deployment contract v3.2 (dataset-credit amendment)
 
 This contract freezes C07/C08; its executable vectors are
 `tools/release_contract/test_contracts.py`. Passing these vectors does not certify
 a real dataset, a complete binary scanner, a hosted preview or a production release.
+
+`release-scope-v3` (user-approved 2026-11-08) permits reviewed legally required
+dataset credits through the separate global frontend display defined below.
+It retains v2's optional numeric quality and unchanged per-score qualification.
+This amendment adds static credit metadata; it changes no VIA3 bytes, descriptor,
+manifest or lookup-answer schema and activates no source.
 
 ## Identity and canonical bytes
 
@@ -51,6 +57,81 @@ The pointer path must equal the path constructed from its verified ID. Reject
 external origins and incompatible versions. Read pointer, verify manifest hash,
 verify descriptor-derived ID, verify expiry, then verify each complete object hash
 before interpreting bytes. No partial publication or mixed-release fallback exists.
+
+## Global dataset-credit artifacts — `release-scope-v3`
+
+Credit documents are immutable content-addressed static assets at
+`/_atlas/credits/<sha256>.json`. The hash is the SHA-256 of the complete canonical
+document bytes. A revalidated `/dataset-credits.json` index selects the documents
+for the current and any retained eligible release, without a runtime API. Its
+closed schema is:
+
+```json
+{"current_release_id":"<verified current release ID>","format_version":1,"releases":[{"credits_path":"/_atlas/credits/<sha256>.json","credits_sha256":"<sha256>","release_id":"<retained release ID>"}]}
+```
+
+`format_version` is exactly 1. The index contains at most two unique retained
+release IDs and exactly one entry for the current ID. Every retained manifest
+has its credit mapping; no unused release may be listed. `credits_path` is exactly
+the same-origin path derived from `credits_sha256`, a lowercase SHA-256 hex value.
+Reject queries, fragments, escaped paths, external URLs, duplicate IDs and unknown
+keys. The index is at most 4096 bytes and its release mappings sort by ascending
+release ID under canonical serialization.
+Each referenced credit document has exactly this schema:
+
+```json
+{"entries":[{"license_url":"https://publisher.example/license","name":"<reviewed name>","text":"<reviewed plain text>","url":"https://publisher.example/"}],"format_version":1,"mode":"production","release_id":"<verified release ID>"}
+```
+
+`format_version` is exactly 1; `release_id` and `mode` match the mapped atlas
+manifest. Mode is `production` or `synthetic`. Each entry has exactly required
+`name`, `text`, `url` and optional `license_url`, matching reviewed
+`license.attribution` bytes from the included datasets. Names/text and URLs obey
+the source-policy limits and safe-text/public-HTTPS rules. No additional field,
+source ID, evidence family, query, per-IP attribution or private lineage is allowed.
+At most 256 entries and at most 1 MiB of canonical JSON v1 are permitted per credit
+document. Deduplicate complete identical entries and sort by canonical full-entry
+bytes; publisher aliases or filenames cannot select unstable order. A synthetic
+release has an empty entries array regardless of the candidate catalog.
+
+The packager derives the public entries from the private verified inclusion set,
+not every catalog entry or merely current source. Every included dataset with
+required attribution must have its complete reviewed notice represented; unused,
+unqualified, withdrawn or merely candidate datasets cannot appear. The private
+report's source-ID binding is removed before public serialization. A credit or
+license reference cannot establish parser certification, rights to redistribute,
+freshness, completeness or evidence independence. If the global display cannot
+satisfy the actual license/upstream obligations, that dataset remains ineligible.
+
+The frontend uses one global shared credit display, separate from IP/ASN fact
+owners. It loads the same-origin static index/document lazily when opened,
+preserving zero atlas requests on initial hero navigation. The hero selects the
+index's current release; a lookup session selects its pinned release ID. Verify
+the document's complete SHA-256 and release identity before display. Neither
+request contains the queried address/ASN. Render escaped plain text and reviewed
+links; never execute notice HTML or fetch publisher/license URLs automatically.
+External credit links are navigation only and must not receive a query-bearing
+referrer. OSM map attribution and software notices retain their own conditions.
+
+Hashed credit documents receive immutable caching; `/dataset-credits.json`
+revalidates. Credit edits produce new document hashes/cache identities even when
+VIA3 bytes and its release ID are unchanged. The frozen candidate inventory/digest
+includes the index and every referenced credit document. Source-catalog and
+rights-audit approval bindings cover the exact reviewed metadata. Credit edits
+require a new candidate digest, preview and approval. Never overwrite a hashed
+asset or extend source/item expiry to renew credit or data eligibility. A retained
+release must still pass current rights/withdrawal/expiry checks; its accepted
+credit bytes remain part of the verified rollback artifact. Unreferenced credit
+assets are pruned from subsequent deployment trees.
+
+The public-output scanner may exempt reviewed names/text/URLs only after
+independently validating the exact index and its referenced hashed credit documents,
+closed fields, canonical bytes, identities, bounds and included-dataset binding.
+It must still reject source IDs, credentials, private/unsafe URLs, extra keys,
+unused/fabricated entries, missing required credits and nonempty synthetic credits.
+The exception never applies to VIA3, decoded dictionaries, lookup answers or other
+frontend data. These are mandatory candidate/hosted regression checks, not a
+generic allowlist for a publisher domain throughout the application.
 
 ## Expiry, withdrawal and suspended sessions
 
@@ -108,7 +189,8 @@ Freeze the entire tree before preview. Its digest is SHA-256 of canonical JSON v
 containing entries `{path,bytes,sha256}` for every physical file, sorted by UTF-8 path
 bytes. Paths are relative ASCII POSIX paths with no empty/dot/dot-dot/hidden segment,
 percent escape, colon or backslash. Symlinks are rejected. Digest inputs include the
-frontend, control files, current pointer, all retained manifests and every object.
+frontend, control files, current pointer, all retained manifests and every object,
+plus the dataset-credit index and every referenced immutable credit document.
 There is no digest file inside the tree; approvals and reports remain outside it.
 Changing HTML, `_headers`, `_redirects` or a single byte after preview changes the
 candidate digest. `tree_inventory` implements this independent contract.
@@ -126,6 +208,9 @@ script bodies into `_headers` and scans frontend bytes against private catalog
 identities, including escaped/base64/percent-encoded literals. Inert JSON hydration
 is scanned but needs no executable-script CSP exception. Software implementation
 tokens and mandatory OSM attribution are not treated as IP source metadata. The
+only dataset-credit exception is the independently validated exact index and
+referenced artifacts/display described above; it never widens the binary,
+lookup-answer or other frontend scan. The
 synthetic packaging command is:
 
 ```powershell

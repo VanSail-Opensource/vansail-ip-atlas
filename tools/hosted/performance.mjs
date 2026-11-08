@@ -135,7 +135,7 @@ async function contextForSample(mobile = true) {
       }
     })().catch(error => report.errors.push(String(error))))
   })
-  return { context, page, scripts, atlas, settle: async () => {
+  return { context, page, cdp, scripts, atlas, settle: async () => {
     await page.waitForLoadState('networkidle')
     await page.waitForTimeout(250)
     await Promise.all(work)
@@ -158,7 +158,8 @@ async function graphLatency(page, selector, event, action) {
   return page.evaluate(() => window.__atlasPaint)
 }
 
-async function activeGraphFrames(page, actionName, action) {
+async function activeGraphFrames(page, actionName, action, cdp, duration = 10000) {
+  const metricsBefore = cdp ? await cdp.send('Performance.getMetrics') : null
   await page.evaluate(() => {
     const state = window.__atlasFrames = { start: performance.now(), times: [], stopped: false }
     const frame = now => {
@@ -170,11 +171,12 @@ async function activeGraphFrames(page, actionName, action) {
   })
   const start = performance.now()
   let actions = 0
-  while (performance.now() - start < 10000) {
-    await action(actions++)
-    // Keep the page active and allow a paint between trusted interactions.
-    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)))
-  }
+  if (!action) await page.waitForTimeout(duration)
+  else while (performance.now() - start < duration) {
+      await action(actions++)
+      // Keep the page active and allow a paint between trusted interactions.
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)))
+    }
   const frames = await page.evaluate(() => {
     const state = window.__atlasFrames
     state.stopped = true
@@ -185,10 +187,17 @@ async function activeGraphFrames(page, actionName, action) {
   const completeSeconds = Math.floor(elapsed / 1000)
   const framesPerSecond = Array.from({ length: completeSeconds }, (_, index) =>
     frames.times.filter(time => time >= frames.start + index * 1000 && time < frames.start + (index + 1) * 1000).length)
+  const metricsAfter = cdp ? await cdp.send('Performance.getMetrics') : null
+  const metrics = result => new Map(result?.metrics.map(row => [row.name, row.value]) ?? [])
+  const before = metrics(metricsBefore), after = metrics(metricsAfter)
+  const renderer = Object.fromEntries(['TaskDuration', 'ScriptDuration', 'LayoutDuration', 'RecalcStyleDuration', 'LayoutCount', 'RecalcStyleCount'].map(name =>
+    [name, before.has(name) && after.has(name) ? after.get(name) - before.get(name) : null]))
   return { action: actionName, actions, duration_ms: elapsed, frames: frames.times.length,
     average_fps: frames.times.length * 1000 / elapsed, complete_second_fps: framesPerSecond,
     minimum_complete_second_fps: Math.min(...framesPerSecond),
-    frame_intervals_ms: intervals, frame_interval_summary_ms: summary(intervals) }
+    frame_intervals_ms: intervals, frame_interval_summary_ms: summary(intervals),
+    renderer_metric_deltas: renderer,
+    diagnostics_only_when_idle: !action }
 }
 
 try {
@@ -232,6 +241,8 @@ try {
     const focusKey = index => index % (2 * (routeCount - 1)) < routeCount - 1 ? 'ArrowDown' : 'ArrowUp'
     const layoutBefore = await graph.page.locator('.graph-node').evaluateAll(nodes => nodes.map(node => node.getAttribute('transform')))
     const svg = graph.page.locator('.bgp-graph svg')
+    await graph.cdp.send('Performance.enable')
+    const schedulerBaseline = await activeGraphFrames(graph.page, 'idle-rAF-diagnostic-not-rendering-acceptance', null, graph.cdp, 3000)
     await svg.focus()
     const latencies = []
     for (let index = 0; index < 20; index++) {
@@ -245,20 +256,58 @@ try {
     }
     console.log('Local graph event-to-paint samples complete; measuring active frame intervals')
     await svg.focus()
-    const activeFrames = [await activeGraphFrames(graph.page, 'keyboard-pan', index => graph.page.keyboard.press(index % 2 ? 'ArrowLeft' : 'ArrowRight'))]
+    const activeFrames = [await activeGraphFrames(graph.page, 'keyboard-pan', index => graph.page.keyboard.press(index % 2 ? 'ArrowLeft' : 'ArrowRight'), graph.cdp)]
     const bounds = await svg.boundingBox()
     await graph.page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
-    activeFrames.push(await activeGraphFrames(graph.page, 'wheel-zoom', index => graph.page.mouse.wheel(0, index % 2 ? 50 : -50)))
+    activeFrames.push(await activeGraphFrames(graph.page, 'wheel-zoom', index => graph.page.mouse.wheel(0, index % 2 ? 50 : -50), graph.cdp))
     if (routeCount > 1) {
       await focus.focus()
       await focus.selectOption('-1')
-      activeFrames.push(await activeGraphFrames(graph.page, 'route-focus', index => graph.page.keyboard.press(focusKey(index))))
+      activeFrames.push(await activeGraphFrames(graph.page, 'route-focus', index => graph.page.keyboard.press(focusKey(index)), graph.cdp))
     }
     const layoutAfter = await graph.page.locator('.graph-node').evaluateAll(nodes => nodes.map(node => node.getAttribute('transform')))
     if (JSON.stringify(layoutBefore) !== JSON.stringify(layoutAfter)) throw new Error('Route focus changed the graph layout')
+    // Causal diagnostics run only AFTER the unchanged mandatory population.
+    // These temporary CSS variants never enter production, the frozen tree,
+    // active_frames or any acceptance comparison. Three-second samples are
+    // deliberately labelled insufficient for the mandatory ten-second gate.
+    const graphCSS = () => graph.page.locator('.bgp-graph').evaluate(element => {
+      const panel = getComputedStyle(element), edge = getComputedStyle(element, '::before')
+      return { backdrop_filter: panel.backdropFilter, contain: panel.contain,
+        edge_display: edge.display, edge_mask: edge.maskImage,
+        viewport_will_change: getComputedStyle(element.querySelector('svg > g')).willChange }
+    })
+    const baselineCSS = await graphCSS()
+    const diagnosticVariants = []
+    for (const variant of [
+      { name: 'original-css-control', css: null },
+      { name: 'panel-backdrop-filter-none', css: '.bgp-graph { backdrop-filter:none!important; }' },
+      { name: 'panel-contain-paint', css: '.bgp-graph { contain:paint!important; }' },
+      { name: 'masked-edge-glow-hidden', css: '.bgp-graph.edge-glow::before { display:none!important; }' },
+      { name: 'svg-group-will-change-transform', css: '.bgp-graph svg > g { will-change:transform!important; }' },
+    ]) {
+      let injected
+      try {
+        if (variant.css) injected = await graph.page.addStyleTag({ content: variant.css })
+        await graph.page.getByRole('button', { name: 'Fit', exact: true }).click()
+        await svg.focus()
+        const pan = await activeGraphFrames(graph.page, 'keyboard-pan', index => graph.page.keyboard.press(index % 2 ? 'ArrowLeft' : 'ArrowRight'), graph.cdp, 3000)
+        await focus.selectOption('-1'); await focus.focus()
+        const pathFocus = await activeGraphFrames(graph.page, 'route-focus', index => graph.page.keyboard.press(focusKey(index)), graph.cdp, 3000)
+        diagnosticVariants.push({ scope: 'causal-css-diagnostic-only-not-acceptance',
+          name: variant.name, injected_css: variant.css, sample_duration_ms: 3000,
+          conditions: await graphCSS(), visible_nodes: await graph.page.locator('.graph-node').count(),
+          samples: [pan, pathFocus], acceptance_eligible: false })
+      } finally { if (injected) await injected.evaluate(element => element.remove()) }
+      if (JSON.stringify(await graphCSS()) !== JSON.stringify(baselineCSS)) throw new Error('Diagnostic CSS was not fully restored')
+    }
+    if (JSON.stringify(layoutBefore) !== JSON.stringify(await graph.page.locator('.graph-node').evaluateAll(nodes => nodes.map(node => node.getAttribute('transform')))))
+      throw new Error('Diagnostic variants changed observed graph layout')
     report.graph = { visible_nodes: await graph.page.locator('.graph-node').count(), interactions: latencies,
       event_to_paint_ms: summary(latencies.map(value => value.ms)), active_frames: activeFrames,
       query: 'AS424240', corpus: report.protocol.graph_corpus, synthetic: true,
+      scheduler_baseline_not_a_gate: schedulerBaseline,
+      baseline_css: baselineCSS, diagnostic_variants_not_acceptance: diagnosticVariants,
       route_focus_options: routeCount, worst_case_24_nodes: 'measured-synthetic-single-desktop-context', field_INP: 'unmeasured' }
   } finally { await graph.context.close() }
   const lcp = summary(report.hero.map(value => value.lcp_ms))

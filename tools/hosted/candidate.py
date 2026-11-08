@@ -21,6 +21,7 @@ if __package__ in (None, ""):
 from tools.release_contract.contracts import (
     ContractError, canonical_bytes, parse_canonical, rollback_eligible, sha256, tree_inventory, verify_manifest,
 )
+from tools.release_contract.dataset_credits import validate_credit_tree
 
 HASH = re.compile(r"[0-9a-f]{64}\Z")
 QA_USER_AGENT = "VanSail-IP-Atlas-Preview-QA/1.0 (+https://github.com/VanSail-Opensource/vansail-ip-atlas)"
@@ -60,6 +61,7 @@ def check_candidate(public: Path, report: dict, now: int) -> dict:
         raise ContractError("candidate has too many retained releases")
     objects = {path: (size, digest) for path, size, digest in entries if path.startswith("_atlas/objects/")}
     expected_objects = {}
+    release_modes = {}
     for path in manifests:
         retained_bytes = path.read_bytes()
         retained = verify_manifest(retained_bytes, canonical_bytes({
@@ -69,6 +71,7 @@ def check_candidate(public: Path, report: dict, now: int) -> dict:
         if retained["mode"] != "synthetic" or (path.parent.name != manifest["release_id"]
                 and not rollback_eligible(retained["valid_from"], retained["valid_until"], now)):
             raise ContractError("retained candidate release is ineligible")
+        release_modes[retained["release_id"]] = retained["mode"]
         for obj in retained["objects"]:
             key = f"_atlas/objects/{obj['sha256']}.via3"
             expected = (obj["bytes"], obj["sha256"])
@@ -77,6 +80,7 @@ def check_candidate(public: Path, report: dict, now: int) -> dict:
             expected_objects[key] = expected
     if objects != expected_objects:
         raise ContractError("candidate has unreferenced database objects")
+    validate_credit_tree(public, manifest["release_id"], release_modes)
     if (public / "_redirects").read_text(encoding="utf-8").strip() != "/ /ip 302":
         raise ContractError("candidate requires the exact root 302 rule")
     return {"release_id": manifest["release_id"], "valid_until": manifest["valid_until"],
@@ -142,11 +146,11 @@ def verify_preview(public: Path, report: dict, origin: str, now: int, fetch=None
             if " ".join(headers.get(name, "").split()) != " ".join(value.split()):
                 raise ContractError(f"preview effective header differs: {name}")
         cache = {token.strip() for token in headers.get("cache-control", "").lower().split(",")}
-        if path.startswith(("_atlas/objects/", "_atlas/releases/", "_nuxt/")):
+        if path.startswith(("_atlas/objects/", "_atlas/releases/", "_atlas/credits/", "_nuxt/")):
             if "immutable" not in cache or "max-age=31536000" not in cache:
                 raise ContractError("immutable preview object cache policy missing")
-        elif path == "_atlas/current.json" and ("max-age=0" not in cache or "must-revalidate" not in cache):
-            raise ContractError("preview pointer revalidation policy missing")
+        elif path in ("_atlas/current.json", "dataset-credits.json") and ("max-age=0" not in cache or "must-revalidate" not in cache):
+            raise ContractError("preview mutable pointer/credit alias revalidation policy missing")
         verified += 1
     # Fetching all files can cross the release expiry; recheck at completion in live runs.
     if live and time.time() >= candidate["valid_until"]:

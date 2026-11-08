@@ -71,6 +71,7 @@ type SourcePolicy struct {
 	ID, Family, Admission, ProofKind string
 	FixtureTested, RightsReviewed    bool
 	AttributionRequired              *bool
+	Attribution                      *DatasetAttribution
 	ParserVersion, SchemaVersion     uint32
 	MaxAge                           time.Duration
 	Subscription, CompleteCoverage   bool
@@ -93,6 +94,7 @@ type StoredSource struct {
 	Fingerprint [32]byte
 	ExpiresAt   time.Time
 	Records     []NormalizedRecord
+	Attribution *DatasetAttribution `json:",omitempty"`
 }
 type BuildState struct {
 	Version     uint16
@@ -161,7 +163,8 @@ func Reconcile(previous BuildState, policies []SourcePolicy, snapshots []SourceS
 		if policy.Admission != "active" {
 			deny("quarantined", "not_active")
 		}
-		if !policy.FixtureTested || !policy.RightsReviewed || policy.AttributionRequired == nil || *policy.AttributionRequired || policy.ParserVersion == 0 || policy.SchemaVersion != 3 {
+		creditReady := policy.AttributionRequired != nil && (!*policy.AttributionRequired || policy.Attribution != nil) && (policy.Attribution == nil || policy.Attribution.Validate() == nil)
+		if !policy.FixtureTested || !policy.RightsReviewed || !creditReady || policy.ParserVersion == 0 || policy.SchemaVersion != 3 {
 			deny("quarantined", "certification_or_rights_incomplete")
 		}
 		if policy.MaxAge <= 0 || policy.MaxAge > 720*time.Hour || !finite(policy.Weight) || policy.Weight < 0 || policy.Weight > 100 {
@@ -359,7 +362,11 @@ func Reconcile(previous BuildState, policies []SourcePolicy, snapshots []SourceS
 		if err != nil {
 			return plan, err
 		}
-		stored := StoredSource{id, sha256.Sum256(encoded), expiry[id], records}
+		stored := StoredSource{ID: id, Fingerprint: sha256.Sum256(encoded), ExpiresAt: expiry[id], Records: records}
+		if policy.Attribution != nil {
+			credit := *policy.Attribution
+			stored.Attribution = &credit
+		}
 		plan.State.Sources = append(plan.State.Sources, stored)
 		if plan.NextExpiry.IsZero() || stored.ExpiresAt.Before(plan.NextExpiry) {
 			plan.NextExpiry = stored.ExpiresAt
@@ -398,6 +405,11 @@ func cloneRecord(input NormalizedRecord) (NormalizedRecord, error) {
 // SavePrivateState has a fixed private destination and an atomic replacement;
 // callers cannot accidentally choose web/public as the state-file location.
 func SavePrivateState(workspace string, state BuildState) error {
+	for _, source := range state.Sources {
+		if source.Attribution != nil && source.Attribution.Validate() != nil {
+			return errors.New("private dataset attribution invalid")
+		}
+	}
 	root, err := filepath.Abs(workspace)
 	if err != nil {
 		return err
@@ -488,6 +500,9 @@ func LoadPrivateState(workspace string) (BuildState, error) {
 		return BuildState{}, errors.New("unsupported private state version")
 	}
 	for _, source := range state.Sources {
+		if source.Attribution != nil && source.Attribution.Validate() != nil {
+			return BuildState{}, errors.New("private dataset attribution invalid")
+		}
 		for _, record := range source.Records {
 			if err := record.Validate(); err != nil {
 				return BuildState{}, err

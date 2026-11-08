@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:vansail:contract:web:3:1",
+  "$id": "urn:vansail:contract:web:3:2",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -319,14 +319,6 @@
           "type": "boolean",
           "const": true
         },
-        "no_source_or_credits_panel": {
-          "type": "boolean",
-          "const": true
-        },
-        "no_source_names_or_inspired_by_labels": {
-          "type": "boolean",
-          "const": true
-        },
         "minimum_text": {
           "type": "boolean",
           "const": true
@@ -349,6 +341,18 @@
             "AS13335",
             "13335"
           ]
+        },
+        "no_per_ip_source_or_credits_panel": {
+          "type": "boolean",
+          "const": true
+        },
+        "no_source_names_in_ip_results": {
+          "type": "boolean",
+          "const": true
+        },
+        "no_inspired_by_labels": {
+          "type": "boolean",
+          "const": true
         }
       },
       "required": [
@@ -369,13 +373,14 @@
         "preserve_q_on_navigation",
         "no_duplicate_displays",
         "single_fact_owner",
-        "no_source_or_credits_panel",
-        "no_source_names_or_inspired_by_labels",
+        "no_per_ip_source_or_credits_panel",
+        "no_source_names_in_ip_results",
         "minimum_text",
         "icon_first",
         "mobile_first",
         "accessibility_reduced_motion",
-        "asn_input_forms"
+        "asn_input_forms",
+        "no_inspired_by_labels"
       ]
     },
     "design": {
@@ -482,9 +487,9 @@
           "type": "boolean",
           "const": true
         },
-        "do_not_show_source_attribution_in_ui": {
-          "type": "boolean",
-          "const": true
+        "dataset_attribution_display": {
+          "type": "string",
+          "const": "global-footer-details"
         }
       },
       "required": [
@@ -499,7 +504,7 @@
         "layout",
         "transitions",
         "theme_skins_separate_css_tokens",
-        "do_not_show_source_attribution_in_ui"
+        "dataset_attribution_display"
       ]
     },
     "motion": {
@@ -1266,6 +1271,58 @@
         "immutable_cache_headers",
         "deployment_gates"
       ]
+    },
+    "contract_revision": {
+      "type": "integer",
+      "const": 2
+    },
+    "dataset_credits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "const": true
+        },
+        "placement": {
+          "type": "string",
+          "const": "global-footer-details"
+        },
+        "current_index": {
+          "type": "string",
+          "const": "/dataset-credits.json"
+        },
+        "object_root": {
+          "type": "string",
+          "const": "/_atlas/credits/"
+        },
+        "only_included_reviewed_datasets": {
+          "type": "boolean",
+          "const": true
+        },
+        "per_ip_attribution": {
+          "type": "boolean",
+          "const": false
+        },
+        "max_entries": {
+          "type": "integer",
+          "const": 256
+        },
+        "max_document_kib": {
+          "type": "integer",
+          "const": 1024
+        }
+      },
+      "required": [
+        "enabled",
+        "placement",
+        "current_index",
+        "object_root",
+        "only_included_reviewed_datasets",
+        "per_ip_attribution",
+        "max_entries",
+        "max_document_kib"
+      ]
     }
   },
   "required": [
@@ -1282,6 +1339,8 @@
     "security",
     "performance",
     "release_policy",
-    "deploy"
+    "deploy",
+    "contract_revision",
+    "dataset_credits"
   ]
 }

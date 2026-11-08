@@ -6,6 +6,8 @@ Local implementation is now in progress (2026-11-08). The current executable wor
 
 **Approved product-scope amendment `release-scope-v2` — 2026-11-08:** numeric quality is optional for production release. The user removed the prerequisite to obtain two complete risk-assessment families before releasing. Production may publish `quality=null`, unrated confidence and supported positive reason flags while numeric coverage is inadequate. The existing requirements for publishing a non-null score remain unchanged: two independent current complete families covering all four required IPv4 layers. This amendment changes release gating only; it changes no scoring coefficient, confidence threshold, coverage meaning, source-admission rule or VIA3 field. All other required capabilities and hosted quality gates remain mandatory.
 
+**Current approved product-scope amendment `release-scope-v3` — 2026-11-08:** the user approved dataset credit display. Reviewed legally required credits may appear in one global shared frontend display and its dedicated static artifact, solely for real datasets included in the immutable release. Source admission may accept `attribution_required: true` with reviewed credit metadata and proof that the global display satisfies the actual obligations. Unresolved attribution and prohibited redistribution remain blocking. This replaces the blanket no-credit prohibition, retains v2's optional numeric quality, and leaves source IDs/per-IP provenance and source metadata in VIA3/lookup answers forbidden. The private capability report now identifies `release-scope-v3`; numeric qualification rules remain unchanged.
+
 This document is the implementation plan; it is not a release claim. `AGENTS.md` remains the normative engineering contract. If this plan conflicts with `AGENTS.md`, `AGENTS.md` wins. The documents listed under **Authoritative contracts** define the executable details that this plan schedules and gates.
 
 Workspace review: **2026-11-08**. The source catalog and format-sample inventory have been reconciled after unavailable entries were removed. Observations below were checked against local files; no upstream freshness, rights, parser certification, hosted regression or deployment was revalidated.
@@ -16,13 +18,13 @@ The current source-admission snapshot is:
 - All 91 entries have `fixture.status: missing`.
 - Publication proof is `unavailable` for 65 entries. The remaining entries use GitHub release or commit metadata, which still has to be tied to the exact payload and verified at build time.
 - No source declares `complete` coverage: 39 declare `mapping` and 52 declare `positive_only`. Numeric quality therefore remains unrated in the current catalog; under `release-scope-v2`, that absence does not itself block production release.
-- The seven rights-approved entries have `distribution: allow`, but none records an explicit `attribution_required: false`; explicit no-attribution proof remains required before activation.
+- The seven rights-approved entries have `distribution: allow`, but none records a resolved attribution decision. Activation still requires an explicit no-credit decision or reviewed required credit metadata compliant with `release-scope-v3`.
 - All 21 proxy-subscription repositories use `evidence_family: public-subscription-aggregators`.
 - BGP MRT ingestion is disabled, and no required BGP/Tier-1 capability is currently qualified.
 
 The workspace also contains format reconnaissance, which is separate from admission:
 
-- `fixtures/source-samples/manifest.json`, updated on 2026-11-08, covers all 91 entries and matches the current source-catalog SHA-256.
+- The local, Git-ignored `fixtures/source-samples/manifest.json` covers the 91 entries from the 2026-11-08 capture snapshot. Its original catalog SHA-256 is retained; the later attribution-policy revision changes the current catalog bytes without renewing or rewriting those captures.
 - It records 68 raw fragments, 21 sanitized subscription fragments, and 2 retired entries. No blocked or failed source entries remain in the catalog or current inventory. Captures do not establish present upstream availability.
 - These 89 captures are not full-payload schema/parser fixtures. Sanitized fragments may omit the structure needed to exercise the production decoder. Neither capture status nor the capture tool's historical tests promote a source to `fixture_tested` or `active`.
 - At the starting snapshot, only the Go module, sample tool, structural validator and static header templates existed. The current compiler, readers, Nuxt application and remaining production integration are recorded in `docs/implementation-status.md`; this historical inventory is not the current implementation status.
@@ -30,13 +32,13 @@ The workspace also contains format reconnaissance, which is separate from admiss
 Consequences:
 
 1. Production is hard-blocked until every required capability in the capability matrix has approved, current, fixture-tested real-source coverage. Numeric quality is the explicit optional exception under `release-scope-v2`.
-2. Rights approval alone does not qualify a source. The seven `rights_approved` entries still lack observed fixtures and explicit no-attribution proof, so they cannot be active.
+2. Rights approval alone does not qualify a source. The seven `rights_approved` entries still lack observed fixtures and a resolved, compliant attribution decision, so they cannot be active.
 3. Synthetic fixtures may validate engineering behavior in previews. They must never satisfy a production gate or be described as real coverage.
 4. No required feature may be silently dropped, replaced by an allowlist, or filled with a placeholder to bypass the block. The optional numeric-quality scope change is explicit; an unrated result must not be presented as a numeric assessment.
 
 ## Product contract
 
-VanSail IP Atlas is a source-free, download-only IP and ASN intelligence site. A Go compiler ingests approved bulk datasets, emits deterministic VIA3 shards, and packages them with a Nuxt 4 static site in one Cloudflare Pages deployment. There is no lookup API, Pages Function, proxy probe, DNS resolution of subscription or query hosts, runtime database, or remote enrichment request.
+VanSail IP Atlas is a download-only IP and ASN intelligence site with source-free lookup facts and a separate global dataset-credit display. A Go compiler ingests approved bulk datasets, emits deterministic VIA3 shards, and packages them with a Nuxt 4 static site in one Cloudflare Pages deployment. There is no lookup API, Pages Function, proxy probe, DNS resolution of subscription or query hosts, runtime database, or remote enrichment request.
 
 The v1 product contract covers:
 
@@ -90,7 +92,7 @@ Any semantic change to a public field, risk weight, T1 threshold, prefix overlay
 
 - `candidate`: cataloged; must not be fetched for publication, used for scoring or admitted to a release. Bounded build-private reconnaissance and parser certification may inspect candidates without enabling them; their artifacts never enter the production input cache or public tree.
 - `fixture_tested`: the parser ran against a pinned observed payload, the expected schema matched and the fixture SHA-256 is recorded. This state alone does not grant use.
-- `rights_approved`: the redistribution decision claims that public derived output is permitted. Activation additionally requires an explicit `attribution_required: false`; the field must not be inferred from absence. This state alone does not grant use.
+- `rights_approved`: the redistribution decision claims that public derived output is permitted. Activation additionally requires an explicit attribution decision: `false` for no required credit, or `true` with reviewed compliant `license.attribution` metadata. The decision must not be inferred from absence. This state alone does not grant use.
 - `active`: every static gate below passes. Only this state is eligible for production ingestion, subject to runtime revalidation.
 - `retired`: immediately excluded from current compilation, with all current contributions retracted. Private audit or rollback retention never delays that retraction and is allowed only under the bounded eligibility/rights rules in C07.
 
@@ -100,7 +102,7 @@ An entry may be changed to `active` only when all of the following are true:
 2. Parser and expected schema are recorded.
 3. `fixture.status` is a passing state, `schema_observed` is true, the fixture has a valid SHA-256 and the tested fixture identifies the same parser/schema.
 4. `publication_proof` is not `unavailable` and is bound to the exact payload.
-5. Redistribution is allowed, `attribution_required` is explicitly `false`, and the rights review is recorded.
+5. Redistribution is allowed and the rights review is recorded. `attribution_required` is explicitly `false`, or explicitly `true` with reviewed `license.attribution` metadata whose obligations are satisfied by the global shared credits. An unresolved/null decision remains ineligible.
 6. `evidence_family`, `coverage`, `scope`, public-field allowlist and dependencies are explicit.
 7. The source is current under the 720-hour clock at fetch time.
 8. The admission and runtime state machines accept the transition.
@@ -145,7 +147,7 @@ A parser must not infer coverage from a source's name. Coverage is a reviewed pr
 
 ## Capability gate
 
-The release tooling must derive this matrix mechanically from the catalog, fixtures, rights decisions and current snapshots. The table is the plan's starting state, not a manually maintained release override. All rows except numeric quality are required; one failed required row blocks production. Under `release-scope-v2`, the private capability report identifies numeric quality as `required: false` and reports `unrated` when unqualified. A qualified optional row permits numeric publication only under the unchanged scoring rules.
+The release tooling must derive this matrix mechanically from the catalog, fixtures, rights decisions and current snapshots. The table is the plan's starting state, not a manually maintained release override. All rows except numeric quality are required; one failed required row blocks production. Under current `release-scope-v3` (retaining v2), the private capability report identifies numeric quality as `required: false` and reports `unrated` when unqualified. A qualified optional row permits numeric publication only under the unchanged scoring rules.
 
 | Capability | Required approved current evidence | Snapshot status | Gate |
 |---|---|---|---|
@@ -176,10 +178,10 @@ The following register records concrete gaps found in the current files. Each ro
 | C01 | VIA3 lacks section record layouts, section IDs/flags, dictionary references, address encoding, router entries, inherited overlays, presence/reason bit numbers, quantization and overflow rules. Define required/optional sections and deterministic IDs without serializing Go structs. | `docs/binary-format-via3.md`, `docs/data-model.md`: byte tables for every shard kind, IPv4/IPv6 and corruption vectors, schema migration behavior. |
 | C02 | Strict schemas do not exist. Scope spellings include `exact`, `exact-ip`, `exact_ip` and `asn-edge`; BGP config uses `provider_transit` while public contracts use `transit_upstream`; assignment field aliases also differ. Separate source-schema fields from the public allowlist and define explicit normalization. | All five configs, `docs/source-policy.md`, validator: reject unknown/duplicate keys, invalid unions, duplicate IDs, bad hashes, invalid state combinations and unresolved aliases. No guessed parser or `unknown` format may become active. |
 | C03 | Scoring YAML uses undefined `u_asn` and `C_asn_diversity`; `docs/scoring.md` substitutes `C_asn` for the latter. Define the quantities, scope/family dedupe, MOAS combination, coverage counting and rounding without changing coefficients by implication. Freeze weighted geo-vote denominators, hierarchy, winning-city selection and coordinate precision too. | `configs/scoring.yaml`, `docs/scoring.md`, `docs/data-model.md`: worked numeric vectors, order/idempotence/monotonicity cases and conflicting-country/city fixtures. Formula changes require an explicit versioned amendment. |
-| C04 | Existing validation reads the obsolete `enabled` field and does not enforce admission, proof, rights or typed schemas. Rights-approved entries lack explicit no-attribution decisions. Freeze runtime failure classification, including future timestamps described as invalid in scoring docs and quarantined here. | `tools/validate_blueprint.py`, `configs/sources.yaml`, `docs/source-policy.md`: negative activation tests and a derived report with zero active sources. The old structural PASS is not this gate. |
+| C04 | Existing validation reads the obsolete `enabled` field and does not enforce admission, proof, rights or typed schemas. Rights-approved entries lack resolved attribution decisions. Freeze runtime failure classification, including future timestamps described as invalid in scoring docs and quarantined here. | `tools/validate_blueprint.py`, `configs/sources.yaml`, `docs/source-policy.md`: negative activation tests and a derived report with zero active sources. The old structural PASS is not this gate. `release-scope-v3` additionally permits reviewed compliant global credits. |
 | C05 | The executable CAIDA URL is dated; MRT is disabled, `max_mrt_sources_per_run` is 1, but path qualification requires two independent families. Two collectors from one family do not satisfy it. | `configs/sources.yaml`, `configs/tier1.yaml`: payload-bound discovery and a cold-build acquisition plan covering both families within existing budgets. Keep production MRT off while certifying its parser in isolation. |
 | C06 | Header/decoded limits need strict boundary parity with Pages; native browser Zstandard support is assumed rather than demonstrated. | Binary/performance contracts and toolchain locks: reject assets at or above 24 MiB, prove bounded Zstandard decoding on the selected stable Chrome, and freeze browser worker/cache memory limits. No alternate codec or legacy fallback. |
-| C07 | Session pinning and immutable caching do not define how an aging static release stops being current. Subscription expiry is shorter than 720 hours, and rollback can reintroduce withdrawn data. | Source/release/data contracts: aggregate release expiry, scheduling, client expiry checks, rollback eligibility and bounded private-cache/quarantine retention, with clock-advance fixtures. No source metadata is added publicly. |
+| C07 | Session pinning and immutable caching do not define how an aging static release stops being current. Subscription expiry is shorter than 720 hours, and rollback can reintroduce withdrawn data. | Source/release/data contracts: aggregate release expiry, scheduling, client expiry checks, rollback eligibility and bounded private-cache/quarantine retention, with clock-advance fixtures. No source metadata is added to VIA3/lookup facts; v3 global credits are separate. |
 | C08 | Release ID, manifest serialization and bundle digest inputs are not frozen. Approval points at `releases/current/manifest.json` instead of the release-ID path, and the source config's asset root differs from the object layout. | `docs/release.md`, `configs/release-approval.yaml`, `configs/sources.yaml`: canonical serialization, acyclic hash inputs, exact manifest-path resolution, inventory and approval tamper vectors. |
 | C09 | Browser input cannot literally call Go `net/netip`; BGP-origin membership cannot be checked before loading the relevant prefix. Reserved ASN policy and duplicate/empty query parameters are unspecified. | `docs/data-model.md`, `configs/web.yaml`: Go/TypeScript canonicalization corpus, bounded input, route/query rules and distinct syntax versus membership-error tests. |
 | C10 | Tier-1 core/cone/degree populations, near-complete-core algorithm, stability window and first-snapshot behavior are unspecified. Graph overflow can conflict with protected hops. | `configs/tier1.yaml`, data contract: deterministic derivation and graph-selection rules, missing-input/first-snapshot/overflow fixtures, with all existing thresholds preserved. |
@@ -188,7 +190,7 @@ The following register records concrete gaps found in the current files. Each ro
 
 Pin the Go, Node/pnpm, Nuxt/UI, Motion, Leaflet and compression toolchains as P0 artifacts. Select a supported stable Go when implementation starts; a `go.mod` directive alone does not prove runner/toolchain support. Lock the compressor version and settings. Verify Chrome/codec behavior in hosted CI and record the actual browser build; do not infer it from the target label.
 
-Create a minimal synthetic corpus for public records, all VIA3 sections, decoder syntax and URL semantics. Keep real source certification fixtures separate and build-private. Record the IPv4-only numeric-quality restriction, origin deep links, no-attribution proof and release-expiry semantics in their owning contracts before readers or UI depend on them.
+Create a minimal synthetic corpus for public records, all VIA3 sections, decoder syntax and URL semantics. Keep real source certification fixtures separate and build-private. Record the IPv4-only numeric-quality restriction, origin deep links, reviewed attribution obligations and release-expiry semantics in their owning contracts before readers or UI depend on them. Synthetic credit artifacts are empty and cannot certify real data inclusion.
 
 Exit criterion: C01-C12 have resolved contracts and their required checks have run; unknown config fields fail; all public layouts are frozen; source states are unambiguous; the CAIDA/MRT contradictions are resolved; a derived capability report correctly reports every required production row blocked on current data and optional numeric quality as unrated. Source qualification may continue later without blocking synthetic engineering work.
 
@@ -260,7 +262,7 @@ Exact, explicit-prefix, ASN and `/24` are separate risk layers. Each layer has o
 - `positive_only`: positive observations may be shown, but absence is not an assessment.
 - `unknown`: coverage is missing, stale, conflicting or otherwise ineligible.
 
-A qualifying family must be current, fixture-tested, rights-approved without public attribution, complete for the relevant risk scope, and independent under `evidence_family`. Mapping sources and positive-only blocklists never qualify as complete risk coverage.
+A qualifying family must be current, fixture-tested, rights-approved with any required global credits satisfied, complete for the relevant risk scope, and independent under `evidence_family`. Mapping sources and positive-only blocklists never qualify as complete risk coverage. Credit entries cannot increase independence or score confidence.
 
 Numeric quality is emitted only when all four configured IPv4 layers are `assessed` and at least two independent current families qualify. Otherwise quality is `unrated`; confirmed reason flags and any observed layer contributions remain visible. Confidence is `low` for two qualifying families, `medium` for three, `high` for four or more, and `unrated` otherwise. Confidence describes coverage only.
 
@@ -306,7 +308,9 @@ CAIDA snapshots must be discovered from the publication index and bound to a ver
 
 ## Frontend and privacy
 
-The frontend is Nuxt 4 static generation with Nuxt UI first, shadcn-vue only for a genuinely missing primitive, one shared light/dark token system, Motion for interaction-driven transitions, and Leaflet lazy-loaded only on `/ip/overview`. TresJS is deferred beyond v1 to protect initial JS and accessibility budgets. No component may load remote data, source metadata or a runtime lookup API.
+The frontend is Nuxt 4 static generation with Nuxt UI first, shadcn-vue only for a genuinely missing primitive, one shared light/dark token system, Motion for interaction-driven transitions, and Leaflet lazy-loaded only on `/ip/overview`. TresJS is deferred beyond v1 to protect initial JS and accessibility budgets. Components load only same-origin static facts and the dedicated global credit artifact, with OSM tiles as the map exception; no runtime lookup API or other source metadata is exposed.
+
+Global dataset credits use one shared frontend display, distinct from every IP/ASN fact owner. The packager includes only reviewed required credits for real datasets that actually contribute to the release. It strips source IDs/private lineage, deduplicates exact approved entries and renders plain text plus safe attribution/license links. Merely cataloged, candidate, stale, withdrawn or synthetic datasets never receive a displayed inclusion credit. The closed credit schema, immutable path/current alias, candidate/cache identity and scanner exception are frozen in `docs/release.md`; VIA3 and lookup answers gain no provenance field.
 
 Design requirements:
 
@@ -321,7 +325,7 @@ Design requirements:
 
 Security and privacy:
 
-- Requests are same-origin except `https://tile.openstreetmap.org` when a map is mounted.
+- Automatic requests are same-origin except `https://tile.openstreetmap.org` when a map is mounted. Reviewed dataset-credit links are navigation only; they are not fetched automatically and never include a query IP/ASN.
 - `Referrer-Policy: no-referrer` ensures `q` cannot reach OSM.
 - CSP restricts script/style/data origins to same-origin and images to the necessary same-origin/data/OSM sources; generated inline script/style handling must be explicitly reviewed. Omit broad wildcards.
 - `X-Content-Type-Options: nosniff` and a restrictive Permissions Policy are mandatory.
@@ -382,7 +386,7 @@ Each implementation change records affected source schemas, VIA3 kinds/public fi
 
 - Strict schemas reject unknown YAML fields, duplicate IDs, invalid enum values and malformed hashes.
 - Duplicate YAML keys, unresolved parser/scope aliases, cross-config enum conflicts and the obsolete `enabled` activation path are rejected.
-- State tests prove no entry can become `active` with a missing/failed fixture, unavailable proof, unresolved rights, attribution requirement, invalid coverage or missing family.
+- State tests prove no entry can become `active` with a missing/failed fixture, unavailable proof, unresolved rights/attribution, missing required credit metadata, invalid coverage or missing family. An explicit reviewed attribution requirement is permitted only when the global display satisfies its obligations.
 - Tests prove all 21 subscription repositories share one family and mirrors/partitions do not create votes.
 - Tests prove `304`, local mtime, fetch time, cache time and mutable GitHub branch commits cannot refresh age.
 - Tests prove withdrawal removes prior contributions and triggers all dependent rebuilds.
@@ -429,8 +433,8 @@ Each implementation change records affected source schemas, VIA3 kinds/public fi
 - Network interception proves no external request except OSM tiles and no query reaches OSM through a referrer.
 - Missing/corrupt shards show a fail-closed state; redirects and cache headers match the contract.
 - Warm IndexedDB caches and long-open tabs refuse an expired release; no-change builds retract expired data. A late response cannot render a prior query. Back/forward and origin-membership errors preserve the intended route state.
-- Public-output scans inspect HTML, JS, CSS, manifests and decompressed VIA3 string tables for source names/IDs/URLs, credentials, domains, protocol/port, collector, latency, timezone, postal and continent data.
-- Scanner fixtures distinguish forbidden public metadata keys and known private values from library implementation tokens and the required OSM map origin/attribution. This is not a general permission for domains or source strings in IP records. Scan encoded strings and generated source maps as applicable; prevent private artifacts from entering the tree in the first place.
+- Public-output scans inspect HTML, JS, CSS, manifests and decompressed VIA3 string tables for source names/IDs/URLs, credentials, domains, protocol/port, collector, latency, timezone, postal and continent data. Only independently validated exact global-credit paths/fields may carry their reviewed attribution names/text/URLs; VIA3, dictionaries, lookup answers and other frontend data keep the full provenance ban.
+- Scanner fixtures distinguish the narrow global-credit exception, library implementation tokens and required OSM attribution from forbidden metadata. Verify included-dataset binding, required-credit completeness, safe plain text/links, synthetic emptiness, canonical deduplication and rejection of unused/fabricated credits or source IDs. This never permits domains or source strings in IP records. Scan encoded strings and generated source maps as applicable; prevent private artifacts from entering the tree in the first place.
 - The complete manifest inventory matches deployed assets; no 404, stale object or mixed release is allowed.
 - Approval mismatch, post-preview byte mutation, an expired candidate, an ineligible rollback and orphaned/extra public objects block promotion. Verify the deployed root's actual 302 response, not only a Nuxt client redirect.
 
@@ -510,7 +514,7 @@ These are execution blockers, not optional backlog items:
 
 - No source is active, and all 91 fixtures are missing. Production cannot start.
 - Region/city/coordinates, usage, abuse/risk, RPKI, MRT paths, directed relationships and Tier-1 lack qualified current coverage.
-- All seven rights-approved entries still need payload fixtures, publication proof, explicit `attribution_required: false` and final rights revalidation.
+- All seven rights-approved entries still need payload fixtures, publication proof, resolved attribution compliance and final rights revalidation. `release-scope-v3` permits required credits but certifies none of these sources.
 - MRT remains disabled until an approved source and parser pass the P5 entry criteria.
 - The hardcoded dated CAIDA URL in the source catalog violates snapshot discovery and must be corrected during P0.
 - VIA3's container framing is specified, but per-section record layouts must be frozen during P0 before implementation can claim parity.
@@ -537,6 +541,7 @@ Numeric quality has no current complete-coverage pair and therefore remains unra
 - [ ] RSS, scratch, cold/warm build, lookup and browser performance measurements pass on hosted infrastructure.
 - [ ] Hosted measurement protocols and sample counts are fixed; whole-process/whole-disk peaks and cold-query payload accounting are reported.
 - [ ] Every required capability matrix row is satisfied by approved current real-source coverage; optional numeric quality is explicitly reported as qualified or unrated, with non-null scores obeying the unchanged coverage rules.
+- [ ] Global credits contain exactly the reviewed obligations of included real datasets, with no source IDs/per-IP provenance; immutable/current credit bytes are included in the frozen candidate, scanner, cache and approval checks.
 - [ ] Release approval binds the exact source catalog, rights audit and manifest hashes; deployment verifies the preview and production artifact digest matches.
 - [ ] Rollback release remains available until the new release is verified.
 

@@ -151,6 +151,10 @@ def validate_sources(config):
             source["license"]["status"] != "reviewed" or source["license"]["distribution"] != "allow"
         ):
             raise ContractError(f"{sid}: invalid rights milestone")
+        if "attribution" in source["license"]:
+            from .policy import attribution_issues
+            if attribution_issues(source["license"]["attribution"]):
+                raise ContractError(f"{sid}: invalid reviewed dataset attribution")
         if source["fixture"]["status"] == "missing" and (
             source["fixture"]["sha256"] is not None or source["fixture"]["schema_observed"]
             or source["fixture"]["tested_at"] is not None

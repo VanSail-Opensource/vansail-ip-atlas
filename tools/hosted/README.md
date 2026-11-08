@@ -76,6 +76,24 @@ and expiry are checked again afterward. Controls `_headers`/`_redirects` are
 validated through their deployed effects because Pages does not serve them as
 ordinary assets. The workflow has no deployment credential or production job.
 
+The user-approved global dataset credits display is tested separately from IP
+facts. Opening the shared footer fetches the `/dataset-credits.json` index, then
+the `/_atlas/credits/<sha256>.json` document matching the current or pinned lookup
+release. Both are exact candidate assets; the index must revalidate and each
+document is content addressed, hash validated and immutable.
+The regression checks one footer on every view, no automatic hero atlas fetch,
+no query/referrer attached to credits requests and no request to dataset origins.
+Synthetic releases must have an empty credit list and clearly state that no
+third-party IP datasets were included; candidate sources are never claimed as used.
+Credits remain global and identical across query IPs. Their assets cannot change
+after preview without changing the complete candidate digest.
+
+Graph reports include a separately labelled idle-rAF diagnostic and renderer
+task/script/style/layout metric deltas to distinguish scheduling from rendering
+cost. Idle callbacks never count toward the active graph gate. The original
+hosted 24-node FPS failure remains evidence; instrumentation does not turn it into
+a pass or change the input rate, rendering, CPU/network model or 50 FPS target.
+
 `python -m unittest tools.hosted.test_candidate -v` covers unchanged artifacts,
 expiry, production rejection, URL restrictions, exact served bytes and security
 headers. `python tools/hosted/candidate.py --public web/.output/public` rechecks a

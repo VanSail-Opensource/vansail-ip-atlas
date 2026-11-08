@@ -1,0 +1,1314 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:vansail:contract:scoring:3:1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 3
+    },
+    "contract_revision": {
+      "type": "integer",
+      "const": 1
+    },
+    "model_id": {
+      "type": "string",
+      "const": "via-risk-v3-contract-1"
+    },
+    "contract": {
+      "type": "string",
+      "const": "docs/scoring.md"
+    },
+    "contract_vectors": {
+      "type": "string",
+      "const": "fixtures/scoring/contract-v1.json"
+    },
+    "range": {
+      "type": "array",
+      "const": [
+        0,
+        100
+      ]
+    },
+    "semantics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "quality_100_is_better": {
+          "type": "boolean",
+          "const": true
+        },
+        "risk_1_is_worse": {
+          "type": "boolean",
+          "const": true
+        },
+        "unknown_is_not_clean": {
+          "type": "boolean",
+          "const": true
+        },
+        "classification_is_not_abuse_proof": {
+          "type": "boolean",
+          "const": true
+        },
+        "uncalibrated_risk_is_not_probability": {
+          "type": "boolean",
+          "const": true
+        },
+        "public_reasons_without_source_metadata": {
+          "type": "boolean",
+          "const": true
+        },
+        "public_score_requires_adequate_coverage": {
+          "type": "boolean",
+          "const": true
+        },
+        "explicit_authoritative_risk_can_be_shown_with_unrated_quality": {
+          "type": "boolean",
+          "const": true
+        },
+        "numeric_quality_requires_all_contributing_layers_assessed": {
+          "type": "boolean",
+          "const": true
+        },
+        "family_key": {
+          "type": "string",
+          "const": "evidence_family"
+        }
+      },
+      "required": [
+        "quality_100_is_better",
+        "risk_1_is_worse",
+        "unknown_is_not_clean",
+        "classification_is_not_abuse_proof",
+        "uncalibrated_risk_is_not_probability",
+        "public_reasons_without_source_metadata",
+        "public_score_requires_adequate_coverage",
+        "explicit_authoritative_risk_can_be_shown_with_unrated_quality",
+        "numeric_quality_requires_all_contributing_layers_assessed",
+        "family_key"
+      ]
+    },
+    "category_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "formula": {
+          "type": "string",
+          "const": "e(d,f)=max_{i in independent family f}(reliability_i*severity_i*specificity_i*2^(-age_hours_i/half_life_hours_d))"
+        },
+        "risk_per_layer": {
+          "type": "string",
+          "const": "R_layer=1-exp(-sum_d(beta_d*sum_f(e(d,f))))"
+        },
+        "aggregate_same_family": {
+          "type": "string",
+          "const": "max"
+        },
+        "no_duplicate_credit_for_aggregators": {
+          "type": "boolean",
+          "const": true
+        },
+        "reliability": {
+          "type": "string",
+          "const": "clamp(source_weight/100, 0, 1)"
+        },
+        "severity_default": {
+          "type": "number",
+          "const": 1.0
+        },
+        "future_timestamp_tolerance_hours": {
+          "type": "integer",
+          "const": 24
+        },
+        "negative_age_policy": {
+          "type": "string",
+          "const": "clamp_to_zero"
+        },
+        "signals": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "malware": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "beta": {
+                  "type": "number",
+                  "const": 2.0
+                },
+                "half_life_hours": {
+                  "type": "integer",
+                  "const": 168
+                },
+                "severity": {
+                  "type": "number",
+                  "const": 1.0
+                },
+                "public_reason": {
+                  "type": "string",
+                  "const": "malware"
+                }
+              },
+              "required": [
+                "beta",
+                "half_life_hours",
+                "severity",
+                "public_reason"
+              ]
+            },
+            "botnet": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "beta": {
+                  "type": "number",
+                  "const": 1.8
+                },
+                "half_life_hours": {
+                  "type": "integer",
+                  "const": 168
+                },
+                "severity": {
+                  "type": "number",
+                  "const": 1.0
+                },
+                "public_reason": {
+                  "type": "string",
+                  "const": "botnet"
+                }
+              },
+              "required": [
+                "beta",
+                "half_life_hours",
+                "severity",
+                "public_reason"
+              ]
+            },
+            "c2": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "beta": {
+                  "type": "number",
+                  "const": 2.0
+                },
+                "half_life_hours": {
+                  "type": "integer",
+                  "const": 168
+                },
+                "severity": {
+                  "type": "number",
+                  "const": 1.0
+                },
+                "public_reason": {
+                  "type": "string",
+                  "const": "command_control"
+                }
+              },
+              "required": [
+                "beta",
+                "half_life_hours",
+                "severity",
+                "public_reason"
+              ]
+            },
+            "abuse": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "beta": {
+                  "type": "number",
+                  "const": 1.4
+                },
+                "half_life_hours": {
+                  "type": "integer",
+                  "const": 336
+                },
+                "severity": {
+                  "type": "number",
+                  "const": 1.0
+                },
+                "public_reason": {
+                  "type": "string",
+                  "const": "abuse"
+                }
+              },
+              "required": [
+                "beta",
+                "half_life_hours",
+                "severity",
+                "public_reason"
+              ]
+            },
+            "fraud": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "beta": {
+                  "type": "number",
+                  "const": 1.3
+                },
+                "half_life_hours": {
+                  "type": "integer",
+                  "const": 336
+                },
+                "severity": {
+                  "type": "number",
+                  "const": 1.0
+                },
+                "public_reason": {
+                  "type": "string",
+                  "const": "fraud"
+                }
+              },
+              "required": [
+                "beta",
+                "half_life_hours",
+                "severity",
+                "public_reason"
+              ]
+            },
+            "scanner": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "beta": {
+                  "type": "number",
+                  "const": 0.9
+                },
+                "half_life_hours": {
+                  "type": "integer",
+                  "const": 72
+                },
+                "severity": {
+                  "type": "number",
+                  "const": 1.0
+                },
+                "public_reason": {
+                  "type": "string",
+                  "const": "scanning"
+                }
+              },
+              "required": [
+                "beta",
+                "half_life_hours",
+                "severity",
+                "public_reason"
+              ]
+            },
+            "spam": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "beta": {
+                  "type": "number",
+                  "const": 0.85
+                },
+                "half_life_hours": {
+                  "type": "integer",
+                  "const": 168
+                },
+                "severity": {
+                  "type": "number",
+                  "const": 1.0
+                },
+                "public_reason": {
+                  "type": "string",
+                  "const": "spam"
+                }
+              },
+              "required": [
+                "beta",
+                "half_life_hours",
+                "severity",
+                "public_reason"
+              ]
+            },
+            "tor": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "beta": {
+                  "type": "number",
+                  "const": 0.24
+                },
+                "half_life_hours": {
+                  "type": "integer",
+                  "const": 48
+                },
+                "severity": {
+                  "type": "number",
+                  "const": 1.0
+                },
+                "public_reason": {
+                  "type": "string",
+                  "const": "tor"
+                }
+              },
+              "required": [
+                "beta",
+                "half_life_hours",
+                "severity",
+                "public_reason"
+              ]
+            },
+            "vpn": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "beta": {
+                  "type": "number",
+                  "const": 0.18
+                },
+                "half_life_hours": {
+                  "type": "integer",
+                  "const": 168
+                },
+                "severity": {
+                  "type": "number",
+                  "const": 1.0
+                },
+                "public_reason": {
+                  "type": "string",
+                  "const": "vpn"
+                }
+              },
+              "required": [
+                "beta",
+                "half_life_hours",
+                "severity",
+                "public_reason"
+              ]
+            },
+            "proxy": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "beta": {
+                  "type": "number",
+                  "const": 0.28
+                },
+                "half_life_hours": {
+                  "type": "integer",
+                  "const": 72
+                },
+                "severity": {
+                  "type": "number",
+                  "const": 1.0
+                },
+                "public_reason": {
+                  "type": "string",
+                  "const": "proxy"
+                }
+              },
+              "required": [
+                "beta",
+                "half_life_hours",
+                "severity",
+                "public_reason"
+              ]
+            },
+            "cloudflare_proxyip": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "beta": {
+                  "type": "number",
+                  "const": 0.28
+                },
+                "half_life_hours": {
+                  "type": "integer",
+                  "const": 72
+                },
+                "severity": {
+                  "type": "number",
+                  "const": 1.0
+                },
+                "public_reason": {
+                  "type": "string",
+                  "const": "proxy"
+                },
+                "merge_into": {
+                  "type": "string",
+                  "const": "proxy"
+                }
+              },
+              "required": [
+                "beta",
+                "half_life_hours",
+                "severity",
+                "public_reason",
+                "merge_into"
+              ]
+            },
+            "datacenter": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "beta": {
+                  "type": "number",
+                  "const": 0.12
+                },
+                "half_life_hours": {
+                  "type": "integer",
+                  "const": 720
+                },
+                "severity": {
+                  "type": "number",
+                  "const": 1.0
+                },
+                "public_reason": {
+                  "type": "string",
+                  "const": "datacenter"
+                }
+              },
+              "required": [
+                "beta",
+                "half_life_hours",
+                "severity",
+                "public_reason"
+              ]
+            },
+            "hosting": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "beta": {
+                  "type": "number",
+                  "const": 0.1
+                },
+                "half_life_hours": {
+                  "type": "integer",
+                  "const": 720
+                },
+                "severity": {
+                  "type": "number",
+                  "const": 1.0
+                },
+                "public_reason": {
+                  "type": "string",
+                  "const": "hosting"
+                }
+              },
+              "required": [
+                "beta",
+                "half_life_hours",
+                "severity",
+                "public_reason"
+              ]
+            }
+          },
+          "required": [
+            "malware",
+            "botnet",
+            "c2",
+            "abuse",
+            "fraud",
+            "scanner",
+            "spam",
+            "tor",
+            "vpn",
+            "proxy",
+            "cloudflare_proxyip",
+            "datacenter",
+            "hosting"
+          ]
+        },
+        "classification_penalty_note": {
+          "type": "string",
+          "const": "Proxy, Tor, VPN and datacenter carry modest configurable quality adjustments; never equate them to abuse."
+        },
+        "indicator_specificity": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "exact": {
+              "type": "number",
+              "const": 1.0
+            },
+            "prefix": {
+              "type": "number",
+              "const": 0.65
+            },
+            "asn": {
+              "type": "number",
+              "const": 0.3
+            },
+            "proxy_subscription_literal_ip": {
+              "type": "number",
+              "const": 0.8
+            },
+            "unresolved_domain": {
+              "type": "number",
+              "const": 0.0
+            }
+          },
+          "required": [
+            "exact",
+            "prefix",
+            "asn",
+            "proxy_subscription_literal_ip",
+            "unresolved_domain"
+          ]
+        }
+      },
+      "required": [
+        "formula",
+        "risk_per_layer",
+        "aggregate_same_family",
+        "no_duplicate_credit_for_aggregators",
+        "reliability",
+        "severity_default",
+        "future_timestamp_tolerance_hours",
+        "negative_age_policy",
+        "signals",
+        "classification_penalty_note",
+        "indicator_specificity"
+      ]
+    },
+    "layers": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "weights": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "exact": {
+              "type": "number",
+              "const": 0.55
+            },
+            "explicit_prefix": {
+              "type": "number",
+              "const": 0.18
+            },
+            "asn": {
+              "type": "number",
+              "const": 0.15
+            },
+            "neighbors24": {
+              "type": "number",
+              "const": 0.12
+            }
+          },
+          "required": [
+            "exact",
+            "explicit_prefix",
+            "asn",
+            "neighbors24"
+          ]
+        },
+        "formula": {
+          "type": "string",
+          "const": "R=clamp(0,1,0.55*R_exact+0.18*R_prefix+0.15*C_asn*R_asn+0.12*C24*R24)"
+        },
+        "quality": {
+          "type": "string",
+          "const": "Q=round(100*(1-R)) if coverage_eligible else null"
+        },
+        "normalization": {
+          "type": "string",
+          "const": "do_not_renormalize_missing_layers_to_zero-risk"
+        },
+        "unknown_layers": {
+          "type": "null",
+          "const": null
+        },
+        "preserve_layer_presence_mask": {
+          "type": "boolean",
+          "const": true
+        },
+        "max_asn_contribution_to_total_risk": {
+          "type": "number",
+          "const": 0.15
+        },
+        "max_neighbor24_contribution_to_total_risk": {
+          "type": "number",
+          "const": 0.12
+        },
+        "required_layer_status": {
+          "type": "string",
+          "const": "assessed"
+        }
+      },
+      "required": [
+        "weights",
+        "formula",
+        "quality",
+        "normalization",
+        "unknown_layers",
+        "preserve_layer_presence_mask",
+        "max_asn_contribution_to_total_risk",
+        "max_neighbor24_contribution_to_total_risk",
+        "required_layer_status"
+      ]
+    },
+    "asn_wide": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "const": true
+        },
+        "direct_asn_indicators_priority": {
+          "type": "boolean",
+          "const": true
+        },
+        "calculate_from_unique_exact_ip_observations": {
+          "type": "boolean",
+          "const": true
+        },
+        "never_assume_unlisted_asn_addresses_clean": {
+          "type": "boolean",
+          "const": true
+        },
+        "no_simple_asn_malice_inference_from_one_host": {
+          "type": "boolean",
+          "const": true
+        },
+        "formula": {
+          "type": "string",
+          "const": "R_asn=max(R_explicit_asn, (1-exp(-u_asn/256))*C_asn_diversity)"
+        },
+        "confidence": {
+          "type": "string",
+          "const": "C_asn=min(1, independent_families/3)*min(1, distinct_positive_ips/64)"
+        },
+        "unique_risk_mass": {
+          "type": "string",
+          "const": "u_asn=sum_unique_current_exact_ips(R_exact_i)"
+        },
+        "diversity": {
+          "type": "string",
+          "const": "C_asn_diversity=min(1, independent_families/3)"
+        },
+        "moas_combination": {
+          "type": "string",
+          "const": "maximum_per_origin_weighted_contribution"
+        },
+        "public_context_band_millionths": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "low_max_exclusive": {
+              "type": "integer",
+              "const": 333334
+            },
+            "medium_max_exclusive": {
+              "type": "integer",
+              "const": 666667
+            }
+          },
+          "required": [
+            "low_max_exclusive",
+            "medium_max_exclusive"
+          ]
+        },
+        "correlation_key": {
+          "type": "array",
+          "const": [
+            "asn",
+            "evidence_family",
+            "ip"
+          ]
+        },
+        "require_current_prefix_to_asn_mapping": {
+          "type": "boolean",
+          "const": true
+        },
+        "handle_moas_as_multiple_origins": {
+          "type": "boolean",
+          "const": true
+        },
+        "never_infer_customer_asn_risk_from_provider_asn": {
+          "type": "boolean",
+          "const": true
+        },
+        "output": {
+          "type": "array",
+          "const": [
+            "asn_risk_band",
+            "asn_context_reason"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "direct_asn_indicators_priority",
+        "calculate_from_unique_exact_ip_observations",
+        "never_assume_unlisted_asn_addresses_clean",
+        "no_simple_asn_malice_inference_from_one_host",
+        "formula",
+        "confidence",
+        "unique_risk_mass",
+        "diversity",
+        "moas_combination",
+        "public_context_band_millionths",
+        "correlation_key",
+        "require_current_prefix_to_asn_mapping",
+        "handle_moas_as_multiple_origins",
+        "never_infer_customer_asn_risk_from_provider_asn",
+        "output"
+      ]
+    },
+    "ipv4_24": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "const": true
+        },
+        "label": {
+          "type": "string",
+          "const": "Class C /24"
+        },
+        "source_prefix_bits": {
+          "type": "integer",
+          "const": 24
+        },
+        "addresses_per_prefix": {
+          "type": "integer",
+          "const": 256
+        },
+        "exclude_queried_ip": {
+          "type": "boolean",
+          "const": true
+        },
+        "exact_observations_only": {
+          "type": "boolean",
+          "const": true
+        },
+        "independence": {
+          "type": "string",
+          "const": "per_unique_positive_address_and_evidence_family"
+        },
+        "denominator_semantics": {
+          "type": "string",
+          "const": "address_count_is_not_safe-coverage"
+        },
+        "density_formula": {
+          "type": "string",
+          "const": "D24=sum_{i != queried_ip}(min(1,R_exact_i))/255"
+        },
+        "risk_formula": {
+          "type": "string",
+          "const": "R24=1-exp(-16*D24)"
+        },
+        "support_formula": {
+          "type": "string",
+          "const": "C24=min(1,unique_positive_neighbor_ips/16)*min(1,independent_families/3)"
+        },
+        "output": {
+          "type": "array",
+          "const": [
+            "positive_observed_count",
+            "observed_density_lower_bound",
+            "risk_distribution",
+            "usage_type_distribution_observed",
+            "proxy_vpn_tor_counts",
+            "abused_count",
+            "dominant_asn",
+            "subdivision_known",
+            "ip_cell_reason_flags",
+            "aggregate_quality"
+          ]
+        },
+        "no_unobserved_host_imputation": {
+          "type": "boolean",
+          "const": true
+        },
+        "aggregate_quality": {
+          "type": "string",
+          "const": "null_unless_all_256_cells_quality_eligible_then_half_up_mean"
+        },
+        "classful_boundary_is_visual_label_only": {
+          "type": "boolean",
+          "const": true
+        },
+        "ipv6_equivalent": {
+          "type": "string",
+          "const": "separate_ipv6_prefix_profile_not_class_c"
+        }
+      },
+      "required": [
+        "enabled",
+        "label",
+        "source_prefix_bits",
+        "addresses_per_prefix",
+        "exclude_queried_ip",
+        "exact_observations_only",
+        "independence",
+        "denominator_semantics",
+        "density_formula",
+        "risk_formula",
+        "support_formula",
+        "output",
+        "no_unobserved_host_imputation",
+        "aggregate_quality",
+        "classful_boundary_is_visual_label_only",
+        "ipv6_equivalent"
+      ]
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "family_key": {
+          "type": "string",
+          "const": "evidence_family"
+        },
+        "min_independent_assessment_families": {
+          "type": "integer",
+          "const": 2
+        },
+        "numeric_quality_requires_all_layers": {
+          "type": "boolean",
+          "const": true
+        },
+        "qualifying_families": {
+          "type": "string",
+          "const": "intersection_of_complete_families_across_all_required_scopes"
+        },
+        "numeric_quality_address_family": {
+          "type": "string",
+          "const": "ipv4_only"
+        },
+        "positive_only_absence_is_unknown": {
+          "type": "boolean",
+          "const": true
+        },
+        "authoritative_positive_emits_reasons_even_if_score_null": {
+          "type": "boolean",
+          "const": true
+        },
+        "min_current_source_age_hours": {
+          "type": "integer",
+          "const": 0
+        },
+        "max_source_age_hours": {
+          "type": "integer",
+          "const": 720
+        },
+        "data_quality_flag": {
+          "type": "string",
+          "const": "unrated_when_insufficient"
+        },
+        "confidence_bands": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "low_min_families": {
+              "type": "integer",
+              "const": 2
+            },
+            "medium_min_families": {
+              "type": "integer",
+              "const": 3
+            },
+            "high_min_families": {
+              "type": "integer",
+              "const": 4
+            },
+            "unrated_when_incomplete": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": [
+            "low_min_families",
+            "medium_min_families",
+            "high_min_families",
+            "unrated_when_incomplete"
+          ]
+        },
+        "calibration": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "require_holdout_labels_for_probability": {
+              "type": "boolean",
+              "const": true
+            },
+            "monitor_fpr_per_usage_type": {
+              "type": "boolean",
+              "const": true
+            },
+            "monitor_residential_fpr": {
+              "type": "boolean",
+              "const": true
+            },
+            "monitor_asn_and_subnet_bias": {
+              "type": "boolean",
+              "const": true
+            },
+            "thresholds_are_hypotheses_not_measured": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": [
+            "require_holdout_labels_for_probability",
+            "monitor_fpr_per_usage_type",
+            "monitor_residential_fpr",
+            "monitor_asn_and_subnet_bias",
+            "thresholds_are_hypotheses_not_measured"
+          ]
+        },
+        "confidence_public": {
+          "type": "string",
+          "const": "confidence_band_only"
+        }
+      },
+      "required": [
+        "family_key",
+        "min_independent_assessment_families",
+        "numeric_quality_requires_all_layers",
+        "qualifying_families",
+        "numeric_quality_address_family",
+        "positive_only_absence_is_unknown",
+        "authoritative_positive_emits_reasons_even_if_score_null",
+        "min_current_source_age_hours",
+        "max_source_age_hours",
+        "data_quality_flag",
+        "confidence_bands",
+        "calibration",
+        "confidence_public"
+      ]
+    },
+    "geo_fusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "family_vote": {
+          "type": "string",
+          "const": "highest_reliability_current_lpm_then_unknown_on_equal_weight_conflict"
+        },
+        "winning_margin_denominator": {
+          "type": "string",
+          "const": "all_nonmissing_family_vote_weights_at_same_hierarchy_level"
+        },
+        "country_min_support_families": {
+          "type": "integer",
+          "const": 1
+        },
+        "city_min_support_families": {
+          "type": "integer",
+          "const": 2
+        },
+        "region_min_support_families": {
+          "type": "integer",
+          "const": 2
+        },
+        "winning_margin": {
+          "type": "number",
+          "const": 0.15
+        },
+        "coordinate_source": {
+          "type": "string",
+          "const": "winning_city_family_only"
+        },
+        "average_coordinates": {
+          "type": "boolean",
+          "const": false
+        },
+        "anycast_suppresses_city_and_map": {
+          "type": "boolean",
+          "const": true
+        },
+        "hierarchy": {
+          "type": "string",
+          "const": "physical_country_then_region_then_city"
+        },
+        "coordinate_winner": {
+          "type": "string",
+          "const": "reliability_desc_precision_desc_canonical_value_bytes_asc"
+        }
+      },
+      "required": [
+        "family_vote",
+        "winning_margin_denominator",
+        "country_min_support_families",
+        "city_min_support_families",
+        "region_min_support_families",
+        "winning_margin",
+        "coordinate_source",
+        "average_coordinates",
+        "anycast_suppresses_city_and_map",
+        "hierarchy",
+        "coordinate_winner"
+      ]
+    },
+    "rounding": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "internal": {
+          "type": "string",
+          "const": "binary64_canonical_order_no_intermediate_rounding"
+        },
+        "quality_integer": {
+          "type": "string",
+          "const": "half_up"
+        },
+        "serialization": {
+          "type": "string",
+          "const": "follow_binary_format_quantization"
+        }
+      },
+      "required": [
+        "internal",
+        "quality_integer",
+        "serialization"
+      ]
+    },
+    "usage_fusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "direct_evidence_only": {
+          "type": "boolean",
+          "const": true
+        },
+        "unresolved_conflict": {
+          "type": "string",
+          "const": "unknown"
+        },
+        "do_not_infer_from_risk_or_country": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "direct_evidence_only",
+        "unresolved_conflict",
+        "do_not_infer_from_risk_or_country"
+      ]
+    },
+    "usage_types": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enum": {
+          "type": "array",
+          "const": [
+            "residential",
+            "business",
+            "mobile",
+            "datacenter",
+            "hosting",
+            "education",
+            "government",
+            "unknown"
+          ]
+        },
+        "rule": {
+          "type": "string",
+          "const": "independently_classified_and_conflict_aware"
+        },
+        "type_not_equivalent_to_malicious": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "enum",
+        "rule",
+        "type_not_equivalent_to_malicious"
+      ]
+    },
+    "broadcast_native": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode_enum": {
+          "type": "array",
+          "const": [
+            "native",
+            "broadcast_or_routed",
+            "unknown"
+          ]
+        },
+        "no_inference_from_country_disagreement_alone": {
+          "type": "boolean",
+          "const": true
+        },
+        "anycast_separate": {
+          "type": "boolean",
+          "const": true
+        },
+        "ipv4_directed_broadcast_separate": {
+          "type": "boolean",
+          "const": true
+        },
+        "unknown_default": {
+          "type": "boolean",
+          "const": true
+        },
+        "do_not_score_mode_without_positive_evidence": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "mode_enum",
+        "no_inference_from_country_disagreement_alone",
+        "anycast_separate",
+        "ipv4_directed_broadcast_separate",
+        "unknown_default",
+        "do_not_score_mode_without_positive_evidence"
+      ]
+    },
+    "public_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reason_flags": {
+          "type": "array",
+          "const": [
+            "malware",
+            "botnet",
+            "command_control",
+            "abuse",
+            "fraud",
+            "scanning",
+            "spam",
+            "tor",
+            "vpn",
+            "proxy",
+            "datacenter",
+            "hosting",
+            "asn_context",
+            "subnet_context"
+          ]
+        },
+        "signal_mapping": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "c2": {
+              "type": "string",
+              "const": "command_control"
+            },
+            "scanner": {
+              "type": "string",
+              "const": "scanning"
+            },
+            "cloudflare_proxyip": {
+              "type": "string",
+              "const": "proxy"
+            }
+          },
+          "required": [
+            "c2",
+            "scanner",
+            "cloudflare_proxyip"
+          ]
+        },
+        "no_source_ids": {
+          "type": "boolean",
+          "const": true
+        },
+        "no_source_names": {
+          "type": "boolean",
+          "const": true
+        },
+        "no_source_counts": {
+          "type": "boolean",
+          "const": true
+        },
+        "no_protocol_or_port": {
+          "type": "boolean",
+          "const": true
+        },
+        "no_raw_evidence": {
+          "type": "boolean",
+          "const": true
+        },
+        "reason_can_be_true_even_when_score_unrated": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "reason_flags",
+        "signal_mapping",
+        "no_source_ids",
+        "no_source_names",
+        "no_source_counts",
+        "no_protocol_or_port",
+        "no_raw_evidence",
+        "reason_can_be_true_even_when_score_unrated"
+      ]
+    },
+    "regression": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "score_bounds": {
+          "type": "array",
+          "const": [
+            0,
+            100
+          ]
+        },
+        "monotonic_for_additional_independent_positive_evidence": {
+          "type": "boolean",
+          "const": true
+        },
+        "do_not_double_count_same_family": {
+          "type": "boolean",
+          "const": true
+        },
+        "neighbor_self_exclusion": {
+          "type": "boolean",
+          "const": true
+        },
+        "no_asn_wide_false_positive_propagation": {
+          "type": "boolean",
+          "const": true
+        },
+        "deterministic_sorting_and_rounding": {
+          "type": "boolean",
+          "const": true
+        },
+        "property_based_tests": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "score_bounds",
+        "monotonic_for_additional_independent_positive_evidence",
+        "do_not_double_count_same_family",
+        "neighbor_self_exclusion",
+        "no_asn_wide_false_positive_propagation",
+        "deterministic_sorting_and_rounding",
+        "property_based_tests"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "contract_revision",
+    "model_id",
+    "contract",
+    "contract_vectors",
+    "range",
+    "semantics",
+    "category_evidence",
+    "layers",
+    "asn_wide",
+    "ipv4_24",
+    "coverage",
+    "geo_fusion",
+    "rounding",
+    "usage_fusion",
+    "usage_types",
+    "broadcast_native",
+    "public_output",
+    "regression"
+  ]
+}

@@ -1,0 +1,19 @@
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://tile.openstreetmap.org; font-src 'self'; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests
+  Referrer-Policy: no-referrer
+  X-Content-Type-Options: nosniff
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+  Cross-Origin-Opener-Policy: same-origin
+  Cache-Control: public, max-age=0, must-revalidate
+
+/_atlas/current.json
+  Cache-Control: public, max-age=0, must-revalidate
+
+/_atlas/objects/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/_atlas/releases/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/_nuxt/*
+  Cache-Control: public, max-age=31536000, immutable

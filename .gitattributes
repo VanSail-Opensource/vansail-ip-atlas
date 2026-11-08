@@ -1,0 +1,3 @@
+* text=auto eol=lf
+# Preserve copied third-party notice bytes and their recorded content hashes.
+web/public/licenses/*.txt -text -whitespace

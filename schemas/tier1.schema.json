@@ -1,0 +1,410 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:vansail:contract:tier1:3:1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 3
+    },
+    "contract_revision": {
+      "type": "integer",
+      "const": 1
+    },
+    "contract": {
+      "type": "string",
+      "const": "docs/bgp-tier1.md"
+    },
+    "contract_vectors": {
+      "type": "string",
+      "const": "fixtures/bgp/contract-v1.json"
+    },
+    "policy": {
+      "type": "string",
+      "const": "source-derived-only"
+    },
+    "fixed_membership": {
+      "type": "boolean",
+      "const": false
+    },
+    "source_inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "relationship_dataset": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "const": "caida-asrel2"
+            },
+            "discovery": {
+              "type": "string",
+              "const": "https://data.caida.org/datasets/as-relationships/serial-2/"
+            },
+            "publication_proof": {
+              "type": "string",
+              "const": "embedded_or_snapshot_metadata"
+            }
+          },
+          "required": [
+            "name",
+            "discovery",
+            "publication_proof"
+          ]
+        },
+        "origin_distribution": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "const": "ipverse-as-blocks"
+            },
+            "publication_proof": {
+              "type": "string",
+              "const": "github_release"
+            }
+          },
+          "required": [
+            "name",
+            "publication_proof"
+          ]
+        },
+        "bgp_path_snapshots": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "minimum_independent_families": {
+              "type": "integer",
+              "const": 2
+            },
+            "preferred_families": {
+              "type": "array",
+              "const": [
+                "ripe-ris-mrt",
+                "routeviews-mrt"
+              ]
+            },
+            "publication_proof": {
+              "type": "string",
+              "const": "snapshot_metadata"
+            },
+            "require_current_sources_within_hours": {
+              "type": "integer",
+              "const": 720
+            }
+          },
+          "required": [
+            "minimum_independent_families",
+            "preferred_families",
+            "publication_proof",
+            "require_current_sources_within_hours"
+          ]
+        },
+        "rpki": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "required_for_rpki_status": {
+              "type": "boolean",
+              "const": true
+            },
+            "publication_proof": {
+              "type": "string",
+              "const": "vrp_metadata"
+            }
+          },
+          "required": [
+            "required_for_rpki_status",
+            "publication_proof"
+          ]
+        },
+        "collector_identity": {
+          "type": "string",
+          "const": "internal-only"
+        },
+        "no_hardcoded_snapshot_date": {
+          "type": "boolean",
+          "const": true
+        },
+        "unknown_or_missing_source": {
+          "type": "string",
+          "const": "unknown"
+        }
+      },
+      "required": [
+        "relationship_dataset",
+        "origin_distribution",
+        "bgp_path_snapshots",
+        "rpki",
+        "collector_identity",
+        "no_hardcoded_snapshot_date",
+        "unknown_or_missing_source"
+      ]
+    },
+    "classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "classes": {
+          "type": "array",
+          "const": [
+            "tier1_candidate",
+            "global_transit",
+            "regional_transit",
+            "access_network",
+            "unknown"
+          ]
+        },
+        "provider_free_required": {
+          "type": "boolean",
+          "const": true
+        },
+        "peer_clique_discovery": {
+          "type": "string",
+          "const": "strongly-connected-or-near-complete-peer-core"
+        },
+        "peer_clique_support_threshold": {
+          "type": "number",
+          "const": 0.8
+        },
+        "percentile_method": {
+          "type": "string",
+          "const": "nearest-rank"
+        },
+        "customer_cone_percentile_threshold": {
+          "type": "number",
+          "const": 0.98
+        },
+        "transit_degree_percentile_threshold": {
+          "type": "number",
+          "const": 0.98
+        },
+        "minimum_independent_observation_families": {
+          "type": "integer",
+          "const": 2
+        },
+        "unknown_relationship_not_peer": {
+          "type": "boolean",
+          "const": true
+        },
+        "false_tier1_if_no_upstreams": {
+          "type": "string",
+          "const": "forbidden"
+        },
+        "cross_snapshot_stability_check": {
+          "type": "boolean",
+          "const": true
+        },
+        "stability_snapshots": {
+          "type": "integer",
+          "const": 2
+        },
+        "stability_min_separation_hours": {
+          "type": "integer",
+          "const": 24
+        },
+        "stability_max_separation_hours": {
+          "type": "integer",
+          "const": 720
+        },
+        "first_snapshot_behavior": {
+          "type": "string",
+          "const": "unknown_pending_stability"
+        },
+        "peer_core_algorithm": {
+          "type": "string",
+          "const": "deterministic_minimum_degree_peeling"
+        },
+        "percentile_population": {
+          "type": "string",
+          "const": "all_current_relationship_endpoint_asns"
+        },
+        "degrade_stale_as_unknown": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "classes",
+        "provider_free_required",
+        "peer_clique_discovery",
+        "peer_clique_support_threshold",
+        "percentile_method",
+        "customer_cone_percentile_threshold",
+        "transit_degree_percentile_threshold",
+        "minimum_independent_observation_families",
+        "unknown_relationship_not_peer",
+        "false_tier1_if_no_upstreams",
+        "cross_snapshot_stability_check",
+        "stability_snapshots",
+        "stability_min_separation_hours",
+        "stability_max_separation_hours",
+        "first_snapshot_behavior",
+        "peer_core_algorithm",
+        "percentile_population",
+        "degrade_stale_as_unknown"
+      ]
+    },
+    "relationships": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "directed_from_origin_perspective": {
+          "type": "boolean",
+          "const": true
+        },
+        "classifications": {
+          "type": "array",
+          "const": [
+            "transit_upstream",
+            "peer",
+            "customer",
+            "sibling",
+            "unknown"
+          ]
+        },
+        "observed_as_adjacency_is_not_business_relationship": {
+          "type": "boolean",
+          "const": true
+        },
+        "infer_from_caida_model": {
+          "type": "boolean",
+          "const": true
+        },
+        "never_convert_unknown_to_peer": {
+          "type": "boolean",
+          "const": true
+        },
+        "conflict_behavior": {
+          "type": "string",
+          "const": "unknown"
+        },
+        "no_source_metadata_in_binary_output": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "directed_from_origin_perspective",
+        "classifications",
+        "observed_as_adjacency_is_not_business_relationship",
+        "infer_from_caida_model",
+        "never_convert_unknown_to_peer",
+        "conflict_behavior",
+        "no_source_metadata_in_binary_output"
+      ]
+    },
+    "paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_paths_per_origin": {
+          "type": "integer",
+          "const": 12
+        },
+        "ranking": {
+          "type": "array",
+          "const": [
+            "relationship_coverage_desc",
+            "path_length_asc",
+            "visibility_desc",
+            "canonical_path_bytes_asc"
+          ]
+        },
+        "preserve_observed_vs_inferred": {
+          "type": "boolean",
+          "const": true
+        },
+        "observed_only_by_default": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "max_paths_per_origin",
+        "ranking",
+        "preserve_observed_vs_inferred",
+        "observed_only_by_default"
+      ]
+    },
+    "graph": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "budget_visible_nodes": {
+          "type": "integer",
+          "const": 24
+        },
+        "protected_hops": {
+          "type": "integer",
+          "const": 2
+        },
+        "max_backbone_exits_per_second_hop": {
+          "type": "integer",
+          "const": 3
+        },
+        "collapse_tier1_to_tier1_for_display_only": {
+          "type": "boolean",
+          "const": true
+        },
+        "preserve_observed_path_structure": {
+          "type": "boolean",
+          "const": true
+        },
+        "no_unrelated_gap_merging": {
+          "type": "boolean",
+          "const": true
+        },
+        "overflow": {
+          "type": "string",
+          "const": "ranked_whole_routes_then_disclosed_contiguous_projection"
+        },
+        "selected_routes_protected_before_optional_nodes": {
+          "type": "boolean",
+          "const": true
+        },
+        "reference_implementation_paths": {
+          "type": "array",
+          "const": [
+            "VanSail-Opensource/VanSail-Carpool:web/src/components/ip-lookup/IPBGPTopology.vue",
+            "VanSail-Opensource/VanSail-Carpool:web/src/components/ip-lookup/bgpGraph.ts",
+            "VanSail-Opensource/VanSail-Carpool:web/src/components/ip-lookup/bgpLayout.ts"
+          ]
+        },
+        "web_rendered_source_credit": {
+          "type": "boolean",
+          "const": false
+        }
+      },
+      "required": [
+        "budget_visible_nodes",
+        "protected_hops",
+        "max_backbone_exits_per_second_hop",
+        "collapse_tier1_to_tier1_for_display_only",
+        "preserve_observed_path_structure",
+        "no_unrelated_gap_merging",
+        "overflow",
+        "selected_routes_protected_before_optional_nodes",
+        "reference_implementation_paths",
+        "web_rendered_source_credit"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "contract_revision",
+    "contract",
+    "contract_vectors",
+    "policy",
+    "fixed_membership",
+    "source_inputs",
+    "classification",
+    "relationships",
+    "paths",
+    "graph"
+  ]
+}

@@ -1,0 +1,1287 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:vansail:contract:web:3:1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 3
+    },
+    "app": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "const": "VanSail IP Atlas"
+        },
+        "identifier": {
+          "type": "string",
+          "const": "vansail-ip-atlas"
+        },
+        "framework": {
+          "type": "string",
+          "const": "Nuxt 4"
+        },
+        "rendering": {
+          "type": "string",
+          "const": "static-generate"
+        },
+        "node_runtime": {
+          "type": "string",
+          "const": "none"
+        },
+        "api_runtime": {
+          "type": "string",
+          "const": "none"
+        },
+        "functions": {
+          "type": "boolean",
+          "const": false
+        },
+        "package_manager": {
+          "type": "string",
+          "const": "pnpm"
+        },
+        "command": {
+          "type": "string",
+          "const": "pnpm exec nuxt generate"
+        },
+        "output": {
+          "type": "string",
+          "const": "web/.output/public"
+        },
+        "data_origin": {
+          "type": "string",
+          "const": "same-origin"
+        },
+        "chromium_target": {
+          "type": "string",
+          "const": "current-stable-only"
+        },
+        "compatibility_fallbacks": {
+          "type": "boolean",
+          "const": false
+        },
+        "database_shards_bundled_into_pages": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "name",
+        "identifier",
+        "framework",
+        "rendering",
+        "node_runtime",
+        "api_runtime",
+        "functions",
+        "package_manager",
+        "command",
+        "output",
+        "data_origin",
+        "chromium_target",
+        "compatibility_fallbacks",
+        "database_shards_bundled_into_pages"
+      ]
+    },
+    "navigation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "root_redirect": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "from": {
+              "type": "string",
+              "const": "/"
+            },
+            "to": {
+              "type": "string",
+              "const": "/ip"
+            },
+            "code": {
+              "type": "integer",
+              "const": 302
+            },
+            "mechanism": {
+              "type": "string",
+              "const": "cloudflare-pages-_redirects"
+            }
+          },
+          "required": [
+            "from",
+            "to",
+            "code",
+            "mechanism"
+          ]
+        },
+        "landing": {
+          "type": "string",
+          "const": "/ip"
+        },
+        "routes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "/ip": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "purpose": {
+                  "type": "string",
+                  "const": "centered-ip-asn-hero"
+                },
+                "owner_of": {
+                  "type": "array",
+                  "const": [
+                    "search"
+                  ]
+                }
+              },
+              "required": [
+                "purpose",
+                "owner_of"
+              ]
+            },
+            "/ip/overview": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "owner_of": {
+                  "type": "array",
+                  "const": [
+                    "country",
+                    "region",
+                    "city",
+                    "coordinates",
+                    "usage_type",
+                    "native_broadcast",
+                    "anycast",
+                    "isp"
+                  ]
+                }
+              },
+              "required": [
+                "owner_of"
+              ]
+            },
+            "/ip/quality": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "owner_of": {
+                  "type": "array",
+                  "const": [
+                    "quality_state",
+                    "quality_score",
+                    "score_reasons",
+                    "classification_reasons",
+                    "layer_contributions"
+                  ]
+                }
+              },
+              "required": [
+                "owner_of"
+              ]
+            },
+            "/ip/class-c": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "owner_of": {
+                  "type": "array",
+                  "const": [
+                    "ipv4_24_heatmap",
+                    "neighborhood_context",
+                    "256_ip_cells"
+                  ]
+                }
+              },
+              "required": [
+                "owner_of"
+              ]
+            },
+            "/ip/bgp": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "owner_of": {
+                  "type": "array",
+                  "const": [
+                    "as_path_graph",
+                    "transit_peer_customer",
+                    "tier1_candidates",
+                    "rpki"
+                  ]
+                }
+              },
+              "required": [
+                "owner_of"
+              ]
+            },
+            "/ip/asn": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "owner_of": {
+                  "type": "array",
+                  "const": [
+                    "asn_summary",
+                    "asn_wide_risk",
+                    "customer_cone",
+                    "prefix_summary"
+                  ]
+                }
+              },
+              "required": [
+                "owner_of"
+              ]
+            }
+          },
+          "required": [
+            "/ip",
+            "/ip/overview",
+            "/ip/quality",
+            "/ip/class-c",
+            "/ip/bgp",
+            "/ip/asn"
+          ]
+        },
+        "reserved_paths": {
+          "type": "array",
+          "const": [
+            "/latency",
+            "/dns-leak",
+            "/webrtc",
+            "/cloudflare",
+            "/split"
+          ]
+        },
+        "query": {
+          "type": "string",
+          "const": "?q=<URL-encoded IP or ASN>"
+        },
+        "ip_submit_target": {
+          "type": "string",
+          "const": "/ip/overview?q=<canonical-IP>"
+        },
+        "asn_submit_target": {
+          "type": "string",
+          "const": "/ip/asn?q=AS<number>"
+        },
+        "asn_query_valid_routes": {
+          "type": "array",
+          "const": [
+            "/ip/asn",
+            "/ip/bgp"
+          ]
+        },
+        "ip_only_routes": {
+          "type": "array",
+          "const": [
+            "/ip/overview",
+            "/ip/quality",
+            "/ip/class-c"
+          ]
+        },
+        "ip_query_asn_page": {
+          "type": "string",
+          "const": "show-all-origins"
+        },
+        "moas_bgp": {
+          "type": "string",
+          "const": "deterministic-origin-selector"
+        },
+        "ipv6_class_c": {
+          "type": "string",
+          "const": "not-applicable"
+        },
+        "missing_q": {
+          "type": "string",
+          "const": "redirect-/ip"
+        },
+        "invalid_q": {
+          "type": "string",
+          "const": "local-error-no-network"
+        },
+        "preserve_q_on_navigation": {
+          "type": "boolean",
+          "const": true
+        },
+        "no_duplicate_displays": {
+          "type": "boolean",
+          "const": true
+        },
+        "single_fact_owner": {
+          "type": "boolean",
+          "const": true
+        },
+        "no_source_or_credits_panel": {
+          "type": "boolean",
+          "const": true
+        },
+        "no_source_names_or_inspired_by_labels": {
+          "type": "boolean",
+          "const": true
+        },
+        "minimum_text": {
+          "type": "boolean",
+          "const": true
+        },
+        "icon_first": {
+          "type": "boolean",
+          "const": true
+        },
+        "mobile_first": {
+          "type": "boolean",
+          "const": true
+        },
+        "accessibility_reduced_motion": {
+          "type": "boolean",
+          "const": true
+        },
+        "asn_input_forms": {
+          "type": "array",
+          "const": [
+            "AS13335",
+            "13335"
+          ]
+        }
+      },
+      "required": [
+        "root_redirect",
+        "landing",
+        "routes",
+        "reserved_paths",
+        "query",
+        "ip_submit_target",
+        "asn_submit_target",
+        "asn_query_valid_routes",
+        "ip_only_routes",
+        "ip_query_asn_page",
+        "moas_bgp",
+        "ipv6_class_c",
+        "missing_q",
+        "invalid_q",
+        "preserve_q_on_navigation",
+        "no_duplicate_displays",
+        "single_fact_owner",
+        "no_source_or_credits_panel",
+        "no_source_names_or_inspired_by_labels",
+        "minimum_text",
+        "icon_first",
+        "mobile_first",
+        "accessibility_reduced_motion",
+        "asn_input_forms"
+      ]
+    },
+    "design": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "component_system": {
+          "type": "array",
+          "const": [
+            "nuxt-ui",
+            "shadcn-vue"
+          ]
+        },
+        "component_selection": {
+          "type": "string",
+          "const": "nuxt-ui-first-no-duplicates"
+        },
+        "theme": {
+          "type": "array",
+          "const": [
+            "light",
+            "dark",
+            "system"
+          ]
+        },
+        "aesthetic": {
+          "type": "string",
+          "const": "liquid-glass-edge-lighting"
+        },
+        "edge_lighting": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "const": true
+            },
+            "method": {
+              "type": "string",
+              "const": "conic-gradient-masked-border"
+            },
+            "thin_px": {
+              "type": "integer",
+              "const": 1
+            },
+            "focused_glow": {
+              "type": "string",
+              "const": "subtle"
+            },
+            "static_glow_when_idle": {
+              "type": "boolean",
+              "const": true
+            },
+            "only_animate_on_interaction": {
+              "type": "boolean",
+              "const": true
+            },
+            "min_contrast": {
+              "type": "string",
+              "const": "WCAG-AA"
+            }
+          },
+          "required": [
+            "enabled",
+            "method",
+            "thin_px",
+            "focused_glow",
+            "static_glow_when_idle",
+            "only_animate_on_interaction",
+            "min_contrast"
+          ]
+        },
+        "blur_px_max": {
+          "type": "integer",
+          "const": 24
+        },
+        "translucent_surfaces": {
+          "type": "boolean",
+          "const": true
+        },
+        "avoid_glass_on_dense_graph_labels": {
+          "type": "boolean",
+          "const": true
+        },
+        "layout": {
+          "type": "array",
+          "const": [
+            "large-negative-space",
+            "low-density",
+            "progressive-disclosure",
+            "stacked-panels"
+          ]
+        },
+        "transitions": {
+          "type": "array",
+          "const": [
+            "subtle-spring",
+            "opacity",
+            "translate",
+            "graph-path-highlight"
+          ]
+        },
+        "theme_skins_separate_css_tokens": {
+          "type": "boolean",
+          "const": true
+        },
+        "do_not_show_source_attribution_in_ui": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "component_system",
+        "component_selection",
+        "theme",
+        "aesthetic",
+        "edge_lighting",
+        "blur_px_max",
+        "translucent_surfaces",
+        "avoid_glass_on_dense_graph_labels",
+        "layout",
+        "transitions",
+        "theme_skins_separate_css_tokens",
+        "do_not_show_source_attribution_in_ui"
+      ]
+    },
+    "motion": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "framework": {
+          "type": "string",
+          "const": "motion-v"
+        },
+        "nuxt_module": {
+          "type": "string",
+          "const": "motion-v/nuxt"
+        },
+        "interaction_driven": {
+          "type": "boolean",
+          "const": true
+        },
+        "animate_hero": {
+          "type": "boolean",
+          "const": true
+        },
+        "animate_search_result_reveal": {
+          "type": "boolean",
+          "const": true
+        },
+        "animate_score_explanation": {
+          "type": "boolean",
+          "const": true
+        },
+        "avoid_continuous_idle_effects": {
+          "type": "boolean",
+          "const": true
+        },
+        "prefers_reduced_motion": {
+          "type": "string",
+          "const": "honor"
+        }
+      },
+      "required": [
+        "framework",
+        "nuxt_module",
+        "interaction_driven",
+        "animate_hero",
+        "animate_search_result_reveal",
+        "animate_score_explanation",
+        "avoid_continuous_idle_effects",
+        "prefers_reduced_motion"
+      ]
+    },
+    "3d": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "framework": {
+          "type": "string",
+          "const": "TresJS"
+        },
+        "enabled": {
+          "type": "boolean",
+          "const": false
+        },
+        "scope": {
+          "type": "string",
+          "const": "optional-hero-scene-only"
+        },
+        "reason": {
+          "type": "string",
+          "const": "deferred-beyond-v1-for-initial-js-and-accessibility-budget"
+        },
+        "avoid_3d_graph_default": {
+          "type": "boolean",
+          "const": true
+        },
+        "lazy_load": {
+          "type": "boolean",
+          "const": true
+        },
+        "no_duplicate_graph": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "framework",
+        "enabled",
+        "scope",
+        "reason",
+        "avoid_3d_graph_default",
+        "lazy_load",
+        "no_duplicate_graph"
+      ]
+    },
+    "geo": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "coordinates_only": {
+          "type": "array",
+          "const": [
+            "latitude",
+            "longitude"
+          ]
+        },
+        "show_map": {
+          "type": "boolean",
+          "const": true
+        },
+        "map_service": {
+          "type": "string",
+          "const": "OpenStreetMap"
+        },
+        "tile_origin": {
+          "type": "string",
+          "const": "https://tile.openstreetmap.org"
+        },
+        "renderer": {
+          "type": "string",
+          "const": "leaflet-with-osm-tiles"
+        },
+        "lazy_mount": {
+          "type": "boolean",
+          "const": true
+        },
+        "map_is_sole_geographic_visual": {
+          "type": "boolean",
+          "const": true
+        },
+        "attribution": {
+          "type": "string",
+          "const": "required-for-OSM-map-tiles"
+        },
+        "marker_precision": {
+          "type": "string",
+          "const": "city-centroid-or-better-only"
+        },
+        "disclose_approximate_coordinate": {
+          "type": "boolean",
+          "const": true
+        },
+        "anycast_suppresses_map": {
+          "type": "boolean",
+          "const": true
+        },
+        "no_postal_or_timezone_display": {
+          "type": "boolean",
+          "const": true
+        },
+        "external_network_exception": {
+          "type": "string",
+          "const": "osm_tile_requests_only"
+        },
+        "referrer_policy": {
+          "type": "string",
+          "const": "no-referrer"
+        },
+        "no_ip_lookup_api": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "coordinates_only",
+        "show_map",
+        "map_service",
+        "tile_origin",
+        "renderer",
+        "lazy_mount",
+        "map_is_sole_geographic_visual",
+        "attribution",
+        "marker_precision",
+        "disclose_approximate_coordinate",
+        "anycast_suppresses_map",
+        "no_postal_or_timezone_display",
+        "external_network_exception",
+        "referrer_policy",
+        "no_ip_lookup_api"
+      ]
+    },
+    "bgp": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "renderer": {
+          "type": "string",
+          "const": "native-svg"
+        },
+        "max_visible_nodes": {
+          "type": "integer",
+          "const": 24
+        },
+        "protected_hops": {
+          "type": "integer",
+          "const": 2
+        },
+        "max_exits_per_second_hop": {
+          "type": "integer",
+          "const": 3
+        },
+        "preserve_real_relationship_directions": {
+          "type": "boolean",
+          "const": true
+        },
+        "relation_classes": {
+          "type": "array",
+          "const": [
+            "transit_upstream",
+            "peer",
+            "customer",
+            "sibling",
+            "unknown"
+          ]
+        },
+        "derive_tier1_from_sources": {
+          "type": "boolean",
+          "const": true
+        },
+        "interaction": {
+          "type": "array",
+          "const": [
+            "wheel_zoom",
+            "pinch_zoom",
+            "keyboard_pan",
+            "fit",
+            "route_focus",
+            "edge_inspect",
+            "graph_export"
+          ]
+        },
+        "graph_source_of_truth": {
+          "type": "string",
+          "const": "unique-BGP-graph-view"
+        },
+        "no_collector_labels": {
+          "type": "boolean",
+          "const": true
+        },
+        "no_source_credits": {
+          "type": "boolean",
+          "const": true
+        },
+        "no_invented_edges": {
+          "type": "boolean",
+          "const": true
+        },
+        "show_observed_vs_inferred": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "renderer",
+        "max_visible_nodes",
+        "protected_hops",
+        "max_exits_per_second_hop",
+        "preserve_real_relationship_directions",
+        "relation_classes",
+        "derive_tier1_from_sources",
+        "interaction",
+        "graph_source_of_truth",
+        "no_collector_labels",
+        "no_source_credits",
+        "no_invented_edges",
+        "show_observed_vs_inferred"
+      ]
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scoring_config": {
+          "type": "string",
+          "const": "configs/scoring.yaml"
+        },
+        "reason_chips": {
+          "type": "boolean",
+          "const": true
+        },
+        "layer_contributions": {
+          "type": "boolean",
+          "const": true
+        },
+        "explicit_unrated_state": {
+          "type": "boolean",
+          "const": true
+        },
+        "risk_categories": {
+          "type": "array",
+          "const": [
+            "tor",
+            "vpn",
+            "datacenter",
+            "proxy",
+            "abuse",
+            "malware",
+            "botnet",
+            "c2",
+            "scanning",
+            "spam",
+            "fraud"
+          ]
+        },
+        "asn_context": {
+          "type": "boolean",
+          "const": true
+        },
+        "ipv4_24_profile_link": {
+          "type": "boolean",
+          "const": true
+        },
+        "no_source_names_or_protocols": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "scoring_config",
+        "reason_chips",
+        "layer_contributions",
+        "explicit_unrated_state",
+        "risk_categories",
+        "asn_context",
+        "ipv4_24_profile_link",
+        "no_source_names_or_protocols"
+      ]
+    },
+    "class_c": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ipv4_prefix": {
+          "type": "integer",
+          "const": 24
+        },
+        "cells": {
+          "type": "integer",
+          "const": 256
+        },
+        "display": {
+          "type": "string",
+          "const": "interactive-grid"
+        },
+        "color_scheme": {
+          "type": "string",
+          "const": "category-and-risk-band"
+        },
+        "accessible_detail": {
+          "type": "string",
+          "const": "keyboard-cell-focus"
+        },
+        "inspect_cell": {
+          "type": "string",
+          "const": "show-ip-and-reasons"
+        },
+        "source_output": {
+          "type": "string",
+          "const": "none"
+        },
+        "no_missing-as-safe": {
+          "type": "boolean",
+          "const": true
+        },
+        "ipv6_state": {
+          "type": "string",
+          "const": "not-applicable"
+        }
+      },
+      "required": [
+        "ipv4_prefix",
+        "cells",
+        "display",
+        "color_scheme",
+        "accessible_detail",
+        "inspect_cell",
+        "source_output",
+        "no_missing-as-safe",
+        "ipv6_state"
+      ]
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "only_external_origin": {
+          "type": "string",
+          "const": "https://tile.openstreetmap.org"
+        },
+        "analytics": {
+          "type": "boolean",
+          "const": false
+        },
+        "cookies": {
+          "type": "boolean",
+          "const": false
+        },
+        "remote_fonts": {
+          "type": "boolean",
+          "const": false
+        },
+        "remote_icons": {
+          "type": "boolean",
+          "const": false
+        },
+        "referrer_policy": {
+          "type": "string",
+          "const": "no-referrer"
+        },
+        "csp": {
+          "type": "string",
+          "const": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://tile.openstreetmap.org; font-src 'self'; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests"
+        },
+        "x_content_type_options": {
+          "type": "string",
+          "const": "nosniff"
+        },
+        "permissions_policy": {
+          "type": "string",
+          "const": "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+        },
+        "fail_closed_on_corrupt_manifest": {
+          "type": "boolean",
+          "const": true
+        },
+        "no_mixed_release_fallback": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "only_external_origin",
+        "analytics",
+        "cookies",
+        "remote_fonts",
+        "remote_icons",
+        "referrer_policy",
+        "csp",
+        "x_content_type_options",
+        "permissions_policy",
+        "fail_closed_on_corrupt_manifest",
+        "no_mixed_release_fallback"
+      ]
+    },
+    "performance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "initial_js_gzip_budget_kib": {
+          "type": "integer",
+          "const": 200
+        },
+        "typical_ip_total_payload_kib": {
+          "type": "integer",
+          "const": 400
+        },
+        "route_graph_visible_node_limit": {
+          "type": "integer",
+          "const": 24
+        },
+        "interaction_p95_ms_budget": {
+          "type": "integer",
+          "const": 100
+        },
+        "lcp_mobile_seconds": {
+          "type": "number",
+          "const": 2.5
+        },
+        "inp_ms": {
+          "type": "integer",
+          "const": 200
+        },
+        "cls": {
+          "type": "number",
+          "const": 0.1
+        },
+        "worker_parser": {
+          "type": "boolean",
+          "const": true
+        },
+        "browser_cache": {
+          "type": "string",
+          "const": "indexeddb"
+        },
+        "immutable_shards": {
+          "type": "boolean",
+          "const": true
+        },
+        "no_polyfills": {
+          "type": "boolean",
+          "const": true
+        },
+        "lazy_map": {
+          "type": "boolean",
+          "const": true
+        },
+        "lazy_bgp": {
+          "type": "boolean",
+          "const": true
+        },
+        "hosted_chromium_regression": {
+          "type": "boolean",
+          "const": true
+        },
+        "lighthouse_ci": {
+          "type": "boolean",
+          "const": true
+        },
+        "no_sources_in_js_or_db_payload": {
+          "type": "boolean",
+          "const": true
+        },
+        "worker_memory_mib": {
+          "type": "integer",
+          "const": 384
+        },
+        "max_inflight_objects": {
+          "type": "integer",
+          "const": 1
+        },
+        "decoded_cache_mib": {
+          "type": "integer",
+          "const": 32
+        },
+        "indexeddb_cache_mib": {
+          "type": "integer",
+          "const": 128
+        },
+        "zstd_decoder": {
+          "type": "string",
+          "const": "fzstd-0.1.1-bundled-bounded"
+        },
+        "max_decoded_object_mib": {
+          "type": "integer",
+          "const": 32
+        },
+        "max_live_decoded_mib": {
+          "type": "integer",
+          "const": 96
+        },
+        "max_answer_mib": {
+          "type": "integer",
+          "const": 8
+        },
+        "max_origins_per_answer": {
+          "type": "integer",
+          "const": 4096
+        },
+        "max_retained_path_asns_per_answer": {
+          "type": "integer",
+          "const": 49152
+        }
+      },
+      "required": [
+        "initial_js_gzip_budget_kib",
+        "typical_ip_total_payload_kib",
+        "route_graph_visible_node_limit",
+        "interaction_p95_ms_budget",
+        "lcp_mobile_seconds",
+        "inp_ms",
+        "cls",
+        "worker_parser",
+        "browser_cache",
+        "immutable_shards",
+        "no_polyfills",
+        "lazy_map",
+        "lazy_bgp",
+        "hosted_chromium_regression",
+        "lighthouse_ci",
+        "no_sources_in_js_or_db_payload",
+        "worker_memory_mib",
+        "max_inflight_objects",
+        "decoded_cache_mib",
+        "indexeddb_cache_mib",
+        "zstd_decoder",
+        "max_decoded_object_mib",
+        "max_live_decoded_mib",
+        "max_answer_mib",
+        "max_origins_per_answer",
+        "max_retained_path_asns_per_answer"
+      ]
+    },
+    "release_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "aggregate_expiry_field": {
+          "type": "string",
+          "const": "valid_until"
+        },
+        "time_encoding": {
+          "type": "string",
+          "const": "unix-seconds-utc-integer"
+        },
+        "expiry_comparison": {
+          "type": "string",
+          "const": "now-greater-than-or-equal"
+        },
+        "pointer_revalidation_seconds": {
+          "type": "integer",
+          "const": 60
+        },
+        "revalidate_on_resume": {
+          "type": "boolean",
+          "const": true
+        },
+        "fail_closed_when_pointer_revalidation_fails": {
+          "type": "boolean",
+          "const": true
+        },
+        "rollback_max_age_hours": {
+          "type": "integer",
+          "const": 48
+        },
+        "private_snapshot_retention_hours": {
+          "type": "integer",
+          "const": 168
+        },
+        "raw_subscription_quarantine_retention_hours": {
+          "type": "integer",
+          "const": 0
+        },
+        "retained_generations_are_maximum": {
+          "type": "boolean",
+          "const": true
+        },
+        "require_previous_release_currently_eligible": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "aggregate_expiry_field",
+        "time_encoding",
+        "expiry_comparison",
+        "pointer_revalidation_seconds",
+        "revalidate_on_resume",
+        "fail_closed_when_pointer_revalidation_fails",
+        "rollback_max_age_hours",
+        "private_snapshot_retention_hours",
+        "raw_subscription_quarantine_retention_hours",
+        "retained_generations_are_maximum",
+        "require_previous_release_currently_eligible"
+      ]
+    },
+    "deploy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "platform": {
+          "type": "string",
+          "const": "cloudflare-pages"
+        },
+        "mode": {
+          "type": "string",
+          "const": "static-direct-upload"
+        },
+        "directory": {
+          "type": "string",
+          "const": "web/.output/public"
+        },
+        "copy_compiled_database_into": {
+          "type": "string",
+          "const": "web/.output/public/_atlas/"
+        },
+        "object_root": {
+          "type": "string",
+          "const": "/_atlas/objects/"
+        },
+        "release_root": {
+          "type": "string",
+          "const": "/_atlas/releases/"
+        },
+        "current_pointer": {
+          "type": "string",
+          "const": "/_atlas/current.json"
+        },
+        "no_remote_database_host": {
+          "type": "boolean",
+          "const": true
+        },
+        "no_server_workers": {
+          "type": "boolean",
+          "const": true
+        },
+        "reserved_routes_are_not_implemented": {
+          "type": "boolean",
+          "const": true
+        },
+        "redirects": {
+          "type": "array",
+          "const": [
+            "/ /ip 302"
+          ]
+        },
+        "max_files_target": {
+          "type": "integer",
+          "const": 18500
+        },
+        "max_asset_mib_target": {
+          "type": "integer",
+          "const": 24
+        },
+        "release_generations": {
+          "type": "integer",
+          "const": 2
+        },
+        "current_and_previous_share_objects": {
+          "type": "boolean",
+          "const": true
+        },
+        "release_pinning": {
+          "type": "boolean",
+          "const": true
+        },
+        "require_manifest_hash_validation": {
+          "type": "boolean",
+          "const": true
+        },
+        "require_all_shards_in_same_deployment": {
+          "type": "boolean",
+          "const": true
+        },
+        "require_preview_url_e2e_before_production": {
+          "type": "boolean",
+          "const": true
+        },
+        "immutable_cache_headers": {
+          "type": "boolean",
+          "const": true
+        },
+        "deployment_gates": {
+          "type": "array",
+          "const": [
+            "hosted-regression",
+            "hosted-performance",
+            "database-quality",
+            "binary-integrity",
+            "content-freshness",
+            "pages-limits",
+            "source-rights",
+            "public-output-scan"
+          ]
+        }
+      },
+      "required": [
+        "platform",
+        "mode",
+        "directory",
+        "copy_compiled_database_into",
+        "object_root",
+        "release_root",
+        "current_pointer",
+        "no_remote_database_host",
+        "no_server_workers",
+        "reserved_routes_are_not_implemented",
+        "redirects",
+        "max_files_target",
+        "max_asset_mib_target",
+        "release_generations",
+        "current_and_previous_share_objects",
+        "release_pinning",
+        "require_manifest_hash_validation",
+        "require_all_shards_in_same_deployment",
+        "require_preview_url_e2e_before_production",
+        "immutable_cache_headers",
+        "deployment_gates"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "app",
+    "navigation",
+    "design",
+    "motion",
+    "3d",
+    "geo",
+    "bgp",
+    "quality",
+    "class_c",
+    "security",
+    "performance",
+    "release_policy",
+    "deploy"
+  ]
+}

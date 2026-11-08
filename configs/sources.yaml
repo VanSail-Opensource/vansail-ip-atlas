@@ -1,0 +1,4795 @@
+schema_version: 3
+description: 'VanSail IP Atlas: download-only catalog. Proxy subscriptions yield public literal IP evidence only;
+  stale or uncertain sources are not published. No source names or provenance in browser artifacts.'
+build:
+  profile: github-actions-private-standard
+  incremental: true
+  reproducible: true
+  timezone: UTC
+  runner:
+    cpu_budget: 2
+    physical_memory_mib: 8192
+    ephemeral_disk_mib: 14336
+    go_memory_limit_mib: 5120
+    rss_abort_mib: 6656
+    scratch_abort_mib: 10240
+    soft_deadline_minutes: 35
+  download:
+    max_workers: 3
+    per_host_workers: 1
+    timeout_seconds: 45
+    retry_attempts: 2
+    redirect_limit: 3
+    reject_private_redirects: true
+    max_total_compressed_mib: 2560
+    max_one_compressed_mib: 1024
+    max_one_uncompressed_mib: 3072
+    max_line_bytes: 1048576
+    max_archive_entries: 10000
+    user_agent: IPDB-BulkBuilder/0.1 (+CONTACT_EMAIL_REQUIRED)
+  normalize:
+    sort_buffer_mib: 96
+    max_parallel_partitions: 2
+    record_schema_version: 3
+    preserve_source_evidence: true
+    dedupe:
+      byte_hash: sha256
+      canonical_record_hash: sha256
+      family_vote: max
+      unknown_dependence_cap: true
+      subscription_ip_identity: netip.Addr with same independently observed family
+      do_not_count_aggregator_votes_as_independent: true
+    output_fields_allowlist:
+    - physical_country
+    - registration_country
+    - region
+    - city
+    - latitude
+    - longitude
+    - coordinate_precision
+    - asn
+    - as_name
+    - organization
+    - isp
+    - origins
+    - usage_type
+    - assignment_mode
+    - anycast
+    - ipv4_directed_broadcast
+    - quality
+    - quality_status
+    - confidence_band
+    - reason_flags
+    - exact_contribution
+    - prefix_contribution
+    - asn_contribution
+    - neighbor_contribution
+    - asn_risk
+    - asn_risk_band
+    - ipv4_24_profile
+    - rpki_status
+    - bgp_origins
+    - bgp_paths
+    - as_relationships
+    - network_class
+    - tier1_candidate
+    - stability
+    remove_fields:
+    - timezone
+    - postal
+    - continent
+    - collector
+    - latency
+    - protocol
+    - port
+    - credentials
+    - hostname
+    - domain
+    - source_id
+    - source_name
+    - source_url
+    - raw_path
+    - source_count
+    - per_source_evidence
+    public_provenance: false
+    source_provenance_internal_only: true
+  storage:
+    format: VIA3
+    schema_version: 3
+    checksum: sha256
+    byte_order: little
+    compression: zstd
+    zstd_level: 3
+    target_chunk_kib: 128
+    max_hot_chunk_kib: 1024
+    ipv4_partition_bits: 16
+    ipv6_sparse_index_bits: 16
+    use_inherited_prefix_overlay: true
+    content_addressed: true
+    publish_backend: cloudflare-pages-direct-upload
+    publish_only_license_allow: true
+    keep_previous_releases: 2
+    public_asset_prefix: /_atlas/objects/
+    max_single_asset_mib: 24
+    max_total_files: 18500
+    manifest_integrity: sha256
+    repack_by_binary_bytes_not_prefix_count: true
+    browser_release_pinning: true
+    public_content_sections:
+    - ip
+    - geo
+    - network
+    - usage
+    - quality
+    - reason_flags
+    - subnet24
+    - asn
+    - bgp
+    - tier1
+    - coordinates
+    forbid_sections:
+    - source
+    - provenance
+    - protocol
+    - port
+    - latency
+    - collector
+    - timezone
+    - postal
+    - continent
+    - domains
+    - hostname
+    - credential
+    remove_stale_inputs: true
+    retain_only_current_and_previous_release: true
+    format_version: 3
+    max_decoded_section_mib: 64
+    max_total_decoded_mib: 256
+    browser_deploy_profile:
+      max_decoded_object_mib: 32
+      max_live_decoded_mib: 96
+      max_answer_mib: 8
+      max_origins_per_answer: 4096
+      max_retained_path_asns_per_answer: 49152
+  confidence:
+    unknown_is_not_safe: true
+    independent_family_cap: true
+    geo_min_margin: 0.15
+    city_min_support_families: 2
+    max_stale_source_days: 30
+    calibration_required_for_probability_label: true
+    stale_policy: remove_from_current_release-and-gc-expired-cache
+    age_clock: upstream_last_content_publication_not_last_successful_HTTP_304
+    unknown_upstream_timestamp: quarantine-until-verified
+    min_numeric_risk_families: 2
+    confidence_band_families:
+      low: 2
+      medium: 3
+      high: 4
+    future_timestamp_tolerance_hours: 24
+    numeric_quality_requires_all_layers: true
+  bgp:
+    download_mode: selected-snapshots
+    mrt_enabled: false
+    collectors:
+    - rrc01
+    - rrc03
+    - rrc06
+    - route-views2
+    max_mrt_sources_per_run: 2
+    max_mrt_compressed_mib_per_run: 1024
+    preserve_raw_as_path: true
+    normalize_for_graph_only: true
+    max_paths_per_origin: 12
+    max_visible_graph_nodes: 24
+    protected_hop_depth: 2
+    max_backbone_exits_per_second_hop: 3
+    collapse_tier1_edges: true
+    paths_observed_only_by_default: true
+    tier1_extraction_config: configs/tier1.yaml
+    tier1_membership_mode: derive_from_versioned_sources
+    fixed_asn_allowlist_allowed: false
+    relationship_classes:
+    - transit_upstream
+    - peer
+    - customer
+    - sibling
+    - unknown
+    relationship_direction: perspective_of_queried_origin
+    retain_relation_conflict_evidence: true
+    relationship_unknown_not_peer: true
+    edge_classification_from: caida-asrel-and-observed-mrt
+    inferred_not_observed: true
+    graph_layout_reference: VanSail-Carpool web/src/components/ip-lookup/
+    browser_layout_reference: Archeb/peer.as
+    tier1_data_degradation: unclassified-label-not-fixed-fallback
+    snapshot_discovery_required: true
+    hardcoded_snapshot_date_forbidden: true
+    minimum_independent_path_families: 2
+    mrt_acquisition: two-families-sequential-cold-build-with-shared-byte-budget
+  release:
+    atomic_manifest_pointer: current.json
+    frontend_api_calls: false
+    retain_attribution: false
+    verify_all_chunks_before_publish: true
+    owner_signoff_required: true
+    owner_signoff_file: configs/release-approval.yaml
+    static_same_origin_required: true
+    static_backend_fallback: none-fail-deploy-on-pages-budget
+    deployment_mode: atomic-pages-direct-upload
+    include_all_database_assets_in_deploy: true
+    generations_in_same_deploy: 2
+    prerender_only: true
+    deploy_dir: web/.output/public
+    deploy_command: pnpm exec wrangler pages deploy web/.output/public --project-name "$CF_PAGES_PROJECT" --branch
+      main
+    no_runtime_functions: true
+    max_generated_static_bytes_mib: 3072
+    pages_limits_checked_on: '2026-10-30'
+    pages_free_max_files: 20000
+    pages_paid_max_files: 100000
+    pages_max_asset_mib: 25
+    pages_build_timeout_minutes: 20
+    pages_build_work: none-ci-prebuild-only
+    publish_no_source_provenance: true
+    public_provenance: false
+    public_source_rights_policy: internal-approval-only; skip any source whose terms require UI attribution
+    maximum_snapshot_age_hours: 720
+    hosted_regression_required: true
+    hosted_performance_required: true
+    quality_gates_required: true
+    no_chrome_polyfills: true
+    database_asset_root: web/.output/public/_atlas/
+  quality:
+    scoring_config: configs/scoring.yaml
+    ipv4_subnet_profile_bits: 24
+    ipv6_context_prefix_bits: 64
+    ipv6_subnet_profile_analog_not_class_c: true
+    aggregate_sparse_only: true
+    store_exact_and_subnet_separately: true
+    zero_support_status: unknown
+    no_implicit_negative_from_unlisted_ips: true
+    broadcast_native:
+      mode_field: assignment_mode
+      modes:
+      - native
+      - broadcast_or_routed
+      - unknown
+      require_explicit_evidence: true
+      weak_inference_relabel_as: candidate_not_verified
+      ipv4_broadcast_address_is_separate_boolean: true
+      anycast_is_separate_boolean: true
+      unknown_by_default: true
+      allow_heuristic_as_proof: false
+    asn_wide_risk_layer: true
+    score_reasons_public: true
+    score_evidence_sources_public: false
+    usage_types:
+    - residential
+    - business
+    - mobile
+    - datacenter
+    - hosting
+    - education
+    - government
+    - unknown
+    proxyip_is_proxy: true
+    proxy_subscriptions_decode_mode: literal-ip-only
+    no_dns_resolution: true
+    ipv4_subnet_profile_name: Class C /24 profile
+    numeric_quality_address_family: ipv4-only
+  ui:
+    config: configs/web.yaml
+    framework: nuxt
+    output: static-pages
+    no_duplicate_facts_across_panels: true
+  project: VanSail IP Atlas
+  proxy_subscription:
+    enabled: true
+    decode_stage: normalizer-only
+    no_remote_dns: true
+    no_network_probes: true
+    no_recursive_subscription_fetch: true
+    allowed_container_formats:
+    - plaintext
+    - base64
+    - mihomo-yaml
+    - singbox-json
+    recognized_uri_schemes:
+    - vless
+    - vmess
+    - trojan
+    - ss
+    - ssr
+    - hy
+    - hy2
+    - hysteria
+    - hysteria2
+    - tuic
+    - anytls
+    strict_ip_literal: true
+    require_public_global_ip: true
+    ignore_domain_hosts: true
+    discard:
+    - hostname
+    - domains
+    - credential
+    - password
+    - uuid
+    - user_info
+    - sni
+    - ws_path
+    - query
+    - fragment
+    - port
+    - protocol
+    - latency
+    - remarks
+    emit:
+    - ip
+    - proxy_reason_flag
+    - observation_timestamp
+    max_nested_base64_depth: 2
+    max_encoded_line_bytes: 131072
+    max_yaml_nodes: 500000
+    max_total_extracted_ips_per_source: 2000000
+    dedupe_scope: unique-ip-and-evidence-family
+    expiry_hours: 168
+    do_not_infer_exit_ip_from_server_ip: true
+    evidence_family: public-subscription-aggregators
+  testing:
+    hosted_ci_required: true
+    regression:
+    - go-unit
+    - go-race
+    - go-fuzz-smoke
+    - binary-golden
+    - go-typescript-parity
+    - source-fixtures
+    - routing-semantic
+    - score-boundaries
+    - stale-expiry
+    - subscription-uri-decoder
+    - nuxt-component
+    - chromium-e2e
+    - a11y
+    - pages-preview
+    performance:
+    - benchmark-lookup
+    - benchmark-build
+    - memory-peak
+    - disk-peak
+    - compressed-payload
+    - lcp
+    - inp
+    - graph-framerate
+    quality_gates:
+    - no-stale-inputs
+    - no-unsupported-ip-classification
+    - no-source-provenance-output
+    - calibration-backtests
+    - false-positive-sentinel
+    - finite-score
+    - reproducible-output
+    - all-manifest-shards-present
+  source_policy:
+    evidence_family_key: evidence_family
+    subscription_evidence_family: public-subscription-aggregators
+    active_requires_fixture: true
+    active_requires_publication_proof: true
+    active_requires_public_redistribution: true
+    active_forbidden_if_attribution_required: true
+    unknown_independence_defaults_to_one_family: true
+    runtime_state_is_not_persisted: true
+    authoritative_publication_headers: []
+    certification_root: fixtures/source-certification/
+source_defaults:
+  requires_redistribution_approval: true
+  on_failure: recompute-with-only-verified-current-sources
+  validate_schema_before_ingestion: true
+  dedupe_by_correlation_group: false
+  fetch_live_ip_lookup_api: false
+  max_public_age_hours: 720
+  state_on_unknown_freshness: quarantined
+  output_source_metadata: false
+  requires_observed_fixture: true
+  requires_publication_proof: true
+  requires_public_redistribution_without_attribution: true
+  active_without_fixture_forbidden: true
+  unknown_freshness_action: quarantine-and-withdraw
+sources:
+- id: sapics-user-country-v4
+  evidence_family: sapics-original-country
+  source_group: sapics-original-country
+  category: geolocation
+  admission: rights_approved
+  download:
+    url: https://github.com/sapics/ip-location-db/releases/download/latest/user-country-ipv4.csv
+    format: range-csv
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - country_code
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: PDDL-1.0
+    distribution: allow
+    evidence_url: https://github.com/sapics/ip-location-db/blob/main/README.md
+    review_basis: publisher documentation, 2026-10-30; owner must revalidate prior to first public release
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: sapics-original-country
+  scope: prefix
+  notes: Original compiled dataset; registered/WHOIS/geofeed-derived country evidence, not guaranteed physical location.
+    Confirm exact schema against README.
+  publication_proof:
+    kind: github_release
+    locator: https://api.github.com/repos/sapics/ip-location-db/releases/latest
+    field: published_at
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: sapics-user-country-v6
+  evidence_family: sapics-original-country
+  source_group: sapics-original-country
+  category: geolocation
+  admission: rights_approved
+  download:
+    url: https://github.com/sapics/ip-location-db/releases/download/latest/user-country-ipv6.csv
+    format: range-csv
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - country_code
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: PDDL-1.0
+    distribution: allow
+    evidence_url: https://github.com/sapics/ip-location-db/blob/main/README.md
+    review_basis: publisher documentation, 2026-10-30; owner must revalidate prior to first public release
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: sapics-original-country
+  scope: prefix
+  notes: IPv6 counterpart, correlated with user-country-v4 publisher.
+  publication_proof:
+    kind: github_release
+    locator: https://api.github.com/repos/sapics/ip-location-db/releases/latest
+    field: published_at
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: sapics-server-country-v4
+  evidence_family: sapics-original-server
+  source_group: sapics-original-server
+  category: geolocation
+  admission: rights_approved
+  download:
+    url: https://github.com/sapics/ip-location-db/releases/download/latest/server-country-ipv4.csv
+    format: range-csv
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - country_code
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: PDDL-1.0
+    distribution: allow
+    evidence_url: https://github.com/sapics/ip-location-db/blob/main/README.md
+    review_basis: publisher documentation, 2026-10-30; owner must revalidate prior to first public release
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: sapics-original-server
+  scope: prefix
+  notes: Distinct country methodology; do not treat same website as independent upstream by default.
+  publication_proof:
+    kind: github_release
+    locator: https://api.github.com/repos/sapics/ip-location-db/releases/latest
+    field: published_at
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: sapics-dbip-city-v4
+  evidence_family: dbip-lite
+  source_group: dbip-lite
+  category: geolocation
+  admission: candidate
+  download:
+    url: https://github.com/sapics/ip-location-db/releases/download/latest/dbip-city-ipv4.mmdb
+    format: mmdb
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - country_code
+  - region
+  - city
+  - coordinates
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: CC-BY-4.0
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: dbip-lite
+  scope: prefix
+  notes: Mirror of DB-IP Lite, not separate evidence; requires attribution/public derivative review.
+  upstream_id: dbip-lite
+  publication_proof:
+    kind: github_release
+    locator: https://api.github.com/repos/sapics/ip-location-db/releases/latest
+    field: published_at
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: sapics-geolite-city-v4
+  evidence_family: maxmind-geolite
+  source_group: maxmind-geolite
+  category: geolocation
+  admission: candidate
+  download:
+    url: https://github.com/sapics/ip-location-db/releases/download/latest/geolite2-city-ipv4.mmdb
+    format: mmdb
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - country_code
+  - region
+  - city
+  - coordinates
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: GeoLite2-EULA/CC-BY-SA-4.0
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: maxmind-geolite
+  scope: prefix
+  notes: Mirror of MaxMind GeoLite2; EULA and share-alike review; cannot count twice.
+  upstream_id: maxmind-geolite
+  publication_proof:
+    kind: github_release
+    locator: https://api.github.com/repos/sapics/ip-location-db/releases/latest
+    field: published_at
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: dbip-lite-direct
+  evidence_family: dbip-lite
+  source_group: dbip-lite
+  category: geolocation
+  admission: candidate
+  discovery: https://db-ip.com/db/lite.php
+  download:
+    url: null
+    format: csv-gz
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - country_code
+  - region
+  - city
+  - coordinates
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: CC-BY-4.0
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: dbip-lite
+  scope: prefix
+  notes: Monthly original DB-IP Lite; mirror is alternate fetch path.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: ipapi-free-geo-v4
+  evidence_family: ipapi-free-geo
+  source_group: ipapi-free-geo
+  category: geolocation
+  admission: candidate
+  discovery: https://ipapi.is/geolocation.html
+  download:
+    url: null
+    format: csv
+    max_compressed_mib: 750
+  refresh:
+    interval: 168h
+    max_stale: 720h
+  fields:
+  - country_code
+  - region
+  - city
+  - coordinates
+  - accuracy
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: CC-BY-SA-4.0
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: ipapi-free-geo
+  scope: prefix
+  notes: 'Free full geolocation CSV (not sample): very large (~559 MB stated 2026-10-28); optional budgeted weekly
+    job. Resolve official download link.'
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: ipapi-free-geo-v6
+  evidence_family: ipapi-free-geo
+  source_group: ipapi-free-geo
+  category: geolocation
+  admission: candidate
+  discovery: https://ipapi.is/geolocation.html
+  download:
+    url: null
+    format: csv
+    max_compressed_mib: 350
+  refresh:
+    interval: 168h
+    max_stale: 720h
+  fields:
+  - country_code
+  - region
+  - city
+  - coordinates
+  - accuracy
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: CC-BY-SA-4.0
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: ipapi-free-geo
+  scope: prefix
+  notes: Free full IPv6 geolocation CSV (~130 MB stated); commercial ASN/VPN/hosting are SAMPLE ONLY.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: ipgeo-community-mmdb
+  evidence_family: ipgeo-community
+  source_group: ipgeo-community
+  category: geolocation
+  admission: candidate
+  download:
+    url: https://github.com/whois-api-llc/ipgeo-community/releases/latest/download/ipgeo-community.mmdb
+    format: mmdb
+    max_compressed_mib: 800
+  refresh:
+    interval: 168h
+    max_stale: 720h
+  fields:
+  - country_code
+  - region
+  - city
+  - coordinates
+  - asn
+  - organization
+  - datacenter
+  - network_type
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: CC-BY-SA-4.0
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: ipgeo-community
+  scope: prefix
+  notes: Choose MMDB OR same-release CSV; is_proxy is reserved/never populated; is_vpn undercounts separate VPN
+    list.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: ipgeo-community-csv-variant
+  evidence_family: ipgeo-community
+  source_group: ipgeo-community
+  category: geolocation
+  admission: candidate
+  download:
+    url: https://github.com/whois-api-llc/ipgeo-community/releases/latest/download/ipgeo-community.csv.gz
+    format: csv-gz
+    max_compressed_mib: 800
+  refresh:
+    interval: 168h
+    max_stale: 720h
+  fields:
+  - country_code
+  - region
+  - city
+  - coordinates
+  - asn
+  - organization
+  - network_type
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: CC-BY-SA-4.0
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: ipgeo-community
+  scope: prefix
+  notes: Same snapshot as ipgeo-community-mmdb; disabled format alternative, not new evidence.
+  upstream_id: ipgeo-community-mmdb
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: iplocate-country
+  evidence_family: iplocate-free
+  source_group: iplocate-free
+  category: geolocation
+  admission: candidate
+  discovery: https://github.com/iplocate/ip-address-databases/tree/main/ip-to-country
+  download:
+    url: null
+    format: csv
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - country_code
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: unknown
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: iplocate-free
+  scope: prefix
+  notes: Free country only; do not ingest claimed API-only city or privacy fields.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: iplocate-asn
+  evidence_family: iplocate-free
+  source_group: iplocate-free
+  category: asn
+  admission: candidate
+  discovery: https://github.com/iplocate/ip-address-databases/tree/main/ip-to-asn
+  download:
+    url: null
+    format: csv
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - asn
+  - organization
+  - organization_domain
+  - country_code
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: unknown
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: iplocate-free
+  scope: prefix
+  notes: Free ASN publisher snapshot; same repo as country but different fields.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: ip2region-xdb
+  evidence_family: ip2region
+  source_group: ip2region
+  category: geolocation
+  admission: candidate
+  discovery: https://github.com/lionsoul2014/ip2region
+  download:
+    url: null
+    format: xdb
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - country_code
+  - region
+  - city
+  - isp
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: unknown
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: ip2region
+  scope: prefix
+  notes: China-oriented format; verify actual dataset source, data freshness and XDB reader.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: metowolf-iplist
+  evidence_family: metowolf
+  source_group: metowolf
+  category: geolocation
+  admission: candidate
+  discovery: https://github.com/metowolf/iplist
+  download:
+    url: null
+    format: cidr-text
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - country_code
+  - region
+  - isp
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: unknown
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: metowolf
+  scope: prefix
+  notes: Verify exact country/ISP files before implementing adapter.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: tdulcet-geo-aggregate
+  evidence_family: mixed-geo-mirrors
+  source_group: mixed-geo-mirrors
+  category: geolocation
+  admission: candidate
+  discovery: https://github.com/tdulcet/ip-geolocation-dbs
+  download:
+    url: null
+    format: tsv
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - country_code
+  - region
+  - city
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: mixed
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: mixed-geo-mirrors
+  scope: prefix
+  notes: Potentially reuses upstream GeoIP publishers; disable until family-level provenance extracted.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: wp-statistics-geo
+  evidence_family: maxmind-geolite
+  source_group: maxmind-geolite
+  category: geolocation
+  admission: candidate
+  discovery: https://github.com/wp-statistics/geo
+  download:
+    url: null
+    format: mmdb
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - country_code
+  - region
+  - city
+  - coordinates
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: mixed
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: maxmind-geolite
+  scope: prefix
+  notes: Alternative MaxMind/DB-IP mirror; no independent vote.
+  upstream_id: maxmind-geolite
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: ip2location-lite
+  evidence_family: ip2location-lite
+  source_group: ip2location-lite
+  category: geolocation
+  admission: retired
+  discovery: https://www.ip2location.com/lite-terms
+  download:
+    url: null
+    format: csv
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - country_code
+  - region
+  - city
+  - coordinates
+  depends_on: []
+  license:
+    status: restricted
+    identifier: IP2Location-LITE-terms
+    distribution: deny
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: ip2location-lite
+  scope: prefix
+  notes: Explicit current restriction on redistribution/compiled composite IP-intelligence database; no public build.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: ip2proxy-lite
+  evidence_family: ip2location-lite
+  source_group: ip2location-lite
+  category: proxy
+  admission: retired
+  discovery: https://www.ip2location.com/lite-terms
+  download:
+    url: null
+    format: csv
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - proxy
+  - provider
+  depends_on: []
+  license:
+    status: restricted
+    identifier: IP2Location-LITE-terms
+    distribution: deny
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: ip2location-lite
+  scope: prefix
+  notes: Proxy edition also restricted; do not incorporate into public composite.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: iptoasn-v4
+  evidence_family: iptoasn
+  source_group: iptoasn
+  category: bgp
+  admission: candidate
+  download:
+    url: https://iptoasn.com/data/ip2asn-v4.tsv.gz
+    format: tsv-gz
+    max_compressed_mib: 800
+  refresh:
+    interval: 6h
+    max_stale: 720h
+  fields:
+  - prefix
+  - asn
+  - organization
+  - country_code
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: PDDL-1.0
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: iptoasn
+  scope: prefix
+  notes: Prefix ownership/origin estimates; distinct from RIR registrant and observed MRT path.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: iptoasn-v6
+  evidence_family: iptoasn
+  source_group: iptoasn
+  category: bgp
+  admission: candidate
+  download:
+    url: https://iptoasn.com/data/ip2asn-v6.tsv.gz
+    format: tsv-gz
+    max_compressed_mib: 800
+  refresh:
+    interval: 6h
+    max_stale: 720h
+  fields:
+  - prefix
+  - asn
+  - organization
+  - country_code
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: PDDL-1.0
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: iptoasn
+  scope: prefix
+  notes: Schema/download, attribution and redistribution require review before activation.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: ipverse-as-metadata
+  evidence_family: ipverse-as
+  source_group: ipverse-as
+  category: asn
+  admission: rights_approved
+  download:
+    url: https://raw.githubusercontent.com/ipverse/as-metadata/master/as.json
+    format: json
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - asn
+  - organization
+  - country_code
+  - network_role
+  - providers
+  - customers
+  - peers
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: CC0-1.0
+    distribution: allow
+    evidence_url: https://github.com/ipverse/as-metadata/blob/master/README.md
+    review_basis: publisher documentation, 2026-10-30; owner must revalidate prior to first public release
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: ipverse-as
+  scope: asn
+  notes: RIR metadata + inferred roles/relationships; distinguish inferred edges from observed MRT path.
+  publication_proof:
+    kind: github_commit
+    locator: https://api.github.com/repos/ipverse/as-metadata/commits?path=as.json&sha=master&per_page=1
+    field: commit.committer.date
+  coverage:
+    kind: mapping
+    scope: asn
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: ipverse-as-blocks
+  evidence_family: ipverse-as
+  source_group: ipverse-as
+  category: bgp
+  admission: rights_approved
+  download:
+    url: https://github.com/ipverse/as-ip-blocks/releases/latest/download/as-ip-blocks.tar.gz
+    format: tar-gz
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - asn
+  - prefix
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: CC0-1.0
+    distribution: allow
+    evidence_url: https://github.com/ipverse/as-ip-blocks/blob/master/README.md
+    review_basis: publisher documentation, 2026-10-30; owner must revalidate prior to first public release
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: ipverse-as
+  scope: prefix
+  notes: Aggregated prefix by origin ASN; a cross-check, not additional independent observations of the same route.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: bgptools-origin
+  evidence_family: bgptools
+  source_group: bgptools
+  category: bgp
+  admission: candidate
+  download:
+    url: https://bgp.tools/table.jsonl
+    format: jsonl
+    max_compressed_mib: 800
+  refresh:
+    interval: 6h
+    max_stale: 720h
+  fields:
+  - prefix
+  - asn
+  - visibility
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: publisher-terms-review
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: bgptools
+  scope: prefix
+  notes: JSONL keys CIDR ASN Hits; identifying User-Agent required, cache ≥2h; `Hits` is routing visibility.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: bgptools-asns
+  evidence_family: bgptools
+  source_group: bgptools
+  category: asn
+  admission: candidate
+  download:
+    url: https://bgp.tools/asns.csv
+    format: csv
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - asn
+  - organization
+  - network_role
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: publisher-terms-review
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: bgptools
+  scope: asn
+  notes: CSV headers asn,name,class; AS prefixed numeric syntax.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: asn
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: bgptools-tags
+  evidence_family: bgptools
+  source_group: bgptools
+  category: asn
+  admission: candidate
+  download:
+    url: https://bgp.tools/tags.txt
+    format: text
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - asn
+  - network_role
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: publisher-terms-review
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: bgptools
+  scope: asn
+  notes: Index of labels, not itself detailed per-AS tag membership; requires second resolver.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: asn
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: ripe-riswhois-v4
+  evidence_family: ripe-ris
+  source_group: ripe-ris
+  category: bgp
+  admission: candidate
+  download:
+    url: https://www.ris.ripe.net/dumps/riswhoisdump.IPv4.gz
+    format: text-gz
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - prefix
+  - asn
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: RIPE-terms-review
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: ripe-ris
+  scope: prefix
+  notes: Aggregated observed route origin, NOT full AS_PATHs.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: ripe-riswhois-v6
+  evidence_family: ripe-ris
+  source_group: ripe-ris
+  category: bgp
+  admission: candidate
+  download:
+    url: https://www.ris.ripe.net/dumps/riswhoisdump.IPv6.gz
+    format: text-gz
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - prefix
+  - asn
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: RIPE-terms-review
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: ripe-ris
+  scope: prefix
+  notes: IPv6 aggregated dump.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: ripe-mrt-rrc01
+  evidence_family: ripe-ris-mrt
+  source_group: ripe-ris-mrt
+  category: bgp
+  admission: candidate
+  discovery: https://data.ris.ripe.net/rrc01/
+  download:
+    url: null
+    format: mrt-gz
+    max_compressed_mib: 1000
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - prefix
+  - asn
+  - as_path
+  - peer
+  - observed_at
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: RIPE-terms-review
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: ripe-ris-mrt
+  scope: path
+  notes: Use date-resolved complete RIB; do not specify nonexistent fixed filename or download all collectors.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: path
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: routeviews-rib
+  evidence_family: routeviews-mrt
+  source_group: routeviews-mrt
+  category: bgp
+  admission: candidate
+  discovery: https://archive.routeviews.org/route-views2/bgpdata/
+  download:
+    url: null
+    format: mrt-bz2
+    max_compressed_mib: 1000
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - prefix
+  - asn
+  - as_path
+  - peer
+  - observed_at
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: RouteViews-terms-review
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: routeviews-mrt
+  scope: path
+  notes: Resolve latest completed RIB with manifest and time budget, use separate worker.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: path
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: caida-asrel2
+  evidence_family: caida-rel
+  source_group: caida-rel
+  category: bgp
+  admission: candidate
+  download:
+    url: null
+    format: text-bz2
+    max_compressed_mib: 800
+  refresh:
+    interval: 720h
+    max_stale: 720h
+  fields:
+  - asn
+  - as_relationship
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: CAIDA-AUA
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: caida-rel
+  scope: asn_edge
+  notes: Discover the latest dated serial-2 asset deterministically; filename selects a candidate only, never proves
+    content publication. Exact payload timestamp binding, parser certification and redistribution review remain
+    required.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: asn_edge
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  discovery:
+    mode: latest-timestamped-asset
+    index_url: https://data.caida.org/datasets/as-relationships/serial-2/
+    filename_pattern: ^[0-9]{8}\.as-rel2\.txt\.bz2$
+    ordering: filename-date-desc-then-url-bytes
+    requires_exact_file: true
+    no_guessing: true
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: caida-asrel1
+  evidence_family: caida-rel
+  source_group: caida-rel
+  category: bgp
+  admission: candidate
+  discovery: https://data.caida.org/datasets/as-relationships/serial-1/
+  download:
+    url: null
+    format: text-bz2
+    max_compressed_mib: 800
+  refresh:
+    interval: 720h
+    max_stale: 720h
+  fields:
+  - asn
+  - as_relationship
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: CAIDA-AUA
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: caida-rel
+  scope: asn_edge
+  notes: Alternative serial-1 to serial-2; not independent if both from same CAIDA inference.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: asn_edge
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: ripe-delegated
+  evidence_family: rir-delegated
+  source_group: rir-delegated
+  category: registry
+  admission: candidate
+  discovery: https://ftp.ripe.net/pub/stats/ripencc/
+  download:
+    url: null
+    format: rir-extended
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - allocation_country
+  - rir
+  - allocation_date
+  - asn
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: RIR-terms-review
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: rir-delegated
+  scope: prefix
+  notes: Registration/allocation data, not physical country.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: apnic-delegated
+  evidence_family: rir-delegated
+  source_group: rir-delegated
+  category: registry
+  admission: candidate
+  discovery: https://ftp.apnic.net/stats/apnic/
+  download:
+    url: null
+    format: rir-extended
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - allocation_country
+  - rir
+  - allocation_date
+  - asn
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: RIR-terms-review
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: rir-delegated
+  scope: prefix
+  notes: RIR data parallel to RIPE; distinct registry region, same semantics.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: iana-ipv4-registry
+  evidence_family: iana
+  source_group: iana
+  category: registry
+  admission: candidate
+  download:
+    url: https://www.iana.org/assignments/ipv4-address-space/ipv4-address-space.csv
+    format: csv
+    max_compressed_mib: 800
+  refresh:
+    interval: 168h
+    max_stale: 720h
+  fields:
+  - allocation_country
+  - rir
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: IANA-terms-review
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: iana
+  scope: prefix
+  notes: IANA delegation, not a physical location indicator.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: iana-special-ipv4
+  evidence_family: iana
+  source_group: iana
+  category: registry
+  admission: candidate
+  discovery: https://www.iana.org/assignments/iana-ipv4-special-registry/
+  download:
+    url: null
+    format: csv
+    max_compressed_mib: 800
+  refresh:
+    interval: 168h
+    max_stale: 720h
+  fields:
+  - special_purpose
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: IANA-terms-review
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: iana
+  scope: prefix
+  notes: Detect reserved/documentation/private networks; exact CSV link to resolve.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: rpki-client-vrps
+  evidence_family: rpki-client
+  source_group: rpki-client
+  category: rpki
+  admission: candidate
+  discovery: https://console.rpki-client.org/
+  download:
+    url: null
+    format: json
+    max_compressed_mib: 800
+  refresh:
+    interval: 12h
+    max_stale: 720h
+  fields:
+  - roa
+  - roa_max_length
+  - roa_asn
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: rpki-client-terms-review
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: rpki-client
+  scope: prefix
+  notes: Resolve a validated full VRP/ROA snapshot; never use a lookup API.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: peeringdb-caida-snapshot
+  evidence_family: caida-peeringdb
+  source_group: caida-peeringdb
+  category: bgp
+  admission: candidate
+  discovery: https://www.caida.org/catalog/datasets/peeringdb/
+  download:
+    url: null
+    format: json
+    max_compressed_mib: 800
+  refresh:
+    interval: 168h
+    max_stale: 720h
+  fields:
+  - ixp
+  - facility
+  - network_presence
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: CAIDA-AUA
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: caida-peeringdb
+  scope: asn
+  notes: Historical snapshot metadata; do not interpret co-location as BGP edge.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: asn
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: fullbogons-v4
+  evidence_family: team-cymru-bogons
+  source_group: team-cymru-bogons
+  category: registry
+  admission: candidate
+  download:
+    url: https://www.team-cymru.org/Services/Bogons/fullbogons-ipv4.txt
+    format: cidr-text
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - bogon
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: provider-publication-review
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: team-cymru-bogons
+  scope: prefix
+  notes: 'Official publisher bulk file: high-confidence provider/network-type evidence; license/redistribution review
+    before public compilation.'
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: fullbogons-v6
+  evidence_family: team-cymru-bogons
+  source_group: team-cymru-bogons
+  category: registry
+  admission: candidate
+  download:
+    url: https://www.team-cymru.org/Services/Bogons/fullbogons-ipv6.txt
+    format: cidr-text
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - bogon
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: provider-publication-review
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: team-cymru-bogons
+  scope: prefix
+  notes: 'Official publisher bulk file: high-confidence provider/network-type evidence; license/redistribution review
+    before public compilation.'
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: x4b-vpn-v4
+  evidence_family: x4b
+  source_group: x4b
+  category: proxy
+  admission: rights_approved
+  download:
+    url: https://raw.githubusercontent.com/X4BNet/lists_vpn/main/output/vpn/ipv4.txt
+    format: cidr-text
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - vpn
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: MIT
+    distribution: allow
+    evidence_url: https://github.com/X4BNet/lists_vpn/blob/main/README.md
+    review_basis: publisher documentation, 2026-10-30; owner must revalidate prior to first public release
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: x4b
+  scope: prefix
+  notes: VPN-specific prefixes only; source based heavily on ASN clusters, not per-IP proof.
+  publication_proof:
+    kind: github_commit
+    locator: https://api.github.com/repos/X4BNet/lists_vpn/commits?path=output/vpn/ipv4.txt&sha=main&per_page=1
+    field: commit.committer.date
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: x4b-datacenter-v4
+  evidence_family: x4b
+  source_group: x4b
+  category: infrastructure
+  admission: rights_approved
+  download:
+    url: https://raw.githubusercontent.com/X4BNet/lists_vpn/main/output/datacenter/ipv4.txt
+    format: cidr-text
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - hosting
+  - datacenter
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: MIT
+    distribution: allow
+    evidence_url: https://github.com/X4BNet/lists_vpn/blob/main/README.md
+    review_basis: publisher documentation, 2026-10-30; owner must revalidate prior to first public release
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: x4b
+  scope: prefix
+  notes: Broader non-eyeball/datacenter set; NOT a direct VPN verdict; legacy root ipv4.txt duplicates this.
+  publication_proof:
+    kind: github_commit
+    locator: https://api.github.com/repos/X4BNet/lists_vpn/commits?path=output/datacenter/ipv4.txt&sha=main&per_page=1
+    field: commit.committer.date
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: ipgeo-community-vpn
+  evidence_family: ipgeo-community-vpn
+  source_group: ipgeo-community-vpn
+  category: proxy
+  admission: candidate
+  download:
+    url: https://github.com/whois-api-llc/ipgeo-community/releases/latest/download/community-vpn-list.csv.gz
+    format: csv-gz
+    max_compressed_mib: 800
+  refresh:
+    interval: 168h
+    max_stale: 720h
+  fields:
+  - vpn
+  - vpn_provider
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: CC-BY-SA-4.0
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: ipgeo-community-vpn
+  scope: prefix
+  notes: Network,provider,basis; full publisher VPN-list coverage; MMDB VPN flag is a subset. Correlated to ipgeo
+    geo product.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: millshre5-vpnips
+  evidence_family: community-vpn-provider
+  source_group: community-vpn-provider
+  category: proxy
+  admission: candidate
+  discovery: https://github.com/millshre5/vpnips
+  download:
+    url: null
+    format: csv
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - vpn
+  - vpn_provider
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: unknown
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: community-vpn-provider
+  scope: prefix
+  notes: Provider-attributed CIDRs; verify original source and file schema.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: tor-exits
+  evidence_family: tor-official
+  source_group: tor-official
+  category: proxy
+  admission: candidate
+  download:
+    url: https://check.torproject.org/api/bulk
+    format: cidr-text
+    max_compressed_mib: 800
+  refresh:
+    interval: 6h
+    max_stale: 720h
+  fields:
+  - tor_exit
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: Tor-terms-review
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: tor-official
+  scope: exact_ip
+  notes: Tor official bulk publication, not per-IP API. Confirm response format and license.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: tor-collector-history
+  evidence_family: tor-official
+  source_group: tor-official
+  category: proxy
+  admission: candidate
+  discovery: https://metrics.torproject.org/collector/archive/exit-lists/
+  download:
+    url: null
+    format: tar-xz
+    max_compressed_mib: 800
+  refresh:
+    interval: 720h
+    max_stale: 720h
+  fields:
+  - tor_exit
+  - observed_at
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: Tor-terms-review
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: tor-official
+  scope: exact_ip
+  notes: Historical observations; not independent of official contemporary exits.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: ipsum-master
+  evidence_family: ipsum-aggregated
+  source_group: ipsum-aggregated
+  category: abuse
+  admission: candidate
+  download:
+    url: https://raw.githubusercontent.com/stamparm/ipsum/master/ipsum.txt
+    format: cidr-text
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - threat_count
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: unknown
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: ipsum-aggregated
+  scope: exact_ip
+  notes: Some lines include count/score column; do not treat count as independent publisher count without upstream
+    details.
+  publication_proof:
+    kind: github_commit
+    locator: https://api.github.com/repos/stamparm/ipsum/commits?path=ipsum.txt&sha=master&per_page=1
+    field: commit.committer.date
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: spamhaus-drop-v4
+  evidence_family: spamhaus-drop
+  source_group: spamhaus-drop
+  category: abuse
+  admission: candidate
+  download:
+    url: https://www.spamhaus.org/drop/drop_v4.json
+    format: json-lines
+    max_compressed_mib: 800
+  refresh:
+    interval: 6h
+    max_stale: 720h
+  fields:
+  - threat
+  - drop
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: Spamhaus-terms-review
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: spamhaus-drop
+  scope: prefix
+  notes: JSON newline records; historical/high-risk netblock, not exact recent event.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: spamhaus-drop-v6
+  evidence_family: spamhaus-drop
+  source_group: spamhaus-drop
+  category: abuse
+  admission: candidate
+  download:
+    url: https://www.spamhaus.org/drop/drop_v6.json
+    format: json-lines
+    max_compressed_mib: 800
+  refresh:
+    interval: 6h
+    max_stale: 720h
+  fields:
+  - threat
+  - drop
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: Spamhaus-terms-review
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: spamhaus-drop
+  scope: prefix
+  notes: Schema/download, attribution and redistribution require review before activation.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: blocklistde-attacks
+  evidence_family: blocklist-de
+  source_group: blocklist-de
+  category: abuse
+  admission: candidate
+  download:
+    url: https://lists.blocklist.de/lists/all.txt
+    format: cidr-text
+    max_compressed_mib: 800
+  refresh:
+    interval: 6h
+    max_stale: 720h
+  fields:
+  - bruteforce
+  - scan
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: publisher-terms-review
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: blocklist-de
+  scope: exact_ip
+  notes: Schema/download, attribution and redistribution require review before activation.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: emerging-compromised
+  evidence_family: emerging-threats
+  source_group: emerging-threats
+  category: abuse
+  admission: candidate
+  download:
+    url: https://rules.emergingthreats.net/open/suricata/rules/compromised-ips.txt
+    format: cidr-text
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - compromised
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: ET-open-terms-review
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: emerging-threats
+  scope: exact_ip
+  notes: Schema/download, attribution and redistribution require review before activation.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: firehol-aggregate
+  evidence_family: firehol-aggregate
+  source_group: firehol-aggregate
+  category: abuse
+  admission: candidate
+  discovery: https://github.com/firehol/blocklist-ipsets
+  download:
+    url: null
+    format: cidr-text
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - threat
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: mixed
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: firehol-aggregate
+  scope: prefix
+  notes: Many upstream feeds have different terms; only fetch selected independently cleared input sets, not count
+    whole repo as independent source.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: borestad-abuseipdb
+  evidence_family: abuseipdb-derivative
+  source_group: abuseipdb-derivative
+  category: abuse
+  admission: candidate
+  discovery: https://github.com/borestad/blocklist-abuseipdb
+  download:
+    url: null
+    format: cidr-text
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - abuse
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: mixed
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: abuseipdb-derivative
+  scope: prefix
+  notes: Derived from AbuseIPDB; no independent vote from FireHOL copies.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: feodo-c2
+  evidence_family: abusech-feodo
+  source_group: abusech-feodo
+  category: abuse
+  admission: candidate
+  download:
+    url: https://feodotracker.abuse.ch/downloads/ipblocklist.txt
+    format: cidr-text
+    max_compressed_mib: 800
+  refresh:
+    interval: 6h
+    max_stale: 720h
+  fields:
+  - botnet_c2
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: abuse.ch-terms-review
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: abusech-feodo
+  scope: exact_ip
+  notes: Verify exact latest feed schema and license; port/malware family may require different CSV artifact.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: romain-malicious-inbound
+  evidence_family: romain-malicious-inbound
+  source_group: romain-malicious-inbound
+  category: abuse
+  admission: candidate
+  discovery: https://github.com/romainmarcoux/malicious-ip
+  download:
+    url: null
+    format: unknown
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - threat
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: unknown/mixed
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: romain-malicious-inbound
+  scope: prefix
+  notes: Verify a genuinely IP-bearing bulk file, license, and parent feed attribution; aggregators are correlated.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: romain-malicious-outgoing
+  evidence_family: romain-malicious-outgoing
+  source_group: romain-malicious-outgoing
+  category: abuse
+  admission: candidate
+  discovery: https://github.com/romainmarcoux/malicious-outgoing-ip
+  download:
+    url: null
+    format: unknown
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - threat
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: unknown/mixed
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: romain-malicious-outgoing
+  scope: prefix
+  notes: Verify a genuinely IP-bearing bulk file, license, and parent feed attribution; aggregators are correlated.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: bitwire-ipblocklist
+  evidence_family: bitwire-ipblocklist
+  source_group: bitwire-ipblocklist
+  category: abuse
+  admission: candidate
+  discovery: https://github.com/bitwire-it/ipblocklist
+  download:
+    url: null
+    format: unknown
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - threat
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: unknown/mixed
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: bitwire-ipblocklist
+  scope: prefix
+  notes: Verify a genuinely IP-bearing bulk file, license, and parent feed attribution; aggregators are correlated.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: c2intelfeeds
+  evidence_family: c2intelfeeds
+  source_group: c2intelfeeds
+  category: abuse
+  admission: candidate
+  discovery: https://github.com/drb-ra/C2IntelFeeds
+  download:
+    url: null
+    format: unknown
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - threat
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: unknown/mixed
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: c2intelfeeds
+  scope: prefix
+  notes: Verify a genuinely IP-bearing bulk file, license, and parent feed attribution; aggregators are correlated.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: public-feeds-iocs
+  evidence_family: public-feeds-iocs
+  source_group: public-feeds-iocs
+  category: abuse
+  admission: candidate
+  discovery: https://github.com/Jam0k/Public-Feeds-IOCs
+  download:
+    url: null
+    format: unknown
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - threat
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: unknown/mixed
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: public-feeds-iocs
+  scope: prefix
+  notes: Verify a genuinely IP-bearing bulk file, license, and parent feed attribution; aggregators are correlated.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: dataplane-org
+  evidence_family: dataplane-org
+  source_group: dataplane-org
+  category: abuse
+  admission: candidate
+  discovery: https://dataplane.org/
+  download:
+    url: null
+    format: unknown
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - threat
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: unknown/mixed
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: dataplane-org
+  scope: prefix
+  notes: Verify a genuinely IP-bearing bulk file, license, and parent feed attribution; aggregators are correlated.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: black-mirror
+  evidence_family: threat-aggregated
+  source_group: threat-aggregated
+  category: abuse
+  admission: candidate
+  discovery: https://github.com/T145/black-mirror
+  download:
+    url: null
+    format: unknown
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - threat
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: unknown/mixed
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: threat-aggregated
+  scope: prefix
+  notes: Verify a genuinely IP-bearing bulk file, license, and parent feed attribution; aggregators are correlated.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: hagezi-threat-ip
+  evidence_family: hagezi-threat-ip
+  source_group: hagezi-threat-ip
+  category: abuse
+  admission: candidate
+  discovery: https://github.com/hagezi/dns-blocklists
+  download:
+    url: null
+    format: unknown
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - threat
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: unknown/mixed
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: hagezi-threat-ip
+  scope: prefix
+  notes: Verify a genuinely IP-bearing bulk file, license, and parent feed attribution; aggregators are correlated.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: ipdb-blocklist
+  evidence_family: threat-aggregated
+  source_group: threat-aggregated
+  category: abuse
+  admission: candidate
+  discovery: https://ip-db.com/en/pricing
+  download:
+    url: null
+    format: unknown
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - threat
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: unknown/mixed
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: threat-aggregated
+  scope: prefix
+  notes: Verify a genuinely IP-bearing bulk file, license, and parent feed attribution; aggregators are correlated.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: cesnet-nerd
+  evidence_family: cesnet-nerd
+  source_group: cesnet-nerd
+  category: abuse
+  admission: candidate
+  discovery: https://nerd.cesnet.cz/nerd/data/
+  download:
+    url: null
+    format: unknown
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - threat
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: unknown/mixed
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: cesnet-nerd
+  scope: prefix
+  notes: Verify a genuinely IP-bearing bulk file, license, and parent feed attribution; aggregators are correlated.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: ipinsights
+  evidence_family: threat-aggregated
+  source_group: threat-aggregated
+  category: abuse
+  admission: candidate
+  discovery: https://www.ipinsights.io/blocklist.php
+  download:
+    url: null
+    format: unknown
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - threat
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: unknown/mixed
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: threat-aggregated
+  scope: prefix
+  notes: Verify a genuinely IP-bearing bulk file, license, and parent feed attribution; aggregators are correlated.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: threat-intel-ip-feeds
+  evidence_family: threat-aggregated
+  source_group: threat-aggregated
+  category: abuse
+  admission: candidate
+  discovery: https://github.com/ziyadnz/threat-intel-ip-feeds
+  download:
+    url: null
+    format: unknown
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - threat
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: unknown/mixed
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: threat-aggregated
+  scope: prefix
+  notes: Verify a genuinely IP-bearing bulk file, license, and parent feed attribution; aggregators are correlated.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: ffraud-ip
+  evidence_family: ffraud-ip
+  source_group: ffraud-ip
+  category: abuse
+  admission: candidate
+  discovery: https://github.com/FFraud-com/ip-fraud-database
+  download:
+    url: null
+    format: unknown
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - threat
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: unknown/mixed
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: ffraud-ip
+  scope: prefix
+  notes: Verify a genuinely IP-bearing bulk file, license, and parent feed attribution; aggregators are correlated.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: reportedip
+  evidence_family: reportedip
+  source_group: reportedip
+  category: abuse
+  admission: candidate
+  discovery: https://github.com/reportedip/reportedip-blacklist
+  download:
+    url: null
+    format: unknown
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - threat
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: unknown/mixed
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: reportedip
+  scope: prefix
+  notes: Verify a genuinely IP-bearing bulk file, license, and parent feed attribution; aggregators are correlated.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: malware-filter-botnet
+  evidence_family: malware-filter-botnet
+  source_group: malware-filter-botnet
+  category: abuse
+  admission: candidate
+  discovery: https://gitlab.com/malware-filter/botnet-filter
+  download:
+    url: null
+    format: unknown
+    max_compressed_mib: 800
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - threat
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: unknown/mixed
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: malware-filter-botnet
+  scope: prefix
+  notes: Verify a genuinely IP-bearing bulk file, license, and parent feed attribution; aggregators are correlated.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: caida-bogons-historical
+  evidence_family: caida-bogons
+  source_group: caida-bogons
+  category: registry
+  admission: candidate
+  discovery: https://www.caida.org/catalog/datasets/bogons/
+  download:
+    url: null
+    format: unknown
+    max_compressed_mib: 800
+  refresh:
+    interval: 720h
+    max_stale: 720h
+  fields:
+  - historical_bogon
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: CAIDA-AUA
+    distribution: review
+    evidence_url: null
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: caida-bogons
+  scope: prefix
+  notes: History only; never use old bogon view as current routed-space truth.
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: xiaobei-proxyip-full
+  evidence_family: xiaobei-proxyip
+  source_group: xiaobei-proxyip
+  category: proxy_ip
+  admission: candidate
+  download:
+    url: https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/valid/all.txt
+    format: proxyip-full-text
+    max_compressed_mib: 128
+  refresh:
+    interval: 6h
+    max_stale: 720h
+  fields:
+  - ip
+  - proxy
+  mapping:
+    proxy: true
+    cloudflare_proxyip: true
+    ip_classification: proxy
+  license:
+    status: needs-review
+    distribution: review
+    attribution_required: null
+  trust:
+    source_weight: 70
+    correlation_group: xiaobei-proxyip
+  scope: exact_ip
+  notes: Only full data/valid/all.txt list; extract literal public IP addresses and ignore all other annotations.
+  publication_proof:
+    kind: github_commit
+    locator: https://api.github.com/repos/Xiaobei09/proxyip/commits?path=data/valid/all.txt&sha=main&per_page=1
+    field: commit.committer.date
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  depends_on: []
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: subscription-0xradikal-free-v2ray-configs
+  evidence_family: public-subscription-aggregators
+  source_group: 0xradikal/free-v2ray-configs
+  category: proxy_subscription_ip
+  admission: candidate
+  repository: https://github.com/0xRadikal/Free-v2ray-Configs
+  download:
+    url: https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/all/configs.txt
+    format: uri-list
+    max_compressed_mib: 128
+  refresh:
+    interval: 6h
+    max_stale: 720h
+    freshness_proof_required: true
+  fields:
+  - ip
+  - proxy
+  mapping:
+    proxy: true
+    risk_evidence: proxy_subscription_ip
+    literal_ip_only: true
+  license:
+    status: needs-review
+    distribution: review
+    attribution_required: null
+  trust:
+    source_weight: 45
+    correlation_group: public-subscription-aggregators
+    dedupe_ip_across_sources: true
+  scope: exact_ip
+  notes: full canonical list
+  publication_proof:
+    kind: github_commit
+    locator: https://api.github.com/repos/0xRadikal/Free-v2ray-Configs/commits?path=all/configs.txt&sha=main&per_page=1
+    field: commit.committer.date
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  depends_on: []
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: subscription-gfpcom-free-proxy-list
+  evidence_family: public-subscription-aggregators
+  source_group: gfpcom/free-proxy-list
+  category: proxy_subscription_ip
+  admission: candidate
+  repository: https://github.com/gfpcom/free-proxy-list
+  download:
+    url: https://raw.githubusercontent.com/wiki/gfpcom/free-proxy-list/lists/vless.txt
+    format: uri-list
+    max_compressed_mib: 128
+    urls:
+    - https://raw.githubusercontent.com/wiki/gfpcom/free-proxy-list/lists/vless.txt
+    - https://raw.githubusercontent.com/wiki/gfpcom/free-proxy-list/lists/vmess.txt
+    - https://raw.githubusercontent.com/wiki/gfpcom/free-proxy-list/lists/trojan.txt
+    - https://raw.githubusercontent.com/wiki/gfpcom/free-proxy-list/lists/ss.txt
+    - https://raw.githubusercontent.com/wiki/gfpcom/free-proxy-list/lists/hy2.txt
+    - https://raw.githubusercontent.com/wiki/gfpcom/free-proxy-list/lists/tuic.txt
+    - https://raw.githubusercontent.com/wiki/gfpcom/free-proxy-list/lists/anytls.txt
+  refresh:
+    interval: 6h
+    max_stale: 720h
+    freshness_proof_required: true
+  fields:
+  - ip
+  - proxy
+  mapping:
+    proxy: true
+    risk_evidence: proxy_subscription_ip
+    literal_ip_only: true
+  license:
+    status: needs-review
+    distribution: review
+    attribution_required: null
+  trust:
+    source_weight: 45
+    correlation_group: public-subscription-aggregators
+    dedupe_ip_across_sources: true
+  scope: exact_ip
+  notes: Protocol-separated files under one source identity; discard protocol and duplicate IPs.
+  publication_proof:
+    kind: github_commit
+    locator: https://api.github.com/repos/wiki/gfpcom/commits?path=lists/vless.txt&sha=free-proxy-list&per_page=1
+    field: commit.committer.date
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  depends_on: []
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: subscription-hamedcode-port-based-v2ray-configs
+  evidence_family: public-subscription-aggregators
+  source_group: hamedcode/port-based-v2ray-configs
+  category: proxy_subscription_ip
+  admission: candidate
+  repository: https://github.com/hamedcode/port-based-v2ray-configs
+  discovery:
+    mode: manual-verify-download
+    requires_exact_file: true
+    path_hints:
+    - sub/
+    - detailed/
+    no_guessing: true
+  refresh:
+    interval: 6h
+    max_stale: 720h
+    freshness_proof_required: true
+  fields:
+  - ip
+  - proxy
+  mapping:
+    proxy: true
+    risk_evidence: proxy_subscription_ip
+    literal_ip_only: true
+  license:
+    status: needs-review
+    distribution: review
+    attribution_required: null
+  trust:
+    source_weight: 45
+    correlation_group: public-subscription-aggregators
+    dedupe_ip_across_sources: true
+  scope: exact_ip
+  notes: resolve full mixed file path from repository before enable
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  depends_on: []
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: subscription-mehrtat-vless-collector
+  evidence_family: public-subscription-aggregators
+  source_group: mehrtat/vless-collector
+  category: proxy_subscription_ip
+  admission: candidate
+  repository: https://github.com/mehrtat/vless-collector
+  download:
+    url: https://raw.githubusercontent.com/mehrtat/vless-collector/main/vless.txt
+    format: uri-list
+    max_compressed_mib: 128
+  refresh:
+    interval: 6h
+    max_stale: 720h
+    freshness_proof_required: true
+  fields:
+  - ip
+  - proxy
+  mapping:
+    proxy: true
+    risk_evidence: proxy_subscription_ip
+    literal_ip_only: true
+  license:
+    status: needs-review
+    distribution: review
+    attribution_required: null
+  trust:
+    source_weight: 45
+    correlation_group: public-subscription-aggregators
+    dedupe_ip_across_sources: true
+  scope: exact_ip
+  notes: plain list; not base64 duplicate
+  publication_proof:
+    kind: github_commit
+    locator: https://api.github.com/repos/mehrtat/vless-collector/commits?path=vless.txt&sha=main&per_page=1
+    field: commit.committer.date
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  depends_on: []
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: subscription-au1rxx-free-vpn-subscriptions
+  evidence_family: public-subscription-aggregators
+  source_group: au1rxx/free-vpn-subscriptions
+  category: proxy_subscription_ip
+  admission: candidate
+  repository: https://github.com/Au1rxx/free-vpn-subscriptions
+  download:
+    url: https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/output/v2ray-base64.txt
+    format: base64-subscription
+    max_compressed_mib: 128
+  refresh:
+    interval: 6h
+    max_stale: 720h
+    freshness_proof_required: true
+  fields:
+  - ip
+  - proxy
+  mapping:
+    proxy: true
+    risk_evidence: proxy_subscription_ip
+    literal_ip_only: true
+  license:
+    status: needs-review
+    distribution: review
+    attribution_required: null
+  trust:
+    source_weight: 45
+    correlation_group: public-subscription-aggregators
+    dedupe_ip_across_sources: true
+  scope: exact_ip
+  notes: use one consolidated format
+  publication_proof:
+    kind: github_commit
+    locator: https://api.github.com/repos/Au1rxx/free-vpn-subscriptions/commits?path=output/v2ray-base64.txt&sha=main&per_page=1
+    field: commit.committer.date
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  depends_on: []
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: subscription-nodesradar-nodesradar-en
+  evidence_family: public-subscription-aggregators
+  source_group: nodesradar/nodesradar-en
+  category: proxy_subscription_ip
+  admission: candidate
+  repository: https://github.com/nodesradar/nodesradar-en
+  download:
+    url: https://radarhub.top/v2ray.txt
+    format: auto-subscription
+    max_compressed_mib: 128
+  refresh:
+    interval: 6h
+    max_stale: 720h
+    freshness_proof_required: true
+  fields:
+  - ip
+  - proxy
+  mapping:
+    proxy: true
+    risk_evidence: proxy_subscription_ip
+    literal_ip_only: true
+  license:
+    status: needs-review
+    distribution: review
+    attribution_required: null
+  trust:
+    source_weight: 45
+    correlation_group: public-subscription-aggregators
+    dedupe_ip_across_sources: true
+  scope: exact_ip
+  notes: externally hosted downloadable subscription
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  depends_on: []
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: subscription-peasoft-nomorewalls
+  evidence_family: public-subscription-aggregators
+  source_group: peasoft/nomorewalls
+  category: proxy_subscription_ip
+  admission: candidate
+  repository: https://github.com/peasoft/NoMoreWalls
+  download:
+    url: https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list.txt
+    format: uri-list
+    max_compressed_mib: 128
+  refresh:
+    interval: 6h
+    max_stale: 720h
+    freshness_proof_required: true
+  fields:
+  - ip
+  - proxy
+  mapping:
+    proxy: true
+    risk_evidence: proxy_subscription_ip
+    literal_ip_only: true
+  license:
+    status: needs-review
+    distribution: review
+    attribution_required: null
+  trust:
+    source_weight: 45
+    correlation_group: public-subscription-aggregators
+    dedupe_ip_across_sources: true
+  scope: exact_ip
+  notes: mixed URI list
+  publication_proof:
+    kind: github_commit
+    locator: https://api.github.com/repos/peasoft/NoMoreWalls/commits?path=list.txt&sha=master&per_page=1
+    field: commit.committer.date
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  depends_on: []
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: subscription-mustafabaqer-vestranet-nodes
+  evidence_family: public-subscription-aggregators
+  source_group: mustafabaqer/vestranet-nodes
+  category: proxy_subscription_ip
+  admission: candidate
+  repository: https://github.com/MustafaBaqer/VestraNet-Nodes
+  download:
+    url: https://raw.githubusercontent.com/MustafaBaqer/VestraNet-Nodes/main/subscriptions/mix-base64.txt
+    format: base64-subscription
+    max_compressed_mib: 128
+  refresh:
+    interval: 6h
+    max_stale: 720h
+    freshness_proof_required: true
+  fields:
+  - ip
+  - proxy
+  mapping:
+    proxy: true
+    risk_evidence: proxy_subscription_ip
+    literal_ip_only: true
+  license:
+    status: needs-review
+    distribution: review
+    attribution_required: null
+  trust:
+    source_weight: 45
+    correlation_group: public-subscription-aggregators
+    dedupe_ip_across_sources: true
+  scope: exact_ip
+  notes: one protocol sample, other files can be added after format checks
+  publication_proof:
+    kind: github_commit
+    locator: https://api.github.com/repos/MustafaBaqer/VestraNet-Nodes/commits?path=subscriptions/mix-base64.txt&sha=main&per_page=1
+    field: commit.committer.date
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  depends_on: []
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: subscription-mohammadbahemmat-v2ray-collector
+  evidence_family: public-subscription-aggregators
+  source_group: mohammadbahemmat/v2ray-collector
+  category: proxy_subscription_ip
+  admission: candidate
+  repository: https://github.com/MohammadBahemmat/V2ray-Collector
+  download:
+    url: https://raw.githubusercontent.com/MohammadBahemmat/V2ray-Collector/main/all_servers.txt
+    format: auto-subscription
+    max_compressed_mib: 128
+  refresh:
+    interval: 6h
+    max_stale: 720h
+    freshness_proof_required: true
+  fields:
+  - ip
+  - proxy
+  mapping:
+    proxy: true
+    risk_evidence: proxy_subscription_ip
+    literal_ip_only: true
+  license:
+    status: needs-review
+    distribution: review
+    attribution_required: null
+  trust:
+    source_weight: 45
+    correlation_group: public-subscription-aggregators
+    dedupe_ip_across_sources: true
+  scope: exact_ip
+  notes: resolve exact downloadable artifact
+  publication_proof:
+    kind: github_commit
+    locator: https://api.github.com/repos/MohammadBahemmat/V2ray-Collector/commits?path=all_servers.txt&sha=main&per_page=1
+    field: commit.committer.date
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  depends_on: []
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: subscription-chenzhihan1751-cyber-node-sub-zixf
+  evidence_family: public-subscription-aggregators
+  source_group: chenzhihan1751-cyber/node-sub-zixf
+  category: proxy_subscription_ip
+  admission: candidate
+  repository: https://github.com/chenzhihan1751-cyber/node-sub-zixf
+  discovery:
+    mode: manual-verify-download
+    requires_exact_file: true
+  refresh:
+    interval: 6h
+    max_stale: 720h
+    freshness_proof_required: true
+  fields:
+  - ip
+  - proxy
+  mapping:
+    proxy: true
+    risk_evidence: proxy_subscription_ip
+    literal_ip_only: true
+  license:
+    status: needs-review
+    distribution: review
+    attribution_required: null
+  trust:
+    source_weight: 45
+    correlation_group: public-subscription-aggregators
+    dedupe_ip_across_sources: true
+  scope: exact_ip
+  notes: resolve exact downloadable artifact
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  depends_on: []
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: subscription-mheidari98-proxy
+  evidence_family: public-subscription-aggregators
+  source_group: mheidari98/.proxy
+  category: proxy_subscription_ip
+  admission: candidate
+  repository: https://github.com/mheidari98/.proxy
+  discovery:
+    mode: manual-verify-download
+    requires_exact_file: true
+  refresh:
+    interval: 6h
+    max_stale: 720h
+    freshness_proof_required: true
+  fields:
+  - ip
+  - proxy
+  mapping:
+    proxy: true
+    risk_evidence: proxy_subscription_ip
+    literal_ip_only: true
+  license:
+    status: needs-review
+    distribution: review
+    attribution_required: null
+  trust:
+    source_weight: 45
+    correlation_group: public-subscription-aggregators
+    dedupe_ip_across_sources: true
+  scope: exact_ip
+  notes: aggregator/index, inspect for a native output; avoid following arbitrary third-party links
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  depends_on: []
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: subscription-pawdroid-free-servers
+  evidence_family: public-subscription-aggregators
+  source_group: pawdroid/free-servers
+  category: proxy_subscription_ip
+  admission: candidate
+  repository: https://github.com/Pawdroid/Free-servers
+  download:
+    url: https://raw.githubusercontent.com/Pawdroid/Free-servers/main/sub
+    format: auto-subscription
+    max_compressed_mib: 128
+  refresh:
+    interval: 6h
+    max_stale: 720h
+    freshness_proof_required: true
+  fields:
+  - ip
+  - proxy
+  mapping:
+    proxy: true
+    risk_evidence: proxy_subscription_ip
+    literal_ip_only: true
+  license:
+    status: needs-review
+    distribution: review
+    attribution_required: null
+  trust:
+    source_weight: 45
+    correlation_group: public-subscription-aggregators
+    dedupe_ip_across_sources: true
+  scope: exact_ip
+  notes: mixed URI subscription
+  publication_proof:
+    kind: github_commit
+    locator: https://api.github.com/repos/Pawdroid/Free-servers/commits?path=sub&sha=main&per_page=1
+    field: commit.committer.date
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  depends_on: []
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: subscription-awesome-vpn-awesome-vpn
+  evidence_family: public-subscription-aggregators
+  source_group: awesome-vpn/awesome-vpn
+  category: proxy_subscription_ip
+  admission: candidate
+  repository: https://github.com/awesome-vpn/awesome-vpn
+  download:
+    url: https://raw.githubusercontent.com/awesome-vpn/awesome-vpn/master/all
+    format: base64-subscription
+    max_compressed_mib: 128
+  refresh:
+    interval: 6h
+    max_stale: 720h
+    freshness_proof_required: true
+  fields:
+  - ip
+  - proxy
+  mapping:
+    proxy: true
+    risk_evidence: proxy_subscription_ip
+    literal_ip_only: true
+  license:
+    status: needs-review
+    distribution: review
+    attribution_required: null
+  trust:
+    source_weight: 45
+    correlation_group: public-subscription-aggregators
+    dedupe_ip_across_sources: true
+  scope: exact_ip
+  notes: base64 list
+  publication_proof:
+    kind: github_commit
+    locator: https://api.github.com/repos/awesome-vpn/awesome-vpn/commits?path=all&sha=master&per_page=1
+    field: commit.committer.date
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  depends_on: []
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: subscription-telegavpn-free-vpn-keys
+  evidence_family: public-subscription-aggregators
+  source_group: telegavpn/free-vpn-keys
+  category: proxy_subscription_ip
+  admission: candidate
+  repository: https://github.com/TelegaVPN/free-vpn-keys
+  download:
+    url: https://raw.githubusercontent.com/TelegaVPN/free-vpn-keys/main/sub/base64/all.txt
+    format: base64-subscription
+    max_compressed_mib: 128
+  refresh:
+    interval: 6h
+    max_stale: 720h
+    freshness_proof_required: true
+  fields:
+  - ip
+  - proxy
+  mapping:
+    proxy: true
+    risk_evidence: proxy_subscription_ip
+    literal_ip_only: true
+  license:
+    status: needs-review
+    distribution: review
+    attribution_required: null
+  trust:
+    source_weight: 45
+    correlation_group: public-subscription-aggregators
+    dedupe_ip_across_sources: true
+  scope: exact_ip
+  notes: global base64 list
+  publication_proof:
+    kind: github_commit
+    locator: https://api.github.com/repos/TelegaVPN/free-vpn-keys/commits?path=sub/base64/all.txt&sha=main&per_page=1
+    field: commit.committer.date
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  depends_on: []
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: subscription-mahdibland-v2rayaggregator
+  evidence_family: public-subscription-aggregators
+  source_group: mahdibland/v2rayaggregator
+  category: proxy_subscription_ip
+  admission: candidate
+  repository: https://github.com/mahdibland/V2RayAggregator
+  download:
+    url: https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/sub/sub_merge_base64.txt
+    format: base64-subscription
+    max_compressed_mib: 128
+  refresh:
+    interval: 6h
+    max_stale: 720h
+    freshness_proof_required: true
+  fields:
+  - ip
+  - proxy
+  mapping:
+    proxy: true
+    risk_evidence: proxy_subscription_ip
+    literal_ip_only: true
+  license:
+    status: needs-review
+    distribution: review
+    attribution_required: null
+  trust:
+    source_weight: 45
+    correlation_group: public-subscription-aggregators
+    dedupe_ip_across_sources: true
+  scope: exact_ip
+  notes: mixed merged list
+  publication_proof:
+    kind: github_commit
+    locator: https://api.github.com/repos/mahdibland/V2RayAggregator/commits?path=sub/sub_merge_base64.txt&sha=master&per_page=1
+    field: commit.committer.date
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  depends_on: []
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: subscription-chaishpish-free-server-v2ray
+  evidence_family: public-subscription-aggregators
+  source_group: chaishpish/free_server_v2ray
+  category: proxy_subscription_ip
+  admission: candidate
+  repository: https://github.com/chaishpish/free_server_v2ray
+  download:
+    url: https://raw.githubusercontent.com/chaishpish/free_server_v2ray/main/@TFMTProto
+    format: auto-subscription
+    max_compressed_mib: 128
+  refresh:
+    interval: 6h
+    max_stale: 720h
+    freshness_proof_required: true
+  fields:
+  - ip
+  - proxy
+  mapping:
+    proxy: true
+    risk_evidence: proxy_subscription_ip
+    literal_ip_only: true
+  license:
+    status: needs-review
+    distribution: review
+    attribution_required: null
+  trust:
+    source_weight: 45
+    correlation_group: public-subscription-aggregators
+    dedupe_ip_across_sources: true
+  scope: exact_ip
+  notes: single published subscription
+  publication_proof:
+    kind: github_commit
+    locator: https://api.github.com/repos/chaishpish/free_server_v2ray/commits?path=@TFMTProto&sha=main&per_page=1
+    field: commit.committer.date
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  depends_on: []
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: subscription-aliilapro-v2rayng-config
+  evidence_family: public-subscription-aggregators
+  source_group: aliilapro/v2rayng-config
+  category: proxy_subscription_ip
+  admission: candidate
+  repository: https://github.com/ALIILAPRO/v2rayNG-Config
+  download:
+    url: https://raw.githubusercontent.com/ALIILAPRO/v2rayNG-Config/main/sub.txt
+    format: auto-subscription
+    max_compressed_mib: 128
+  refresh:
+    interval: 6h
+    max_stale: 720h
+    freshness_proof_required: true
+  fields:
+  - ip
+  - proxy
+  mapping:
+    proxy: true
+    risk_evidence: proxy_subscription_ip
+    literal_ip_only: true
+  license:
+    status: needs-review
+    distribution: review
+    attribution_required: null
+  trust:
+    source_weight: 45
+    correlation_group: public-subscription-aggregators
+    dedupe_ip_across_sources: true
+  scope: exact_ip
+  notes: single published subscription
+  publication_proof:
+    kind: github_commit
+    locator: https://api.github.com/repos/ALIILAPRO/v2rayNG-Config/commits?path=sub.txt&sha=main&per_page=1
+    field: commit.committer.date
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  depends_on: []
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: subscription-ermaozi-get-subscribe
+  evidence_family: public-subscription-aggregators
+  source_group: ermaozi/get_subscribe
+  category: proxy_subscription_ip
+  admission: candidate
+  repository: https://github.com/ermaozi/get_subscribe
+  download:
+    url: https://raw.githubusercontent.com/ermaozi/get_subscribe/main/subscribe/v2ray.txt
+    format: auto-subscription
+    max_compressed_mib: 128
+  refresh:
+    interval: 6h
+    max_stale: 720h
+    freshness_proof_required: true
+  fields:
+  - ip
+  - proxy
+  mapping:
+    proxy: true
+    risk_evidence: proxy_subscription_ip
+    literal_ip_only: true
+  license:
+    status: needs-review
+    distribution: review
+    attribution_required: null
+  trust:
+    source_weight: 45
+    correlation_group: public-subscription-aggregators
+    dedupe_ip_across_sources: true
+  scope: exact_ip
+  notes: externally hosted downloadable subscription
+  publication_proof:
+    kind: github_commit
+    locator: https://api.github.com/repos/ermaozi/get_subscribe/commits?path=subscribe/v2ray.txt&sha=main&per_page=1
+    field: commit.committer.date
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  depends_on: []
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: subscription-argh94-proxy-list
+  evidence_family: public-subscription-aggregators
+  source_group: argh94/proxy-list
+  category: proxy_subscription_ip
+  admission: candidate
+  repository: https://github.com/Argh94/Proxy-List
+  discovery:
+    mode: manual-verify-download
+    requires_exact_file: true
+  refresh:
+    interval: 6h
+    max_stale: 720h
+    freshness_proof_required: true
+  fields:
+  - ip
+  - proxy
+  mapping:
+    proxy: true
+    risk_evidence: proxy_subscription_ip
+    literal_ip_only: true
+  license:
+    status: needs-review
+    distribution: review
+    attribution_required: null
+  trust:
+    source_weight: 45
+    correlation_group: public-subscription-aggregators
+    dedupe_ip_across_sources: true
+  scope: exact_ip
+  notes: select appropriate VLESS/VMess/Trojan artifacts after checking filenames
+  publication_proof:
+    kind: unavailable
+    locator: null
+    field: null
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  depends_on: []
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: subscription-matinghanbari-v2ray-configs
+  evidence_family: public-subscription-aggregators
+  source_group: matinghanbari/v2ray-configs
+  category: proxy_subscription_ip
+  admission: candidate
+  repository: https://github.com/MatinGhanbari/v2ray-configs
+  download:
+    url: https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/all_sub.txt
+    format: base64-subscription
+    max_compressed_mib: 128
+  refresh:
+    interval: 6h
+    max_stale: 720h
+    freshness_proof_required: true
+  fields:
+  - ip
+  - proxy
+  mapping:
+    proxy: true
+    risk_evidence: proxy_subscription_ip
+    literal_ip_only: true
+  license:
+    status: needs-review
+    distribution: review
+    attribution_required: null
+  trust:
+    source_weight: 45
+    correlation_group: public-subscription-aggregators
+    dedupe_ip_across_sources: true
+  scope: exact_ip
+  notes: full merged subscription
+  publication_proof:
+    kind: github_commit
+    locator: https://api.github.com/repos/MatinGhanbari/v2ray-configs/commits?path=subscriptions/v2ray/all_sub.txt&sha=main&per_page=1
+    field: commit.committer.date
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  depends_on: []
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+- id: subscription-mfuu-freeproxies
+  evidence_family: public-subscription-aggregators
+  source_group: mfuu/freeproxies
+  category: proxy_subscription_ip
+  admission: candidate
+  repository: https://github.com/mfuu/FreeProxies
+  download:
+    url: https://raw.githubusercontent.com/mfuu/FreeProxies/master/sub
+    format: auto-subscription
+    max_compressed_mib: 128
+  refresh:
+    interval: 6h
+    max_stale: 720h
+    freshness_proof_required: true
+  fields:
+  - ip
+  - proxy
+  mapping:
+    proxy: true
+    risk_evidence: proxy_subscription_ip
+    literal_ip_only: true
+  license:
+    status: needs-review
+    distribution: review
+    attribution_required: null
+  trust:
+    source_weight: 45
+    correlation_group: public-subscription-aggregators
+    dedupe_ip_across_sources: true
+  scope: exact_ip
+  notes: repository includes pointer index; require native downloaded artifact, do not follow indirect URLs
+  publication_proof:
+    kind: github_commit
+    locator: https://api.github.com/repos/mfuu/FreeProxies/commits?path=sub&sha=master&per_page=1
+    field: commit.committer.date
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+  depends_on: []
+  parser:
+    id: null
+    schema: null
+    version: null
+  public_fields: []
+  field_mappings: {}
+  signals: []
+contract_revision: 1

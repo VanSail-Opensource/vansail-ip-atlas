@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:vansail:contract:release-approval:3:1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 3
+    },
+    "public_release_approved": {
+      "type": "boolean"
+    },
+    "approver": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "approved_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "source_catalog_sha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "rights_audit_sha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "release_manifest_sha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "release_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "candidate_bundle_sha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "evidence_sha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "approval_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source_catalog": {
+          "type": "string",
+          "const": "configs/sources.yaml"
+        },
+        "rights_audit": {
+          "type": "string",
+          "const": "SOURCES_AUDIT.md"
+        },
+        "release_manifest_template": {
+          "type": "string",
+          "const": "web/.output/public/_atlas/releases/{release_id}/manifest.json"
+        }
+      },
+      "required": [
+        "source_catalog",
+        "rights_audit",
+        "release_manifest_template"
+      ]
+    },
+    "requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "all_required_capabilities_have_approved_current_sources": {
+          "type": "boolean",
+          "const": true
+        },
+        "no_source_requiring_public_attribution": {
+          "type": "boolean",
+          "const": true
+        },
+        "hosted_regression_passed": {
+          "type": "boolean",
+          "const": true
+        },
+        "hosted_performance_passed": {
+          "type": "boolean",
+          "const": true
+        },
+        "public_output_scan_passed": {
+          "type": "boolean",
+          "const": true
+        },
+        "complete_pages_asset_inventory_passed": {
+          "type": "boolean",
+          "const": true
+        },
+        "automatic_release_forbidden": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "all_required_capabilities_have_approved_current_sources",
+        "no_source_requiring_public_attribution",
+        "hosted_regression_passed",
+        "hosted_performance_passed",
+        "public_output_scan_passed",
+        "complete_pages_asset_inventory_passed",
+        "automatic_release_forbidden"
+      ]
+    },
+    "notes": {
+      "type": "string",
+      "const": "Set true only after explicit final legal/provenance audit and binding the source catalog, rights audit and release manifest hashes."
+    }
+  },
+  "required": [
+    "schema_version",
+    "public_release_approved",
+    "approver",
+    "approved_at",
+    "source_catalog_sha256",
+    "rights_audit_sha256",
+    "release_manifest_sha256",
+    "release_id",
+    "candidate_bundle_sha256",
+    "evidence_sha256",
+    "approval_scope",
+    "requirements",
+    "notes"
+  ]
+}

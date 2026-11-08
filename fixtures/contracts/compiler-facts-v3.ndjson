@@ -1,0 +1,3 @@
+{"Version":3,"Kind":2,"Prefix":"203.0.113.0/24","Geo":{"Country":"US","RegistrationCountry":"GB","Region":"Atlas Region","City":"Atlas Harbor"}}
+{"Version":3,"Kind":5,"Prefix":"203.0.113.0/24","Usage":{"Type":1,"Assignment":1}}
+{"Version":3,"Kind":5,"Prefix":"203.0.113.1/32","Exact":true,"Usage":{"Type":4,"Assignment":2}}

@@ -1,0 +1,20 @@
+[
+  {
+    "name": "empty",
+    "encoded_base64": "KLUv/SQAAQAAmenYUQ==",
+    "decoded_bytes": 0,
+    "decoded_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "name": "utf8",
+    "encoded_base64": "KLUv/SQjGQEAVklBMyBzeW50aGV0aWMgY29kZWMgY29ycHVzIOmmmea4rwpF6Mj/",
+    "decoded_bytes": 35,
+    "decoded_sha256": "c8f4715dfb17a58bbe67f14638de1d9838c9507e1f88ed1cceed4d6a5416ee90"
+  },
+  {
+    "name": "bounded",
+    "encoded_base64": "KLUv/aQAABAAbAAAIFZJQTMBVAQCNPn/B1wAAAABVAAQNP3///8BXAAAAAFUABE0/f8DAAJcAAAAAVQAETT9/wMAAlwAAAABVAARNP3/AwACXAAAAAFUABE0/f8DAAJcAAAAAVQAETT9/wMAAl0AAAABVAARNP3/AwAC/K0UEQ==",
+    "decoded_bytes": 1048576,
+    "decoded_sha256": "92c8bf3db5641297521f68d51df9929ca19c4f22954716fa944ed316bf63912a"
+  }
+]

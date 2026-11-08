@@ -1,0 +1,76 @@
+# Tier-1 status is inferred at build time from versioned, current source datasets.
+schema_version: 3
+contract_revision: 1
+contract: docs/bgp-tier1.md
+contract_vectors: fixtures/bgp/contract-v1.json
+policy: source-derived-only
+fixed_membership: false
+source_inputs:
+  relationship_dataset:
+    name: caida-asrel2
+    discovery: https://data.caida.org/datasets/as-relationships/serial-2/
+    publication_proof: embedded_or_snapshot_metadata
+  origin_distribution:
+    name: ipverse-as-blocks
+    publication_proof: github_release
+  bgp_path_snapshots:
+    minimum_independent_families: 2
+    preferred_families: [ripe-ris-mrt, routeviews-mrt]
+    publication_proof: snapshot_metadata
+    require_current_sources_within_hours: 720
+  rpki:
+    required_for_rpki_status: true
+    publication_proof: vrp_metadata
+  collector_identity: internal-only
+  no_hardcoded_snapshot_date: true
+  unknown_or_missing_source: unknown
+classification:
+  classes: [tier1_candidate, global_transit, regional_transit, access_network, unknown]
+  provider_free_required: true
+  peer_clique_discovery: strongly-connected-or-near-complete-peer-core
+  peer_clique_support_threshold: 0.80
+  percentile_method: nearest-rank
+  customer_cone_percentile_threshold: 0.98
+  transit_degree_percentile_threshold: 0.98
+  minimum_independent_observation_families: 2
+  unknown_relationship_not_peer: true
+  false_tier1_if_no_upstreams: forbidden
+  cross_snapshot_stability_check: true
+  stability_snapshots: 2
+  stability_min_separation_hours: 24
+  stability_max_separation_hours: 720
+  first_snapshot_behavior: unknown_pending_stability
+  peer_core_algorithm: deterministic_minimum_degree_peeling
+  percentile_population: all_current_relationship_endpoint_asns
+  degrade_stale_as_unknown: true
+relationships:
+  directed_from_origin_perspective: true
+  classifications: [transit_upstream, peer, customer, sibling, unknown]
+  observed_as_adjacency_is_not_business_relationship: true
+  infer_from_caida_model: true
+  never_convert_unknown_to_peer: true
+  conflict_behavior: unknown
+  no_source_metadata_in_binary_output: true
+paths:
+  max_paths_per_origin: 12
+  ranking:
+    - relationship_coverage_desc
+    - path_length_asc
+    - visibility_desc
+    - canonical_path_bytes_asc
+  preserve_observed_vs_inferred: true
+  observed_only_by_default: true
+graph:
+  budget_visible_nodes: 24
+  protected_hops: 2
+  max_backbone_exits_per_second_hop: 3
+  collapse_tier1_to_tier1_for_display_only: true
+  preserve_observed_path_structure: true
+  no_unrelated_gap_merging: true
+  overflow: ranked_whole_routes_then_disclosed_contiguous_projection
+  selected_routes_protected_before_optional_nodes: true
+  reference_implementation_paths:
+    - VanSail-Opensource/VanSail-Carpool:web/src/components/ip-lookup/IPBGPTopology.vue
+    - VanSail-Opensource/VanSail-Carpool:web/src/components/ip-lookup/bgpGraph.ts
+    - VanSail-Opensource/VanSail-Carpool:web/src/components/ip-lookup/bgpLayout.ts
+  web_rendered_source_credit: false

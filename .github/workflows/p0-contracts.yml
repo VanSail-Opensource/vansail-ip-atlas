@@ -1,0 +1,165 @@
+name: Atlas integration checks (no release)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: atlas-checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOMAXPROCS: '2'
+  GOMEMLIMIT: 5GiB
+  PNPM_VERSION: 12.18.0
+
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version: '1.27.3'
+          cache: true
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.13.7'
+      - name: Install pinned validation dependencies
+        run: python -m pip install -r tools/requirements.txt
+      - name: Strict contracts and derived capability report
+        run: python tools/validate_blueprint.py --report reports/capabilities.json
+      - name: Focused contract regressions
+        run: python -m unittest discover -s tools -p 'test_*.py' -v
+      - name: Frozen candidate and Pages identity regressions
+        run: python -m unittest tools.hosted.test_candidate -v
+      - name: Go regressions
+        run: go test ./...
+      - name: Go static checks
+        run: go vet ./...
+      - name: Selected race tests
+        run: go test -race ./internal/... ./tools/source_samples
+      - name: Production subscription decoder fuzz smoke
+        run: go test ./internal/subscription -run '^$' -fuzz '^FuzzLiteralDecoder$' -fuzztime 10s -parallel 2
+      - name: MRT parser fuzz smoke
+        run: go test ./internal/intelligence -run '^$' -fuzz '^FuzzParseMRT$' -fuzztime 10s -parallel 2
+      - name: BGP4MP event and AS4 transition fuzz smoke
+        run: go test ./internal/intelligence -run '^$' -fuzz '^FuzzParseBGP4MP$' -fuzztime 10s -parallel 2
+      - name: VIA3 reader fuzz smoke
+        run: go test ./internal/via3 -run '^$' -fuzz '^FuzzRead$' -fuzztime 10s -parallel 2
+      - name: Reconnaissance decoder fuzz smoke
+        run: go test ./tools/source_samples -run '^$' -fuzz '^FuzzDecodeSample$' -fuzztime 10s -parallel 2
+      - name: Explain evidence boundary
+        run: python tools/hosted/evidence-status.py
+      - uses: actions/upload-artifact@v7.0.0
+        if: always()
+        with:
+          name: source-free-contract-status
+          # Source-rich capabilities/lineage stay on the ephemeral build runner.
+          # A public repository's artifact name cannot make an upload private.
+          path: reports/pending-gates.json
+          retention-days: 7
+
+  bundled-codec:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.13.0'
+      - name: Install locked harness
+        working-directory: tools/hosted
+        run: npm exec --yes --package pnpm@12.18.0 -- pnpm install --frozen-lockfile --ignore-scripts
+      - name: Install actual current stable Chrome
+        working-directory: tools/hosted
+        run: npm exec --yes --package pnpm@12.18.0 -- pnpm exec playwright install --with-deps chrome
+      - name: Install locked product decoder
+        working-directory: web
+        run: npm exec --yes --package pnpm@12.18.0 -- pnpm install --frozen-lockfile --ignore-scripts
+      - name: Bundled Zstandard TypeScript regression
+        run: node --test tools/query_contract/query.test.mjs tools/query_contract/via3.test.mjs web/tests/zstd.test.ts web/tests/bgpGraph.test.ts tools/hosted/performance-gates.test.mjs
+      - name: Native support diagnostic (mechanism replaced by explicit amendment)
+        continue-on-error: true
+        run: node tools/hosted/codec-probe.mjs
+      - name: Bundled Zstandard golden/bounds acceptance
+        run: node tools/hosted/codec-bundled.mjs
+      - uses: actions/upload-artifact@v7.0.0
+        if: always()
+        with:
+          name: private-p0-codec-evidence
+          path: reports/codec*.json
+          retention-days: 7
+
+  synthetic-browser:
+    needs: [contracts, bundled-codec]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version: '1.27.3'
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.13.0'
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.13.7'
+      - name: Install locked tools and product
+        run: |
+          python -m pip install -r tools/requirements.txt
+          npm exec --yes --package pnpm@12.18.0 -- pnpm --dir web install --frozen-lockfile --ignore-scripts
+          npm exec --yes --package pnpm@12.18.0 -- pnpm --dir tools/hosted install --frozen-lockfile --ignore-scripts
+          npm exec --yes --package pnpm@12.18.0 -- pnpm --dir tools/hosted exec playwright install --with-deps chrome
+      - name: Typecheck and generate immutable synthetic candidate
+        run: |
+          npm exec --yes --package pnpm@12.18.0 -- pnpm --dir web typecheck
+          npm exec --yes --package pnpm@12.18.0 -- pnpm --dir web generate
+          go run ./cmd/atlas synthetic -out build-private/ci-atlas
+          python tools/release_contract/prepare_static.py --atlas build-private/ci-atlas --public web/.output/public
+      - name: Synthetic static HTTP browser regression (not Pages acceptance)
+        run: |
+          python tools/hosted/static-server.py --directory web/.output/public --port 4173 &
+          atlas_pid=$!
+          trap 'kill "$atlas_pid"' EXIT
+          python tools/hosted/wait-preview.py
+          node tools/hosted/ui-regression.mjs
+          node tools/hosted/performance.mjs
+      - name: Verify frozen tree before preserving candidate
+        run: python tools/hosted/candidate.py --public web/.output/public
+      - uses: actions/upload-artifact@v7.0.0
+        if: always()
+        with:
+          name: synthetic-integration-evidence
+          # Explicit source-free allowlist. Never upload a build-private catalog,
+          # capability report, source fixture, normalized state or lineage tree.
+          path: |
+            reports/static-candidate.json
+            reports/ui-regression.json
+            reports/performance-local.json
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v7.0.0
+        with:
+          name: atlas-synthetic-public
+          path: web/.output/public/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+# No deployment, source promotion, approval mutation or production token is present.
+# The static QA server is an integration harness, never a Pages Function or API.
+# These checks do not replace real-source, full-capacity or Pages preview gates.

@@ -1,0 +1,24 @@
+# Default-deny production approval. Every hash must match the exact candidate.
+schema_version: 3
+public_release_approved: false
+approver: null
+approved_at: null
+source_catalog_sha256: null
+rights_audit_sha256: null
+release_manifest_sha256: null
+release_id: null
+candidate_bundle_sha256: null
+evidence_sha256: null
+approval_scope:
+  source_catalog: configs/sources.yaml
+  rights_audit: SOURCES_AUDIT.md
+  release_manifest_template: web/.output/public/_atlas/releases/{release_id}/manifest.json
+requirements:
+  all_required_capabilities_have_approved_current_sources: true
+  no_source_requiring_public_attribution: true
+  hosted_regression_passed: true
+  hosted_performance_passed: true
+  public_output_scan_passed: true
+  complete_pages_asset_inventory_passed: true
+  automatic_release_forbidden: true
+notes: Set true only after explicit final legal/provenance audit and binding the source catalog, rights audit and release manifest hashes.

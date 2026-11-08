@@ -1,0 +1,256 @@
+# VanSail IP Atlas — frontend, privacy and Cloudflare Pages deployment.
+schema_version: 3
+app:
+  name: VanSail IP Atlas
+  identifier: vansail-ip-atlas
+  framework: Nuxt 4
+  rendering: static-generate
+  node_runtime: none
+  api_runtime: none
+  functions: false
+  package_manager: pnpm
+  command: pnpm exec nuxt generate
+  output: web/.output/public
+  data_origin: same-origin
+  chromium_target: current-stable-only
+  compatibility_fallbacks: false
+  database_shards_bundled_into_pages: true
+navigation:
+  root_redirect:
+    from: /
+    to: /ip
+    code: 302
+    mechanism: cloudflare-pages-_redirects
+  landing: /ip
+  routes:
+    /ip:
+      purpose: centered-ip-asn-hero
+      owner_of:
+      - search
+    /ip/overview:
+      owner_of:
+      - country
+      - region
+      - city
+      - coordinates
+      - usage_type
+      - native_broadcast
+      - anycast
+      - isp
+    /ip/quality:
+      owner_of:
+      - quality_state
+      - quality_score
+      - score_reasons
+      - classification_reasons
+      - layer_contributions
+    /ip/class-c:
+      owner_of:
+      - ipv4_24_heatmap
+      - neighborhood_context
+      - 256_ip_cells
+    /ip/bgp:
+      owner_of:
+      - as_path_graph
+      - transit_peer_customer
+      - tier1_candidates
+      - rpki
+    /ip/asn:
+      owner_of:
+      - asn_summary
+      - asn_wide_risk
+      - customer_cone
+      - prefix_summary
+  reserved_paths:
+  - /latency
+  - /dns-leak
+  - /webrtc
+  - /cloudflare
+  - /split
+  query: ?q=<URL-encoded IP or ASN>
+  ip_submit_target: /ip/overview?q=<canonical-IP>
+  asn_submit_target: /ip/asn?q=AS<number>
+  asn_query_valid_routes: [/ip/asn, /ip/bgp]
+  ip_only_routes: [/ip/overview, /ip/quality, /ip/class-c]
+  ip_query_asn_page: show-all-origins
+  moas_bgp: deterministic-origin-selector
+  ipv6_class_c: not-applicable
+  missing_q: redirect-/ip
+  invalid_q: local-error-no-network
+  preserve_q_on_navigation: true
+  no_duplicate_displays: true
+  single_fact_owner: true
+  no_source_or_credits_panel: true
+  no_source_names_or_inspired_by_labels: true
+  minimum_text: true
+  icon_first: true
+  mobile_first: true
+  accessibility_reduced_motion: true
+  asn_input_forms: [AS13335, '13335']
+design:
+  component_system: [nuxt-ui, shadcn-vue]
+  component_selection: nuxt-ui-first-no-duplicates
+  theme: [light, dark, system]
+  aesthetic: liquid-glass-edge-lighting
+  edge_lighting:
+    enabled: true
+    method: conic-gradient-masked-border
+    thin_px: 1
+    focused_glow: subtle
+    static_glow_when_idle: true
+    only_animate_on_interaction: true
+    min_contrast: WCAG-AA
+  blur_px_max: 24
+  translucent_surfaces: true
+  avoid_glass_on_dense_graph_labels: true
+  layout: [large-negative-space, low-density, progressive-disclosure, stacked-panels]
+  transitions: [subtle-spring, opacity, translate, graph-path-highlight]
+  theme_skins_separate_css_tokens: true
+  do_not_show_source_attribution_in_ui: true
+motion:
+  framework: motion-v
+  nuxt_module: motion-v/nuxt
+  interaction_driven: true
+  animate_hero: true
+  animate_search_result_reveal: true
+  animate_score_explanation: true
+  avoid_continuous_idle_effects: true
+  prefers_reduced_motion: honor
+3d:
+  framework: TresJS
+  enabled: false
+  scope: optional-hero-scene-only
+  reason: deferred-beyond-v1-for-initial-js-and-accessibility-budget
+  avoid_3d_graph_default: true
+  lazy_load: true
+  no_duplicate_graph: true
+geo:
+  coordinates_only: [latitude, longitude]
+  show_map: true
+  map_service: OpenStreetMap
+  tile_origin: https://tile.openstreetmap.org
+  renderer: leaflet-with-osm-tiles
+  lazy_mount: true
+  map_is_sole_geographic_visual: true
+  attribution: required-for-OSM-map-tiles
+  marker_precision: city-centroid-or-better-only
+  disclose_approximate_coordinate: true
+  anycast_suppresses_map: true
+  no_postal_or_timezone_display: true
+  external_network_exception: osm_tile_requests_only
+  referrer_policy: no-referrer
+  no_ip_lookup_api: true
+bgp:
+  renderer: native-svg
+  max_visible_nodes: 24
+  protected_hops: 2
+  max_exits_per_second_hop: 3
+  preserve_real_relationship_directions: true
+  relation_classes: [transit_upstream, peer, customer, sibling, unknown]
+  derive_tier1_from_sources: true
+  interaction: [wheel_zoom, pinch_zoom, keyboard_pan, fit, route_focus, edge_inspect, graph_export]
+  graph_source_of_truth: unique-BGP-graph-view
+  no_collector_labels: true
+  no_source_credits: true
+  no_invented_edges: true
+  show_observed_vs_inferred: true
+quality:
+  scoring_config: configs/scoring.yaml
+  reason_chips: true
+  layer_contributions: true
+  explicit_unrated_state: true
+  risk_categories: [tor, vpn, datacenter, proxy, abuse, malware, botnet, c2, scanning, spam, fraud]
+  asn_context: true
+  ipv4_24_profile_link: true
+  no_source_names_or_protocols: true
+class_c:
+  ipv4_prefix: 24
+  cells: 256
+  display: interactive-grid
+  color_scheme: category-and-risk-band
+  accessible_detail: keyboard-cell-focus
+  inspect_cell: show-ip-and-reasons
+  source_output: none
+  no_missing-as-safe: true
+  ipv6_state: not-applicable
+security:
+  only_external_origin: https://tile.openstreetmap.org
+  analytics: false
+  cookies: false
+  remote_fonts: false
+  remote_icons: false
+  referrer_policy: no-referrer
+  csp: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://tile.openstreetmap.org; font-src 'self'; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests"
+  x_content_type_options: nosniff
+  permissions_policy: "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+  fail_closed_on_corrupt_manifest: true
+  no_mixed_release_fallback: true
+performance:
+  initial_js_gzip_budget_kib: 200
+  typical_ip_total_payload_kib: 400
+  route_graph_visible_node_limit: 24
+  interaction_p95_ms_budget: 100
+  lcp_mobile_seconds: 2.5
+  inp_ms: 200
+  cls: 0.1
+  worker_parser: true
+  browser_cache: indexeddb
+  immutable_shards: true
+  no_polyfills: true
+  lazy_map: true
+  lazy_bgp: true
+  hosted_chromium_regression: true
+  lighthouse_ci: true
+  no_sources_in_js_or_db_payload: true
+  worker_memory_mib: 384
+  max_inflight_objects: 1
+  decoded_cache_mib: 32
+  indexeddb_cache_mib: 128
+  zstd_decoder: fzstd-0.1.1-bundled-bounded
+  max_decoded_object_mib: 32
+  max_live_decoded_mib: 96
+  max_answer_mib: 8
+  max_origins_per_answer: 4096
+  max_retained_path_asns_per_answer: 49152
+release_policy:
+  aggregate_expiry_field: valid_until
+  time_encoding: unix-seconds-utc-integer
+  expiry_comparison: now-greater-than-or-equal
+  pointer_revalidation_seconds: 60
+  revalidate_on_resume: true
+  fail_closed_when_pointer_revalidation_fails: true
+  rollback_max_age_hours: 48
+  private_snapshot_retention_hours: 168
+  raw_subscription_quarantine_retention_hours: 0
+  retained_generations_are_maximum: true
+  require_previous_release_currently_eligible: true
+deploy:
+  platform: cloudflare-pages
+  mode: static-direct-upload
+  directory: web/.output/public
+  copy_compiled_database_into: web/.output/public/_atlas/
+  object_root: /_atlas/objects/
+  release_root: /_atlas/releases/
+  current_pointer: /_atlas/current.json
+  no_remote_database_host: true
+  no_server_workers: true
+  reserved_routes_are_not_implemented: true
+  redirects: [/ /ip 302]
+  max_files_target: 18500
+  max_asset_mib_target: 24
+  release_generations: 2
+  current_and_previous_share_objects: true
+  release_pinning: true
+  require_manifest_hash_validation: true
+  require_all_shards_in_same_deployment: true
+  require_preview_url_e2e_before_production: true
+  immutable_cache_headers: true
+  deployment_gates:
+  - hosted-regression
+  - hosted-performance
+  - database-quality
+  - binary-integrity
+  - content-freshness
+  - pages-limits
+  - source-rights
+  - public-output-scan

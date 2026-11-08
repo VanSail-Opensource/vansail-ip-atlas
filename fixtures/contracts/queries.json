@@ -1,0 +1,806 @@
+{
+  "contract_revision": 1,
+  "synthetic": true,
+  "inputs": [
+    {
+      "input": "1.1.1.1",
+      "expected": {
+        "kind": "ip",
+        "canonical": "1.1.1.1"
+      }
+    },
+    {
+      "input": " 8.8.8.8\t",
+      "expected": {
+        "kind": "ip",
+        "canonical": "8.8.8.8"
+      }
+    },
+    {
+      "input": "0.0.0.0",
+      "expected": {
+        "kind": "ip",
+        "canonical": "0.0.0.0"
+      }
+    },
+    {
+      "input": "255.255.255.255",
+      "expected": {
+        "kind": "ip",
+        "canonical": "255.255.255.255"
+      }
+    },
+    {
+      "input": "10.0.0.1",
+      "expected": {
+        "kind": "ip",
+        "canonical": "10.0.0.1"
+      }
+    },
+    {
+      "input": "127.0.0.1",
+      "expected": {
+        "kind": "ip",
+        "canonical": "127.0.0.1"
+      }
+    },
+    {
+      "input": "2001:0DB8:0000:0000:0000:0000:0000:0001",
+      "expected": {
+        "kind": "ip",
+        "canonical": "2001:db8::1"
+      }
+    },
+    {
+      "input": "2001:0:0:1:0:0:1:1",
+      "expected": {
+        "kind": "ip",
+        "canonical": "2001::1:0:0:1:1"
+      }
+    },
+    {
+      "input": "1:0:2:3:4:5:6:7",
+      "expected": {
+        "kind": "ip",
+        "canonical": "1:0:2:3:4:5:6:7"
+      }
+    },
+    {
+      "input": "::",
+      "expected": {
+        "kind": "ip",
+        "canonical": "::"
+      }
+    },
+    {
+      "input": "::1",
+      "expected": {
+        "kind": "ip",
+        "canonical": "::1"
+      }
+    },
+    {
+      "input": "2001:db8::",
+      "expected": {
+        "kind": "ip",
+        "canonical": "2001:db8::"
+      }
+    },
+    {
+      "input": "::FFFF:192.0.2.1",
+      "expected": {
+        "kind": "ip",
+        "canonical": "192.0.2.1"
+      }
+    },
+    {
+      "input": "::ffff:c000:201",
+      "expected": {
+        "kind": "ip",
+        "canonical": "192.0.2.1"
+      }
+    },
+    {
+      "input": "::192.0.2.1",
+      "expected": {
+        "kind": "ip",
+        "canonical": "::c000:201"
+      }
+    },
+    {
+      "input": "1:2:3:4:5:6:192.0.2.1",
+      "expected": {
+        "kind": "ip",
+        "canonical": "1:2:3:4:5:6:c000:201"
+      }
+    },
+    {
+      "input": "1:2:3:4:5::192.0.2.1",
+      "expected": {
+        "kind": "ip",
+        "canonical": "1:2:3:4:5:0:c000:201"
+      }
+    },
+    {
+      "input": "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+      "expected": {
+        "kind": "ip",
+        "canonical": "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"
+      }
+    },
+    {
+      "input": "AS13335",
+      "expected": {
+        "kind": "asn",
+        "canonical": "AS13335"
+      }
+    },
+    {
+      "input": "as0013335",
+      "expected": {
+        "kind": "asn",
+        "canonical": "AS13335"
+      }
+    },
+    {
+      "input": "13335",
+      "expected": {
+        "kind": "asn",
+        "canonical": "AS13335"
+      }
+    },
+    {
+      "input": "\r\n AS1 \f",
+      "expected": {
+        "kind": "asn",
+        "canonical": "AS1"
+      }
+    },
+    {
+      "input": "AS23455",
+      "expected": {
+        "kind": "asn",
+        "canonical": "AS23455"
+      }
+    },
+    {
+      "input": "23457",
+      "expected": {
+        "kind": "asn",
+        "canonical": "AS23457"
+      }
+    },
+    {
+      "input": "64495",
+      "expected": {
+        "kind": "asn",
+        "canonical": "AS64495"
+      }
+    },
+    {
+      "input": "131072",
+      "expected": {
+        "kind": "asn",
+        "canonical": "AS131072"
+      }
+    },
+    {
+      "input": "4199999999",
+      "expected": {
+        "kind": "asn",
+        "canonical": "AS4199999999"
+      }
+    },
+    {
+      "input": "AS000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001",
+      "expected": {
+        "kind": "asn",
+        "canonical": "AS1"
+      }
+    },
+    {
+      "input": "",
+      "error": "invalid_input"
+    },
+    {
+      "input": " \t\n",
+      "error": "invalid_input"
+    },
+    {
+      "input": "01.2.3.4",
+      "error": "invalid_input"
+    },
+    {
+      "input": "1.2.3",
+      "error": "invalid_input"
+    },
+    {
+      "input": "1.2.3.256",
+      "error": "invalid_input"
+    },
+    {
+      "input": "1.2.3.4.",
+      "error": "invalid_input"
+    },
+    {
+      "input": "0x1.2.3.4",
+      "error": "invalid_input"
+    },
+    {
+      "input": "1.2.3.04",
+      "error": "invalid_input"
+    },
+    {
+      "input": "[2001:db8::1]",
+      "error": "invalid_input"
+    },
+    {
+      "input": "fe80::1%eth0",
+      "error": "invalid_input"
+    },
+    {
+      "input": "::1%25eth0",
+      "error": "invalid_input"
+    },
+    {
+      "input": "2001:db8::1/64",
+      "error": "invalid_input"
+    },
+    {
+      "input": "2001:db8:::1",
+      "error": "invalid_input"
+    },
+    {
+      "input": "2001::db8::1",
+      "error": "invalid_input"
+    },
+    {
+      "input": "1:2:3:4:5:6:7",
+      "error": "invalid_input"
+    },
+    {
+      "input": "1:2:3:4:5:6:7:8:9",
+      "error": "invalid_input"
+    },
+    {
+      "input": "1:2:3:4:5:6:7::8",
+      "error": "invalid_input"
+    },
+    {
+      "input": "::192.0.2.01",
+      "error": "invalid_input"
+    },
+    {
+      "input": "192.0.2.1::",
+      "error": "invalid_input"
+    },
+    {
+      "input": "1:2:3:4:5:6:7:192.0.2.1",
+      "error": "invalid_input"
+    },
+    {
+      "input": "https://1.1.1.1",
+      "error": "invalid_input"
+    },
+    {
+      "input": "example.test",
+      "error": "invalid_input"
+    },
+    {
+      "input": "AS0",
+      "error": "invalid_input"
+    },
+    {
+      "input": "AS23456",
+      "error": "invalid_input"
+    },
+    {
+      "input": "AS64496",
+      "error": "invalid_input"
+    },
+    {
+      "input": "AS64511",
+      "error": "invalid_input"
+    },
+    {
+      "input": "AS64512",
+      "error": "invalid_input"
+    },
+    {
+      "input": "AS65534",
+      "error": "invalid_input"
+    },
+    {
+      "input": "AS65535",
+      "error": "invalid_input"
+    },
+    {
+      "input": "AS65536",
+      "error": "invalid_input"
+    },
+    {
+      "input": "AS65551",
+      "error": "invalid_input"
+    },
+    {
+      "input": "AS65552",
+      "error": "invalid_input"
+    },
+    {
+      "input": "AS131071",
+      "error": "invalid_input"
+    },
+    {
+      "input": "AS4200000000",
+      "error": "invalid_input"
+    },
+    {
+      "input": "AS4294967294",
+      "error": "invalid_input"
+    },
+    {
+      "input": "AS4294967295",
+      "error": "invalid_input"
+    },
+    {
+      "input": "4294967296",
+      "error": "invalid_input"
+    },
+    {
+      "input": "99999999999999999999999",
+      "error": "invalid_input"
+    },
+    {
+      "input": "AS",
+      "error": "invalid_input"
+    },
+    {
+      "input": "AS-1",
+      "error": "invalid_input"
+    },
+    {
+      "input": "+13335",
+      "error": "invalid_input"
+    },
+    {
+      "input": "AS 13335",
+      "error": "invalid_input"
+    },
+    {
+      "input": "1.1. 1.1",
+      "error": "invalid_input"
+    },
+    {
+      "input": " 1.1.1.1",
+      "error": "invalid_input"
+    },
+    {
+      "input": "1.1.1.1 ",
+      "error": "invalid_input"
+    },
+    {
+      "input": "AS١٣٣٣٥",
+      "error": "invalid_input"
+    },
+    {
+      "input": "1.1.1.1\u0000",
+      "error": "invalid_input"
+    },
+    {
+      "input": "AS0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001",
+      "error": "invalid_input"
+    },
+    {
+      "input": "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
+      "error": "invalid_input"
+    }
+  ],
+  "urls": [
+    {
+      "route": "/ip",
+      "raw": "",
+      "expected": {
+        "state": "hero",
+        "route": "/ip"
+      }
+    },
+    {
+      "route": "/ip/overview",
+      "raw": "",
+      "expected": {
+        "state": "redirect",
+        "route": "/ip"
+      }
+    },
+    {
+      "route": "/ip",
+      "raw": "q=1.1.1.1",
+      "expected": {
+        "state": "redirect",
+        "route": "/ip/overview",
+        "q": "1.1.1.1",
+        "kind": "ip",
+        "query": "q=1.1.1.1"
+      }
+    },
+    {
+      "route": "/ip",
+      "raw": "q=as0013335",
+      "expected": {
+        "state": "redirect",
+        "route": "/ip/asn",
+        "q": "AS13335",
+        "kind": "asn",
+        "query": "q=AS13335"
+      }
+    },
+    {
+      "route": "/ip/overview",
+      "raw": "q=2001%3A0DB8%3A%3A1",
+      "expected": {
+        "state": "ok",
+        "route": "/ip/overview",
+        "q": "2001:db8::1",
+        "kind": "ip",
+        "query": "q=2001%3Adb8%3A%3A1"
+      }
+    },
+    {
+      "route": "/ip/quality",
+      "raw": "q=AS13335",
+      "expected": {
+        "state": "redirect",
+        "route": "/ip/asn",
+        "q": "AS13335",
+        "kind": "asn",
+        "query": "q=AS13335"
+      }
+    },
+    {
+      "route": "/ip/class-c",
+      "raw": "q=%3A%3A1",
+      "expected": {
+        "state": "ok",
+        "route": "/ip/class-c",
+        "q": "::1",
+        "kind": "ip",
+        "query": "q=%3A%3A1"
+      }
+    },
+    {
+      "route": "/ip/asn",
+      "raw": "q=1.1.1.1",
+      "expected": {
+        "state": "ok",
+        "route": "/ip/asn",
+        "q": "1.1.1.1",
+        "kind": "ip",
+        "query": "q=1.1.1.1"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "origin=as0013335&q=%3A%3Affff%3A1.1.1.1",
+      "expected": {
+        "state": "ok",
+        "route": "/ip/bgp",
+        "q": "1.1.1.1",
+        "kind": "ip",
+        "origin": "AS13335",
+        "query": "q=1.1.1.1&origin=AS13335"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q=13335",
+      "expected": {
+        "state": "ok",
+        "route": "/ip/bgp",
+        "q": "AS13335",
+        "kind": "asn",
+        "query": "q=AS13335"
+      }
+    },
+    {
+      "route": "/ip/overview",
+      "raw": "q=+1.1.1.1+",
+      "expected": {
+        "state": "ok",
+        "route": "/ip/overview",
+        "q": "1.1.1.1",
+        "kind": "ip",
+        "query": "q=1.1.1.1"
+      }
+    },
+    {
+      "route": "/ip/overview",
+      "raw": "%71=1.1.1.1",
+      "expected": {
+        "state": "ok",
+        "route": "/ip/overview",
+        "q": "1.1.1.1",
+        "kind": "ip",
+        "query": "q=1.1.1.1"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q=",
+      "expected": {
+        "state": "error",
+        "error": "invalid_query"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q",
+      "expected": {
+        "state": "error",
+        "error": "invalid_query"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q=1.1.1.1&q=8.8.8.8",
+      "expected": {
+        "state": "error",
+        "error": "invalid_query"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q=1.1.1.1&%71=8.8.8.8",
+      "expected": {
+        "state": "error",
+        "error": "invalid_query"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q=1.1.1.1&origin=AS1&origin=AS1",
+      "expected": {
+        "state": "error",
+        "error": "invalid_query"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q=1.1.1.1&",
+      "expected": {
+        "state": "error",
+        "error": "invalid_query"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "&q=1.1.1.1",
+      "expected": {
+        "state": "error",
+        "error": "invalid_query"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q=1.1.1.1&&",
+      "expected": {
+        "state": "error",
+        "error": "invalid_query"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q=1.1.1.1&extra=1",
+      "expected": {
+        "state": "error",
+        "error": "invalid_query"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "=1.1.1.1",
+      "expected": {
+        "state": "error",
+        "error": "invalid_query"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "Q=1.1.1.1",
+      "expected": {
+        "state": "error",
+        "error": "invalid_query"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "origin=AS13335",
+      "expected": {
+        "state": "error",
+        "error": "invalid_query"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q=%",
+      "expected": {
+        "state": "error",
+        "error": "invalid_query"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q=%0",
+      "expected": {
+        "state": "error",
+        "error": "invalid_query"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q=%GG",
+      "expected": {
+        "state": "error",
+        "error": "invalid_query"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q=%FF",
+      "expected": {
+        "state": "error",
+        "error": "invalid_query"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q=%C0%AF",
+      "expected": {
+        "state": "error",
+        "error": "invalid_query"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q=%ED%A0%80",
+      "expected": {
+        "state": "error",
+        "error": "invalid_query"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q=1.1.1.1&origin=",
+      "expected": {
+        "state": "error",
+        "error": "invalid_query"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q=111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
+      "expected": {
+        "state": "error",
+        "error": "invalid_query"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q=%20",
+      "expected": {
+        "state": "error",
+        "error": "invalid_input"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q=example.test",
+      "expected": {
+        "state": "error",
+        "error": "invalid_input"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q=1.1.1.1%2F24",
+      "expected": {
+        "state": "error",
+        "error": "invalid_input"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q=AS64512",
+      "expected": {
+        "state": "error",
+        "error": "invalid_input"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q=%251.1.1.1",
+      "expected": {
+        "state": "error",
+        "error": "invalid_input"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q=1.1.1.1%3Borigin%3DAS1",
+      "expected": {
+        "state": "error",
+        "error": "invalid_input"
+      }
+    },
+    {
+      "route": "/ip/overview",
+      "raw": "q=1.1.1.1&origin=AS13335",
+      "expected": {
+        "state": "error",
+        "error": "invalid_origin"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q=AS13335&origin=AS13335",
+      "expected": {
+        "state": "error",
+        "error": "invalid_origin"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q=1.1.1.1&origin=8.8.8.8",
+      "expected": {
+        "state": "error",
+        "error": "invalid_origin"
+      }
+    },
+    {
+      "route": "/ip/bgp",
+      "raw": "q=1.1.1.1&origin=AS64512",
+      "expected": {
+        "state": "error",
+        "error": "invalid_origin"
+      }
+    },
+    {
+      "route": "/latency",
+      "raw": "q=1.1.1.1",
+      "expected": {
+        "state": "error",
+        "error": "invalid_route"
+      }
+    }
+  ],
+  "origin_membership": [
+    {
+      "requested": 13335,
+      "origins": [
+        13335,
+        15169
+      ],
+      "valid": true
+    },
+    {
+      "requested": 15169,
+      "origins": [
+        13335,
+        15169
+      ],
+      "valid": true
+    },
+    {
+      "requested": 1,
+      "origins": [
+        13335,
+        15169
+      ],
+      "valid": false
+    },
+    {
+      "requested": 13335,
+      "origins": [],
+      "valid": false
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+{
+  "base64": "VklBMwMAAwBAAAkAAAAAAAMAAABAAAAAAAAAALIBAAAAAAAAOAEAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAEAAQAAAAAAAAEAAAAAAAA3AAAAAAAAAEgAAAAAAAAAvoN54/+Bd4Me8xKAyJ+xnokzS/8QV8Rab+V/CiSC0poDAAEAAAAAADcBAAAAAAAAQgAAAAAAAABoAAAAAAAAAAnKmQouz9/DJ80K8PAsNNA05IoCieOPudxsKu3SydeLCAABAAAAAAB5AQAAAAAAADkAAAAAAAAAiAAAAAAAAACKb0cs8Lbuj2/+Q6Tx6LQ4PY1X72etBmIhSee4eF02kii1L/0kSFUBANLBBg/gSQGAAqUgJRH11PTb/z4DagTdJNTyHPZ7BQQALUXc3IimoTmcF3YEDFwotS/9JGitAQBCwgcQ0MECMAwjV+FwNBNEwfAp9cN8RchkxwtBvprJDg4ECABTcQB2AbuAXcDWzAZgok5bjGZPOeMotS/9JIhlAQCyAQYO0IEAkAoAAKaj779feB4CT8TshSmHvisHAMAQoGlAGBg8VG0wOcbh5kteW7g=",
+  "cases": [
+    {
+      "ip": "203.0.113.1",
+      "origin": 3356,
+      "announcement": "203.0.0.0/16",
+      "status": 2
+    },
+    {
+      "ip": "203.0.113.1",
+      "origin": 13335,
+      "announcement": "203.0.0.0/16",
+      "status": 1
+    },
+    {
+      "ip": "203.0.113.1",
+      "origin": 174,
+      "announcement": "203.0.113.0/24",
+      "status": 3
+    },
+    {
+      "ip": "203.0.113.1",
+      "origin": 13335,
+      "announcement": "203.0.113.0/24",
+      "status": -1
+    },
+    {
+      "ip": "203.0.113.1",
+      "origin": 13335,
+      "announcement": "203.0.113.0/25",
+      "status": -1
+    },
+    {
+      "ip": "203.0.114.1",
+      "origin": 174,
+      "announcement": "203.0.113.0/24",
+      "status": -1
+    },
+    {
+      "ip": "203.0.113.1",
+      "origin": 13335,
+      "announcement": "",
+      "status": -1
+    },
+    {
+      "ip": "2001:db8:1::1",
+      "origin": 3356,
+      "announcement": "2001:db8::/32",
+      "status": 1
+    },
+    {
+      "ip": "2001:db8:1::1",
+      "origin": 13335,
+      "announcement": "2001:db8::/32",
+      "status": 2
+    },
+    {
+      "ip": "2001:db8:1::1",
+      "origin": 174,
+      "announcement": "2001:db8:1::/48",
+      "status": 3
+    },
+    {
+      "ip": "2001:db8:1::1",
+      "origin": 3356,
+      "announcement": "2001:db8:1::/48",
+      "status": -1
+    },
+    {
+      "ip": "2001:db8:1::1",
+      "origin": 3356,
+      "announcement": "2001:db8:1::/64",
+      "status": -1
+    }
+  ]
+}

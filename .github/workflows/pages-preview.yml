@@ -1,0 +1,101 @@
+name: Atlas frozen Pages preview regression (no production)
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: Successful main-branch integration run containing the uploaded exact synthetic candidate
+        required: true
+        type: string
+      preview_url:
+        description: Immutable https://<deployment-hash>.<project>.pages.dev origin serving that exact artifact
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: atlas-preview-${{ inputs.candidate_run_id }}
+  cancel-in-progress: false
+
+jobs:
+  preview:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.13.7'
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.13.0'
+      - name: Require successful trusted main integration artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ATLAS_RUN_ID: ${{ inputs.candidate_run_id }}
+          ATLAS_REPOSITORY: ${{ github.repository }}
+          ATLAS_PREVIEW_URL: ${{ inputs.preview_url }}
+        run: |
+          python - <<'PY'
+          import json, os, re, subprocess
+          from tools.hosted.candidate import check_preview_origin
+          run_id = os.environ['ATLAS_RUN_ID']
+          if not re.fullmatch(r'[1-9][0-9]{0,19}', run_id):
+              raise SystemExit('invalid candidate run id')
+          check_preview_origin(os.environ['ATLAS_PREVIEW_URL'])
+          repository = os.environ['ATLAS_REPOSITORY']
+          run = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repository}/actions/runs/{run_id}']))
+          if (run['conclusion'] != 'success' or run['status'] != 'completed'
+              or run['head_branch'] != 'main' or run['event'] not in ('push', 'workflow_dispatch')
+              or run['path'] != '.github/workflows/p0-contracts.yml'
+              or run['head_repository']['full_name'] != repository):
+              raise SystemExit('candidate must come from successful trusted main integration')
+          print('Candidate revision:', run['head_sha'])
+          PY
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: atlas-synthetic-public
+          path: build-private/frozen-public
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: synthetic-integration-evidence
+          path: reports
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+      - name: Compare every deployed asset and effective control policy
+        env:
+          ATLAS_PREVIEW_URL: ${{ inputs.preview_url }}
+        run: python tools/hosted/candidate.py --public build-private/frozen-public --preview-url "$ATLAS_PREVIEW_URL"
+      - name: Install locked harness and current stable Chrome
+        working-directory: tools/hosted
+        run: |
+          npm exec --yes --package pnpm@12.18.0 -- pnpm install --frozen-lockfile --ignore-scripts
+          npm exec --yes --package pnpm@12.18.0 -- pnpm exec playwright install --with-deps chrome
+      - name: Run hosted browser regression against frozen Pages deployment
+        env:
+          ATLAS_PREVIEW_URL: ${{ inputs.preview_url }}
+        run: node tools/hosted/ui-regression.mjs
+      - name: Recheck identity and expiry after browser regression
+        env:
+          ATLAS_PREVIEW_URL: ${{ inputs.preview_url }}
+        run: python tools/hosted/candidate.py --public build-private/frozen-public --preview-url "$ATLAS_PREVIEW_URL"
+      - uses: actions/upload-artifact@v7.0.0
+        if: always()
+        with:
+          name: hosted-synthetic-preview-evidence
+          path: |
+            reports/preview-identity.json
+            reports/ui-regression.json
+          if-no-files-found: error
+          retention-days: 7
+
+# Direct Upload happens separately using the frozen atlas-synthetic-public tree.
+# This workflow has no deployment credentials, production job or approval mutation.
+# A synthetic preview pass never satisfies real-source coverage/performance gates.

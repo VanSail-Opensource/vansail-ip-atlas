@@ -1,0 +1,28 @@
+{
+  "contract_revision": 1,
+  "synthetic": true,
+  "scope": "P0 contract examples only; never actual routing or Tier-1 evidence",
+  "relationships": [
+    {"provider": 100, "customer": 200, "from": 200, "to": 100, "expected": "transit_upstream"},
+    {"provider": 100, "customer": 200, "from": 100, "to": 200, "expected": "customer"},
+    {"provider": 100, "customer": 200, "from": 100, "to": 300, "expected": "unknown"}
+  ],
+  "percentiles": [
+    {"values": [0, 1, 1, 3, 3], "expected_p98": 3},
+    {"values": [1], "expected_p98": 1}
+  ],
+  "peer_cores": [
+    {"id": "complete-core", "nodes": [100, 200, 300], "peers": [[100, 200], [100, 300], [200, 300]], "expected": [100, 200, 300]},
+    {"id": "connected-is-not-near-complete", "nodes": [100, 200, 300, 400], "peers": [[100, 200], [200, 300], [300, 400]], "expected": []},
+    {"id": "pair-is-not-core", "nodes": [100, 200], "peers": [[100, 200]], "expected": []},
+    {"id": "peeling-keeps-triangle", "nodes": [100, 200, 300, 400], "peers": [[100, 200], [100, 300], [200, 300], [300, 400]], "expected": [100, 200, 300]}
+  ],
+  "stability": [
+    {"id": "bootstrap", "current": true, "previous": null, "separation_hours": 0, "same_policy": true, "eligible": true, "expected": "unknown"},
+    {"id": "two-snapshots", "current": true, "previous": true, "separation_hours": 24, "same_policy": true, "eligible": true, "expected": "tier1_candidate"},
+    {"id": "too-close", "current": true, "previous": true, "separation_hours": 23.99, "same_policy": true, "eligible": true, "expected": "unknown"},
+    {"id": "changed-policy", "current": true, "previous": true, "separation_hours": 24, "same_policy": false, "eligible": true, "expected": "unknown"},
+    {"id": "withdrawn-history", "current": true, "previous": true, "separation_hours": 24, "same_policy": true, "eligible": false, "expected": "unknown"},
+    {"id": "current-fails-retract-now", "current": false, "previous": true, "separation_hours": 24, "same_policy": true, "eligible": true, "expected": "unknown"}
+  ]
+}

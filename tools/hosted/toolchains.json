@@ -1,0 +1,43 @@
+{
+  "contract_version": 1,
+  "verified_at": "2026-11-08",
+  "go": "1.27.3",
+  "node": "26.13.0",
+  "pnpm": "12.18.0",
+  "nuxt": "4.6.4",
+  "nuxt_ui": "4.12.0",
+  "motion_v": "2.11.1",
+  "leaflet": "1.9.4",
+  "tailwindcss": "4.3.5",
+  "typescript": "6.0.3",
+  "vue_tsc": "3.3.14",
+  "leaflet_types": "1.9.22",
+  "playwright": "1.65.0",
+  "bundled_zstd_decoder": "fzstd@0.1.1",
+  "decoder_integrity": "sha512-dkuVSOKKwh3eas5VkJy1AW1vFpet8TA/fGmVA5krThl8YcOVE/8ZIoEA1+U1vEn5ckxxhLirSdY837azmbaNHA==",
+  "browser_channel": "chrome",
+  "browser_version_policy": "current-stable-recorded-every-run",
+  "compressor": {
+    "module": "github.com/klauspost/compress",
+    "version": "v1.20.3",
+    "level": 3,
+    "concurrency": 1,
+    "window_bytes": 8388608,
+    "checksum": true,
+    "single_segment": "input-at-most-window",
+    "zero_frames": true,
+    "dictionary": false
+  },
+  "evidence": [
+    "https://go.dev/dl/",
+    "https://github.com/nodejs/node/releases/tag/v26.13.0",
+    "https://www.npmjs.com/package/pnpm/v/12.18.0",
+    "https://github.com/nuxt/nuxt/releases/tag/v4.6.4",
+    "https://github.com/nuxt/ui/releases/tag/v4.12.0",
+    "https://www.npmjs.com/package/motion-v/v/2.11.1",
+    "https://www.npmjs.com/package/leaflet/v/1.9.4",
+    "https://www.npmjs.com/package/playwright/v/1.65.0",
+    "https://github.com/101arrowz/fzstd"
+  ],
+  "node_types": "26.6.6"
+}

@@ -1,0 +1,40 @@
+{
+  "contract_revision": 1,
+  "synthetic": true,
+  "scope": "P0 arithmetic examples only; never source certification or coverage",
+  "observation": [
+    {"id": "literal-subscription-one-half-life", "reliability": 0.8, "severity": 1, "specificity": 0.8, "age_hours": 72, "half_life_hours": 72, "expected": 0.32},
+    {"id": "future-within-tolerance", "reliability": 1, "severity": 1, "specificity": 1, "age_hours": -24, "half_life_hours": 168, "expected": 1},
+    {"id": "future-outside-tolerance", "reliability": 1, "severity": 1, "specificity": 1, "age_hours": -24.0001, "half_life_hours": 168, "error": "quarantined"}
+  ],
+  "layers": [
+    {"id": "single-malware", "observations": [["malware", "a", 1]], "expected_risk": 0.8646647167633873},
+    {"id": "same-family-duplicate", "observations": [["malware", "a", 1], ["malware", "a", 1], ["malware", "a", 0.5]], "expected_risk": 0.8646647167633873},
+    {"id": "independent-family", "observations": [["malware", "a", 1], ["malware", "b", 1]], "expected_risk": 0.9816843611112658},
+    {"id": "proxy-alias-dedup", "observations": [["proxy", "a", 1], ["cloudflare_proxyip", "a", 1]], "expected_risk": 0.24421625854427453},
+    {"id": "unknown-does-not-mean-clean", "observations": [], "expected_risk": 0}
+  ],
+  "quality": [
+    {"id": "eligible-exact-malware", "ipv4": true, "layers": [0.8646647167633873, 0, 0, 0], "complete_families": [["a", "b"], ["a", "b"], ["a", "b"], ["a", "b"]], "expected_score": 52, "expected_confidence": "low"},
+    {"id": "positive-only-not-a-score", "ipv4": true, "layers": [0.8646647167633873, null, null, null], "complete_families": [[], [], [], []], "expected_score": null, "expected_confidence": "unrated"},
+    {"id": "disjoint-scope-families", "ipv4": true, "layers": [0, 0, 0, 0], "complete_families": [["a", "b"], ["c", "d"], ["a", "b"], ["a", "b"]], "expected_score": null, "expected_confidence": "unrated"},
+    {"id": "ipv6-remains-unrated", "ipv4": false, "layers": [0, 0, 0, 0], "complete_families": [["a", "b"], ["a", "b"], ["a", "b"], ["a", "b"]], "expected_score": null, "expected_confidence": "unrated"},
+    {"id": "half-up-tie", "ipv4": true, "layers": [0.5, 0, 0, 0], "complete_families": [["a", "b", "c"], ["a", "b", "c"], ["a", "b", "c"], ["a", "b", "c"]], "expected_score": 73, "expected_confidence": "medium"},
+    {"id": "binary64-below-half-boundary", "ipv4": true, "layers": [0.9, 0, 0, 0], "complete_families": [["a", "b", "c"], ["a", "b", "c"], ["a", "b", "c"], ["a", "b", "c"]], "expected_score": 50, "expected_confidence": "medium"}
+  ],
+  "asn": [
+    {"id": "one-host-not-whole-asn", "risks": [0.8], "families": 1, "explicit_risk": 0, "expected_risk": 0.001040040756597286, "expected_confidence": 0.005208333333333333, "expected_weighted": 0.0000008125318410916296},
+    {"id": "explicit-without-exact-support", "risks": [], "families": 2, "explicit_risk": 0.5, "expected_risk": 0.5, "expected_confidence": 0, "expected_weighted": 0}
+  ],
+  "neighbor": [
+    {"id": "self-only-is-excluded", "query": "192.0.2.1", "observations": [["192.0.2.1", 1, "self"]], "expected_density": 0, "expected_risk": 0, "expected_confidence": 0},
+    {"id": "one-neighbor-and-self", "query": "192.0.2.1", "observations": [["192.0.2.1", 1, "self"], ["192.0.2.2", 0.8, "a"], ["192.0.2.2", 0.8, "a"]], "expected_density": 0.0031372549019607846, "expected_risk": 0.04895707278807204, "expected_confidence": 0.020833333333333332}
+  ],
+  "geo": [
+    {"id": "two-participants-not-two-agreeing", "min_support": 2, "votes": [["a", "City A", 0.8], ["b", "City B", 0.7]], "expected": null},
+    {"id": "winner-support-and-denominator", "min_support": 2, "votes": [["a", "City A", 0.8], ["b", "City A", 0.7], ["c", "City B", 1.0]], "expected": "City A"},
+    {"id": "margin-below-threshold", "min_support": 2, "votes": [["a", "City A", 0.55], ["b", "City A", 0.55], ["c", "City B", 1.0]], "expected": null},
+    {"id": "same-family-cannot-create-city-support", "min_support": 2, "votes": [["a", "City A", 0.8], ["a", "City A", 0.8]], "expected": null},
+    {"id": "equal-weight-conflict-abstains", "min_support": 1, "votes": [["a", "City A", 0.8], ["a", "City B", 0.8]], "expected": null}
+  ]
+}

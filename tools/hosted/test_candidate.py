@@ -1,7 +1,10 @@
 import json
+import io
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
+from urllib.parse import urlsplit
 
 from tools.hosted.candidate import check_candidate, check_preview_origin, verify_preview
 from tools.release_contract.contracts import ContractError, make_manifest, parse_canonical, sha256, tree_inventory
@@ -62,6 +65,39 @@ class CandidateTests(unittest.TestCase):
                     "https://user:pass@a01b23cd.atlas.pages.dev", "https://127.0.0.1"):
             with self.subTest(url=url), self.assertRaises(ContractError):
                 check_preview_origin(url)
+
+    def test_http_preview_identifies_qa_client_instead_of_blocked_library_default(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            files, report = self.fixture(root)
+            class Response(io.BytesIO):
+                def __init__(self, status, headers, body):
+                    super().__init__(body)
+                    self.status, self.headers = status, headers
+            calls = []
+            def open_request(request, timeout):
+                agent = request.get_header("User-agent", "Python-urllib/default")
+                calls.append(agent)
+                if agent.startswith("Python-urllib/"):
+                    return Response(403, {}, b"error code: 1010")
+                path = urlsplit(request.full_url).path
+                if path == "/":
+                    return Response(302, {"location": "/ip"}, b"")
+                name = path.removeprefix("/")
+                if name == "ip/":
+                    name = "ip/index.html"
+                if name in ("200", "404"):
+                    name += ".html"
+                headers = {"content-security-policy": "default-src 'self'", "referrer-policy": "no-referrer",
+                           "x-content-type-options": "nosniff", "cache-control": "public, max-age=0, must-revalidate"}
+                if name.startswith(("_atlas/objects/", "_atlas/releases/")):
+                    headers["cache-control"] = "public, max-age=31536000, immutable"
+                return Response(200, headers, files[name])
+            with patch("tools.hosted.candidate.urllib.request.build_opener") as factory, patch("tools.hosted.candidate.time.time", return_value=150):
+                factory.return_value.open = open_request
+                result = verify_preview(root, report, "https://a01b23cd.atlas.pages.dev", 150)
+            self.assertEqual(result["status"], "passed")
+            self.assertTrue(all(agent.startswith("VanSail-IP-Atlas-Preview-QA/") for agent in calls))
 
     def test_preview_verifies_every_served_byte_and_effective_headers(self):
         with tempfile.TemporaryDirectory() as directory:

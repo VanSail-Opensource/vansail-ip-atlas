@@ -76,10 +76,15 @@ func run(ctx context.Context, args []string) error {
 		descriptor := fs.String("descriptor", "build-private/synthetic-descriptor.json", "private descriptor path")
 		clock := fs.Int64("clock", time.Now().UTC().Unix(), "explicit evaluation clock, UTC Unix seconds")
 		golden := fs.String("golden", "", "optional shared synthetic golden corpus JSON")
+		graph24 := fs.Bool("graph24", false, "include the artificial 24-node AS424240 graph performance example")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
-		release, err := via3.Synthetic(ctx, *clock)
+		build := via3.Synthetic
+		if *graph24 {
+			build = via3.SyntheticGraph24
+		}
+		release, err := build(ctx, *clock)
 		if err != nil {
 			return err
 		}
@@ -114,7 +119,11 @@ func run(ctx context.Context, args []string) error {
 			if err != nil {
 				return err
 			}
-			for _, q := range []string{"203.0.113.1", "203.0.113.2", "203.0.113.200", "203.0.114.1", "2001:db8::1", "::ffff:203.0.113.1", "AS13335", "AS15169", "8.8.8.8"} {
+			queries := []string{"203.0.113.1", "203.0.113.2", "203.0.113.200", "203.0.114.1", "2001:db8::1", "::ffff:203.0.113.1", "AS13335", "AS15169", "8.8.8.8"}
+			if *graph24 {
+				queries = append(queries, "AS424240")
+			}
+			for _, q := range queries {
 				answer, err := reader.Lookup(ctx, q)
 				if err != nil {
 					return err

@@ -93,8 +93,16 @@ physical location.
 
 ## Quality and reasons
 
-Numeric quality is IPv4-only in this version. Complete coverage and all four
-layers are required exactly as `configs/scoring.yaml`/`docs/scoring.md` specify.
+The approved `release-scope-v2` amendment (2026-11-08) makes numeric quality
+optional for production release. A production snapshot may contain no numeric
+scores while retaining supported positive reasons and observed contributions.
+That state is explicitly unrated; it is not a clean assessment. This amendment
+uses the existing null/presence representation and changes no VIA3 schema or
+scoring-model revision.
+
+Numeric quality is IPv4-only in this version. Publishing a non-null score
+requires complete coverage and all four layers exactly as
+`configs/scoring.yaml`/`docs/scoring.md` specify.
 `quality_status=unrated` means `quality=null`, never 0 or 100. An assessed score
 has presence bit 9; status assessed without that bit, or unrated with it, is
 invalid. Confidence 0 is unrated,1 low,2 medium,3 high. Missing coverage does not

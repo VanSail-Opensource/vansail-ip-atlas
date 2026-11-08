@@ -4,6 +4,8 @@
 
 Local implementation is now in progress (2026-11-08). The current executable work, user-approved bundled-Zstandard amendment, commands, measured results and remaining integration/production gates are recorded in `docs/implementation-status.md` and `VALIDATION_REPORT.md`. The catalog/reconnaissance snapshot and gap register below describe the starting state; they do not override those dated execution results. No phase or production release is declared complete by this checkpoint.
 
+**Approved product-scope amendment `release-scope-v2` — 2026-11-08:** numeric quality is optional for production release. The user removed the prerequisite to obtain two complete risk-assessment families before releasing. Production may publish `quality=null`, unrated confidence and supported positive reason flags while numeric coverage is inadequate. The existing requirements for publishing a non-null score remain unchanged: two independent current complete families covering all four required IPv4 layers. This amendment changes release gating only; it changes no scoring coefficient, confidence threshold, coverage meaning, source-admission rule or VIA3 field. All other required capabilities and hosted quality gates remain mandatory.
+
 This document is the implementation plan; it is not a release claim. `AGENTS.md` remains the normative engineering contract. If this plan conflicts with `AGENTS.md`, `AGENTS.md` wins. The documents listed under **Authoritative contracts** define the executable details that this plan schedules and gates.
 
 Workspace review: **2026-11-08**. The source catalog and format-sample inventory have been reconciled after unavailable entries were removed. Observations below were checked against local files; no upstream freshness, rights, parser certification, hosted regression or deployment was revalidated.
@@ -13,7 +15,7 @@ The current source-admission snapshot is:
 - 91 source entries: 82 `candidate`, 7 `rights_approved`, 2 `retired`, 0 `fixture_tested`, 0 `active`.
 - All 91 entries have `fixture.status: missing`.
 - Publication proof is `unavailable` for 65 entries. The remaining entries use GitHub release or commit metadata, which still has to be tied to the exact payload and verified at build time.
-- No source declares `complete` coverage: 39 declare `mapping` and 52 declare `positive_only`. Numeric quality therefore has no qualifying complete family in the current catalog.
+- No source declares `complete` coverage: 39 declare `mapping` and 52 declare `positive_only`. Numeric quality therefore remains unrated in the current catalog; under `release-scope-v2`, that absence does not itself block production release.
 - The seven rights-approved entries have `distribution: allow`, but none records an explicit `attribution_required: false`; explicit no-attribution proof remains required before activation.
 - All 21 proxy-subscription repositories use `evidence_family: public-subscription-aggregators`.
 - BGP MRT ingestion is disabled, and no required BGP/Tier-1 capability is currently qualified.
@@ -27,10 +29,10 @@ The workspace also contains format reconnaissance, which is separate from admiss
 
 Consequences:
 
-1. Production is hard-blocked until every capability in the capability matrix has approved, current, fixture-tested real-source coverage.
+1. Production is hard-blocked until every required capability in the capability matrix has approved, current, fixture-tested real-source coverage. Numeric quality is the explicit optional exception under `release-scope-v2`.
 2. Rights approval alone does not qualify a source. The seven `rights_approved` entries still lack observed fixtures and explicit no-attribution proof, so they cannot be active.
 3. Synthetic fixtures may validate engineering behavior in previews. They must never satisfy a production gate or be described as real coverage.
-4. No feature may be silently dropped, replaced by an allowlist, or filled with a placeholder to bypass the block. Production remains unavailable until the promised capability is genuinely supported.
+4. No required feature may be silently dropped, replaced by an allowlist, or filled with a placeholder to bypass the block. The optional numeric-quality scope change is explicit; an unrated result must not be presented as a numeric assessment.
 
 ## Product contract
 
@@ -41,7 +43,7 @@ The v1 product contract covers:
 - IPv4 and IPv6 country, region, city and quantized coordinates.
 - Network identity and every origin for MOAS prefixes.
 - Usage, assignment, anycast and IPv4 directed-broadcast facts when explicitly evidenced.
-- Explainable risk reasons, numeric IPv4 quality when coverage is adequate, and unrated states otherwise.
+- Explainable risk reasons and unrated states, with optional numeric IPv4 quality only when coverage is adequate. Complete risk feeds are not a production prerequisite under `release-scope-v2`.
 - IPv4 `/24` context, ASN-wide context, RPKI, observed BGP paths, directed relationships and source-derived Tier-1 candidates.
 
 Non-negotiable constraints:
@@ -143,7 +145,7 @@ A parser must not infer coverage from a source's name. Coverage is a reviewed pr
 
 ## Capability gate
 
-The release tooling must derive this matrix mechanically from the catalog, fixtures, rights decisions and current snapshots. The table is the plan's starting state, not a manually maintained release override. Every row is blocking; one failure blocks production.
+The release tooling must derive this matrix mechanically from the catalog, fixtures, rights decisions and current snapshots. The table is the plan's starting state, not a manually maintained release override. All rows except numeric quality are required; one failed required row blocks production. Under `release-scope-v2`, the private capability report identifies numeric quality as `required: false` and reports `unrated` when unqualified. A qualified optional row permits numeric publication only under the unchanged scoring rules.
 
 | Capability | Required approved current evidence | Snapshot status | Gate |
 |---|---|---|---|
@@ -153,7 +155,7 @@ The release tooling must derive this matrix mechanically from the catalog, fixtu
 | ASN/prefix mapping | Current origin/prefix mapping with all MOAS origins preserved | Two ASN entries are rights-approved but fixture-missing | Blocked |
 | Usage | Current direct classification evidence with conflict handling | Candidates only | Blocked |
 | Proxy/risk reasons | Current approved evidence for each published reason | 21 subscription aggregators are one family and none is fixture-qualified | Blocked |
-| Numeric quality | Two independent current complete-coverage risk families; all contributing layers assessed | No source declares complete coverage | Blocked |
+| Numeric quality (optional) | For a non-null score only: two independent current complete-coverage risk families; all contributing layers assessed | No source declares complete coverage; publish null score and unrated confidence with supported positive reasons | Unrated; does not block release |
 | `/24` context | Current exact-address observations; no prefix imputation | No active exact-observation family | Blocked |
 | RPKI | Current VRP data | Candidate only | Blocked |
 | BGP origins/paths | Approved current MRT snapshots from at least two independent path families | MRT disabled; candidate sources only | Blocked |
@@ -161,7 +163,7 @@ The release tooling must derive this matrix mechanically from the catalog, fixtu
 | Tier-1 | Current relationships plus at least two independent current path observations | No qualified inputs | Blocked |
 | Pages release | Complete manifest, hosted gates and exact-hash approval | No approved release | Blocked |
 
-Synthetic data may satisfy test-fixture rows only. It never satisfies a capability row.
+Synthetic data may satisfy test-fixture rows only. It never qualifies real-source coverage for a capability row. Optional numeric quality is not marked qualified merely because a synthetic score fixture passes.
 
 ## P0 contract closure
 
@@ -188,7 +190,7 @@ Pin the Go, Node/pnpm, Nuxt/UI, Motion, Leaflet and compression toolchains as P0
 
 Create a minimal synthetic corpus for public records, all VIA3 sections, decoder syntax and URL semantics. Keep real source certification fixtures separate and build-private. Record the IPv4-only numeric-quality restriction, origin deep links, no-attribution proof and release-expiry semantics in their owning contracts before readers or UI depend on them.
 
-Exit criterion: C01-C12 have resolved contracts and their required checks have run; unknown config fields fail; all public layouts are frozen; source states are unambiguous; the CAIDA/MRT contradictions are resolved; a derived capability report correctly reports every production row blocked on current data. Source qualification may continue later without blocking synthetic engineering work.
+Exit criterion: C01-C12 have resolved contracts and their required checks have run; unknown config fields fail; all public layouts are frozen; source states are unambiguous; the CAIDA/MRT contradictions are resolved; a derived capability report correctly reports every required production row blocked on current data and optional numeric quality as unrated. Source qualification may continue later without blocking synthetic engineering work.
 
 ## Public data and VIA3
 
@@ -261,6 +263,8 @@ Exact, explicit-prefix, ASN and `/24` are separate risk layers. Each layer has o
 A qualifying family must be current, fixture-tested, rights-approved without public attribution, complete for the relevant risk scope, and independent under `evidence_family`. Mapping sources and positive-only blocklists never qualify as complete risk coverage.
 
 Numeric quality is emitted only when all four configured IPv4 layers are `assessed` and at least two independent current families qualify. Otherwise quality is `unrated`; confirmed reason flags and any observed layer contributions remain visible. Confidence is `low` for two qualifying families, `medium` for three, `high` for four or more, and `unrated` otherwise. Confidence describes coverage only.
+
+Under `release-scope-v2`, this is a per-result numeric-publication gate, not a production-release prerequisite. The quality route, supported reason flags, observed contributions and explicit unrated/null behavior remain required and tested even if no production address qualifies for a number. Missing complete feeds never justify treating positive-only absence as clean or assigning a fallback score.
 
 Numeric quality v1 is IPv4-only because the configured neighbor layer is `/24`. IPv6 may show confirmed reasons and available layer facts but remains explicitly `unrated` until a separately specified IPv6 prefix-context model is approved; the system must not treat an absent IPv6 neighbor layer as zero risk by renormalization.
 
@@ -339,7 +343,7 @@ The build is an explicit dependency graph:
 4. Deduplicate exact bytes, canonical records and evidence families without losing the private contributor index needed for retraction.
 5. Partition and external-sort within declared RSS and scratch limits.
 6. Recompute every partition invalidated by a source change, withdrawal, expiry, parser/schema/config change or mapping change.
-7. Fuse geo, network, usage, quality, ASN, `/24`, RPKI, BGP and Tier-1 outputs deterministically and derive the capability report. An unmet production capability blocks promotion.
+7. Fuse geo, network, usage, quality, ASN, `/24`, RPKI, BGP and Tier-1 outputs deterministically and derive the capability report. An unmet required production capability blocks promotion; optional numeric quality remains unrated when unqualified.
 8. Encode content-addressed VIA3 objects, verify every object, compute conservative expiry and freeze the immutable manifest.
 9. Generate Nuxt, copy the entire `_atlas` tree into `web/.output/public`, build the complete Pages inventory and scan public output.
 10. Deploy that candidate to preview, run hosted gates and bind their results to its artifact digest.
@@ -357,7 +361,7 @@ No phase is complete until its exit gate has actually run in the repository. Sta
 
 | Phase | Depends on | Reviewable work product | Exit gate |
 |---|---|---|---|
-| P0 | Repository contracts | C01-C12 amendments, strict schemas/validator, synthetic corpus, toolchain locks, hosted harness and capability report | Register resolved; unknown fields and impossible states fail; zero active sources and every production capability blocked on the current catalog |
+| P0 | Repository contracts | C01-C12 amendments, strict schemas/validator, synthetic corpus, toolchain locks, hosted harness and capability report | Register resolved; unknown fields and impossible states fail; zero active sources and every required production capability blocked on the current catalog; optional numeric quality remains unrated |
 | P1 | P0 | Synthetic end-to-end release: typed records, writer, Go/TS readers, indexed router, worker, minimal static `/ip` and `/ip/overview`, manifest/inventory | Deterministic bytes and canonical answers; corruption/migration fixtures fail closed; hosted preview serves every synthetic object and is visibly synthetic |
 | P2 | P0-P1 | Secure fetch, proof, archive handling, private lineage, source state machine, subscription decoders and source-certification reports | Initial/private redirect, size/bomb, cancellation, stale/304, withdrawal, decoder and family-dedupe regressions pass; candidate certification never enables publication implicitly |
 | P3 | P1-P2 | Geo/network/usage fusion, inherited overlays, MOAS, coordinate ownership and sparse `/24` records | LPM/shard-boundary, conflict, presence, retraction and deterministic cold/warm resource checks pass |
@@ -368,7 +372,7 @@ No phase is complete until its exit gate has actually run in the repository. Sta
 
 The synthetic vertical slice may be demonstrated before real-source qualification. It is clearly labelled synthetic and cannot be used for production approval.
 
-Source rights, exact-asset discovery and coverage certification form a continuing workstream from P0/P2 through P7. They need not block synthetic parser/UI development, but no phase test may relabel a synthetic capability as approved real-source coverage. In particular, finding a valid complete-coverage pair is a product dependency that code cannot supply.
+Source rights, exact-asset discovery and coverage certification form a continuing workstream from P0/P2 through P7. They need not block synthetic parser/UI development, but no phase test may relabel a synthetic capability as approved real-source coverage. Finding a valid complete-coverage pair remains a dependency for non-null numeric quality; `release-scope-v2` removes it as a production-release prerequisite. Required reason coverage and the other mandatory capabilities still need qualified real sources.
 
 Each implementation change records affected source schemas, VIA3 kinds/public fields, routes, resource budgets and regression fixtures before editing. Its evidence packet includes revision/config hashes, modified paths, hosted run and preview URLs, actual commands and outcomes, benchmark inputs/results, pending gates and assumptions. Publish only source-free public test reports; provenance-rich evidence remains build-private. A green subjob is not a completed phase or production approval.
 
@@ -505,7 +509,6 @@ Rollback selects a previously verified immutable artifact only after current fre
 These are execution blockers, not optional backlog items:
 
 - No source is active, and all 91 fixtures are missing. Production cannot start.
-- No source declares complete coverage and no current complete-coverage pair exists for numeric quality; this requires an approved source/coverage correction, not a code default.
 - Region/city/coordinates, usage, abuse/risk, RPKI, MRT paths, directed relationships and Tier-1 lack qualified current coverage.
 - All seven rights-approved entries still need payload fixtures, publication proof, explicit `attribution_required: false` and final rights revalidation.
 - MRT remains disabled until an approved source and parser pass the P5 entry criteria.
@@ -514,7 +517,7 @@ These are execution blockers, not optional backlog items:
 - C01-C12 remain open until their owning contracts and acceptance evidence exist. This review documents their closure work; it does not assert that the accompanying configs, docs or validator have already been fixed.
 - Browser Zstandard behavior, full-dataset runner capacity, static-release expiry, source-use permissions and a safe two-generation bundle remain unverified. Format samples and historical structural checks do not settle them.
 
-The plan does not authorize a reduced production scope. If a capability cannot be sourced under the public-output and rights rules, the correct outcome is to keep production blocked or obtain an explicit product-scope decision; it is not to publish that capability as unknown, synthetic or inferred.
+Numeric quality has no current complete-coverage pair and therefore remains unrated. Under the approved `release-scope-v2` amendment, this optional capability is not a release blocker and receives no invented fallback number. The amendment does not waive another required capability. If any other required capability cannot be sourced under the public-output and rights rules, production stays blocked until it is supported or the user explicitly changes that scope.
 
 ## Completion checklist
 
@@ -533,7 +536,7 @@ The plan does not authorize a reduced production scope. If a capability cannot b
 - [ ] Manifest, object hashes, Pages inventory, file/size limits and public-output scans pass.
 - [ ] RSS, scratch, cold/warm build, lookup and browser performance measurements pass on hosted infrastructure.
 - [ ] Hosted measurement protocols and sample counts are fixed; whole-process/whole-disk peaks and cold-query payload accounting are reported.
-- [ ] Every capability matrix row is satisfied by approved current real-source coverage.
+- [ ] Every required capability matrix row is satisfied by approved current real-source coverage; optional numeric quality is explicitly reported as qualified or unrated, with non-null scores obeying the unchanged coverage rules.
 - [ ] Release approval binds the exact source catalog, rights audit and manifest hashes; deployment verifies the preview and production artifact digest matches.
 - [ ] Rollback release remains available until the new release is verified.
 

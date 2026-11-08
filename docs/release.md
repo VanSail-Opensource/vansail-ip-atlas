@@ -174,8 +174,10 @@ may remain 30 days if rights allow. Prune unreferenced objects from subsequent t
 
 ## Evidence boundary
 
-The implementation includes local identity/expiry/scanner/inventory tests,
-synthetic packaging and prepared hosted scripts. No Pages candidate, hosted run,
-deployment, rollback or production approval is claimed by these amendments.
-The mandatory hosted browser, source qualification and resource measurements remain
-blocking until they actually run on the frozen candidate.
+The implementation includes identity/expiry/scanner/inventory tests, synthetic
+packaging and hosted workflows. Dated exact-revision results and Pages preview
+evidence belong in `VALIDATION_REPORT.md`; the presence of this contract or a
+workflow is not itself acceptance evidence. Synthetic previews do not establish
+real-source qualification, full-capacity measurements or production approval.
+The mandatory gates remain blocking until they actually pass for the frozen
+candidate and its current user-approved release scope.

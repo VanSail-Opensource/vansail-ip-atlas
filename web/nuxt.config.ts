@@ -2,6 +2,9 @@ import { createHash } from 'node:crypto'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { bundleLicenseAudit } from '../tools/release_contract/bundle_licenses'
+
+const softwareAudit = bundleLicenseAudit(fileURLToPath(new URL('..', import.meta.url)))
 
 function publicBuildId() {
   const root = fileURLToPath(new URL('.', import.meta.url))
@@ -15,6 +18,7 @@ function publicBuildId() {
   }
   visit(join(root, 'app')); visit(join(root, 'public'))
   for (const name of ['nuxt.config.ts', 'tsconfig.json', 'package.json', 'pnpm-lock.yaml']) files.push(join(root, name))
+  files.push(fileURLToPath(new URL('../tools/release_contract/bundle_licenses.ts', import.meta.url)))
   const hash = createHash('sha256')
   for (const path of files.sort()) hash.update(relative(root, path).replaceAll('\\', '/')).update('\0').update(readFileSync(path)).update('\0')
   return hash.digest('hex').slice(0, 32)
@@ -47,6 +51,6 @@ export default defineNuxtConfig({
     prerender: { routes: ['/ip', '/ip/overview', '/ip/quality', '/ip/class-c', '/ip/bgp', '/ip/asn'] },
   },
   sourcemap: false,
-  vite: { build: { target: 'chrome156', modulePreload: { polyfill: false } } },
+  vite: { plugins: [softwareAudit.client], worker: { plugins: softwareAudit.workers }, build: { target: 'chrome156', modulePreload: { polyfill: false } } },
   compatibilityDate: '2026-11-08',
 })

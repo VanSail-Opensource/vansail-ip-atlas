@@ -164,7 +164,7 @@ make a failing measurement pass.
 No whole-dataset benchmark, deployed-page metric, process-memory high-water proof or
 hosted browser test has been measured by these contract amendments.
 
-## Local synthetic diagnostic harness
+## Synthetic diagnostic harness
 
 `tools/hosted/performance.mjs` records twenty independent cold mobile hero contexts,
 five cold synthetic overview lookups and sixty trusted graph event-to-paint samples.
@@ -173,9 +173,29 @@ It additionally records raw animation-frame intervals during ten seconds each of
 trusted keyboard pan, wheel zoom and route-focus changes. The report retains
 one-second frame counts, distributions, the actual visible node count, exact static
 candidate/release hashes and configuration/fixture/toolchain input hashes. Missing
-candidate or contract-input provenance fails measurement before launching Chrome. A graph
-with fewer than 24 nodes cannot pass the 24-node gate; event-to-paint latency has no
-separate invented threshold. The 50 FPS gate remains unmeasured for that corpus.
+candidate or contract-input provenance fails measurement before launching Chrome.
+The candidate must be compiled with `atlas synthetic -graph24`. This opt-in release
+adds the artificial `AS424240` query: twelve observed sequence routes form exactly
+24 unique nodes and 23 observed adjacencies, with three exits from the shared second
+hop and no clipping. The original `Synthetic()` golden release remains unchanged.
+A separate Go-produced compressed fixture binds both readers and the browser graph
+projection; it does not qualify any real ASN, source or path coverage.
+
+The graph measurement requires exactly 24 visible nodes and all twelve routes.
+Each of keyboard pan, wheel zoom and trusted route-focus changes runs for at least
+ten seconds. Report every complete one-second frame count; a measured count below
+50 fails the unchanged gate. Missing population/action/interval evidence remains
+unmeasured. The harness verifies that route focus never changes node positions.
+Event-to-paint latency has no separate invented threshold.
+
+For an immutable HTTPS deployment-hash Pages URL, the same harness writes
+`reports/performance-preview.json` with `scope: hosted-synthetic-measurements`
+and records the actual Pages response transport. Mutable branch aliases,
+credentials and other remote origins are rejected. This is one synthetic desktop
+graph context, not the complete required theme/viewport population. Full interaction
+INP/CLS, peak browser memory, full dataset capacity and that population remain
+explicitly unmeasured; `hosted_gate_passed` and overall acceptance remain false.
+The preview workflow verifies the frozen candidate before and after these checks.
 
 The local Python static server sends uncompressed JavaScript. LCP therefore measures
 that exact local transport, not Cloudflare Pages compression or a hosted page. The

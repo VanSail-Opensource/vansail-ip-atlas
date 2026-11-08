@@ -1,19 +1,20 @@
-// Local synthetic measurements only. This is not the hosted performance gate.
+// Synthetic measurements only. Missing full-population gates never become passes.
 import { chromium } from 'playwright'
 import { readFile, mkdir, writeFile } from 'node:fs/promises'
 import { gzipSync } from 'node:zlib'
 import { cpus, totalmem } from 'node:os'
 import { createHash } from 'node:crypto'
-import { localGateResult } from './performance-gates.mjs'
+import { graph24FPSComparison, localGateResult } from './performance-gates.mjs'
 
 const base = new URL(process.env.ATLAS_PREVIEW_URL ?? 'http://127.0.0.1:4173')
-if (!['127.0.0.1', 'localhost', '[::1]'].includes(base.hostname))
-  throw new Error('This measurement script is scoped to a local static candidate')
+const hosted = !['127.0.0.1', 'localhost', '[::1]'].includes(base.hostname)
+if (hosted && (base.protocol !== 'https:' || base.username || base.password || !/^[0-9a-f]{8,64}\.[a-z0-9][a-z0-9-]*\.pages\.dev$/.test(base.host) || base.pathname !== '/' || base.search || base.hash))
+  throw new Error('Hosted synthetic measurements require an immutable HTTPS Pages deployment origin')
 const HERO_SAMPLES = 20
 const QUERY_SAMPLES = 5
-const reportPath = new URL('../../reports/performance-local.json', import.meta.url)
+const reportPath = new URL(hosted ? '../../reports/performance-preview.json' : '../../reports/performance-local.json', import.meta.url)
 const report = {
-  scope: 'local-synthetic-measurements', hosted_gate_passed: false, local_absolute_gates_passed: false, status: 'measuring',
+  scope: hosted ? 'hosted-synthetic-measurements' : 'local-synthetic-measurements', hosted_gate_passed: false, local_absolute_gates_passed: false, status: 'measuring',
   url: base.origin, browser: null, hero: [], cold_queries: [], graph: null, errors: [],
   execution_host: { platform: process.platform, arch: process.arch, node: process.versions.node,
     logical_cpus: cpus().length, cpu: cpus()[0]?.model, memory_bytes: totalmem() },
@@ -29,7 +30,9 @@ const report = {
     atlas_bytes: 'actual-response-body-size-including-pointer-manifest-router-dictionaries-and-shards',
     graph_latency: 'trusted-event-capture-to-second-animation-frame-including-handler-and-paint-opportunity',
     graph_frames: 'requestAnimationFrame-intervals-during-ten-seconds-each-of-trusted-pan-zoom-and-route-focus-input',
-    transport: 'local-static-server-uncompressed-responses-not-Pages-compression-or-hosted-LCP',
+    transport: hosted ? 'immutable-Pages-preview-actual-HTTP-response-transport' : 'local-static-server-uncompressed-responses-not-Pages-compression-or-hosted-LCP',
+    graph_query: 'AS424240', graph_expected_visible_nodes: 24,
+    graph_corpus: 'synthetic-graph24-via3-v1-twelve-linear-routes-24-nodes-23-adjacencies',
     cls_scope: 'cold-hero-navigation-only-full-interaction-script-unmeasured',
     percentile: 'nearest-rank',
   },
@@ -40,7 +43,6 @@ const report = {
     'CLS over the mandatory complete interaction script',
     'browser allocation counts and peak process/worker RSS',
     'mandatory 30-sample all-width/theme population',
-    'worst-case 24-node graph when the synthetic route has fewer visible nodes',
     'cached browser indexed-lookup p95 and Go lookup p95',
   ],
 }
@@ -52,7 +54,7 @@ try {
   report.candidate_bundle_sha256 = candidate.candidate_bundle_sha256
   report.release_id = candidate.release_id
   for (const path of ['configs/sources.yaml', 'configs/scoring.yaml', 'configs/tier1.yaml', 'configs/web.yaml',
-    'configs/release-approval.yaml', 'fixtures/bin/synthetic-via3.json', 'web/pnpm-lock.yaml', 'tools/hosted/toolchains.json']) {
+    'configs/release-approval.yaml', 'fixtures/bin/synthetic-via3.json', 'fixtures/bin/synthetic-graph24-via3.json', 'web/pnpm-lock.yaml', 'tools/hosted/toolchains.json']) {
     const bytes = await readFile(new URL(`../../${path}`, import.meta.url))
     report.contract_input_sha256[path] = createHash('sha256').update(bytes).digest('hex')
   }
@@ -221,9 +223,14 @@ try {
   console.log('Local cold query samples complete; measuring graph interactions')
   const graph = await contextForSample(false)
   try {
-    await graph.page.goto(new URL('/ip/bgp/?q=203.0.113.1', base).href, { waitUntil: 'networkidle', timeout: 30000 })
+    await graph.page.goto(new URL('/ip/bgp/?q=AS424240', base).href, { waitUntil: 'networkidle', timeout: 30000 })
     await graph.page.locator('.bgp-graph svg').waitFor({ timeout: 30000 })
-    if (await graph.page.locator('.graph-node').count() < 2) throw new Error('No actual observed graph population to measure')
+    if (await graph.page.locator('.graph-node').count() !== 24) throw new Error('The artificial AS424240 graph must contain exactly 24 visible nodes')
+    const focus = graph.page.getByRole('combobox', { name: 'Focus observed route' })
+    const routeCount = await focus.locator('option').count()
+    if (routeCount !== 13) throw new Error('The graph fixture must retain all 12 routes plus all-routes focus')
+    const focusKey = index => index % (2 * (routeCount - 1)) < routeCount - 1 ? 'ArrowDown' : 'ArrowUp'
+    const layoutBefore = await graph.page.locator('.graph-node').evaluateAll(nodes => nodes.map(node => node.getAttribute('transform')))
     const svg = graph.page.locator('.bgp-graph svg')
     await svg.focus()
     const latencies = []
@@ -233,7 +240,8 @@ try {
       const bounds = await svg.boundingBox()
       await graph.page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
       latencies.push({ action: 'wheel-zoom', ms: await graphLatency(graph.page, '.bgp-graph svg', 'wheel', () => graph.page.mouse.wheel(0, index % 2 ? 50 : -50)) })
-      latencies.push({ action: 'fit', ms: await graphLatency(graph.page, '.graph-actions button:last-child', 'click', () => graph.page.getByRole('button', { name: 'Fit', exact: true }).click()) })
+      await focus.focus()
+      latencies.push({ action: 'route-focus', ms: await graphLatency(graph.page, '.graph-toolbar select', 'change', () => graph.page.keyboard.press(focusKey(index))) })
     }
     console.log('Local graph event-to-paint samples complete; measuring active frame intervals')
     await svg.focus()
@@ -241,15 +249,17 @@ try {
     const bounds = await svg.boundingBox()
     await graph.page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
     activeFrames.push(await activeGraphFrames(graph.page, 'wheel-zoom', index => graph.page.mouse.wheel(0, index % 2 ? 50 : -50)))
-    const focus = graph.page.getByRole('combobox', { name: 'Focus observed route' })
-    const routeCount = await focus.locator('option').count()
     if (routeCount > 1) {
       await focus.focus()
-      activeFrames.push(await activeGraphFrames(graph.page, 'route-focus', index => graph.page.keyboard.press(index % 2 ? 'ArrowUp' : 'ArrowDown')))
+      await focus.selectOption('-1')
+      activeFrames.push(await activeGraphFrames(graph.page, 'route-focus', index => graph.page.keyboard.press(focusKey(index))))
     }
+    const layoutAfter = await graph.page.locator('.graph-node').evaluateAll(nodes => nodes.map(node => node.getAttribute('transform')))
+    if (JSON.stringify(layoutBefore) !== JSON.stringify(layoutAfter)) throw new Error('Route focus changed the graph layout')
     report.graph = { visible_nodes: await graph.page.locator('.graph-node').count(), interactions: latencies,
       event_to_paint_ms: summary(latencies.map(value => value.ms)), active_frames: activeFrames,
-      route_focus_options: routeCount, worst_case_24_nodes: 'unmeasured', field_INP: 'unmeasured' }
+      query: 'AS424240', corpus: report.protocol.graph_corpus, synthetic: true,
+      route_focus_options: routeCount, worst_case_24_nodes: 'measured-synthetic-single-desktop-context', field_INP: 'unmeasured' }
   } finally { await graph.context.close() }
   const lcp = summary(report.hero.map(value => value.lcp_ms))
   const cls = summary(report.hero.map(value => value.cls_supported ? value.cls : null))
@@ -257,7 +267,9 @@ try {
   const atlas = summary(report.cold_queries.map(value => value.atlas_body_bytes))
   report.summary = { lcp_ms: lcp, cls, initial_js_gzip_bytes: js, cold_atlas_body_bytes: atlas,
     local_comparisons: { lcp: within(lcp.p95, 2500), cls: within(cls.p95, .1), initial_js: within(js.p95, 200 * 1024),
-      cold_atlas_payload: within(atlas.p95, 400 * 1024), graph_50fps_at_24_nodes: 'unmeasured' } }
+      cold_atlas_payload: within(atlas.p95, 400 * 1024), graph_50fps_at_24_nodes: graph24FPSComparison(report.graph),
+      full_interaction_INP: 'unmeasured', complete_interaction_CLS: 'unmeasured', browser_peak_memory: 'unmeasured',
+      mandatory_theme_viewport_population: 'unmeasured', full_dataset_hosted_capacity: 'unmeasured' } }
   const gates = localGateResult(report.summary.local_comparisons, report.errors)
   const { exit_code, ...gateReport } = gates
   Object.assign(report, gateReport)

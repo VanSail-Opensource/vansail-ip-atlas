@@ -82,6 +82,10 @@ jobs:
         env:
           ATLAS_PREVIEW_URL: ${{ inputs.preview_url }}
         run: node tools/hosted/ui-regression.mjs
+      - name: Measure synthetic preview including the full 24-node graph
+        env:
+          ATLAS_PREVIEW_URL: ${{ inputs.preview_url }}
+        run: node tools/hosted/performance.mjs
       - name: Recheck identity and expiry after browser regression
         env:
           ATLAS_PREVIEW_URL: ${{ inputs.preview_url }}
@@ -93,6 +97,7 @@ jobs:
           path: |
             reports/preview-identity.json
             reports/ui-regression.json
+            reports/performance-preview.json
           if-no-files-found: error
           retention-days: 7
 

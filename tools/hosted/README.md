@@ -41,13 +41,19 @@ tests all fourteen VIA3 kinds, canonical answers, corruption, expiry and query
 cancellation. Full-process memory, real-source parity and hosted execution remain
 separate gates.
 
-`performance.mjs` requires the prepared local static server on port 4173 (or a
-local `ATLAS_PREVIEW_URL`). It records twenty cold mobile hero samples, five cold
+`performance.mjs` requires the prepared local static server on port 4173 (or an
+immutable HTTPS deployment-hash Pages `ATLAS_PREVIEW_URL`). Generate its candidate
+using `go run ./cmd/atlas synthetic -graph24 -out build-private/synthetic-atlas`,
+then prepare the static tree as above. It records twenty cold mobile hero samples, five cold
 synthetic lookups, actual gzip-level-9 initial JS bytes and sixty graph event-to-paint
-samples with p50/p95/p99. CPU/network emulation and the host/browser versions are
-recorded. Its scope is local measurements only: no hosted gate, field INP, full
-dataset capacity, thirty-sample theme/viewport protocol or worst-case 24-node graph
-is certified. Missing metrics remain unmeasured. Budgets are reported unchanged.
+samples with p50/p95/p99. The artificial AS424240 graph has twelve retained routes,
+exactly 24 visible nodes and 23 actual synthetic adjacencies. Active pan/zoom/focus
+measurements each run ten seconds; every complete one-second population must reach
+50 FPS. CPU/network emulation and the host/browser versions are recorded. Pages
+runs write `performance-preview.json`; local runs retain `performance-local.json`.
+Field INP, complete interaction CLS, browser peak memory, full dataset capacity and
+the full theme/viewport protocol remain unmeasured. Overall/hosted acceptance stays
+false. Budgets are unchanged and a measured graph failure exits nonzero.
 
 `.github/workflows/p0-contracts.yml` runs on main pushes, pull requests and manual
 dispatch. It includes Go/race/fuzz/static checks, source-free contract reports,

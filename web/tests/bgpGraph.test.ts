@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { readFileSync } from 'node:fs'
 import { projectGraph } from '../app/lib/bgpGraph.ts'
+import { AtlasReader } from '../app/workers/atlas.ts'
 
 const path = (asns: number[], graphEligible = true) => ({ origin: asns[0]!, asns, graphEligible, visibility: 'high' })
 const relation = (from: number, to: number, value: string) => ({ from, to, relation: value, observed: true, inferred: value !== 'unknown' })
@@ -109,4 +111,35 @@ test('projection layout and raw paths are independent of route-focus UI state', 
     assert.equal(JSON.stringify(graph.nodes), before)
   }
   assert.deepEqual(inputs.map(value => value.asns), [[100, 200, 300], [100, 400, 500]])
+})
+
+test('Go-produced synthetic graph24 release has twelve complete routes and exactly24 observed nodes', async () => {
+  const fixture = JSON.parse(readFileSync(new URL('../../fixtures/bin/synthetic-graph24-via3.json', import.meta.url), 'utf8'))
+  const stable = (value: any): string => value === null || typeof value !== 'object' ? JSON.stringify(value) : Array.isArray(value)
+    ? `[${value.map(stable).join(',')}]` : `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stable(value[key])}`).join(',')}}`
+  const files = new Map<string, Uint8Array>(fixture.objects.map((object: any) =>
+    [`/_atlas/objects/${object.info.sha256}.via3`, new Uint8Array(Buffer.from(object.base64, 'base64'))]))
+  files.set('/_atlas/current.json', new TextEncoder().encode(stable(fixture.pointer)))
+  files.set(fixture.pointer.manifest_path, new TextEncoder().encode(stable(fixture.manifest)))
+  const reader = new AtlasReader(async input => {
+    const bytes = files.get(input)
+    return new Response(bytes, { status: bytes ? 200 : 404, headers: { 'content-length': String(bytes?.length ?? 0) } })
+  }, () => fixture.clock)
+  try {
+    const answer = await reader.lookup('AS424240')
+    assert.deepEqual(answer, fixture.vectors.find((vector: any) => vector.q === 'AS424240').answer)
+    assert.equal(answer.synthetic, true)
+    const graph = projectGraph(answer.bgp.paths, answer.bgp.relationships, 424240)
+    assert.equal(graph.nodes.length, 24)
+    assert.equal(graph.edges.length, 23)
+    assert.equal(graph.routes.length, 12)
+    assert.equal(graph.truncated, false)
+    for (const edge of graph.edges) for (const routeId of edge.routeIds) {
+      const route = graph.routes[routeId]!.original.asns
+      assert.equal(route[edge.fromOriginalPosition], edge.from)
+      assert.equal(route[edge.toOriginalPosition], edge.to)
+      assert.equal(edge.toOriginalPosition, edge.fromOriginalPosition + 1)
+      assert.equal(edge.relation, 'unknown')
+    }
+  } finally { reader.clear() }
 })

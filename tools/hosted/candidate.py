@@ -23,6 +23,7 @@ from tools.release_contract.contracts import (
 )
 
 HASH = re.compile(r"[0-9a-f]{64}\Z")
+QA_USER_AGENT = "VanSail-IP-Atlas-Preview-QA/1.0 (+https://github.com/VanSail-Opensource/vansail-ip-atlas)"
 
 
 def check_preview_origin(value: str) -> str:
@@ -112,7 +113,7 @@ def verify_preview(public: Path, report: dict, origin: str, now: int, fetch=None
         def fetch(path, size):
             if time.monotonic() >= deadline:
                 raise ContractError("preview verification deadline exceeded")
-            request = urllib.request.Request(origin + path, headers={"Accept-Encoding": "identity"})
+            request = urllib.request.Request(origin + path, headers={"Accept-Encoding": "identity", "User-Agent": QA_USER_AGENT})
             try:
                 response = opener.open(request, timeout=min(30, max(1, deadline - time.monotonic())))
             except urllib.error.HTTPError as error:

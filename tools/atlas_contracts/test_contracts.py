@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import subprocess
+import sys
 
 from tools.atlas_contracts.config import ContractError, ROOT, load_configs, load_yaml, validate_schema, validate_sources
 from tools.atlas_contracts.policy import Snapshot, adapter_code_hash, capability_report, fixture_issues, runtime_state, static_issues, utc
@@ -20,11 +22,29 @@ class ConfigurationTests(unittest.TestCase):
         report = capability_report(self.configs["sources"], utc("2026-11-08T00:00:00Z"), ROOT)
         self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (91, 0, 0))
         self.assertFalse(report["production_eligible"])
+        self.assertEqual(report["schema_version"], 2)
+        self.assertEqual(report["release_scope"], "release-scope-v2")
         self.assertEqual(len(report["capabilities"]), 13)
-        self.assertTrue(all(row["status"] == "blocked" for row in report["capabilities"]))
+        required = [row for row in report["capabilities"] if row["required"]]
+        optional = [row for row in report["capabilities"] if not row["required"]]
+        self.assertEqual(len(required), 12)
+        self.assertTrue(all(row["status"] == "blocked" for row in required))
+        self.assertEqual([(row["capability"], row["status"]) for row in optional], [("numeric_quality", "unrated")])
+        self.assertEqual(report["required_capability_count"], 12)
+        self.assertEqual(report["blocked_required_capability_count"], 12)
         subscriptions = [s for s in self.configs["sources"]["sources"] if s["category"] == "proxy_subscription_ip"]
         self.assertEqual(len(subscriptions), 21)
         self.assertEqual({s["evidence_family"] for s in subscriptions}, {"public-subscription-aggregators"})
+
+    def test_cli_counts_only_required_capabilities_and_preserves_other_release_blocks(self):
+        result = subprocess.run([sys.executable, str(ROOT / "tools/validate_blueprint.py"), "--now", "2026-11-08T00:00:00Z", "--require-production"],
+                                cwd=ROOT, capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("12/12 required capabilities", result.stdout)
+        self.assertIn("Optional numeric quality: unrated", result.stdout)
+        production_line = next(line for line in result.stdout.splitlines() if line.startswith("Production BLOCKED"))
+        self.assertNotIn("numeric_quality", production_line)
+        self.assertIn("pages_release", production_line)
 
     def test_unknown_keys_rejected_in_every_config(self):
         for name, value in self.configs.items():

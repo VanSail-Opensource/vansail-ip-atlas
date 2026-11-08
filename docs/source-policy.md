@@ -1,5 +1,17 @@
 # Source Admission and Freshness Policy
 
+## Approved release scope `release-scope-v2` — 2026-11-08
+
+The user removed complete risk-assessment feeds as a production-release
+prerequisite. Numeric quality is optional for release. Without adequate complete
+assessment coverage, publish `quality=null`, unrated confidence and any supported
+positive reason flags. Publishing a non-null numeric score still requires the
+unchanged two independent complete families and all four assessed IPv4 layers
+specified in `configs/scoring.yaml` and `docs/scoring.md`. Source admission,
+freshness, independence and rights checks remain mandatory for every contribution.
+This is a versioned release-scope amendment; it does not activate any source or
+change the scoring model.
+
 ## Static Admission States
 
 - `candidate`: cataloged but not fixture-tested.
@@ -41,7 +53,7 @@ An active source requires all of: nonempty parser ID/schema/version, an observed
 
 The P0 policy evaluator accepts trusted payload-verifier results only; it is not a network ingestor or proof verifier. P2 must construct these results from actual downloaded bytes, their schema validation, current policy, and asset-specific metadata. The CLI intentionally supplies no such results and consequently reports no current sources. A config label or checked-in report cannot produce a current payload. Build-private reports include config hashes, decisions and missing capabilities and must never enter `web/` or a deploy artifact.
 
-The capability report counts distinct `evidence_family` values, explicit canonical fields and signal mappings. Numeric quality needs the same two complete families assessing all four layers. Usage cannot qualify from a provider name or a datacenter reason. The Pages row cannot qualify from config booleans; exact candidate evidence, preview and approval verification remain separate mandatory gates. Missing runtime evidence makes every data capability blocked even if a source is statically active.
+The capability report counts distinct `evidence_family` values, explicit canonical fields and signal mappings. Numeric quality needs the same two complete families assessing all four layers to qualify for numeric publication. Under `release-scope-v2`, the private report uses schema version 2, carries `release_scope: release-scope-v2`, marks this row `required: false` and reports `status: unrated` when unqualified; that optional row does not block production eligibility. Every other capability remains required. Usage cannot qualify from a provider name or a datacenter reason. The Pages row cannot qualify from config booleans; exact candidate evidence, preview and approval verification remain separate mandatory gates. Missing runtime evidence blocks each required data capability even if a source is statically active; it leaves optional numeric quality unrated.
 
 ## Event clocks, runtime failures and retraction
 
@@ -100,13 +112,19 @@ Public hosting of a derived database can constitute redistribution. Sources requ
 
 ## Production Capability Gate
 
-Production is blocked unless approved current sources exist for every promised capability:
+Production is blocked unless approved current sources exist for every required capability:
 
 - at least one geolocation family for country;
 - two independent families for region/city/coordinates;
 - current ASN/prefix mapping and usage classification;
 - proxy/risk reasons and exact `/24` observations;
-- two independent complete-coverage risk families for numeric quality;
 - current MRT paths, directed relationships, origin data, and RPKI for BGP/Tier-1.
+
+Numeric quality is optional under `release-scope-v2`. Two independent complete
+risk-assessment families covering all required layers remain necessary for a
+non-null score, but are not necessary to release supported reasons and unrated
+quality. The reason display, null-score semantics and scoring invariant tests
+remain required. Complete coverage cannot be inferred from positive-only lists,
+mapping records, mirror counts or a successful synthetic parser test.
 
 No allowlist, placeholder source, or synthetic record satisfies the gate.

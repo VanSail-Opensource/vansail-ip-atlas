@@ -249,3 +249,28 @@ func TestIntelligenceMaterializerMissingVRPSnapshotAndInputWithdrawal(t *testing
 		t.Fatal("withdrawn input left candidate", err)
 	}
 }
+
+func TestProfileUsageKeepsCanonicalConflictAndMissingFieldFallback(t *testing.T) {
+	state, policy, _, _, _ := intelligenceFixture(t)
+	// The same family directly classifies a broader prefix as residential and
+	// this child as business. Current usage contracts resolve this conflict to
+	// unknown; the child has no assignment, so the known parent assignment stays.
+	// This is the existing MappingProducer fixture, now exercised in a /24 cell.
+	opts := testOptions(t)
+	opts.Limits = DefaultLimits()
+	if _, err := BuildIntelligence(context.Background(), opts, state, policy); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := via3.OpenRelease(opts.Output, func() int64 { return opts.Clock })
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer, err := reader.Lookup(context.Background(), "203.0.113.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := reader.ClassC(context.Background(), "203.0.113.0")
+	if err != nil || answer.Usage == nil || profile == nil || !profile.Cells[0].Observed || answer.Usage.Type != "unknown" || answer.Usage.Assignment != "native" || profile.Cells[0].Usage != answer.Usage.Type {
+		t.Fatal("canonical/profile usage conflict semantics diverged", answer.Usage, profile, err)
+	}
+}

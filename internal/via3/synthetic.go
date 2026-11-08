@@ -461,6 +461,127 @@ func Synthetic(ctx context.Context, clock int64) (BuiltRelease, error) {
 	return BuiltRelease{Descriptor: descriptor, Manifest: manifest, Pointer: pointer, Objects: objects}, nil
 }
 
+// SyntheticGraph24 extends the unchanged golden example with an artificial
+// AS424240 graph: twelve sequence routes form exactly 24 unique nodes and 23
+// observed edges. It certifies no real ASN facts or source coverage.
+func SyntheticGraph24(ctx context.Context, clock int64) (BuiltRelease, error) {
+	release, err := Synthetic(ctx, clock)
+	if err != nil {
+		return BuiltRelease{}, err
+	}
+	const origin = uint32(424240)
+	var records, segments [][]byte
+	var values []uint32
+	next := origin + 6
+	for group := uint32(0); group < 3; group++ {
+		for branch := 0; branch < 4; branch++ {
+			path := []uint32{origin, origin + 1, origin + 2, origin + 3 + group, next}
+			next++
+			if branch < 2 {
+				path = append(path, next)
+				next++
+			}
+			row := make([]byte, 24)
+			p32(row, 0, bits(29))
+			p32(row, 4, origin)
+			p32(row, 8, uint32(len(segments)))
+			p16(row, 12, 1)
+			row[14] = 1
+			row[15] = 3
+			segment := make([]byte, 12)
+			segment[0] = 1
+			p32(segment, 4, uint32(len(values)))
+			p32(segment, 8, uint32(len(path)))
+			records = append(records, row)
+			segments = append(segments, segment)
+			values = append(values, path...)
+		}
+	}
+	paths := newShard(11, records...)
+	paths.set(2, asnKeys(origin))
+	paths.set(4, intVector(values...))
+	paths.set(9, Vector(12, segments...))
+	makeObject := func(shard Shard, partition string) (BuiltObject, error) {
+		if err := ValidatePublicProfile(shard); err != nil {
+			return BuiltObject{}, err
+		}
+		encoded, err := Write(ctx, shard)
+		if err != nil {
+			return BuiltObject{}, err
+		}
+		return BuiltObject{Info: ObjectInfo{Bytes: len(encoded), Kind: shard.Kind, Partition: partition, SHA256: Hash(encoded)}, Bytes: encoded, Shard: shard}, nil
+	}
+	pathObject, err := makeObject(paths, "asn:424240:424240")
+	if err != nil {
+		return BuiltRelease{}, err
+	}
+	var router Shard
+	var objects []BuiltObject
+	byHash := make(map[string]BuiltObject, len(release.Objects))
+	for _, object := range release.Objects {
+		byHash[object.Info.SHA256] = object
+		if object.Info.Kind == 1 {
+			router = object.Shard
+			router.Sections = append([]Section(nil), router.Sections...)
+		} else {
+			objects = append(objects, object)
+		}
+	}
+	oldDir, _ := router.Rows(7)
+	var destinations []BuiltObject
+	for p := 0; p < len(oldDir); p += 40 {
+		destinations = append(destinations, byHash[hex.EncodeToString(oldDir[p+8:p+40])])
+	}
+	destinations = append(destinations, pathObject)
+	newDir, newID := makeObjectDir(destinations...)
+	oldValues, _ := router.Rows(4)
+	newValues := make([]uint32, 0, len(oldValues)/4+1)
+	for p := 0; p < len(oldValues); p += 4 {
+		ordinal := int(u32(oldValues, p))
+		hash := hex.EncodeToString(oldDir[ordinal*40+8 : ordinal*40+40])
+		newValues = append(newValues, newID(byHash[hash]))
+	}
+	oldRecords, _ := router.Rows(3)
+	newRecords := make([][]byte, 0, len(oldRecords)/16+1)
+	for p := 0; p < len(oldRecords); p += 16 {
+		newRecords = append(newRecords, oldRecords[p:p+16])
+	}
+	graphRoute := make([]byte, 16)
+	p32(graphRoute, 0, uint32(len(newValues)))
+	p16(graphRoute, 4, 1)
+	graphOrdinal := uint32(len(newRecords))
+	newRecords = append(newRecords, graphRoute)
+	newValues = append(newValues, newID(pathObject))
+	oldASNs, _ := router.Rows(2)
+	var asns [][]byte
+	for p := 0; p < len(oldASNs); p += 8 {
+		asns = append(asns, oldASNs[p:p+8])
+	}
+	graphASN := make([]byte, 8)
+	p32(graphASN, 0, origin)
+	p32(graphASN, 4, graphOrdinal)
+	asns = append(asns, graphASN)
+	router.set(7, newDir)
+	router.set(4, intVector(newValues...))
+	router.set(3, Vector(16, newRecords...))
+	router.set(2, Vector(8, asns...))
+	routerObject, err := makeObject(router, "all")
+	if err != nil {
+		return BuiltRelease{}, err
+	}
+	objects = append(objects, pathObject, routerObject)
+	sort.Slice(objects, func(i, j int) bool { return objects[i].Info.SHA256 < objects[j].Info.SHA256 })
+	infos := make([]ObjectInfo, len(objects))
+	for i, object := range objects {
+		infos[i] = object.Info
+	}
+	descriptor := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: infos, SchemaVersion: 3, ValidFrom: clock, ValidUntil: clock + 720*3600}
+	id := Hash(canonical(descriptor))
+	manifest := Manifest{Codec: descriptor.Codec, FormatVersion: 3, Mode: descriptor.Mode, Objects: infos, ReleaseID: id, SchemaVersion: 3, ValidFrom: clock, ValidUntil: descriptor.ValidUntil}
+	pointer := Pointer{FormatVersion: 3, ManifestPath: "/_atlas/releases/" + id + "/manifest.json", ManifestSHA256: Hash(canonical(manifest)), ReleaseID: id}
+	return BuiltRelease{Descriptor: descriptor, Manifest: manifest, Pointer: pointer, Objects: objects}, nil
+}
+
 func atomicWrite(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err

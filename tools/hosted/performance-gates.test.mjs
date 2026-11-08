@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { localGateResult } from './performance-gates.mjs'
+import { graph24FPSComparison, localGateResult } from './performance-gates.mjs'
 
 test('an actual budget failure makes the measurement process fail', () => {
   const result = localGateResult({ lcp: 'over_limit', cls: 'within_limit' })
@@ -35,4 +35,16 @@ test('runtime errors and invalid comparison labels cannot mask a failed measurem
   assert.equal(result.measured_local_comparisons_passed, false)
   assert.equal(result.status, 'measurement-errors')
   assert.throws(() => localGateResult({ lcp: 'probably fine' }), /Unknown performance/)
+})
+
+test('24-node FPS gate requires complete active pan/zoom/focus measurements', () => {
+  const graph = { visible_nodes: 24, active_frames: ['keyboard-pan', 'wheel-zoom', 'route-focus'].map(action =>
+    ({ action, actions: 100, duration_ms: 10001, complete_second_fps: Array(10).fill(50) })) }
+  assert.equal(graph24FPSComparison(graph), 'within_limit')
+  assert.equal(graph24FPSComparison({ ...graph, visible_nodes: 3 }), 'unmeasured')
+  assert.equal(graph24FPSComparison({ ...graph, active_frames: graph.active_frames.slice(0, 2) }), 'unmeasured')
+  graph.active_frames[1].complete_second_fps[4] = 49
+  assert.equal(graph24FPSComparison(graph), 'over_limit')
+  graph.active_frames[1].complete_second_fps[4] = NaN
+  assert.equal(graph24FPSComparison(graph), 'unmeasured')
 })

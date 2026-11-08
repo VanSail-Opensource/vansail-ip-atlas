@@ -88,7 +88,7 @@ jobs:
         working-directory: web
         run: npm exec --yes --package pnpm@12.18.0 -- pnpm install --frozen-lockfile --ignore-scripts
       - name: Bundled Zstandard TypeScript regression
-        run: node --test tools/query_contract/query.test.mjs tools/query_contract/via3.test.mjs web/tests/zstd.test.ts web/tests/bgpGraph.test.ts tools/hosted/performance-gates.test.mjs
+        run: node --test tools/query_contract/query.test.mjs tools/query_contract/via3.test.mjs web/tests/zstd.test.ts web/tests/bgpGraph.test.ts tools/hosted/performance-gates.test.mjs tools/release_contract/bundle_licenses.test.mjs
       - name: Native support diagnostic (mechanism replaced by explicit amendment)
         continue-on-error: true
         run: node tools/hosted/codec-probe.mjs
@@ -126,9 +126,13 @@ jobs:
           npm exec --yes --package pnpm@12.18.0 -- pnpm --dir tools/hosted exec playwright install --with-deps chrome
       - name: Typecheck and generate immutable synthetic candidate
         run: |
+          mkdir -p build-private
+          npm exec --yes --package pnpm@12.18.0 -- pnpm --dir web licenses list --prod --json > build-private/software-license-metadata.json
+          python tools/release_contract/software_licenses.py
           npm exec --yes --package pnpm@12.18.0 -- pnpm --dir web typecheck
           npm exec --yes --package pnpm@12.18.0 -- pnpm --dir web generate
-          go run ./cmd/atlas synthetic -out build-private/ci-atlas
+          python tools/release_contract/software_licenses.py --bundle-audit build-private/software-bundle-audit.json --require-runtime-review
+          go run ./cmd/atlas synthetic -graph24 -out build-private/ci-atlas
           python tools/release_contract/prepare_static.py --atlas build-private/ci-atlas --public web/.output/public
       - name: Synthetic static HTTP browser regression (not Pages acceptance)
         run: |
@@ -150,6 +154,7 @@ jobs:
             reports/static-candidate.json
             reports/ui-regression.json
             reports/performance-local.json
+            reports/software-licenses.json
           if-no-files-found: error
           retention-days: 7
       - uses: actions/upload-artifact@v7.0.0

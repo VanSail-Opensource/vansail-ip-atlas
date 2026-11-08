@@ -108,7 +108,39 @@ class SourcePolicyAuditTests(unittest.TestCase):
                                      scope="asn", coverage="complete")
                 source.update(evidence_family=family, assessment_layers=[layer], signals=["abuse"])
                 sources.append(source)
-        self.assertEqual(self.capability(self.report(sources), "numeric_quality"), "blocked")
+        report = self.report(sources)
+        self.assertEqual(self.capability(report, "numeric_quality"), "unrated")
+        row = next(row for row in report["capabilities"] if row["capability"] == "numeric_quality")
+        self.assertFalse(row["required"])
+        self.assertEqual(row["families"], [])
+
+    def test_optional_numeric_quality_still_qualifies_only_two_complete_families(self):
+        sources = []
+        for family in ("family-a", "family-b"):
+            for layer, scope in (("exact", "exact_ip"), ("neighbors24", "exact_ip"), ("explicit_prefix", "prefix"), ("asn", "asn")):
+                source = self.source(f"{family}-{layer}", category="abuse", fields=("reason_flags",), scope=scope, coverage="complete")
+                source.update(evidence_family=family, assessment_layers=[layer], signals=["abuse"])
+                sources.append(source)
+        report = self.report(sources)
+        row = next(row for row in report["capabilities"] if row["capability"] == "numeric_quality")
+        self.assertEqual(row["status"], "qualified")
+        self.assertFalse(row["required"])
+        self.assertEqual(row["families"], ["family-a", "family-b"])
+        # Optional scoring cannot waive unrelated data or Pages evidence.
+        self.assertFalse(report["production_eligible"])
+        self.assertEqual(self.capability(report, "rpki"), "blocked")
+        self.assertEqual(self.capability(report, "pages_release"), "blocked")
+
+    def test_positive_only_risk_does_not_become_clean_or_a_release_requirement(self):
+        source = self.source("positive-only", category="abuse", fields=("reason_flags",), scope="exact_ip", coverage="positive_only")
+        source["signals"] = ["abuse"]
+        report = self.report([source])
+        row = next(row for row in report["capabilities"] if row["capability"] == "numeric_quality")
+        self.assertEqual(row["status"], "unrated")
+        self.assertEqual(row["families"], [])
+        self.assertFalse(row["required"])
+        self.assertNotIn("abuse", report["missing_reason_evidence"])
+        self.assertEqual(report["required_capability_count"], 12)
 
 
 if __name__ == "__main__":

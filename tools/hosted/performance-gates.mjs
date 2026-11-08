@@ -16,3 +16,14 @@ export function localGateResult(comparisons, errors = []) {
     exit_code: errors.length || failed.length ? 1 : 0,
   }
 }
+
+/** A measured 24-node graph needs every mandatory active action and full seconds. */
+export function graph24FPSComparison(graph) {
+  if (graph?.visible_nodes !== 24) return 'unmeasured'
+  const actions = ['keyboard-pan', 'wheel-zoom', 'route-focus']
+  const rows = actions.map(action => graph.active_frames?.find(row => row.action === action))
+  if (rows.some(row => !row || row.actions < 1 || row.duration_ms < 10000 ||
+      !Array.isArray(row.complete_second_fps) || row.complete_second_fps.length < 10 ||
+      row.complete_second_fps.some(value => !Number.isFinite(value) || value < 0))) return 'unmeasured'
+  return rows.every(row => row.complete_second_fps.every(value => value >= 50)) ? 'within_limit' : 'over_limit'
+}

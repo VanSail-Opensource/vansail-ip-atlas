@@ -7,6 +7,18 @@ real-source certification. Reference vectors are in
 `fixtures/scoring/contract-v1.json`; `python -m unittest discover -s
 tools/contract_vectors -p "test_*.py"` checks the synthetic vectors.
 
+## Release-scope amendment `release-scope-v2` — 2026-11-08
+
+The user made numeric quality optional for production release and removed the
+prerequisite to obtain two complete risk-assessment families before releasing.
+This does not revise model `via-risk-v3-contract-1`, its coefficients, half-lives,
+coverage qualification or confidence thresholds. The existing two-family and
+four-assessed-layer requirements below still govern every non-null numeric score.
+When they are unmet, retain `quality=null`, unrated confidence and supported
+positive reasons; do not infer clean from absence or assign a substitute number.
+The quality view and all scoring/unrated invariants remain mandatory even when
+numeric quality is unavailable throughout a production snapshot.
+
 ## Observation, scope and independence
 
 Reject nonfinite or out-of-range evidence inputs. Reliability is
@@ -47,6 +59,10 @@ test exact serialized integers and boundary vectors; tolerance never excuses
 different canonical bytes.
 
 ## Coverage and numeric quality
+
+This section controls whether an individual result may publish a number. Under
+`release-scope-v2`, missing complete assessment families do not themselves block
+production release; they leave numeric quality unrated.
 
 A layer is `assessed` only when current, admitted, complete evidence covers its
 whole required scope. Exact scope is the queried address; explicit-prefix scope

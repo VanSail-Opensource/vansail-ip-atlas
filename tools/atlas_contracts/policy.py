@@ -9,6 +9,7 @@ import re
 HEX = re.compile(r"^[0-9a-f]{64}$")
 UTC_TIMESTAMP = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?Z$")
 LAYERS = ("exact", "explicit_prefix", "asn", "neighbors24")
+RELEASE_SCOPE = "release-scope-v2"
 
 
 def adapter_code_hash(root):
@@ -240,9 +241,15 @@ def capability_report(config, now, root, snapshots=None):
         ("tier1", bool(relations) and len(paths) >= 2, sorted(set(paths + relations)), "relationships_and_two_path_families"),
         ("pages_release", False, [], "exact_artifact_hosted_preview_gates_and_approval_required"),
     ]
-    capabilities = [{"capability": name, "status": "qualified" if ok else "blocked", "families": fs,
-                     "requirement": requirement} for name, ok, fs, requirement in rows]
-    return {"schema_version": 1, "build_private": True, "evaluated_at": now.isoformat().replace("+00:00", "Z"),
+    # User-approved release scope v2 permits an unrated quality view. It does
+    # not weaken the unchanged assessment qualification needed for a number,
+    # invent negative evidence, or waive any other data/Pages capability gate.
+    capabilities = [{"capability": name, "status": "qualified" if ok else "unrated" if name == "numeric_quality" else "blocked",
+                     "required": name != "numeric_quality", "families": fs, "requirement": requirement}
+                    for name, ok, fs, requirement in rows]
+    required = [row for row in capabilities if row["required"]]
+    return {"schema_version": 2, "release_scope": RELEASE_SCOPE, "build_private": True, "evaluated_at": now.isoformat().replace("+00:00", "Z"),
             "source_count": len(config["sources"]), "active_count": sum(s["admission"] == "active" for s in config["sources"]),
-            "current_count": len(eligible), "production_eligible": all(ok for _, ok, _, _ in rows),
+            "current_count": len(eligible), "production_eligible": all(row["status"] == "qualified" for row in required),
+            "required_capability_count": len(required), "blocked_required_capability_count": sum(row["status"] != "qualified" for row in required),
             "missing_reason_evidence": missing_reasons, "capabilities": capabilities, "sources": decisions}

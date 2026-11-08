@@ -13,14 +13,14 @@ From the repository root:
 ```powershell
 python -m pip install -r tools/requirements.txt
 python tools/validate_blueprint.py --report reports/capabilities.json
-go run ./cmd/atlas synthetic -out build-private/local-atlas
+go run ./cmd/atlas synthetic -graph24 -out build-private/local-atlas
 npm exec --yes --package node@26.13.0 --package pnpm@12.18.0 -- pnpm --dir web install --frozen-lockfile --ignore-scripts
 npm exec --yes --package node@26.13.0 --package pnpm@12.18.0 -- pnpm --dir web generate
 python tools/release_contract/prepare_static.py --atlas build-private/local-atlas --public web/.output/public
 python tools/hosted/static-server.py --directory web/.output/public --port 4173
 ```
 
-Open `http://127.0.0.1:4173/ip`. Synthetic examples are `203.0.113.1`, `203.0.114.1`, `2001:db8::1` and `AS13335`. All displayed facts for these fixtures are synthetic. A real address without a fixture remains unknown. Use a fresh atlas output directory when changing the release clock or corpus; packaging rejects unreferenced old objects.
+Open `http://127.0.0.1:4173/ip`. Synthetic examples are `203.0.113.1`, `203.0.114.1`, `2001:db8::1` and `AS13335`; `AS424240` exercises the artificial 24-node graph. All displayed facts for these fixtures are synthetic. A real address without a fixture remains unknown. Use a fresh atlas output directory when changing the release clock or corpus; packaging rejects unreferenced old objects.
 
 The final prepared deployment directory is `web/.output/public`, including its complete `_atlas/` tree, redirect, CSP/cache headers and software notices. `prepare_static.py` validates every object, decoded string table, inventory and immutable hash before producing the private candidate report. It refuses production mode. Regenerate headers and restart the local static server after rebuilding.
 
@@ -30,7 +30,7 @@ The final prepared deployment directory is `web/.output/public`, including its c
 go test ./...
 go vet ./...
 python -m unittest discover -s tools -p 'test_*.py' -v
-node --test tools/query_contract/query.test.mjs tools/query_contract/via3.test.mjs web/tests/zstd.test.ts web/tests/bgpGraph.test.ts tools/hosted/performance-gates.test.mjs
+node --test tools/query_contract/query.test.mjs tools/query_contract/via3.test.mjs web/tests/zstd.test.ts web/tests/bgpGraph.test.ts tools/hosted/performance-gates.test.mjs tools/release_contract/bundle_licenses.test.mjs
 npm exec --yes --package node@26.13.0 --package pnpm@12.18.0 -- pnpm --dir web typecheck
 go test ./internal/subscription -run '^$' -fuzz FuzzLiteralDecoder -fuzztime 5s -parallel 2
 go test ./internal/intelligence -run '^$' -fuzz FuzzParseMRT -fuzztime 5s -parallel 2
@@ -45,7 +45,7 @@ node tools/hosted/ui-regression.mjs
 node tools/hosted/performance.mjs
 ```
 
-Selected race tests require a CGO-capable toolchain: `go test -race ./internal/... ./tools/source_samples`. The current Windows environment cannot run them. The prepared workflow has not run on GitHub. Local measurements are not the required hosted 2-vCPU/8-GiB/14-GiB baseline or Pages preview acceptance.
+Selected race tests require a CGO-capable toolchain: `go test -race ./internal/... ./tools/source_samples`. The current Windows environment cannot run them; the [initial hosted integration run](https://github.com/VanSail-Opensource/vansail-ip-atlas/actions/runs/42481869394) passed them on Linux. Its synthetic checks do not establish full-dataset capacity or Pages preview acceptance.
 
 ## Implementation map
 
@@ -65,7 +65,7 @@ Selected race tests require a CGO-capable toolchain: `go test -race ./internal/.
 
 The catalog still contains 91 entries: 82 candidates, seven rights-approved entries and two retired entries. Zero sources are active; all real parser fixtures remain missing, no source declares complete risk coverage, and no real capability currently qualifies. All 21 subscription repositories share one scoring family. No rights decision, attribution exception or source activation was invented during implementation.
 
-Production requires all capabilities, real-source schema/freshness/rights certification, complete bulk ingestion/repacking, hosted regression and performance, a verified Pages preview and approval bound to the exact candidate. `configs/release-approval.yaml` remains default-deny. No GitHub repository, push or deployment is required to use the local synthetic preview.
+Production requires all required capabilities, real-source schema/freshness/rights certification, complete bulk ingestion/repacking, hosted regression and performance, a verified Pages preview and approval bound to the exact candidate. Under the user-approved `release-scope-v2`, numeric quality is optional: unavailable assessment coverage leaves it unrated and does not block release; positive reasons still appear. Its scoring eligibility rules remain unchanged. `configs/release-approval.yaml` remains default-deny. No GitHub repository, push or deployment is required to use the local synthetic preview.
 
 The external planner can also compile the small post-fusion engineering fixture:
 

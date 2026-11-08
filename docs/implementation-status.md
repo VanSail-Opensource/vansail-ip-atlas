@@ -14,7 +14,7 @@ Reviewed attribution is now permitted in one lazy-loaded global footer display.
 Credit text/links are bound to private source receipts and a content-addressed
 public credit document; source IDs and per-IP provenance remain prohibited.
 Synthetic releases have no real dataset credits. The updated local compiler,
-packager and 19 browser scenarios pass, including shared credits without query
+packager and 20 browser scenarios pass, including shared credits without query
 parameters or external requests. Required source fixtures remain unqualified.
 
 - Added `atlas compile-state`, connecting all nine normalized record kinds to deterministic engineering materialization: quality regions, ASN context and direct identity, sparse `/24`, origin-specific RPKI, retained paths and directed relationships. It binds the exact intake/config/certification clock and receipts at publication, rechecks withdrawal and expiry, and refuses production mode. Full bulk streaming, real-source certification and provenance-qualified Tier-1 history remain required.
@@ -24,6 +24,7 @@ parameters or external requests. Required source fixtures remain unqualified.
 - Added main-push integration and frozen-artifact Pages preview verification. Source-rich reports and captures are excluded from public artifacts. Neither a passing synthetic run nor a checked-in policy flag can authorize production.
 - Added exact-file GitHub commit publication proof: a path/ref/repository-bound one-result metadata query and a separately downloaded immutable commit copy must match the original payload's SHA-256 and size. The older author/committer clock and retained earliest-content clock prevent observed identical-byte recommits from renewing age. Tests reject mismatched paths/refs/content, ambiguous JSON, future clocks and stale original content. This implements a proof mechanism without certifying any source.
 - Fixed global-credit URL parser parity for legacy numeric IP aliases and nonliteral HTTPS port spellings using shared Go/Python/browser regressions. The graph panel replaces its measured slow backdrop blur with a static theme surface; masked edge lighting remains. Updated hosted acceptance is required separately from the passing causal diagnostic.
+- Fixed dense graph overlap with adaptive world bounds, fixed hop columns and label-inclusive vertical spacing. Default size remains readable and scrollable; Fit/Home includes both axes, gestures use the actual SVG transform and export includes the complete world. Four-width browser checks verify nonoverlap, mobile controls and export. Performance now verifies all 24 circles are physically on-screen throughout the unchanged pan/zoom/focus workload.
 
 ## Implemented work
 

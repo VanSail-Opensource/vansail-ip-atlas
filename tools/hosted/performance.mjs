@@ -4,7 +4,7 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises'
 import { gzipSync } from 'node:zlib'
 import { cpus, totalmem } from 'node:os'
 import { createHash } from 'node:crypto'
-import { graph24FPSComparison, localGateResult } from './performance-gates.mjs'
+import { graph24FPSComparison, graphVisibleNodeCount, localGateResult } from './performance-gates.mjs'
 
 const base = new URL(process.env.ATLAS_PREVIEW_URL ?? 'http://127.0.0.1:4173')
 const hosted = !['127.0.0.1', 'localhost', '[::1]'].includes(base.hostname)
@@ -33,6 +33,8 @@ const report = {
     transport: hosted ? 'immutable-Pages-preview-actual-HTTP-response-transport' : 'local-static-server-uncompressed-responses-not-Pages-compression-or-hosted-LCP',
     graph_query: 'AS424240', graph_expected_visible_nodes: 24,
     graph_corpus: 'synthetic-graph24-via3-v1-twelve-linear-routes-24-nodes-23-adjacencies',
+    graph_population: 'explicit-full-graph-fit-before-each-phase;all-24-circles-inside-SVG-and-screen-before-after-and-every-1000ms',
+    graph_wheel_pair_order: 'zoom-in-then-zoom-out;deltaY=-50,+50;original-amplitude-and-cadence',
     cls_scope: 'cold-hero-navigation-only-full-interaction-script-unmeasured',
     percentile: 'nearest-rank',
   },
@@ -158,8 +160,23 @@ async function graphLatency(page, selector, event, action) {
   return page.evaluate(() => window.__atlasPaint)
 }
 
-async function activeGraphFrames(page, actionName, action, cdp, duration = 10000) {
+async function graphPopulation(page) {
+  const sample = await page.locator('.bgp-graph svg').evaluate(svg => {
+    const box = element => { const r=element.getBoundingClientRect();return { left:r.left,top:r.top,right:r.right,bottom:r.bottom } }
+    const bounds=box(svg), viewport=box(svg.closest('.graph-viewport'))
+    return { svg_bounds:bounds,visible_bounds:{ left:Math.max(0,bounds.left,viewport.left),top:Math.max(0,bounds.top,viewport.top),
+      right:Math.min(innerWidth,bounds.right,viewport.right),bottom:Math.min(innerHeight,bounds.bottom,viewport.bottom) },
+      circles:[...svg.querySelectorAll('.graph-node circle')].map(box) }
+  })
+  const fullyVisible=graphVisibleNodeCount(sample)
+  if (sample.circles.length!==24 || fullyVisible!==24) throw new Error(`Graph workload must paint all 24 circles inside its SVG and screen: ${fullyVisible}/${sample.circles.length}`)
+  return {...sample,fully_visible_nodes:fullyVisible}
+}
+
+async function activeGraphFrames(page, actionName, action, cdp, duration = 10000, requireVisiblePopulation = false) {
   const metricsBefore = cdp ? await cdp.send('Performance.getMetrics') : null
+  const population=[]
+  if (requireVisiblePopulation) population.push({ checkpoint:'before',...(await graphPopulation(page)) })
   await page.evaluate(() => {
     const state = window.__atlasFrames = { start: performance.now(), times: [], stopped: false }
     const frame = now => {
@@ -171,17 +188,23 @@ async function activeGraphFrames(page, actionName, action, cdp, duration = 10000
   })
   const start = performance.now()
   let actions = 0
+  let nextPopulationCheck=1000
   if (!action) await page.waitForTimeout(duration)
   else while (performance.now() - start < duration) {
       await action(actions++)
       // Keep the page active and allow a paint between trusted interactions.
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)))
+      if (requireVisiblePopulation && performance.now()-start>=nextPopulationCheck) {
+        population.push({ checkpoint:'during',elapsed_ms:performance.now()-start,...(await graphPopulation(page)) })
+        nextPopulationCheck+=1000
+      }
     }
   const frames = await page.evaluate(() => {
     const state = window.__atlasFrames
     state.stopped = true
     return { start: state.start, end: performance.now(), times: state.times }
   })
+  if (requireVisiblePopulation) population.push({ checkpoint:'after',...(await graphPopulation(page)) })
   const intervals = frames.times.slice(1).map((time, index) => time - frames.times[index])
   const elapsed = frames.end - frames.start
   const completeSeconds = Math.floor(elapsed / 1000)
@@ -197,6 +220,7 @@ async function activeGraphFrames(page, actionName, action, cdp, duration = 10000
     minimum_complete_second_fps: Math.min(...framesPerSecond),
     frame_intervals_ms: intervals, frame_interval_summary_ms: summary(intervals),
     renderer_metric_deltas: renderer,
+    population_checkpoints: population,
     diagnostics_only_when_idle: !action }
 }
 
@@ -241,6 +265,13 @@ try {
     const focusKey = index => index % (2 * (routeCount - 1)) < routeCount - 1 ? 'ArrowDown' : 'ArrowUp'
     const layoutBefore = await graph.page.locator('.graph-node').evaluateAll(nodes => nodes.map(node => node.getAttribute('transform')))
     const svg = graph.page.locator('.bgp-graph svg')
+    const prepareFullGraph = async () => {
+      await graph.page.getByRole('button',{name:'Fit',exact:true}).click()
+      await svg.scrollIntoViewIfNeeded()
+      await svg.focus()
+      return graphPopulation(graph.page)
+    }
+    const initialPopulation=await prepareFullGraph()
     await graph.cdp.send('Performance.enable')
     const schedulerBaseline = await activeGraphFrames(graph.page, 'idle-rAF-diagnostic-not-rendering-acceptance', null, graph.cdp, 3000)
     await svg.focus()
@@ -255,15 +286,17 @@ try {
       latencies.push({ action: 'route-focus', ms: await graphLatency(graph.page, '.graph-toolbar select', 'change', () => graph.page.keyboard.press(focusKey(index))) })
     }
     console.log('Local graph event-to-paint samples complete; measuring active frame intervals')
-    await svg.focus()
-    const activeFrames = [await activeGraphFrames(graph.page, 'keyboard-pan', index => graph.page.keyboard.press(index % 2 ? 'ArrowLeft' : 'ArrowRight'), graph.cdp)]
+    await prepareFullGraph()
+    const activeFrames = [await activeGraphFrames(graph.page, 'keyboard-pan', index => graph.page.keyboard.press(index % 2 ? 'ArrowLeft' : 'ArrowRight'), graph.cdp,10000,true)]
+    await prepareFullGraph()
     const bounds = await svg.boundingBox()
     await graph.page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
-    activeFrames.push(await activeGraphFrames(graph.page, 'wheel-zoom', index => graph.page.mouse.wheel(0, index % 2 ? 50 : -50), graph.cdp))
+    activeFrames.push(await activeGraphFrames(graph.page, 'wheel-zoom', index => graph.page.mouse.wheel(0, index % 2 ? 50 : -50), graph.cdp,10000,true))
     if (routeCount > 1) {
+      await prepareFullGraph()
       await focus.focus()
       await focus.selectOption('-1')
-      activeFrames.push(await activeGraphFrames(graph.page, 'route-focus', index => graph.page.keyboard.press(focusKey(index)), graph.cdp))
+      activeFrames.push(await activeGraphFrames(graph.page, 'route-focus', index => graph.page.keyboard.press(focusKey(index)), graph.cdp,10000,true))
     }
     const layoutAfter = await graph.page.locator('.graph-node').evaluateAll(nodes => nodes.map(node => node.getAttribute('transform')))
     if (JSON.stringify(layoutBefore) !== JSON.stringify(layoutAfter)) throw new Error('Route focus changed the graph layout')
@@ -307,6 +340,7 @@ try {
       event_to_paint_ms: summary(latencies.map(value => value.ms)), active_frames: activeFrames,
       query: 'AS424240', corpus: report.protocol.graph_corpus, synthetic: true,
       scheduler_baseline_not_a_gate: schedulerBaseline,
+      initial_population: initialPopulation,
       baseline_css: baselineCSS, diagnostic_variants_not_acceptance: diagnosticVariants,
       route_focus_options: routeCount, worst_case_24_nodes: 'measured-synthetic-single-desktop-context', field_INP: 'unmeasured' }
   } finally { await graph.context.close() }

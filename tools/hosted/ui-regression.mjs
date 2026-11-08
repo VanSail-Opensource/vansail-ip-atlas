@@ -239,6 +239,9 @@ try {
     await page.goto(`${base}/ip/bgp/?q=203.0.113.1`)
     await page.locator('.graph-node').first().waitFor()
     const focus = page.getByRole('combobox', { name: 'Focus observed route' })
+    const liveViewBox = await page.locator('.bgp-graph svg').evaluate(svg => ({
+      value: svg.getAttribute('viewBox'), width: svg.viewBox.baseVal.width, height: svg.viewBox.baseVal.height,
+    }))
     const exports = []
     for (const selection of ['-1', '0']) {
       await focus.selectOption(selection)
@@ -256,6 +259,8 @@ try {
         const svg = document.documentElement
         return { error: document.querySelector('parsererror')?.textContent, namespace: svg.namespaceURI,
           xmlns: svg.getAttribute('xmlns'), width: svg.getAttribute('width'), height: svg.getAttribute('height'),
+          viewBox: svg.getAttribute('viewBox'),
+          background: { width: svg.querySelector(':scope > rect')?.getAttribute('width'), height: svg.querySelector(':scope > rect')?.getAttribute('height') },
           title: svg.querySelector(':scope > title')?.textContent, description: svg.querySelector(':scope > desc')?.textContent,
           edgePaint: [...svg.querySelectorAll('.graph-edge')].map(node => ({ stroke: node.getAttribute('stroke'), fill: node.getAttribute('fill') })),
           textPaint: [...svg.querySelectorAll('.graph-node text')].map(node => ({ fill: node.getAttribute('fill'), font: node.getAttribute('font-family') })),
@@ -265,7 +270,9 @@ try {
       assert(!parsed.error)
       assert.equal(parsed.namespace, 'http://www.w3.org/2000/svg')
       assert.equal(parsed.xmlns, 'http://www.w3.org/2000/svg')
-      assert.equal(parsed.width, '800'); assert.equal(parsed.height, '380')
+      assert.equal(Number(parsed.width), liveViewBox.width); assert.equal(Number(parsed.height), liveViewBox.height)
+      assert.equal(parsed.viewBox, liveViewBox.value)
+      assert.equal(Number(parsed.background.width), liveViewBox.width); assert.equal(Number(parsed.background.height), liveViewBox.height)
       assert.match(parsed.title, /observed AS paths/)
       assert.match(parsed.description, /bounded projection/)
       assert(parsed.edgePaint.length > 0 && parsed.textPaint.length > 0)
@@ -276,6 +283,91 @@ try {
       await writeFile(new URL(`../../reports/bgp-export-${selection === '-1' ? 'all' : 'focused'}.svg`, import.meta.url), xml)
     }
     assert.deepEqual(exports[1].geometry, exports[0].geometry)
+  })
+  await test('24-node graph keeps readable default spacing and exports its full dynamic bounds', async () => {
+    const populations = []
+    for (const width of [320, 390, 1280, 1440]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto(`${base}/ip/bgp/?q=AS424240`)
+      await page.locator('.graph-node').nth(23).waitFor()
+      const svg = page.locator('.bgp-graph svg')
+      const geometry = await svg.evaluate(svg => {
+        const box = element => { const r = element.getBoundingClientRect(); return { left:r.left, top:r.top, right:r.right, bottom:r.bottom, width:r.width, height:r.height } }
+        return { svg:box(svg), bounds:{ width:svg.viewBox.baseVal.width, height:svg.viewBox.baseVal.height },
+          items:[...svg.querySelectorAll('.graph-node')].flatMap((node,index) => ['circle','text'].map(kind =>
+            ({ id:`${index}:${kind}`, ...box(node.querySelector(kind)) }))),
+          layout:[...svg.querySelectorAll('.graph-node')].map(node => node.getAttribute('transform')) }
+      })
+      assert.equal(geometry.items.length, 48)
+      assert.equal(await page.locator('.graph-edge').count(), 23)
+      for (const box of geometry.items) {
+        assert(box.width > 0 && box.height > 0, `Empty graph content ${box.id} at width ${width}`)
+        assert(box.left >= geometry.svg.left - .5 && box.right <= geometry.svg.right + .5 &&
+          box.top >= geometry.svg.top - .5 && box.bottom <= geometry.svg.bottom + .5,
+        `Graph content ${box.id} clipped by world bounds at width ${width}`)
+      }
+      for (let a=0;a<geometry.items.length;a++) for (let b=a+1;b<geometry.items.length;b++) {
+        const x=geometry.items[a],y=geometry.items[b]
+        assert(!(x.left < y.right && y.left < x.right && x.top < y.bottom && y.top < x.bottom),
+          `Graph content overlaps: ${x.id} / ${y.id} at width ${width}`)
+      }
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Graph caused page overflow at ${width}`)
+      const viewport = page.locator('.graph-viewport')
+      const scroll = await viewport.evaluate(element => {
+        const maximum=element.scrollWidth-element.clientWidth
+        element.scrollLeft=maximum
+        const reached=element.scrollLeft
+        element.scrollLeft=0
+        return { maximum,reached }
+      })
+      if (scroll.maximum > 1) assert(scroll.reached > 0, 'The readable graph must remain horizontally reachable')
+      await page.getByRole('button', { name:'Fit', exact:true }).click()
+      const fitted = await viewport.evaluate(element => ({ viewport:element.clientWidth, content:element.scrollWidth, scroll:element.scrollLeft }))
+      assert(fitted.content <= fitted.viewport + 1 && fitted.scroll === 0, 'Fit must reveal the complete graph width')
+      await svg.scrollIntoViewIfNeeded()
+      assert(await svg.evaluate(svg => {
+        const r=svg.getBoundingClientRect()
+        return [...svg.querySelectorAll('.graph-node circle')].every(node => {
+          const b=node.getBoundingClientRect()
+          return b.left>=Math.max(0,r.left) && b.right<=Math.min(innerWidth,r.right) && b.top>=Math.max(0,r.top) && b.bottom<=Math.min(innerHeight,r.bottom)
+        })
+      }), 'Fit must show every node inside the SVG and screen')
+      if (width===320) {
+        const toolbar=await page.locator('.bgp-graph').evaluate(panel => {
+          const r=panel.getBoundingClientRect()
+          return { labels:[...panel.querySelectorAll('.graph-actions button')].map(button => button.textContent.trim()),
+            clipped:[...panel.querySelectorAll('.graph-actions button')].some(button => {const b=button.getBoundingClientRect();return b.left<r.left || b.right>r.right || b.left<0 || b.right>innerWidth}) }
+        })
+        assert.deepEqual(toolbar.labels,['Export','Actual size','Fit'])
+        assert.equal(toolbar.clipped,false,'All fitted graph controls remain reachable at320px')
+        assert(await page.evaluate(() => document.documentElement.scrollWidth<=innerWidth),'Fitted graph controls must not overflow the narrow page')
+      }
+      assert.deepEqual(await page.locator('.graph-node').evaluateAll(nodes => nodes.map(node => node.getAttribute('transform'))), geometry.layout)
+      await page.getByRole('combobox', { name:'Focus observed route' }).selectOption('11')
+      assert.deepEqual(await page.locator('.graph-node').evaluateAll(nodes => nodes.map(node => node.getAttribute('transform'))), geometry.layout)
+      await page.getByRole('combobox', { name:'Focus observed route' }).selectOption('-1')
+      populations.push({ width, nodes:24, world_bounds:geometry.bounds, overlapping_items:0, clipped_items:0, default_scroll_max:scroll.maximum })
+    }
+    const bounds = await page.locator('.bgp-graph svg').evaluate(svg => ({ width:svg.viewBox.baseVal.width,height:svg.viewBox.baseVal.height,value:svg.getAttribute('viewBox') }))
+    const pending = page.waitForEvent('download')
+    await page.getByRole('button', { name:'Export',exact:true }).click()
+    const download = await pending
+    assert.equal(await download.failure(),null)
+    const chunks=[]
+    for await (const chunk of await download.createReadStream()) chunks.push(chunk)
+    const xml=Buffer.concat(chunks).toString('utf8')
+    const exported=await page.evaluate(xml => {
+      const document=new DOMParser().parseFromString(xml,'image/svg+xml'),svg=document.documentElement,background=svg.querySelector(':scope > rect')
+      return { error:document.querySelector('parsererror')?.textContent,width:Number(svg.getAttribute('width')),height:Number(svg.getAttribute('height')),
+        viewBox:svg.getAttribute('viewBox'),backgroundWidth:Number(background?.getAttribute('width')),backgroundHeight:Number(background?.getAttribute('height')),
+        nodes:svg.querySelectorAll('.graph-node').length,edges:svg.querySelectorAll('.graph-edge').length }
+    },xml)
+    assert(!exported.error)
+    assert.equal(exported.width,bounds.width);assert.equal(exported.height,bounds.height);assert.equal(exported.viewBox,bounds.value)
+    assert.equal(exported.backgroundWidth,bounds.width);assert.equal(exported.backgroundHeight,bounds.height)
+    assert.equal(exported.nodes,24);assert.equal(exported.edges,23)
+    await writeFile(new URL('../../reports/bgp-export-24.svg',import.meta.url),xml)
+    report.graph_readability_populations=populations
   })
   await test('IPv6 Class C not applicable', async () => {
     await page.goto(`${base}/ip/class-c/?q=2001%3Adb8%3A%3A1`)

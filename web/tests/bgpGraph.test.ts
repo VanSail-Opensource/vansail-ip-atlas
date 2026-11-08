@@ -8,6 +8,38 @@ const path = (asns: number[], graphEligible = true) => ({ origin: asns[0]!, asns
 const relation = (from: number, to: number, value: string) => ({ from, to, relation: value, observed: true, inferred: value !== 'unknown' })
 const sequence = (start: number, count: number) => Array.from({ length: count }, (_, index) => start + index)
 
+function readableLayout(graph: ReturnType<typeof projectGraph>) {
+  for (const a of graph.nodes) for (const b of graph.nodes) if (a.depth === b.depth && a.asn !== b.asn)
+    assert(Math.abs(a.y - b.y) >= 76, 'a dense hop column must retain readable vertical separation')
+  // A 12-character ASN label at 11px monospace fits inside this conservative
+  // rectangle together with its circle and the label's baseline/descent.
+  const boxes = graph.nodes.map(node => ({ left: node.x - 44, right: node.x + 44,
+    top: node.y - 21, bottom: node.y + 46 }))
+  for (let i = 0; i < boxes.length; i++) {
+    const a = boxes[i]!
+    for (const b of boxes.slice(i + 1)) assert(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top,
+      'node circles and ASN labels must have distinct bounding boxes')
+    assert(a.left >= 0 && a.top >= 0 && a.right <= graph.bounds.width && a.bottom <= graph.bounds.height,
+      'world bounds must include every circle and complete ASN label')
+  }
+  const columns = new Map(graph.nodes.map(node => [node.depth, node.x]))
+  for (const node of graph.nodes) assert.equal(node.x, columns.get(node.depth))
+  const first = graph.nodes[0]
+  if (first) for (const node of graph.nodes) assert.equal(node.x - first.x, (node.depth - first.depth) * 168)
+}
+
+test('the full protected set and longest bounded route retain distinct readable node bounds', () => {
+  const dense = projectGraph(sequence(200, 23).map(asn => path([100, asn])), [], 100)
+  assert.equal(dense.nodes.length, 24)
+  assert.equal(dense.edges.length, 23)
+  assert.equal(dense.omittedPathIndexes.length, 0)
+  readableLayout(dense)
+  const longest = projectGraph([path(sequence(0xffffffd0, 24))], [], 0xffffffd0)
+  assert.equal(longest.nodes.length, 24)
+  assert.equal(longest.edges.length, 23)
+  readableLayout(longest)
+})
+
 test('a long observed route keeps its protected hops and a disclosed contiguous prefix', () => {
   const original = Object.freeze({ ...path(sequence(100, 40)), asns: Object.freeze(sequence(100, 40)) })
   const before = JSON.stringify(original)
@@ -134,6 +166,7 @@ test('Go-produced synthetic graph24 release has twelve complete routes and exact
     assert.equal(graph.edges.length, 23)
     assert.equal(graph.routes.length, 12)
     assert.equal(graph.truncated, false)
+    readableLayout(graph)
     for (const edge of graph.edges) for (const routeId of edge.routeIds) {
       const route = graph.routes[routeId]!.original.asns
       assert.equal(route[edge.fromOriginalPosition], edge.from)

@@ -27,3 +27,11 @@ export function graph24FPSComparison(graph) {
       row.complete_second_fps.some(value => !Number.isFinite(value) || value < 0))) return 'unmeasured'
   return rows.every(row => row.complete_second_fps.every(value => value >= 50)) ? 'within_limit' : 'over_limit'
 }
+
+/** Count full circles inside both the SVG and its actual visible screen clip. */
+export function graphVisibleNodeCount(sample) {
+  const valid = box => box && ['left','right','top','bottom'].every(key => Number.isFinite(box[key])) && box.right > box.left && box.bottom > box.top
+  if (!Array.isArray(sample?.circles) || !valid(sample.svg_bounds) || !valid(sample.visible_bounds)) return 0
+  return sample.circles.filter(box => valid(box) && [sample.svg_bounds,sample.visible_bounds].every(bounds =>
+    box.left >= bounds.left && box.right <= bounds.right && box.top >= bounds.top && box.bottom <= bounds.bottom)).length
+}

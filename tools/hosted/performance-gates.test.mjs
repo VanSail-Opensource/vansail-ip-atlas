@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { graph24FPSComparison, localGateResult } from './performance-gates.mjs'
+import { graph24FPSComparison, graphVisibleNodeCount, localGateResult } from './performance-gates.mjs'
 
 test('an actual budget failure makes the measurement process fail', () => {
   const result = localGateResult({ lcp: 'over_limit', cls: 'within_limit' })
@@ -49,4 +49,14 @@ test('24-node FPS gate requires complete active pan/zoom/focus measurements', ()
   assert.equal(graph24FPSComparison(graph), 'over_limit')
   graph.active_frames[1].complete_second_fps[4] = NaN
   assert.equal(graph24FPSComparison(graph), 'unmeasured')
+})
+
+test('offscreen or clipped circles cannot satisfy the actual graph population', () => {
+  const sample = { svg_bounds:{ left:0,top:0,right:800,bottom:800 }, visible_bounds:{ left:0,top:0,right:800,bottom:800 },
+    circles:Array.from({length:24},(_,index) => ({ left:index*30,top:20,right:index*30+20,bottom:40 })) }
+  assert.equal(graphVisibleNodeCount(sample),24)
+  assert.equal(graphVisibleNodeCount({...sample,visible_bounds:{...sample.visible_bounds,right:700}}),23)
+  assert.equal(graphVisibleNodeCount({...sample,svg_bounds:{...sample.svg_bounds,right:700}}),23)
+  sample.circles[0].left=NaN
+  assert.equal(graphVisibleNodeCount(sample),23)
 })

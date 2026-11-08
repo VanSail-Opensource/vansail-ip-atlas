@@ -1,4 +1,4 @@
-# Performance and capacity contract v3.1 (P0 amendment)
+# Performance and capacity contract v3.2 (visible graph population)
 
 This freezes C06/C11 before collecting a baseline. No budget is raised. Synthetic
 contract tests measure correctness only; they do not establish full-dataset capacity.
@@ -43,6 +43,15 @@ Report every sample and gate the maximum build RSS/scratch/runtime. Do not hide 
 failed sample in an average. Before relative regression gates are enabled, collect
 at least ten accepted hosted runs on the same versioned real-input corpus. Absolute
 gates apply immediately. Relative thresholds require a reviewed baseline amendment.
+
+The 24-node graph workload uses explicit Fit so its adaptive world bounds fit
+both viewport axes. Before, after and every second of each ten-second trusted
+pan/zoom/focus phase, all 24 complete circle bounds must be inside the SVG and
+the actual screen clip. A DOM count cannot qualify an off-screen population.
+Keep the original alternating zoom-in/zoom-out pair (`deltaY=-50`, then `+50`),
+event cadence and 50-FPS gate. The default readable canvas, four viewport widths,
+nonoverlapping circle/label bounds and full-world export are separate UI checks.
+Idle scheduler and injected-CSS diagnostics remain ineligible for acceptance.
 
 ## Process and disk accounting
 

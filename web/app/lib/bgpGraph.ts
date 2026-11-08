@@ -30,6 +30,8 @@ export type ProjectedEdge = {
 const MAX_NODES = 24
 const PROTECTED_NODES = 3 // The origin is hop zero, followed by two protected hops.
 const MAX_EXITS = 3
+const HOP_SPACING = 168
+const ROW_SPACING = 76 // Includes the 40px circle and the ASN label below it.
 const relationships = new Set(['transit_upstream', 'peer', 'customer', 'sibling'])
 const validASN = (asn: number) => Number.isInteger(asn) && asn > 0 && asn <= 0xffffffff
 
@@ -119,12 +121,20 @@ export function projectGraph(paths: readonly GraphPath[], relations: readonly Gr
     const level = levels.get(node.depth) ?? []
     level.push(node.asn); levels.set(node.depth, level)
   }
-  const maxDepth = Math.max(1, ...levels.keys())
+  // Grow the world instead of squeezing dense columns or long routes into a
+  // fixed rectangle. Hop columns and ASN label sizes remain independent of
+  // route focus; sparse columns stay centered inside the same world bounds.
+  const maxDepth = Math.max(0, ...levels.keys())
+  const largestColumn = Math.max(1, ...[...levels.values()].map(asns => asns.length))
+  const bounds = { width: Math.max(800, 140 + maxDepth * HOP_SPACING),
+    height: Math.max(380, (largestColumn + 1) * ROW_SPACING) }
+  const left = (bounds.width - maxDepth * HOP_SPACING) / 2
   for (const [depth, asns] of levels) {
     asns.sort((a, b) => a - b)
-    asns.forEach((asn, index) => Object.assign(nodes.get(asn)!, { x: 70 + depth * (660 / maxDepth), y: (index + 1) * 380 / (asns.length + 1) }))
+    asns.forEach((asn, index) => Object.assign(nodes.get(asn)!, {
+      x: left + depth * HOP_SPACING, y: (index + 1) * bounds.height / (asns.length + 1) }))
   }
-  return { nodes: [...nodes.values()].sort((a, b) => a.asn - b.asn), byId: nodes, routes,
+  return { bounds, nodes: [...nodes.values()].sort((a, b) => a.asn - b.asn), byId: nodes, routes,
     edges: [...edges.values()].sort((a, b) => a.from - b.from || a.to - b.to || a.fromOriginalPosition - b.fromOriginalPosition || a.toOriginalPosition - b.toOriginalPosition),
     omittedPathIndexes, truncatedTerminals: [...terminals].sort((a, b) => a - b),
     truncated: omittedPathIndexes.length > 0 || routes.some(route => route.truncated) }

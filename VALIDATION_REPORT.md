@@ -6,6 +6,22 @@ Run instructions are in [README.md](README.md); exact implementation boundaries 
 
 ## Subsequent implementation and local verification
 
+The final adaptive-layout local candidate is
+`3abafea397a55d3bea4903f4f888132025ce7140ade635b2edd7118d826d7e07`:
+86 files / 2,157,275 bytes / 18 atlas objects. All 20 browser scenarios pass.
+The 980-by-988 graph world has no overlapping or clipped circle/label bounds
+at 320/390/1280/1440 widths; mobile Fit controls and complete-world SVG export
+pass. Dense and long layouts retain fixed hop columns and readable spacing;
+route focus never reconstructs positions.
+
+The final local performance run preserved the original zoom-in/out order and
+unchanged 50-FPS gate. Each ten-second pan/zoom/focus phase recorded 12 physical
+population checkpoints, all with 24 complete circles inside both SVG and screen.
+Minimum complete-second FPS was 198/191/187 respectively, LCP p95 2200 ms,
+initial JS 194,872 gzip bytes, cold atlas payload 10,258 bytes and hero CLS 0.
+No contract hash changed during that measurement. Full mandatory populations
+remain unmeasured and hosted acceptance requires the new revision's own run.
+
 The latest local graph/credit candidate passes all 19 UI scenarios, including a
 nonempty isolated legal-text renderer fixture, with no page errors. Its full
 tree is 86 files / 2,155,988 bytes / 18 atlas objects, SHA-256
@@ -82,6 +98,22 @@ explicitly when captures are absent on a public checkout; this is not a real
 source-schema certification pass.
 
 ## Hosted delivery evidence
+
+The [subsequent main integration](https://github.com/VanSail-Opensource/vansail-ip-atlas/actions/runs/42490154928)
+for `bb7861b761dceaf02ac9c31cd5d4a08d3d8a172c` passed all three jobs,
+including 19 Chrome-157 UI scenarios and graph FPS minimum 60 across all phases.
+Its artifact was downloaded, SHA-256 checked against the Actions API and safely
+extracted; full candidate verification passed. Visual inspection then found
+dense labels overlapping despite the passing timing test. That artifact was
+held without deployment and superseded by the adaptive-layout fix above.
+
+Its hosted full-answer Go benchmark measured 6197–6291 ns/op, 39 allocations and
+1840 bytes/op on the 8379-byte synthetic input, with 14.98–15.23 MB process peak
+RSS and no lookup scratch. Batch-mean p95 was 8.492–10.095 microseconds; it is
+not a per-query distribution. The strict two-microsecond target still fails.
+The 256-record compiler measurement was 113.90 ms/op, p95/p99 116.24 ms,
+16.97 MB process peak RSS and 182,856 scratch bytes. These remain tiny synthetic
+populations on a four-CPU/16.76-GB host, not full-capacity qualification.
 
 The [credit-display integration run](https://github.com/VanSail-Opensource/vansail-ip-atlas/actions/runs/42486640054)
 for `c9ff28657e61b23635453e74dc441a2a32677aae` passed contracts, Go tests/vet/race,

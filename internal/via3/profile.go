@@ -104,6 +104,10 @@ func (r *Release) endQuery() {
 	}
 	clear(r.active)
 	clear(r.activeObjects)
+	for _, reference := range r.usedReferences {
+		reference.active = nil
+	}
+	r.usedReferences = r.usedReferences[:0]
 	r.activeBytes = 0
 }
 func (r *Release) evictCache(hash string) {

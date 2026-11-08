@@ -23,6 +23,7 @@ const (
 	vrpJSON
 	mrtRIB
 	subscriptionSyntax
+	asnIdentityCSV
 )
 
 // Adapter IDs describe implemented schemas, not source certification. None is
@@ -33,6 +34,8 @@ func selectAdapter(source Source) (adapter, bool) {
 		return 0, false
 	}
 	switch source.Parser.ID {
+	case "asn-identity-csv":
+		return asnIdentityCSV, source.Parser.Schema == "asn-handle-description-country-csv-v1" && source.Category == "asn" && source.Coverage == "mapping" && source.Scope == "asn" && fieldsEqual(source.PublicFields, "asn", "as_name", "organization", "asn_country") && mappedFields(source, map[string]string{"asn": "asn", "handle": "as_name", "description": "organization", "country-code": "asn_country"}) && (source.Format == "csv" || source.Format == "csv-gz")
 	case "vrp-csv":
 		return vrpCSV, source.Parser.Schema == "asn-prefix-maxLength-csv-v1" && source.Category == "rpki" && source.Coverage == "mapping" && source.Scope == "prefix" && fieldsEqual(source.PublicFields, "rpki_status") && mappedFields(source, map[string]string{"roa": "rpki_status"}) && (source.Format == "csv" || source.Format == "csv-gz")
 	case "vrp-json":
@@ -81,7 +84,7 @@ func fieldsEqual(values []string, required ...string) bool {
 	return true
 }
 
-func parsePayload(ctx context.Context, file *os.File, size int64, source Source, implementation adapter, published time.Time) ([]intelligence.NormalizedRecord, error) {
+func parsePayload(ctx context.Context, file *os.File, size int64, source Source, implementation adapter, published time.Time, asnStats ...*intelligence.ASNIdentityStats) ([]intelligence.NormalizedRecord, error) {
 	if implementation == subscriptionSyntax {
 		return nil, errors.New("per-item publication verifier required")
 	}
@@ -115,6 +118,14 @@ func parsePayload(ctx context.Context, file *os.File, size int64, source Source,
 	parse := func(_ string, reader io.Reader) error {
 		limits := intelligence.ParseLimits{Bytes: 3 << 30, Records: 100000, LineBytes: 1 << 20}
 		switch implementation {
+		case asnIdentityCSV:
+			stats, err := intelligence.ParseASNIdentityCSV(ctx, reader, limits, func(value intelligence.ASNIdentityEvidence) error {
+				return emit(intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordASNIdentity, ASNIdentity: &value})
+			})
+			if len(asnStats) > 0 && asnStats[0] != nil {
+				*asnStats[0] = stats
+			}
+			return err
 		case vrpCSV, vrpJSON:
 			sink := func(value intelligence.VRP) error {
 				if !value.Prefix.IsValid() || value.Prefix.Addr().Is4In6() || value.Prefix.Addr().Zone() != "" || value.ASN != 0 && !intelligence.IsPublicASN(value.ASN) {

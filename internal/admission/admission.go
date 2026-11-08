@@ -118,7 +118,8 @@ func policy(source Source) intelligence.SourcePolicy {
 }
 
 // Ingest rechecks review/certification before downloading. The only implemented
-// publication verifier accepts authenticated GitHub per-asset SHA-256 metadata.
+// publication verifiers require GitHub per-asset SHA-256 metadata or exact
+// SHA-256 equality with a separately downloaded immutable commit payload.
 // Unsupported clocks, discovery rules and adapters quarantine instead of
 // treating fetch times, filenames or repository activity as freshness evidence.
 func (e *Engine) Ingest(ctx context.Context, source Source, now time.Time, normalizationPolicyHash [32]byte) (result Result, failure error) {
@@ -153,7 +154,7 @@ func (e *Engine) Ingest(ctx context.Context, source Source, now time.Time, norma
 	if *source.Rights.AttributionRequired && source.Rights.Attribution == nil || source.Rights.Attribution != nil && source.Rights.Attribution.Validate() != nil {
 		return deny("quarantined", "reviewed_dataset_attribution_required")
 	}
-	if !safeHTTPS(source.URL) || !validReleaseLocator(source.Publication.Locator, source.URL) || source.Publication.Kind != "github_release" || source.Publication.Field != "published_at" {
+	if !safeHTTPS(source.URL) || !publicationSupported(source) {
 		return deny("quarantined", "unsupported_or_unbound_publication_verifier")
 	}
 	adapter, ok := selectAdapter(source)
@@ -213,7 +214,12 @@ func (e *Engine) Ingest(ctx context.Context, source Source, now time.Time, norma
 		}
 		return deny("quarantined", "publication_metadata_unavailable")
 	}
-	published, err := verifyReleaseFile(ctx, metadata, source.URL, hash, size, now)
+	var published time.Time
+	if source.Publication.Kind == "github_commit" {
+		published, err = e.verifyCommit(ctx, metadata, quarantine, source, hash, size, now)
+	} else {
+		published, err = verifyReleaseFile(ctx, metadata, source.URL, hash, size, now)
+	}
 	if err != nil {
 		return deny("quarantined", "publication_not_payload_bound")
 	}
@@ -235,7 +241,8 @@ func (e *Engine) Ingest(ctx context.Context, source Source, now time.Time, norma
 			failure = errors.New("private payload close failed")
 		}
 	}()
-	records, err := parsePayload(ctx, file, size, source, adapter, published)
+	var asnStats intelligence.ASNIdentityStats
+	records, err := parsePayload(ctx, file, size, source, adapter, published, &asnStats)
 	if err != nil {
 		if ctx.Err() != nil {
 			return result, ctx.Err()
@@ -245,7 +252,10 @@ func (e *Engine) Ingest(ctx context.Context, source Source, now time.Time, norma
 	result.Snapshot = &intelligence.SourceSnapshot{ID: source.ID, PayloadHash: hash,
 		ProofPayloadHash: hash, NormalizationPolicyHash: normalizationPolicyHash,
 		ParserVersion: source.Parser.Version, SchemaVersion: 3, PublishedAt: published,
-		ProofKind: source.Publication.Kind, PayloadVerified: true, SchemaVerified: true, Records: records}
+		ProofKind: source.Publication.Kind, PayloadVerified: true, SchemaVerified: true, ImmutableCommitBound: source.Publication.Kind == "github_commit", Records: records}
+	if adapter == asnIdentityCSV {
+		result.Snapshot.ASNIdentityStats = &asnStats
+	}
 	result.Decision.State, result.Decision.Reason = "current", ""
 	return result, nil
 }

@@ -112,6 +112,15 @@ same positive reason and an unrated quality, not 52 or 100.
 
 ## ASN context and MOAS
 
+ASN identity fusion is independent of contextual risk. Each of name,
+organization and ASN country takes at most one current vote per family: choose
+the highest reliability and abstain on conflicting values at that reliability.
+Across remaining families, a field's highest reliability wins only when the
+value is unique at that weight. Equal-weight conflicts remain unknown. Missing,
+stale and zero-weight fields abstain. This direct identity never supplies usage,
+IP geography, relationships or Tier-1 membership and changes no risk coefficient,
+coverage requirement or score calculation.
+
 For one origin, first deduplicate its current exact addresses and calculate each
 address's exact positive risk as above. Do not count CIDR expansion or inferred
 addresses. Let `P` be the unique addresses whose exact risk is greater than zero:

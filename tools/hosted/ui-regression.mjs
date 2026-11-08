@@ -152,6 +152,45 @@ try {
         requests: creditRequests, external_requests: 0, query_associations: 0 }
     } finally { await isolated.close() }
   })
+  await test('global credit renderer escapes notices and exposes safe keyboard-accessible links', async () => {
+    // An isolated HTTP mock exercises a nonempty legal display. It is never
+    // written to the candidate and does not claim inclusion of a real dataset.
+    const isolated = await browser.newContext({ serviceWorkers: 'block' })
+    const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(',')}]`
+      : value && typeof value === 'object' ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}` : JSON.stringify(value)
+    const entry = { name: 'Legal display fixture', text: 'Synthetic notice: <strong>plain text</strong>.',
+      url: 'https://publisher.example/credit', license_url: 'https://publisher.example/license' }
+    const body = Buffer.from(canonical({ format_version: 1, release_id: report.release_id, mode: 'production', entries: [entry] }))
+    const hash = createHash('sha256').update(body).digest('hex'), path = `/_atlas/credits/${hash}.json`
+    const index = canonical({ format_version: 1, current_release_id: report.release_id,
+      releases: [{ release_id: report.release_id, credits_path: path, credits_sha256: hash }] })
+    const external = []
+    isolated.on('request', request => { if (new URL(request.url()).origin !== new URL(base).origin) external.push(request.url()) })
+    try {
+      await isolated.route('**/dataset-credits.json', route => route.fulfill({ contentType: 'application/json', body: index }))
+      await isolated.route(`**${path}`, route => route.fulfill({ contentType: 'application/json', body }))
+      const creditPage = await isolated.newPage()
+      await creditPage.goto(`${base}/ip/`)
+      const details = creditPage.getByTestId('dataset-credits')
+      await details.locator('summary').focus(); await creditPage.keyboard.press('Enter')
+      const credit = details.getByTestId('dataset-credit')
+      await credit.waitFor()
+      assert.equal(await credit.count(), 1)
+      assert.equal(await credit.locator('p').innerText(), entry.text)
+      assert.equal(await credit.locator('strong').count(), 0, 'Legal text must never become markup')
+      const links = credit.locator('a')
+      assert.equal(await links.count(), 2)
+      for (const [i, href] of [entry.url, entry.license_url].entries()) {
+        const link = links.nth(i)
+        assert.equal(await link.getAttribute('href'), href)
+        assert.equal(await link.getAttribute('target'), '_blank')
+        assert.equal(await link.getAttribute('rel'), 'noopener noreferrer')
+        assert.equal(await link.getAttribute('referrerpolicy'), 'no-referrer')
+      }
+      assert.deepEqual(external, [], 'Displaying credits must not fetch the publisher or license origin')
+      report.credit_renderer_fixture = { scope: 'isolated-intercept-only-not-candidate-data', entries: 1, external_requests: 0 }
+    } finally { await isolated.close() }
+  })
   for (const view of ['overview', 'quality', 'class-c', 'bgp', 'asn']) {
     await test(`canonical ${view} owner`, async () => {
       await page.goto(`${base}/ip/${view}/?q=203.0.113.1`)
@@ -171,6 +210,20 @@ try {
         assert.equal(await page.getByRole('gridcell').nth(16).getAttribute('tabindex'), '0')
       }
       if (view === 'bgp') {
+        const assertGraphSurface = async () => {
+          const surface = await page.locator('.bgp-graph').evaluate(element => ({
+            backdrop: getComputedStyle(element).backdropFilter,
+            background: getComputedStyle(element).backgroundImage,
+            edgeMask: getComputedStyle(element, '::before').maskImage,
+          }))
+          assert.equal(surface.backdrop, 'none', 'The interactive SVG must not invalidate a backdrop blur on every frame')
+          assert.notEqual(surface.background, 'none', 'The graph retains its themed surface lighting')
+          assert.notEqual(surface.edgeMask, 'none', 'The graph retains masked edge lighting')
+        }
+        await assertGraphSurface()
+        await page.getByRole('button', { name: 'Toggle color theme' }).click()
+        await assertGraphSurface()
+        await page.getByRole('button', { name: 'Toggle color theme' }).click()
         const svg = page.locator('.bgp-graph svg')
         await svg.focus(); await page.keyboard.press('ArrowRight'); await page.keyboard.press('+')
         await page.getByRole('button', { name: 'Fit', exact: true }).click()

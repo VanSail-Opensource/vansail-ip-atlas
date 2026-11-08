@@ -23,6 +23,7 @@ const (
 	RecordVRP
 	RecordPath
 	RecordRelationship
+	RecordASNIdentity
 )
 
 type ScopedUsage struct {
@@ -43,25 +44,26 @@ type RelationshipRecord struct {
 type NormalizedRecord struct {
 	Version      uint16
 	Kind         RecordKind
-	Evidence     *Evidence           `json:",omitempty"`
-	Coverage     *Coverage           `json:",omitempty"`
-	Origins      *OriginMapping      `json:",omitempty"`
-	Geo          *GeoEvidence        `json:",omitempty"`
-	Usage        *ScopedUsage        `json:",omitempty"`
-	VRP          *VRP                `json:",omitempty"`
-	Path         *ScopedPath         `json:",omitempty"`
-	Relationship *RelationshipRecord `json:",omitempty"`
+	Evidence     *Evidence            `json:",omitempty"`
+	Coverage     *Coverage            `json:",omitempty"`
+	Origins      *OriginMapping       `json:",omitempty"`
+	Geo          *GeoEvidence         `json:",omitempty"`
+	Usage        *ScopedUsage         `json:",omitempty"`
+	VRP          *VRP                 `json:",omitempty"`
+	Path         *ScopedPath          `json:",omitempty"`
+	Relationship *RelationshipRecord  `json:",omitempty"`
+	ASNIdentity  *ASNIdentityEvidence `json:",omitempty"`
 }
 
 func (r NormalizedRecord) Validate() error {
-	present := [8]bool{r.Evidence != nil, r.Coverage != nil, r.Origins != nil, r.Geo != nil, r.Usage != nil, r.VRP != nil, r.Path != nil, r.Relationship != nil}
+	present := [9]bool{r.Evidence != nil, r.Coverage != nil, r.Origins != nil, r.Geo != nil, r.Usage != nil, r.VRP != nil, r.Path != nil, r.Relationship != nil, r.ASNIdentity != nil}
 	count := 0
 	for _, yes := range present {
 		if yes {
 			count++
 		}
 	}
-	if r.Version != 3 || r.Kind < 1 || r.Kind > 8 || count != 1 || !present[int(r.Kind)-1] {
+	if r.Version != 3 || r.Kind < 1 || r.Kind > 9 || count != 1 || !present[int(r.Kind)-1] {
 		return errors.New("normalized record union invalid")
 	}
 	return nil
@@ -87,6 +89,7 @@ type SourceSnapshot struct {
 	ProofKind                                             string
 	PayloadVerified, SchemaVerified, ImmutableCommitBound bool
 	Records                                               []NormalizedRecord
+	ASNIdentityStats                                      *ASNIdentityStats `json:",omitempty"`
 }
 type SourceDecision struct{ ID, State, Reason string }
 type StoredSource struct {
@@ -351,6 +354,17 @@ func Reconcile(previous BuildState, policies []SourcePolicy, snapshots []SourceS
 			case RecordPath:
 				clone.Path.Observation.Family = family
 				clone.Path.Observation.Current = true
+			case RecordASNIdentity:
+				v := clone.ASNIdentity
+				if !IsPublicASN(v.ASN) {
+					return plan, errors.New("normalized ASN identity invalid")
+				}
+				v.Family = family
+				v.Weight = policy.Weight
+				v.Current = true
+				v.Name = SafeLabel(v.Name)
+				v.Organization = SafeLabel(v.Organization)
+				v.Country = country(v.Country)
 			}
 			records = append(records, clone)
 		}

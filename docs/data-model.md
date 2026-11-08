@@ -16,6 +16,21 @@ Normalize mapped IPv6 to IPv4. Mapping is factual coverage, never an assessment
 that an address is safe. Evidence families, source IDs and publication proofs
 are private and never serialized into public records.
 
+The November 8 internal normalization amendment adds kind 9 `ASNIdentity` to
+normalized record version 3: public ASN, direct name/organization/country,
+private family/reliability/current status. Old private readers reject this
+unknown kind; existing kinds are unchanged and the implementation fingerprint
+invalidates old adapter certifications. This is not a public VIA3 change: the
+existing kind-8 ASN name/organization/country layout and Go/browser answer fields
+already represent these facts. No source metadata is added to those records.
+
+CSV normalization maps `handle` to `as_name`, `description` to `organization`,
+and `country-code` to `asn_country`. The latter identifies the ASN registration
+country and never supplies an IP's physical or registration-country fact. Labels
+are normalized/sanitized before emission; unknown country codes stay absent.
+Reserved/nonpublic ASN rows are skipped and counted privately; malformed ASN
+syntax fails the source. Parser row/byte/logical-record limits remain enforced.
+
 Canonical internal risk scopes are `exact_ip`, `prefix`, `asn`; path facts use
 `path`, relationship facts `asn_edge`. An adapter explicitly maps a reviewed
 source field to a typed record; source-schema fields are not the public schema.

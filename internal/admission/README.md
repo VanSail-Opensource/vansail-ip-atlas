@@ -14,7 +14,7 @@ including when no payload changed. That step resolves dependencies and retracts
 sources that are retired, stale, unavailable or no longer reviewed.
 
 Before network IO, intake requires an active milestone, explicit reviewed
-no-attribution rights, an implemented parser/schema/version, exact public-field
+redistribution rights and any required global credits, an implemented parser/schema/version, exact public-field
 mapping, the observed real-fixture controls, and the matching reviewed ledger
 entry. It verifies fixture bytes and the current sorted internal Go code hash,
 then reruns that exact fixture through the current parser. This module cannot
@@ -25,7 +25,7 @@ internal Go bytes and active fixture bytes with a 64 MiB aggregate read cap.
 Compare it before and after intake alongside the configuration fingerprint, so
 mid-build review withdrawal or code/fixture changes invalidate the result.
 
-The implemented publication verifier fetches GitHub release metadata using the
+The release publication verifier fetches GitHub release metadata using the
 same public-address-pinned HTTPS acquisition code. It requires the source and
 metadata URLs to name the same repository, an exact asset download URL, uploaded
 state, matching actual size and a publisher SHA-256 digest matching the locally
@@ -33,6 +33,21 @@ stream-hashed payload. The older of release publication and asset creation is
 the clock. Missing digests, different assets, malformed or duplicate JSON keys,
 unapproved origins, unknown/future clocks and stale content fail closed. It does
 not use download time, HTTP 304 or local file timestamps as content age.
+
+The commit verifier accepts only GitHub's path-filtered one-result commit query
+for the exact repository/ref/file named by a raw GitHub source URL. It validates
+the full immutable commit ID and repository URL, uses the older of the UTC author
+and committer clocks, downloads that same file at the immutable commit, and
+requires its SHA-256 and byte count to equal the original payload. A branch race,
+different content, unbound path/ref, duplicate JSON, unavailable payload or invalid
+clock quarantines the source. Both copies share the normal acquisition and disk
+budgets and are removed with quarantine. This avoids treating a mutable branch,
+repository-wide activity or Git SHA-1 blob identity as content-publication proof.
+The fetcher's sole initial URL-query exception is this closed GitHub API shape:
+exactly `path`, `sha` and `per_page=1`; credentials, other queries and pagination
+remain rejected. See the [publisher API contract](https://docs.github.com/en/rest/commits/commits#list-commits).
+The existing earliest-content-clock retention also applies to commit receipts;
+recommitting known identical content cannot renew its observed publication time.
 
 Verified clocks are also retained across runs in the fixed private
 `.atlas-private/publication-clocks-v1.json` anti-replay audit. Equal content can
@@ -55,8 +70,8 @@ Payloads may be plain, gzip or bzip2 as declared. A source partition is capped a
 100,000 normalized records / 64 MiB,
 with 1 MiB records and bounded existing archive/parser readers. Larger sources
 are rejected, not truncated. Whole-source streaming partitions/external merge,
-additional source adapters, archive-member selection, discovery, embedded clocks,
-GitHub commit proofs and broader publication proof methods are future integration
+additional source adapters, archive-member selection, discovery, embedded clocks
+and broader publication proof methods are future integration
 work. Unrepresentable or expired MRT observations fail the partition rather than
 inventing an origin or silently dropping route structure.
 

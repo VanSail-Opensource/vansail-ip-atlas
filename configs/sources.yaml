@@ -49,6 +49,7 @@ build:
     - coordinate_precision
     - asn
     - as_name
+    - asn_country
     - organization
     - isp
     - origins

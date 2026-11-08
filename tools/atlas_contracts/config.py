@@ -19,6 +19,7 @@ FIELD_TARGETS = {
     "allocation_country": {"registration_country"}, "region": {"region"}, "city": {"city"},
     "coordinates": {"latitude", "longitude", "coordinate_precision"},
     "asn": {"asn", "origins", "bgp_origins"}, "organization": {"organization"}, "isp": {"isp"},
+    "handle": {"as_name"}, "description": {"organization"}, "country-code": {"asn_country"},
     "network_type": {"usage_type"}, "usage_type": {"usage_type"},
     "as_path": {"bgp_paths"}, "as_relationship": {"as_relationships"},
     "roa": {"rpki_status"}, "roa_asn": {"rpki_status"}, "roa_max_length": {"rpki_status"},

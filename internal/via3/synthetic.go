@@ -74,6 +74,7 @@ func newShard(kind uint16, records ...[]byte) Shard {
 	return s
 }
 func (s *Shard) set(id uint16, data []byte) {
+	s.lookup = nil
 	for i := range s.Sections {
 		if s.Sections[i].ID == id {
 			s.Sections[i].Data = data

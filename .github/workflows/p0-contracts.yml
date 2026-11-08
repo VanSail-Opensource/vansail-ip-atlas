@@ -57,6 +57,14 @@ jobs:
         run: go test ./internal/via3 -run '^$' -fuzz '^FuzzRead$' -fuzztime 10s -parallel 2
       - name: Reconnaissance decoder fuzz smoke
         run: go test ./tools/source_samples -run '^$' -fuzz '^FuzzDecodeSample$' -fuzztime 10s -parallel 2
+      - name: Hosted synthetic compiler and full-answer lookup measurements
+        # These measured populations do not replace full-data capacity or the
+        # 2-microsecond lookup gate. Keep allocation/RSS/scratch/percentile evidence.
+        run: |
+          go version > reports/go-benchmarks.log
+          python -c "import json,os,platform,shutil; print(json.dumps({'host':platform.platform(),'logical_cpus':os.cpu_count(),'physical_memory_bytes':os.sysconf('SC_PAGE_SIZE')*os.sysconf('SC_PHYS_PAGES'),'disk_free_bytes':shutil.disk_usage('.').free,'GOMAXPROCS':os.environ.get('GOMAXPROCS'),'GOMEMLIMIT':os.environ.get('GOMEMLIMIT'),'scope':'synthetic-not-full-dataset-capacity'}))" >> reports/go-benchmarks.log
+          go test ./internal/via3 -run '^$' -bench '^BenchmarkLookup$' -benchtime=2s -count=3 -benchmem >> reports/go-benchmarks.log
+          go test ./internal/pipeline -run '^$' -bench '^BenchmarkDiskBackedCompile$' -benchtime=12x -count=1 -benchmem >> reports/go-benchmarks.log
       - name: Explain evidence boundary
         run: python tools/hosted/evidence-status.py
       - uses: actions/upload-artifact@v7.0.0
@@ -65,7 +73,9 @@ jobs:
           name: source-free-contract-status
           # Source-rich capabilities/lineage stay on the ephemeral build runner.
           # A public repository's artifact name cannot make an upload private.
-          path: reports/pending-gates.json
+          path: |
+            reports/pending-gates.json
+            reports/go-benchmarks.log
           retention-days: 7
 
   bundled-codec:

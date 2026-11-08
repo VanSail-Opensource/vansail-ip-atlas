@@ -172,3 +172,20 @@ remain required. Complete coverage cannot be inferred from positive-only lists,
 mapping records, mirror counts or a successful synthetic parser test.
 
 No allowlist, placeholder source, or synthetic record satisfies the gate.
+
+## Direct ASN identity CSV adapter
+
+The engineering adapter `asn-identity-csv`, schema
+`asn-handle-description-country-csv-v1`, accepts exactly
+`asn,handle,description,country-code`. Its explicit public targets are `asn`,
+`as_name`, `organization`, `asn_country`; it cannot map ASN country to IP geography.
+It streams bounded logical CSV records, including quoted commas/newlines, and
+returns private read/accepted/reserved-skip/sanitized-field counters. Decimal ASN
+syntax is required. Reserved ASNs abstain through the shared public-ASN predicate
+instead of invalidating an otherwise valid publisher file.
+
+Implementing this parser is not source certification. The observed publisher
+CSV has 125,830 rows; current intake still rejects more than 100,000 rows or
+64 MiB of normalized source state. No bound was raised to admit it. Full streamed
+state, exact publication proof, reviewed rights and real-fixture certification
+remain prerequisites before any source entry can become active.

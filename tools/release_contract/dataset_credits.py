@@ -79,6 +79,7 @@ def _url(value: object) -> bool:
         except ValueError:
             labels = host.split(".")
             return (len(host) <= 253 and len(labels) >= 2
+                    and not all(re.fullmatch(r"(?:[0-9]+|0x[0-9a-f]+)", label) for label in labels)
                     and not host.endswith((".localhost", ".local", ".internal"))
                     and any("a" <= ch <= "z" for ch in labels[-1])
                     and all(re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)

@@ -71,12 +71,17 @@ func (r budgetReader) Read(p []byte) (int, error) {
 }
 
 func validURL(raw string) bool {
-	if len(raw) > 4096 || strings.ContainsAny(raw, "\x00\t\n\r \\?#") {
+	if len(raw) > 4096 || strings.ContainsAny(raw, "\x00\t\n\r \\#") {
 		return false
 	}
 	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" || u.RawQuery != "" || strings.Contains(u.Hostname(), "%") || (u.Port() != "" && u.Port() != "443") {
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" || u.ForceQuery || strings.Contains(u.Hostname(), "%") || (u.Port() != "" && u.Port() != "443") {
 		return false
+	}
+	if u.RawQuery != "" {
+		if _, ok := ParseGitHubCommitURL(raw); !ok {
+			return false
+		}
 	}
 	if strings.HasSuffix(u.Host, ":") {
 		return false

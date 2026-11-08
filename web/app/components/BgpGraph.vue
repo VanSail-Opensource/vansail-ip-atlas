@@ -105,6 +105,11 @@ watch(() => props.origin, () => { activePath.value = -1; originalOpen.value = fa
 </template>
 
 <style scoped>
+.bgp-graph {
+  /* Moving SVG content must not rerasterize a backdrop blur every frame. */
+  backdrop-filter:none;
+  background:linear-gradient(135deg,color-mix(in srgb,var(--surface) 90%,var(--highlight) 10%),var(--surface));
+}
 .graph-node.truncated circle { stroke-dasharray:3 2; }
 .graph-original { border-top:1px solid var(--line); padding:14px 24px; font-size:11px; color:var(--secondary); }
 .graph-original summary { cursor:pointer; min-height:24px; }

@@ -70,7 +70,7 @@ needs streamed table-specific risk/BGP/ASN materialization and real-source
 certification. A mapping-only release must not satisfy the full production gate.
 
 `BuildIntelligence(ctx, options, state, policy, MaterializationInputs)` now
-materializes all eight currently defined normalized record kinds for engineering
+materializes all nine currently defined normalized record kinds for engineering
 releases. It reuses geographic/usage/MOAS fusion and adds four-layer quality,
 sparse exact-observation `/24` profiles, ASN contextual risk and prefix pages,
 per-announcement/per-origin RPKI, ranked typed observed paths and directed
@@ -87,9 +87,11 @@ million nodes. It still buffers a bounded complete state and is not full-source
 streamed production ingestion. Missing/partial VRPs are unavailable; the explicit
 `VRPComplete` engineering assertion plus retained nonempty VRP data is necessary
 to compute valid/invalid/not-found. No ASN identity is inferred from a path,
-address or relationship. This state schema has no certified Tier-1 history or ASN
-identity union, so positive Tier-1 classification/ASN labels remain unavailable
-and the entry point rejects production unconditionally.
+address or relationship. This state schema has no certified Tier-1 history,
+so positive Tier-1 classification remains unavailable and the entry
+point rejects production unconditionally. ASN identities now use an explicit
+direct-evidence union and field-wise conflict handling; they never infer IP
+location, usage, business relationships or Tier-1 status.
 
 The concrete `atlas compile-state` command reads only the fixed private state
 created by `atlas intake`. It holds the intake writer lock and binds the exact

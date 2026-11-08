@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -71,6 +72,19 @@ func creditURL(value string) bool {
 	host := strings.ToLower(u.Hostname())
 	labels := strings.Split(host, ".")
 	if len(host) > 253 || len(labels) < 2 || strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".internal") {
+		return false
+	}
+	legacyNumeric := true
+	for _, label := range labels {
+		base, atom := 10, label
+		if strings.HasPrefix(atom, "0x") {
+			base, atom = 16, atom[2:]
+		}
+		if _, err := strconv.ParseUint(atom, base, 32); err != nil {
+			legacyNumeric = false
+		}
+	}
+	if legacyNumeric {
 		return false
 	}
 	alpha := false

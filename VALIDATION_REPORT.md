@@ -6,6 +6,39 @@ Run instructions are in [README.md](README.md); exact implementation boundaries 
 
 ## Subsequent implementation and local verification
 
+The latest local graph/credit candidate passes all 19 UI scenarios, including a
+nonempty isolated legal-text renderer fixture, with no page errors. Its full
+tree is 86 files / 2,155,988 bytes / 18 atlas objects, SHA-256
+`a4b9a3d9f5e776b6107942e09bf8c12786f28d7ccebc1357e9f5096464e86453`.
+Runtime software notice auditing is complete for its exact code assets. Updated
+hosted acceptance remains separate from these local checks.
+
+That local Chrome run passed every measured comparison: 20 mobile cold hero
+samples yielded LCP p50/p95/p99 2136/2212/2400 ms, CLS 0 and initial JavaScript
+194,872 gzip bytes; all five cold atlas lookups transferred 10,258 bytes.
+The unchanged full-duration 24-node graph phases had minimum complete-second
+FPS 230 pan, 231 zoom and 236 focus on this Windows host. Full memory, INP,
+interaction CLS and required viewport/theme populations remain unmeasured.
+The catalog's line endings were normalized while this local measurement ran;
+its recorded starting catalog hash differs from the final Git input, although
+the synthetic tree stayed byte-identical. Exact-revision hosted evidence must
+be refreshed; this report does not relabel the local run as full acceptance.
+
+Full canonical Go lookup now measures 4.90–5.98 microseconds, 39 allocations and
+1,840 allocated bytes per operation on the 8,379-byte Windows synthetic corpus.
+Process peak RSS was 22,249,472 bytes; lookup scratch was zero. The unchanged
+two-microsecond gate still fails. The 256 batch-mean percentiles are not a hosted
+per-query latency population. Ownership, index parity, query-pin cleanup,
+cancellation and cache-eviction regressions pass. No decoded dictionary payload
+copy or query-answer/history cache was introduced.
+
+The typed ASN CSV parser and ninth normalized union member now materialize
+direct ASN name/organization/country facts through existing VIA3 fields.
+Field/family conflicts remain unknown; registration country cannot become IP
+location and labels cannot imply usage, relationships or Tier-1 membership.
+The original 100,000-row intake bound is unchanged, so the observed 125,830-row
+real CSV remains ineligible for complete intake. No catalog source was activated.
+
 The user explicitly removed the two-complete-risk-feed production prerequisite
 and requested dataset credits. Current `release-scope-v3` keeps quality optional: insufficient coverage remains
 unrated with positive reason flags. Existing scoring qualification and coefficients
@@ -23,8 +56,8 @@ acceptance of the updated revision remains separate.
 The current pass adds the same-clock `compile-state` materializer, bounded XZ
 and ZIP64 ingestion primitives, exact-announcement Go/TypeScript RPKI parity,
 lookup allocation/answer-size improvements, and BGP4MP/AS4 replay-event parsing.
-The materializer supports the eight existing normalized record kinds while
-remaining an engineering population; real bulk state, ASN labels, Tier-1 history
+The materializer supports nine normalized record kinds while
+remaining an engineering population; real bulk state, qualified source labels, Tier-1 history
 and transactional update replay remain unfinished. No source was promoted and
 no score coefficient, Tier-1 threshold or public wire schema was changed.
 
@@ -49,6 +82,28 @@ explicitly when captures are absent on a public checkout; this is not a real
 source-schema certification pass.
 
 ## Hosted delivery evidence
+
+The [credit-display integration run](https://github.com/VanSail-Opensource/vansail-ip-atlas/actions/runs/42486640054)
+for `c9ff28657e61b23635453e74dc441a2a32677aae` passed contracts, Go tests/vet/race,
+all five fuzz populations, bundled codec/parity, typecheck, generation and all
+18 browser scenarios. It **failed** the unchanged 24-node graph frame-rate gate:
+pan averaged 35.0 FPS (minimum complete second 33), wheel 45.0 (44), and route
+focus 34.7 (34), below 50. LCP p95 was 2120 ms over 20 samples, CLS 0,
+initial JS 194,822 gzip bytes and cold atlas payload 10,258 bytes.
+
+Post-baseline diagnostics isolated backdrop blur: the original CSS control
+reproduced 35 FPS; disabling the panel's backdrop filter produced 60.3 FPS pan
+and 60.2 FPS focus, with minimum seconds 59/60. Other CSS variants failed.
+These diagnostic samples are explicitly ineligible for acceptance. The product
+fix uses a static themed graph surface while retaining masked edge lighting;
+it must pass the original full-duration gate on its own revision.
+
+This hosted machine exposed four logical CPUs and 16,760,344,576 bytes RAM.
+`GOMAXPROCS=2` and `GOMEMLIMIT=5GiB` constrain Go but do not turn that hardware
+into the specified two-vCPU/eight-GiB capacity population. Subsequent integration
+runs retain source-free Go compiler/lookup benchmark logs and actual host facts;
+full-data, cold/changed/no-change and process-group budget qualification remains
+outstanding. No failed threshold was raised.
 
 The [initial main-branch integration run](https://github.com/VanSail-Opensource/vansail-ip-atlas/actions/runs/42481869394)
 passed for revision `5f4f0ca532998ab22d2e4d9640c05fd118cb62dc`: strict contracts,
@@ -86,7 +141,7 @@ Public fact fields and VIA3 wire codec remain schema 3/Zstandard. This is the in
 
 The user explicitly approved the pinned bounded bundled decoder after actual Chrome rejected native Zstandard. `fzstd@0.1.1` is the sole implementation; no remote decoder, alternate codec or old-browser polyfill was added.
 
-## Exact prepared artifact
+## Earlier prepared local artifact
 
 | Property | Verified local value |
 |---|---|
@@ -137,7 +192,7 @@ The hero's initial SSR opacity bug was fixed with a JavaScript-disabled regressi
 ## Production blockers and remaining work
 
 1. The catalog has 82 candidates, seven rights-approved entries and two retired entries; **zero active/current and zero real parser fixtures**. Under `release-scope-v3`, numeric quality is optional/unrated and reviewed required credits are allowed; **12/12 required capability rows** remain blocked. All 21 subscription repositories share one evidence family. No source-use grant, activation or publication proof was invented.
-2. Full admitted-source streaming, discovery/proof coverage, risk/BGP/Tier-1/ASN identity materialization, incremental dirty-partition reuse and source/blob retention/GC are unfinished. Mapping materialization deliberately supports only Geo/Usage/Origins and refuses production; input receipt expiry bounds its synthetic release. Intake has a 100,000-row/64-MiB per-source limit and a 64-MiB complete-state ceiling. Exceeding a bound rejects the build instead of truncating facts. Hash-only anti-replay audit retention also needs production policy review alongside no-renewal guarantees.
+2. Full admitted-source streaming, broad discovery/proof coverage, qualified Tier-1 history, incremental dirty-partition reuse and source/blob retention/GC are unfinished. The nine-kind engineering materializer includes quality/BGP/ASN identity but refuses production; input receipt expiry bounds its synthetic release. Intake has a 100,000-row/64-MiB per-source limit and a 64-MiB complete-state ceiling. Exceeding a bound rejects the build instead of truncating facts. Hash-only anti-replay audit retention also needs production policy review alongside no-renewal guarantees.
 3. Runtime MRT remains disabled pending the max-two-source, sequential, shared-1-GiB cold-acquisition coordinator. TABLE_DUMP_V2 unicast/ADDPATH and separate BGP4MP/AS4 event parsing exist; transactional update replay remains unfinished. XZ/ZIP64 have bounded engineering security coverage; real adapters still need source-specific certification. Trusted subscription per-item publication verification is still missing.
 4. Full-source schema/freshness/redistribution qualification, whole-process RSS/physical disk high-water, full/changed/no-change runtime, hot/cold lookup populations, 24-node graph performance, field/lab INP, interaction CLS, complete browser memory/allocation accounting and hosted accessibility remain unmeasured. The known Go lookup failure stays blocking.
 5. Direct software notices are included. The Windows dependency audit copied 567 package notices and proved all 25 missing installed-package notices are absent from the client/worker module graphs; every runtime package has a copied notice. Hosted builds independently check their complete emitted code tree. The user-approved dataset-credit exception is documented separately; it grants no dataset rights.

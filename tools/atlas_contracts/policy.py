@@ -111,7 +111,15 @@ def attribution_url(value):
             or not value.startswith("https://") or any(ch in value for ch in "<>\"'") or not safe_https(value)
             or re.search(r"%(?![0-9A-Fa-f]{2})", value) or CREDIT_SECRET.search(value)):
         return False
-    host = urlsplit(value).hostname
+    parsed = urlsplit(value)
+    host = parsed.hostname
+    if all(re.fullmatch(r"(?:[0-9]+|0[xX][0-9A-Fa-f]+)", label) for label in host.split(".")):
+        try:
+            ipaddress.ip_address(host)
+        except ValueError:
+            return False
+    if parsed.port is not None and parsed.netloc.rsplit(":", 1)[-1] != "443":
+        return False
     if host.endswith("."):
         return False
     try:

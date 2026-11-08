@@ -42,6 +42,7 @@ type Section struct {
 type Shard struct {
 	Kind     uint16
 	Sections []Section
+	lookup   *shardLookup // immutable release-side metadata; never serialized
 }
 
 func Hash(data []byte) string       { sum := sha256.Sum256(data); return hex.EncodeToString(sum[:]) }
@@ -122,6 +123,9 @@ func (s *Shard) Section(id uint16) []byte {
 	return nil
 }
 func (s *Shard) Rows(id uint16) ([]byte, int) {
+	if s.lookup != nil && id < uint16(len(s.lookup.rows)) {
+		return s.lookup.rows[id], s.lookup.widths[id]
+	}
 	b := s.Section(id)
 	if len(b) < 8 {
 		return nil, 0

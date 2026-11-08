@@ -50,8 +50,8 @@ Selected race tests require a CGO-capable toolchain: `go test -race ./internal/.
 ## Implementation map
 
 - `internal/via3`, `cmd/atlas`: versioned container, typed records, indexed readers, compiler work and synthetic release CLI.
-- `internal/pipeline`: bounded disk-backed sorting, partitioning and repacking, streamed object emission and a Geo/Usage/Origins materializer.
-- `internal/admission`: reviewed adapter/fixture checks, exact GitHub asset publication verification, persistent anti-replay clocks and bounded private intake.
+- `internal/pipeline`: bounded disk-backed sorting, partitioning and repacking, streamed object emission and nine-kind engineering materialization, including direct ASN identity.
+- `internal/admission`: reviewed adapter/fixture checks, exact GitHub asset/immutable-commit publication verification, persistent anti-replay clocks and bounded private intake.
 - `internal/intelligence`: scoring, geo/usage fusion, MOAS/RPKI, directed relationships, Tier-1, streaming MRT and typed private reconciliation.
 - `internal/subscription`: bounded literal-IP-only subscription syntax decoders.
 - `internal/acquire`: pinned public-address HTTP dialing, bounded atomic download and streaming archive inspection.
@@ -88,4 +88,13 @@ connects surviving reconciled receipts to bounded engineering materialization.
 It rechecks config/certification/state identity, clock and expiry at publication.
 With the current empty intake it rejects the build rather than inventing facts.
 See [the pipeline contract](internal/pipeline/README.md) for supported inputs and
-the remaining bulk/Tier-1/ASN-identity gates. Production mode remains refused.
+the remaining bulk/Tier-1/source-certification gates. Production mode remains refused.
+
+The new `asn-identity-csv` adapter streams the observed
+`asn,handle,description,country-code` schema into direct ASN name, organization
+and country facts. It counts/skips reserved ASNs, bounds logical CSV records
+before decoding, and preserves unknown field conflicts. It does not infer IP
+location, usage, relationships or Tier-1 class. Actual-source intake is still
+limited to 100,000 rows/64 MiB; the privately observed 125,830-row publisher file
+therefore remains blocked until streamed state and full-capacity gates are
+implemented. No catalog source is activated by the new adapter.

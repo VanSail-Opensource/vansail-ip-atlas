@@ -18,10 +18,10 @@ import (
 // Missing or partial VRP snapshots must leave VRPComplete false.
 type MaterializationInputs struct{ VRPComplete bool }
 
-// BuildIntelligence connects all eight normalized record kinds to the bounded
+// BuildIntelligence connects all nine normalized record kinds to the bounded
 // public-fact planner. This engineering entry point refuses production: its
-// BuildState lacks certified Tier-1 history and ASN-identity records, and does
-// not replace the real-source admission/capability gate.
+// BuildState lacks certified Tier-1 history and complete streamed bulk state,
+// and does not replace the real-source admission/capability gate.
 func BuildIntelligence(ctx context.Context, options Options, state intelligence.BuildState, policy intelligence.Policy, inputs ...MaterializationInputs) (Candidate, error) {
 	if options.Mode != "synthetic" {
 		return Candidate{}, &via3.Error{Code: "production_blocked"}
@@ -69,6 +69,7 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 		var observations []intelligence.PathObservation
 		usage := map[netip.Prefix][]intelligence.UsageEvidence{}
 		asnPrefixes := map[uint32][]netip.Prefix{}
+		identities := map[uint32][]intelligence.ASNIdentityEvidence{}
 		asns := map[uint32]struct{}{}
 		edges := map[intelligence.ASNEdge]bool{}
 		relations := intelligence.NewRelationships(true)
@@ -225,6 +226,16 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 					edges[intelligence.ASNEdge{From: v.To, To: v.From}] = false
 					asns[v.From] = struct{}{}
 					asns[v.To] = struct{}{}
+				case intelligence.RecordASNIdentity:
+					v := *record.ASNIdentity
+					if !facts.PublicASN(v.ASN) || !v.Current || v.Family == "" {
+						return errors.New("noncurrent or invalid normalized ASN identity")
+					}
+					if len(identities[v.ASN]) >= 8192 {
+						return errors.New("ASN identity working set exceeded")
+					}
+					identities[v.ASN] = append(identities[v.ASN], v)
+					asns[v.ASN] = struct{}{}
 				}
 			}
 			mappings.Sources = append(mappings.Sources, mapping)
@@ -338,7 +349,11 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 			prefixes := asnPrefixes[asn]
 			sortPrefixes(prefixes)
 			prefixes = uniquePrefixes(prefixes)
-			out := via3.ASNData{Prefixes: prefixes}
+			identity, err := intelligence.FuseASNIdentities(identities[asn])
+			if err != nil {
+				return err
+			}
+			out := via3.ASNData{Prefixes: prefixes, Name: identity.Name, Organization: identity.Organization, Country: identity.Country}
 			context := engine.ASNContext(asn)
 			if context.Present {
 				out.Risk = &context.Risk
@@ -473,6 +488,9 @@ func boundedNormalizedRecord(record intelligence.NormalizedRecord) error {
 			total += len(segment.ASNs)
 		}
 		bad = bad || total > via3.PublicPathASNs
+	}
+	if v := record.ASNIdentity; v != nil {
+		bad = len(v.Name) > 1024 || len(v.Organization) > 1024 || len(v.Country) > 2 || len(v.Family) > 256
 	}
 	if bad {
 		return errors.New("normalized materialization field limit")

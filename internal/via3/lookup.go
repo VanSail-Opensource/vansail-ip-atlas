@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	mathbits "math/bits"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -220,22 +221,65 @@ func (r *Release) prefixes(ctx context.Context, q string, cursor uint32) (ASNPre
 }
 
 type Release struct {
-	mu            sync.Mutex
-	Manifest      Manifest
-	objects       map[string]ObjectInfo
-	load          func(string) ([]byte, error)
-	cache         map[string]*Shard
-	cacheOrder    []string
-	cacheBytes    int
-	active        map[string]bool
-	activeObjects map[string]*Shard
-	activeBytes   int
-	routerBytes   int
-	residents     map[string]*resident
-	residentBytes int
-	router        *Shard
-	Clock         func() int64
-	Reads         int
+	mu             sync.Mutex
+	Manifest       Manifest
+	objects        map[string]ObjectInfo
+	load           func(string) ([]byte, error)
+	cache          map[string]*Shard
+	cacheOrder     []string
+	cacheBytes     int
+	active         map[string]bool
+	activeObjects  map[string]*Shard
+	activeBytes    int
+	routerBytes    int
+	residents      map[string]*resident
+	residentBytes  int
+	router         *Shard
+	references     map[string]*objectReference
+	usedReferences []*objectReference
+	Clock          func() int64
+	Reads          int
+}
+
+// These are immutable views of a fully validated shard, not query/answer caches.
+// The metadata is owned by its shard and is released with it on cache eviction.
+// Directory strings reuse canonical manifest hash strings; no mutable answer
+// or caller-owned scalar is retained here.
+// No decoded payload is copied: row slices are views, reference pointers cost
+// one machine word per 40-byte directory row, and the fixed row/depth tables
+// occur at most once per loaded manifest object (<18500). Reference-slot and
+// used-slot counts are likewise bounded by that manifest inventory. Decoded
+// section admission remains unchanged; process RSS still needs full-corpus
+// measurement including this bounded metadata and Go allocator overhead.
+type shardLookup struct {
+	rows       [13][]byte
+	widths     [13]int
+	depths     [2][129]bool
+	references []*objectReference
+}
+
+type objectReference struct {
+	hash   string
+	active *Shard // same query pin as activeObjects; cleared by endQuery
+}
+
+func shardLookupMetadata(s *Shard, references []*objectReference) *shardLookup {
+	index := &shardLookup{references: references}
+	for _, section := range s.Sections {
+		index.rows[section.ID] = section.Data[8:]
+		index.widths[section.ID] = int(u32(section.Data, 4))
+	}
+	for _, id := range []uint16{1, 8} {
+		rows := index.rows[id]
+		for p := 0; p < len(rows); p += 32 {
+			family := 0
+			if rows[p] == 6 {
+				family = 1
+			}
+			index.depths[family][rows[p+1]] = true
+		}
+	}
+	return index
 }
 
 func strictJSON(data []byte, target any) error {
@@ -431,12 +475,23 @@ func (r *Release) object(ctx context.Context, hash string) (*Shard, error) {
 		return nil, err
 	}
 	dir, _ := s.Rows(7)
+	references := make([]*objectReference, len(dir)/40)
 	for p := 0; p < len(dir); p += 40 {
-		h := hex.EncodeToString(dir[p+8 : p+40])
-		o, ok := r.objects[h]
-		if !ok || o.Kind != u16(dir, p) || o.Bytes != int(u32(dir, p+4)) || h == hash {
+		var encoded [64]byte
+		hex.Encode(encoded[:], dir[p+8:p+40])
+		o, ok := r.objects[string(encoded[:])]
+		if !ok || o.Kind != u16(dir, p) || o.Bytes != int(u32(dir, p+4)) || o.SHA256 == hash {
 			return nil, fail("record")
 		}
+		if r.references == nil {
+			r.references = make(map[string]*objectReference)
+		}
+		reference := r.references[o.SHA256]
+		if reference == nil {
+			reference = &objectReference{hash: o.SHA256}
+			r.references[o.SHA256] = reference
+		}
+		references[p/40] = reference
 	}
 	if strings.HasPrefix(info.Partition, "4:") || strings.HasPrefix(info.Partition, "6:") {
 		parts := strings.Split(info.Partition[2:], "/")
@@ -489,6 +544,7 @@ func (r *Release) object(ctx context.Context, hash string) (*Shard, error) {
 			}
 		}
 	}
+	s.lookup = shardLookupMetadata(&s, references)
 	r.cacheObject(hash, &s)
 	if r.activeObjects == nil {
 		r.activeObjects = make(map[string]*Shard)
@@ -497,6 +553,27 @@ func (r *Release) object(ctx context.Context, hash string) (*Shard, error) {
 	return &s, nil
 }
 func (r *Release) reference(ctx context.Context, from *Shard, index uint32) (*Shard, error) {
+	if from.lookup != nil {
+		if uint64(index) >= uint64(len(from.lookup.references)) {
+			return nil, fail("record")
+		}
+		reference := from.lookup.references[index]
+		if reference.active != nil {
+			if err := r.current(); err != nil {
+				return nil, err
+			}
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return reference.active, nil
+		}
+		shard, err := r.object(ctx, reference.hash)
+		if err == nil {
+			reference.active = shard
+			r.usedReferences = append(r.usedReferences, reference)
+		}
+		return shard, err
+	}
 	dir, _ := from.Rows(7)
 	if uint64(index) >= uint64(len(dir)/40) {
 		return nil, fail("record")
@@ -512,7 +589,7 @@ func (r *Release) reference(ctx context.Context, from *Shard, index uint32) (*Sh
 	}
 	return r.object(ctx, info.SHA256)
 }
-func (r *Release) label(ctx context.Context, from *Shard, row []byte, p int) (*string, error) {
+func (r *Release) label(ctx context.Context, from *Shard, row []byte, p int, target *string) (*string, error) {
 	object, id := u32(row, p), u32(row, p+4)
 	if object == None && id == None {
 		return nil, nil
@@ -529,8 +606,8 @@ func (r *Release) label(ctx context.Context, from *Shard, row []byte, p int) (*s
 	if uint64(id)+1 >= uint64(len(offsets)/4) {
 		return nil, fail("record")
 	}
-	value := string(text[u32(offsets, int(id)*4):u32(offsets, (int(id)+1)*4)])
-	return &value, nil
+	*target = string(text[u32(offsets, int(id)*4):u32(offsets, (int(id)+1)*4)])
+	return target, nil
 }
 func (s *Shard) ASNRecord(asn uint32) ([]byte, bool) {
 	index, _ := s.Rows(2)
@@ -582,6 +659,42 @@ func country(v uint16) *string {
 	s := string([]byte{byte(n/26) + 'A', byte(n%26) + 'A'})
 	return &s
 }
+
+// Optional pointers and their owning result are allocated together. Each block
+// is fresh for this answer, never retained on Release or shared across queries.
+// Keep separate fact blocks so a sparse answer does not allocate absent views.
+type geoLookupValues struct {
+	answer                                         GeoAnswer
+	country, registration, region, city, precision string
+	latitude, longitude                            float64
+}
+type networkLookupValues struct {
+	answer                  NetworkAnswer
+	name, organization, isp string
+}
+type usageLookupValues struct {
+	answer                     UsageAnswer
+	anycast, directedBroadcast bool
+}
+type qualityLookupValues struct {
+	answer                        QualityAnswer
+	exact, prefix, asn, neighbors float64
+	score                         uint8
+}
+type asnLookupValues struct {
+	country, name, organization string
+	risk                        float64
+	customerCone, transitDegree uint32
+}
+
+func countryInto(v uint16, target *string) *string {
+	if v == 0 {
+		return nil
+	}
+	n := int(v) - 1
+	*target = string([]byte{byte(n/26) + 'A', byte(n%26) + 'A'})
+	return target
+}
 func confidence(v byte) string { return []string{"unrated", "low", "medium", "high"}[v] }
 func usageName(v byte) string {
 	return []string{"unknown", "residential", "business", "mobile", "datacenter", "hosting", "education", "government"}[v]
@@ -592,7 +705,7 @@ func className(v byte) string {
 func stability(v byte) string { return []string{"unavailable", "pending", "stable"}[v] }
 func reasons(v uint32) []string {
 	names := []string{"malware", "botnet", "command_control", "abuse", "fraud", "scanning", "spam", "tor", "vpn", "proxy", "datacenter", "hosting", "asn_context", "subnet_context"}
-	out := []string{}
+	out := make([]string, 0, mathbits.OnesCount32(v&((1<<len(names))-1)))
 	for bit, name := range names {
 		if v&(1<<bit) != 0 {
 			out = append(out, name)
@@ -600,12 +713,12 @@ func reasons(v uint32) []string {
 	}
 	return out
 }
-func riskValue(row []byte, p int, bit uint) *float64 {
+func riskValue(row []byte, p int, bit uint, target *float64) *float64 {
 	if !present(row, bit) {
 		return nil
 	}
-	v := float64(u32(row, p)) / 1000000
-	return &v
+	*target = float64(u32(row, p)) / 1000000
+	return target
 }
 func origins(s *Shard, row []byte) []uint32 {
 	ints, _ := s.Rows(4)
@@ -636,16 +749,19 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 	}
 	var addr netip.Addr
 	var announcement netip.Prefix
+	var geoValues *geoLookupValues
 	networkOriginsKnown := false
 	if input.Kind == "ip" {
 		addr = netip.MustParseAddr(input.Canonical)
 		if s := dest[2]; s != nil {
 			if row, _, ok := s.findPrefix(addr); ok {
-				g := &GeoAnswer{Country: country(u16(row, 4)), RegistrationCountry: country(u16(row, 6))}
-				if g.Region, err = r.label(ctx, s, row, 8); err != nil {
+				geoValues = &geoLookupValues{}
+				g := &geoValues.answer
+				g.Country, g.RegistrationCountry = countryInto(u16(row, 4), &geoValues.country), countryInto(u16(row, 6), &geoValues.registration)
+				if g.Region, err = r.label(ctx, s, row, 8, &geoValues.region); err != nil {
 					return answer, err
 				}
-				if g.City, err = r.label(ctx, s, row, 16); err != nil {
+				if g.City, err = r.label(ctx, s, row, 16, &geoValues.city); err != nil {
 					return answer, err
 				}
 				answer.Geo = g
@@ -654,13 +770,14 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 		if s := dest[3]; s != nil {
 			if row, _, ok := s.findPrefix(addr); ok && present(row, 4) {
 				if answer.Geo == nil {
-					answer.Geo = &GeoAnswer{}
+					geoValues = &geoLookupValues{}
+					answer.Geo = &geoValues.answer
 				}
-				lat, lon := float64(int32(u32(row, 4)))/1000, float64(int32(u32(row, 8)))/1000
-				precision := []string{"unknown", "country", "region", "city_centroid", "area"}[row[12]]
-				answer.Geo.Latitude = &lat
-				answer.Geo.Longitude = &lon
-				answer.Geo.Precision = &precision
+				geoValues.latitude, geoValues.longitude = float64(int32(u32(row, 4)))/1000, float64(int32(u32(row, 8)))/1000
+				geoValues.precision = []string{"unknown", "country", "region", "city_centroid", "area"}[row[12]]
+				answer.Geo.Latitude = &geoValues.latitude
+				answer.Geo.Longitude = &geoValues.longitude
+				answer.Geo.Precision = &geoValues.precision
 			}
 		}
 		if s := dest[4]; s != nil {
@@ -668,14 +785,15 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 				if err := budget.charge(4096 + 16*int(u32(row, 8))); err != nil {
 					return answer, err
 				}
-				n := &NetworkAnswer{Prefix: prefix.String(), Origins: origins(s, row)}
-				if n.Name, err = r.label(ctx, s, row, 16); err != nil {
+				values := &networkLookupValues{answer: NetworkAnswer{Prefix: prefix.String(), Origins: origins(s, row)}}
+				n := &values.answer
+				if n.Name, err = r.label(ctx, s, row, 16, &values.name); err != nil {
 					return answer, err
 				}
-				if n.Organization, err = r.label(ctx, s, row, 24); err != nil {
+				if n.Organization, err = r.label(ctx, s, row, 24, &values.organization); err != nil {
 					return answer, err
 				}
-				if n.ISP, err = r.label(ctx, s, row, 32); err != nil {
+				if n.ISP, err = r.label(ctx, s, row, 32, &values.isp); err != nil {
 					return answer, err
 				}
 				answer.Network = n
@@ -688,14 +806,15 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 		}
 		if s := dest[5]; s != nil {
 			if row, _, ok := s.findPrefix(addr); ok {
-				u := &UsageAnswer{Type: usageName(row[4]), Assignment: []string{"unknown", "native", "broadcast_or_routed"}[row[5]]}
+				values := &usageLookupValues{answer: UsageAnswer{Type: usageName(row[4]), Assignment: []string{"unknown", "native", "broadcast_or_routed"}[row[5]]}}
+				u := &values.answer
 				if present(row, 7) {
-					v := row[6]&1 != 0
-					u.Anycast = &v
+					values.anycast = row[6]&1 != 0
+					u.Anycast = &values.anycast
 				}
 				if present(row, 8) {
-					v := row[6]&2 != 0
-					u.DirectedBroadcast = &v
+					values.directedBroadcast = row[6]&2 != 0
+					u.DirectedBroadcast = &values.directedBroadcast
 				}
 				answer.Usage = u
 				if u.Anycast != nil && *u.Anycast && answer.Geo != nil {
@@ -708,10 +827,12 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 		}
 		if s := dest[6]; s != nil {
 			if row, _, ok := s.findPrefix(addr); ok {
-				q := &QualityAnswer{Confidence: confidence(row[10]), Reasons: reasons(u32(row, 4)), Layers: LayerAnswer{Exact: riskValue(row, 12, 10), Prefix: riskValue(row, 16, 11), ASN: riskValue(row, 20, 12), Neighbors: riskValue(row, 24, 13)}}
+				values := &qualityLookupValues{}
+				q := &values.answer
+				*q = QualityAnswer{Confidence: confidence(row[10]), Reasons: reasons(u32(row, 4)), Layers: LayerAnswer{Exact: riskValue(row, 12, 10, &values.exact), Prefix: riskValue(row, 16, 11, &values.prefix), ASN: riskValue(row, 20, 12, &values.asn), Neighbors: riskValue(row, 24, 13, &values.neighbors)}}
 				if present(row, 9) {
-					v := row[9]
-					q.Score = &v
+					values.score = row[9]
+					q.Score = &values.score
 				}
 				answer.Quality = q
 			}
@@ -745,20 +866,21 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 				if err := budget.charge(4096); err != nil {
 					return answer, err
 				}
-				a := ASNAnswer{ASN: asn, Country: country(u16(row, 24)), Risk: riskValue(row, 28, 23), RiskBand: []string{"unknown", "low", "medium", "high"}[row[26]], Confidence: confidence(row[27]), Prefixes: []string{}, NetworkClass: className(row[52]), Stability: stability(row[53])}
-				if a.Name, err = r.label(ctx, s, row, 8); err != nil {
+				values := &asnLookupValues{}
+				a := ASNAnswer{ASN: asn, Country: countryInto(u16(row, 24), &values.country), Risk: riskValue(row, 28, 23, &values.risk), RiskBand: []string{"unknown", "low", "medium", "high"}[row[26]], Confidence: confidence(row[27]), Prefixes: []string{}, NetworkClass: className(row[52]), Stability: stability(row[53])}
+				if a.Name, err = r.label(ctx, s, row, 8, &values.name); err != nil {
 					return answer, err
 				}
-				if a.Organization, err = r.label(ctx, s, row, 16); err != nil {
+				if a.Organization, err = r.label(ctx, s, row, 16, &values.organization); err != nil {
 					return answer, err
 				}
 				if present(row, 25) {
-					v := u32(row, 44)
-					a.CustomerCone = &v
+					values.customerCone = u32(row, 44)
+					a.CustomerCone = &values.customerCone
 				}
 				if present(row, 26) {
-					v := u32(row, 48)
-					a.TransitDegree = &v
+					values.transitDegree = u32(row, 48)
+					a.TransitDegree = &values.transitDegree
 				}
 				if u32(row, 40) > 0 {
 					pages, _ := s.Rows(12)
@@ -772,29 +894,47 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 					return answer, err
 				}
 				a.Prefixes, a.PrefixCursor = page.Prefixes, page.NextCursor
+				if cap(answer.ASNs) == 0 {
+					answer.ASNs = make([]ASNAnswer, 0, len(answer.BGP.Origins))
+				}
 				answer.ASNs = append(answer.ASNs, a)
 			}
 		}
 		if s := asndest[11]; s != nil {
-			if rows, ok := s.ASNRun(asn); ok {
-				if len(rows) > 12 {
+			if first, end, ok := s.asnBounds(asn); ok {
+				if end-first > 12 {
 					return answer, fail("record")
 				}
 				segments, _ := s.Rows(9)
 				ints, _ := s.Rows(4)
-				for _, row := range rows {
-					p := PathAnswer{Origin: asn, ASNs: []uint32{}, Visibility: []string{"unknown", "low", "medium", "high"}[row[15]], GraphEligible: row[14]&1 != 0, Segments: []SegmentAnswer{}}
+				for ordinal := first; ordinal < end; ordinal++ {
+					row := s.Record(ordinal)
+					count := int(u16(row, 12))
+					total := 0
 					for j := u32(row, 8); j < u32(row, 8)+uint32(u16(row, 12)); j++ {
 						seg := segments[j*12 : (j+1)*12]
 						if err := budget.path(int(u32(seg, 8))); err != nil {
 							return answer, err
 						}
-						a := make([]uint32, u32(seg, 8))
+						total += int(u32(seg, 8))
+					}
+					// Flat and per-segment values have disjoint caller-owned ranges.
+					// Full slice bounds also prevent an append from overwriting the
+					// next range. The complete allocation is reserved above first.
+					values := make([]uint32, 2*total)
+					p := PathAnswer{Origin: asn, ASNs: values[:total:total], Visibility: []string{"unknown", "low", "medium", "high"}[row[15]], GraphEligible: row[14]&1 != 0, Segments: make([]SegmentAnswer, count)}
+					start := 0
+					for offset := 0; offset < count; offset++ {
+						j := u32(row, 8) + uint32(offset)
+						seg := segments[j*12 : (j+1)*12]
+						end := start + int(u32(seg, 8))
+						a := values[total+start : total+end : total+end]
 						for k := range a {
 							a[k] = u32(ints, (int(u32(seg, 4))+k)*4)
 						}
-						p.Segments = append(p.Segments, SegmentAnswer{Type: []string{"", "sequence", "set", "confederation_sequence", "confederation_set"}[seg[0]], ASNs: a})
-						p.ASNs = append(p.ASNs, a...)
+						p.Segments[offset] = SegmentAnswer{Type: []string{"", "sequence", "set", "confederation_sequence", "confederation_set"}[seg[0]], ASNs: a}
+						copy(p.ASNs[start:end], a)
+						start = end
 					}
 					answer.BGP.Paths = append(answer.BGP.Paths, p)
 				}
@@ -802,6 +942,9 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 		}
 		if s := asndest[13]; s != nil {
 			if row, ok := s.ASNRecord(asn); ok {
+				if cap(answer.BGP.Tier1) == 0 {
+					answer.BGP.Tier1 = make([]TierAnswer, 0, len(answer.BGP.Origins))
+				}
 				answer.BGP.Tier1 = append(answer.BGP.Tier1, TierAnswer{ASN: asn, NetworkClass: className(row[8]), Stability: stability(row[9])})
 			}
 		}
@@ -811,6 +954,9 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 				if row, ok := s.FindRPKI(addr, asn, announcement); ok {
 					status = []string{"unavailable", "valid", "invalid", "not_found"}[row[8]]
 				}
+			}
+			if cap(answer.BGP.RPKI) == 0 {
+				answer.BGP.RPKI = make([]RPKIAnswer, 0, len(answer.BGP.Origins))
 			}
 			answer.BGP.RPKI = append(answer.BGP.RPKI, RPKIAnswer{Origin: asn, Status: status})
 		}
@@ -833,7 +979,7 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 	for pair := range pairs {
 		ordered = append(ordered, pair)
 	}
-	sort.Slice(ordered, func(i, j int) bool { return ordered[i] < ordered[j] })
+	slices.Sort(ordered)
 	for _, pair := range ordered {
 		if err := budget.charge(256); err != nil {
 			return answer, err

@@ -24,6 +24,12 @@
     {"url": "https://[::ffff:127.0.0.1]/license", "valid": false},
     {"url": "https://publisher.example/<notice>", "valid": false},
     {"url": "https://publisher.example/ghp_synthetic", "valid": false},
-    {"url": "https://publisher.example/github_pat_synthetic", "valid": false}
+    {"url": "https://publisher.example/github_pat_synthetic", "valid": false},
+    {"url": "https://publisher.example:0443/license", "valid": false},
+    {"url": "https://010.010.010.010/license", "valid": false},
+    {"url": "https://0x8.0x8.0x8.0x8/license", "valid": false},
+    {"url": "https://134744072/license", "valid": false},
+    {"url": "https://8.8.2056/license", "valid": false},
+    {"url": "https://%38.8.8.8/license", "valid": false}
   ]
 }

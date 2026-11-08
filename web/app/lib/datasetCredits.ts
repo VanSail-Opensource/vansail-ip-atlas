@@ -52,6 +52,11 @@ function https(value: unknown): string {
   const port = /:([^:\]]*)$/.exec(value.slice(8).split('/')[0]!)?.[1]
   if (port !== undefined && port !== '443') return failure()
   const url = new URL(value)
+  const authority = value.slice(8).split('/')[0]!
+  const rawHost = authority.startsWith('[') ? authority.slice(0, authority.indexOf(']') + 1) : authority.split(':')[0]!
+  // URL normalizes legacy numeric IPv4 and percent-encoded hosts. Require the
+  // ordinary raw hostname to agree before that normalization can hide aliases.
+  if (!rawHost.startsWith('[') && url.hostname !== rawHost.toLowerCase()) return failure()
   if (url.protocol !== 'https:' || url.username || url.password || url.port && url.port !== '443' || !publicHost(url.hostname)) return failure()
   return value
 }

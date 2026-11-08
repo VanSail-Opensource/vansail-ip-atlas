@@ -644,7 +644,14 @@ func (s *Shard) findPrefixWithin(addr netip.Addr, maxBits int) ([]byte, netip.Pr
 	}
 	var keyBytes [32]byte
 	key := keyBytes[:]
+	family := 0
+	if addr.Is6() {
+		family = 1
+	}
 	for length := maxBits; length >= 0; length-- {
+		if s.lookup != nil && !s.lookup.depths[family][length] {
+			continue
+		}
 		prefix := netip.PrefixFrom(addr, length).Masked()
 		for _, exact := range []bool{true, false} {
 			if exact && length != addr.BitLen() {

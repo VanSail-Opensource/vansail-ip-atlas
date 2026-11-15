@@ -23,8 +23,10 @@ class CandidateClockTests(unittest.TestCase):
         self.state = self.private / 'state-v1.json'
         self.evaluated_at = 1794700800
         self.state.write_text(json.dumps({'Version': 2, 'EvaluatedAt': '2026-11-15T00:00:00Z'}))
-        (self.private / 'workflow-context.json').write_text(json.dumps({'integration_run_id': 10}))
-        self.environment = {'ATLAS_UPSTREAM_RUN': '11', 'GITHUB_RUN_ID': '12', 'GITHUB_SHA': 'a' * 40}
+        (self.private / 'workflow-context.json').write_text(json.dumps({'format_version':2,'head_sha':'a'*40,
+            'integration_run_id':10,'integration_run_attempt':1,'intake_run_id':11,'intake_run_attempt':1}))
+        self.environment = {'ATLAS_UPSTREAM_RUN':'11','ATLAS_UPSTREAM_ATTEMPT':'1','GITHUB_RUN_ID':'12',
+                            'GITHUB_RUN_ATTEMPT':'1','GITHUB_SHA':'a'*40}
 
     def test_delayed_candidate_uses_intake_clock_only_for_compilation(self):
         with patch.object(workflow, 'ROOT', self.root), patch.dict(os.environ, self.environment), \
@@ -43,10 +45,12 @@ class CandidateClockTests(unittest.TestCase):
             self.assertNotIn('-clock', command, 'Post-compile validation must use its fresh wall clock')
             self.assertNotIn('--now', command)
         self.assertTrue(any('tools/release_contract/prepare_static.py' in command for command in commands))
-        self.assertTrue(any('tools/hosted/production-build.py' in command for command in commands))
+        self.assertTrue(any('native-gate' in command for command in commands))
+        self.assertFalse(any('tools/hosted/production-build.py' in command for command in commands))
         self.assertEqual(commands[-1], ['python', 'tools/hosted/candidate.py', '--public', 'web/.output/public'])
         self.assertEqual(json.loads((self.private / 'workflow-context.json').read_text()), {
-            'integration_run_id': 10, 'intake_run_id': 11, 'candidate_run_id': 12, 'head_sha': 'a' * 40})
+            'format_version':2,'integration_run_id':10,'integration_run_attempt':1,
+            'intake_run_id':11,'intake_run_attempt':1,'candidate_run_id':12,'candidate_run_attempt':1,'head_sha':'a'*40})
 
     def test_invalid_or_future_intake_clock_stops_before_compilation(self):
         valid = {'Version': 2, 'EvaluatedAt': '2026-11-15T00:00:00Z'}
@@ -128,12 +132,12 @@ class CandidateClockTests(unittest.TestCase):
             self.assertEqual(route, 'actions/runs/11')
             return {'head_sha': head, 'head_branch': 'main', 'path': '.github/workflows/p0-contracts.yml',
                     'head_repository': {'full_name': workflow.REPOSITORY}, 'status': 'completed',
-                    'conclusion': 'success', 'event': 'push'}
+                    'conclusion': 'success', 'event': 'push', 'run_attempt':1}
         with patch.dict(os.environ, env), patch.object(workflow, 'api', side_effect=api), \
                 patch.object(workflow.time, 'monotonic', side_effect=[0, 3600]), \
                 patch.object(workflow.time, 'sleep'):
             workflow.context('intake', None)
-        self.assertEqual(output.read_text(), 'upstream_run_id=11\n')
+        self.assertEqual(output.read_text(), 'upstream_run_id=11\nupstream_run_attempt=1\n')
         self.assertEqual(polls, 2)
         with patch.dict(os.environ, env), patch.object(workflow, 'api', return_value={'commit': {'sha': 'b' * 40}}), \
                 self.assertRaises(ContractError):
@@ -200,3 +204,86 @@ class CompilePhaseDiagnosticsTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class ParallelStageContextTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        (self.root/'.atlas-private').mkdir()
+        (self.root/'build-private').mkdir()
+        self.path = self.root/'.atlas-private/workflow-context.json'
+        self.candidate = {'format_version':2,'head_sha':'a'*40,
+            'integration_run_id':10,'integration_run_attempt':1,'intake_run_id':11,'intake_run_attempt':1,
+            'candidate_run_id':12,'candidate_run_attempt':2}
+        self.path.write_text(json.dumps(self.candidate))
+
+    def environment(self, upstream, attempt, run, run_attempt=1):
+        return {'GITHUB_SHA':'a'*40,'ATLAS_UPSTREAM_RUN':str(upstream),'ATLAS_UPSTREAM_ATTEMPT':str(attempt),
+                'GITHUB_RUN_ID':str(run),'GITHUB_RUN_ATTEMPT':str(run_attempt)}
+
+    def test_matrix_preserves_original_candidate_and_binds_current_attempt(self):
+        with patch.object(workflow,'ROOT',self.root), patch.dict(os.environ,self.environment(12,2,20,3)):
+            result = workflow.update_context('benchmark_cases')
+        self.assertEqual(result['candidate_run_id'],12)
+        self.assertEqual(result['candidate_run_attempt'],2)
+        self.assertEqual(result['benchmark_cases_run_id'],20)
+        self.assertEqual(result['benchmark_cases_run_attempt'],3)
+
+    def test_join_restores_original_candidate_then_preview_restores_join(self):
+        with patch.object(workflow,'ROOT',self.root), patch.dict(os.environ,self.environment(20,3,21,2)):
+            joined = workflow.update_context('benchmark')
+        self.assertEqual(joined['candidate_run_id'],12)
+        self.assertEqual(joined['benchmark_cases_run_id'],20)
+        with patch.object(workflow,'ROOT',self.root), patch.dict(os.environ,self.environment(21,2,22)):
+            preview = workflow.update_context('preview')
+        self.assertEqual(preview['candidate_run_id'],12)
+        self.assertEqual(preview['benchmark_run_id'],21)
+        self.assertEqual(preview['preview_run_id'],22)
+
+    def test_wrong_checkpoint_attempt_head_or_unexpected_context_is_rejected(self):
+        for changed in ({**self.candidate,'candidate_run_attempt':1}, {**self.candidate,'head_sha':'b'*40},
+                        {**self.candidate,'source_name':'private'}, {**self.candidate,'format_version':1}):
+            self.path.write_text(json.dumps(changed))
+            with self.subTest(changed=changed), patch.object(workflow,'ROOT',self.root), \
+                    patch.dict(os.environ,self.environment(12,2,20)), self.assertRaises(ContractError):
+                workflow.update_context('benchmark_cases')
+
+    def test_case_verifies_current_source_before_and_after_the_actual_measurement(self):
+        with patch.object(workflow,'ROOT',self.root), patch.dict(os.environ,self.environment(12,2,20)), \
+                patch.object(workflow,'original_candidate'), patch.object(workflow,'run') as run:
+            workflow.benchmark_case('warm_changed',2)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual([command[1] for command in commands],
+                         ['tools/hosted/candidate.py','verify-production','tools/hosted/production-build.py',
+                          'tools/hosted/candidate.py','verify-production'])
+        self.assertIn('--case',commands[2])
+        self.assertIn('warm_changed',commands[2])
+        self.assertNotIn('-clock',commands[1])
+        self.assertNotIn('-clock',commands[-1])
+
+    def test_relay_dispatch_is_after_strict_completed_context_without_private_secrets(self):
+        with patch.object(workflow,'context',return_value=(12,2)) as context, \
+                patch.object(workflow.subprocess,'run') as run:
+            run.return_value.returncode = 0
+            workflow.dispatch_benchmarks()
+        context.assert_called_once_with('benchmark_dispatch',None)
+        self.assertEqual(json.loads(run.call_args.kwargs['input']),{'ref':'main','inputs':{'upstream_run_id':'12'}})
+        with patch.object(workflow,'context',side_effect=ContractError('upstream in progress')), \
+                patch.object(workflow.subprocess,'run') as run, self.assertRaises(ContractError):
+            workflow.dispatch_benchmarks()
+        run.assert_not_called()
+
+    def test_cleanup_removes_partial_replay_workspaces_and_rejects_links(self):
+        replay = self.root/'build-private/benchmark-123/workspace/.atlas-private'
+        replay.mkdir(parents=True)
+        (replay/'state-seal.key').write_bytes(b'private')
+        opened=self.root/'atlas-open-123';opened.mkdir();(opened/'identity').write_bytes(b'private')
+        transferred=self.root/'atlas-transfer-123';transferred.mkdir();(transferred/'checkpoint.tar.gz').write_bytes(b'private')
+        with patch.object(workflow,'ROOT',self.root): workflow.cleanup_private()
+        self.assertFalse(replay.exists())
+        self.assertFalse(opened.exists())
+        self.assertFalse(transferred.exists())
+        self.assertFalse(self.path.exists())
+        (self.root/'.atlas-private').symlink_to(self.root/'build-private',target_is_directory=True)
+        with patch.object(workflow,'ROOT',self.root), self.assertRaises(ContractError): workflow.cleanup_private()

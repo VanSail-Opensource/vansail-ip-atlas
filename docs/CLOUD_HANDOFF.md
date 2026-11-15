@@ -22,7 +22,9 @@ a completed production release; the historical evidence below remains historical
 
 - Public schema 4, observed-risk arithmetic, confidence/coverage, IPv6 behavior,
   /24 scored-cell mean/denominator, Go/TypeScript parity and UI labels.
-- Four production stages: authenticated intake, candidate, preview, promotion;
+- Production stages: authenticated intake, frozen candidate, fifteen parallel benchmark
+  cases, completed benchmark join, preview and promotion; a checked dispatch relay
+  resets GitHub’s three-level workflow-run chain;
   official Ubuntu runners, encrypted age checkpoints, trusted exact-head checks,
   measured resource envelopes, automatic authorization and eligible-only rollback.
 - Release catalog contains ten statically admitted entries, including dated Tor

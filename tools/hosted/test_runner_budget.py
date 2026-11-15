@@ -41,6 +41,8 @@ class RunnerBudgetTests(unittest.TestCase):
         def launch(argv, **kwargs):
             calls.append(argv)
             self.assertEqual(argv[argv.index('--slice') + 1], kwargs['env']['ATLAS_RUNNER_SLICE'])
+            self.assertEqual(argv[2:5], ['env', 'PATH='+os.environ['PATH'], '/usr/bin/systemd-run'])
+            self.assertIn('/usr/sbin/runuser', argv)
             raise OSError('launch failed')
 
         with patch('sys.argv', ['runner_budget.py', '--', 'false']), \

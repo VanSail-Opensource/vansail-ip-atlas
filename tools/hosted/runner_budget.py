@@ -79,10 +79,12 @@ def main():
         unit='atlas-'+identity
         budget_slice='atlas'+identity+'.slice'
         environment={**os.environ,'ATLAS_RUNNER_SLICE':budget_slice}
-        argv=['sudo','-E','systemd-run','--quiet','--scope','--unit',unit,
+        # sudo's secure_path applies even with -E. Restore only PATH after sudo
+        # so children can find the pinned Python/Go/Node tools and workspace age.
+        argv=['sudo','-E','env','PATH='+os.environ['PATH'],'/usr/bin/systemd-run','--quiet','--scope','--unit',unit,
               '--slice',budget_slice,
               '-p','CPUQuota=200%','-p','CPUQuotaPeriodSec=100ms','-p','MemoryMax=8G','-p','MemorySwapMax=0',
-              'runuser','--user',user,'--preserve-environment','--',
+              '/usr/sbin/runuser','--user',user,'--preserve-environment','--',
               sys.executable,str(Path(__file__).resolve()),'--inside','--report',str(args.report),'--',*command]
         # A slice accounts both this scope and Chrome's separately measured scope.
         # Apply its limits before launching any task process, never after the fact.

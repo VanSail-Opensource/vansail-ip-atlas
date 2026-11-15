@@ -32,13 +32,14 @@ type Capability struct {
 	Required   bool     `json:"required"`
 }
 type SourceStatistics struct {
-	ID                                       string
-	Records                                  uint64
-	Kinds                                    [9]uint64
-	Family                                   string
-	Country, City, Coordinates, Usage, Exact bool
-	VRPComplete                              bool
-	Signals                                  map[intelligence.Signal]bool
+	ID                                          string
+	Records                                     uint64
+	Kinds                                       [9]uint64
+	OriginObservations, UnknownOriginBoundaries uint64
+	Family                                      string
+	Country, City, Coordinates, Usage, Exact    bool
+	VRPComplete                                 bool
+	Signals                                     map[intelligence.Signal]bool
 }
 
 const ProductionReleaseScope = "release-scope-v6"
@@ -494,6 +495,11 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 				if !contains(s.PublicFields, "origins") && !contains(s.PublicFields, "bgp_origins") {
 					return errors.New("production origin binding invalid")
 				}
+				if len(record.Origins.Origins) > 0 {
+					stat.OriginObservations++
+				} else {
+					stat.UnknownOriginBoundaries++
+				}
 			case intelligence.RecordVRP:
 				if !contains(s.PublicFields, "rpki_status") {
 					return errors.New("production VRP binding invalid")
@@ -573,11 +579,11 @@ func deriveCapabilities(stats []SourceStatistics, clock time.Time) CapabilityRep
 	add("country", 1, func(s SourceStatistics) bool { return s.Country })
 	add("region_city", 2, func(s SourceStatistics) bool { return s.City })
 	add("coordinates", 2, func(s SourceStatistics) bool { return s.Coordinates })
-	add("asn_prefix", 1, func(s SourceStatistics) bool { return s.Kinds[intelligence.RecordOrigins-1] > 0 })
+	add("asn_prefix", 1, func(s SourceStatistics) bool { return s.OriginObservations > 0 })
 	add("usage", 1, func(s SourceStatistics) bool { return s.Usage })
 	add("class_c", 1, func(s SourceStatistics) bool { return s.Exact })
 	add("rpki", 1, func(s SourceStatistics) bool { return s.VRPComplete })
-	originFamilies := families(func(s SourceStatistics) bool { return s.Kinds[intelligence.RecordOrigins-1] > 0 })
+	originFamilies := families(func(s SourceStatistics) bool { return s.OriginObservations > 0 })
 	pathFamilies := families(func(s SourceStatistics) bool { return s.Kinds[intelligence.RecordPath-1] > 0 })
 	report.Capabilities = append(report.Capabilities, Capability{Capability: "bgp_origins_paths", Families: pathFamilies, Qualified: len(originFamilies) > 0 && len(pathFamilies) >= 2, Required: true})
 	add("relationships", 1, func(s SourceStatistics) bool { return s.Kinds[intelligence.RecordRelationship-1] > 0 })

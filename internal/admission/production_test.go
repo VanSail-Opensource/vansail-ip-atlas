@@ -152,6 +152,7 @@ func TestAvailableDataProductionKeepsRoutingUnknownAndCoreRequired(t *testing.T)
 		}
 	}
 	stats[0].Kinds[intelligence.RecordOrigins-1] = 1
+	stats[0].OriginObservations = 1
 	stats[0].Kinds[intelligence.RecordPath-1] = 1
 	stats[0].Kinds[intelligence.RecordRelationship-1] = 1
 	stats[0].VRPComplete = true

@@ -242,13 +242,23 @@ func parseMRTCapturePayload(ctx context.Context, file *os.File, size int64, sour
 		var err error
 		proof, err = intelligence.ParseMRTSnapshot(ctx, input, intelligence.MRTLimits{Bytes: 3 << 30, FrameBytes: 8 << 20, Records: maxRecords / 2, Peers: 65535}, now, source.MaxAge, func(captured intelligence.MRTSnapshotRecord) error {
 			value := captured.Record
-			if !intelligence.IsPublicASN(value.Origin) || !value.Prefix.IsValid() || value.Prefix.Addr().Is4In6() || value.Prefix.Addr().Zone() != "" || value.ObservedAt.After(captured.CapturedAt.Add(24*time.Hour)) {
+			if !value.Prefix.IsValid() || value.Prefix.Addr().Is4In6() || value.Prefix.Addr().Zone() != "" || value.ObservedAt.After(captured.CapturedAt.Add(24*time.Hour)) {
 				return errors.New("unrepresentable MRT record or future originated time")
 			}
 			originated := value.ObservedAt
 			identity := &intelligence.MRTRouteIdentity{PeerKey: value.PeerKey, PeerIndex: value.PeerIndex, PeerTable: value.PeerTable, PathID: value.PathID, AddPath: value.AddPath, PeerAmbiguous: value.PeerAmbiguous, CapturedAt: captured.CapturedAt}
-			if err := sink(intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordOrigins, MRTOriginatedAt: &originated, MRT: identity, Origins: &intelligence.OriginMapping{Prefix: value.Prefix, Origins: []uint32{value.Origin}}}); err != nil {
+			origins := []uint32{}
+			if intelligence.IsPublicASN(value.Origin) {
+				origins = append(origins, value.Origin)
+			}
+			// A valid observed route with an unsupported scalar origin still
+			// shadows broader routes. Do not choose an AS_SET member or drop its
+			// prefix: either would invent an origin during longest-prefix lookup.
+			if err := sink(intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordOrigins, MRTOriginatedAt: &originated, MRT: identity, Origins: &intelligence.OriginMapping{Prefix: value.Prefix, Origins: origins}}); err != nil {
 				return err
+			}
+			if len(origins) == 0 {
+				return nil
 			}
 			return sink(intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordPath, MRTOriginatedAt: &originated, MRT: identity, Path: &intelligence.ScopedPath{Prefix: value.Prefix, Observation: intelligence.PathObservation{Origin: value.Origin, Segments: value.Segments, Family: source.Family, Current: true, OriginOutward: false}}})
 		})

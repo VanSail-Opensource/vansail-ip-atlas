@@ -7,7 +7,7 @@ public packager and deploy verifier. Synthetic fixture compilation is separate:
 public synthetic previews contain only synthetic data and have empty real-dataset
 credits. Raw `compile-facts` inputs cannot certify a production source.
 
-Current `release-scope-v5` distributes compiled database material under CC BY-SA
+Current `release-scope-v6` distributes compiled database material under CC BY-SA
 4.0, with the exact data-license notice and required included-dataset credits.
 This retains the shared global legal display and adds reviewed local publisher logos.
 Observed risk describes supported positive evidence, separately from assessment
@@ -62,8 +62,9 @@ hosted evidence; source qualification alone cannot authorize deployment.
 
 Static fixture/rights qualification and actual current intake are distinct.
 Derive each report from current bytes rather than preserving a historical count
-of active sources. Enabling a reviewed subset does not satisfy missing reason,
-usage, routing or other capabilities, and positive-only absence remains unknown.
+of active sources. A reviewed subset does not manufacture missing capabilities. The v6 core
+capabilities remain required; unavailable routing capabilities are explicitly
+optional and remain unknown. Positive-only absence remains unknown.
 
 For release assets, the content clock is the creation time of the exact uploaded
 asset whose size and SHA-256 match the download. The enclosing release must be

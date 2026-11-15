@@ -29,6 +29,7 @@ from tools.release_contract.contracts import ContractError, canonical_bytes, par
 REPOSITORY = 'VanSail-Opensource/vansail-ip-atlas'
 WORKFLOWS = {'intake': '.github/workflows/production-intake.yml',
              'candidate': '.github/workflows/production-candidate.yml',
+             'benchmark': '.github/workflows/production-benchmark-join.yml',
              'preview': '.github/workflows/production-preview.yml',
              'promotion': '.github/workflows/production-promotion.yml'}
 MAX_BYTES = 8 * 1024**3
@@ -36,7 +37,7 @@ MAX_FILES = 100_000
 RETENTION = 168 * 3600
 STATE_FILES = frozenset({'state-v1.json','state-seal.key','state-seal-v2.json','publication-clocks-v1.json',
     'tier1-history-v2.json','production-receipt.json','production-acceptance.json',
-    'production-browser-corpus.json','workflow-context.json','intake-report-v1.json','production-deployment.json'})
+    'production-browser-corpus.json','production-build.json','workflow-context.json','intake-report-v1.json','production-deployment.json'})
 STATE_DIRECTORIES = frozenset({'records-v2','state-history-v2','production-receipts-v1'})
 ENVELOPE_KEYS = {'format_version','kind','repository','head_sha','run_id','run_attempt',
                  'created_at','expires_at','ciphertext_sha256','ciphertext_bytes','key_id'}

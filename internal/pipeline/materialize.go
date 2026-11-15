@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/netip"
 	"sort"
@@ -24,6 +23,9 @@ type MaterializationInputs struct {
 	prepareOnly      bool
 	resolver         intelligence.RelationResolver
 	verifiedEmptyVRP bool
+	// Exact canonical lengths from the closed bulk collector. No caller-facing
+	// completeness or validation assertion is accepted through this bookkeeping.
+	encodedLengths []int
 }
 
 // BuildIntelligence connects all nine normalized record kinds to the bounded
@@ -67,12 +69,19 @@ func containsAdmittedData(state intelligence.BuildState) bool {
 // network/announcement prefixes are kept independently of these derived regions.
 func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Policy, clock time.Time, inputs ...MaterializationInputs) Producer {
 	return func(ctx context.Context, emit func(via3.PublicRecord) error) error {
+		if emit == nil || len(inputs) > 1 {
+			return errors.New("one materialization policy and an output sink are required")
+		}
+		var encodedLengths []int
+		if len(inputs) == 1 {
+			encodedLengths = inputs[0].encodedLengths
+		}
+		if err := checkOwnedRecordLengths(state, encodedLengths); err != nil {
+			return err
+		}
 		state, joinErr := joinASNUsage(ctx, state)
 		if joinErr != nil {
 			return joinErr
-		}
-		if emit == nil || len(inputs) > 1 {
-			return errors.New("one materialization policy and an output sink are required")
 		}
 		sink := emit
 		emit = func(record via3.PublicRecord) error {
@@ -89,6 +98,7 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 		}
 		mappings := state
 		mappings.Sources = make([]intelligence.StoredSource, 0, len(state.Sources))
+		var mappingLengths []int
 		var evidence []intelligence.Evidence
 		var coverage []intelligence.Coverage
 		var origins []intelligence.OriginMapping
@@ -136,18 +146,19 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 				if err := boundedNormalizedRecord(record); err != nil {
 					return err
 				}
-				encoded, err := json.Marshal(record)
+				size, err := normalizedRecordBytes(record, encodedLengths, count)
 				if err != nil {
 					return err
 				}
 				count++
-				bytes += len(encoded) + 512
+				bytes += size + 512
 				if count > 200000 || bytes > 96<<20 {
 					return errors.New("bounded intelligence working input exceeded")
 				}
 				switch record.Kind {
 				case intelligence.RecordGeo, intelligence.RecordUsage, intelligence.RecordOrigins:
 					mapping.Records = append(mapping.Records, record)
+					mappingLengths = append(mappingLengths, size)
 				}
 				switch record.Kind {
 				case intelligence.RecordEvidence:
@@ -334,7 +345,7 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 				return errors.New("invalid intelligence ASN")
 			}
 		}
-		if err := MappingProducer(mappings, policy, clock)(ctx, emit); err != nil {
+		if err := mappingProducer(mappings, policy, clock, mappingLengths)(ctx, emit); err != nil {
 			return err
 		}
 		if err := regions.visit(ctx, func(p netip.Prefix) error {

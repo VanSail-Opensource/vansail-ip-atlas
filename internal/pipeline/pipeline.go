@@ -5,13 +5,13 @@ package pipeline
 
 import (
 	"bufio"
-	"bytes"
 	"container/heap"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -58,12 +58,14 @@ type Options struct {
 	Clock, ValidUntil       int64
 	Limits                  Limits
 	ProductionGate          func(context.Context) error
+	ObserveStage            func(context.Context, Stage) func(bool)
 	// InputGate binds source/config/state inputs throughout a build in either
 	// mode. It is independent of the mandatory production capability gate.
-	InputGate       func(context.Context) error
-	externalScratch func() uint64
-	scratchUsage    func(uint64)
-	prefixProvider  via3.ASNPrefixProvider
+	InputGate            func(context.Context) error
+	externalScratch      func() uint64
+	scratchUsage         func(uint64)
+	prefixProvider       via3.ASNPrefixProvider
+	materializationCache *materializationCache
 }
 
 // Stats account this compiler's files and process, not unrelated processes or
@@ -71,6 +73,7 @@ type Options struct {
 type Stats struct {
 	InputRecords, UniqueRecords, SortRuns, Partitions                int64
 	BinaryByteRepacks                                                int64
+	MaterializationCacheHits                                         int64
 	SortBufferPeak, PartitionBufferPeak, ScratchPeak, ProcessRSSPeak uint64
 	ProcessRSSMeasured                                               bool
 	OutputBytes                                                      uint64
@@ -93,8 +96,14 @@ type compiler struct {
 	used                  uint64
 	serial                int
 	objects               map[string]via3.ObjectInfo
+	partitionSizes        map[string]partitionSize
 	routes                []route
 	routerBytes           uint64
+}
+
+type partitionSize struct {
+	records int64
+	bytes   int64
 }
 
 type route struct {
@@ -226,41 +235,61 @@ func Build(ctx context.Context, options Options, produce Producer) (Candidate, e
 			}
 		}
 	}()
-	runs, err := c.sort(produce)
+	reused, err := c.restoreMaterialization()
 	if err != nil {
 		return result, c.cause(err)
 	}
-	merged, err := c.merge(runs)
-	if err != nil {
-		return result, c.cause(err)
-	}
-	groups, err := c.classify(merged)
-	if err != nil {
-		return result, c.cause(err)
-	}
-	for i, path := range groups {
-		if path == "" {
-			continue
-		}
-		var scope scope
-		if i == 0 {
-			scope.prefix = netip.MustParsePrefix("0.0.0.0/0")
-		} else if i == 1 {
-			scope.prefix = netip.MustParsePrefix("::/0")
-		} else {
-			scope.asn = true
-			scope.last = ^uint32(0)
-		}
-		if err := c.partition(path, scope); err != nil {
+	if !reused {
+		finishSort := observeStage(workCtx, options, StageSort)
+		runs, err := c.sort(produce)
+		finishSort(err == nil)
+		if err != nil {
 			return result, c.cause(err)
 		}
+		finishMerge := observeStage(workCtx, options, StageMerge)
+		merged, err := c.merge(runs)
+		finishMerge(err == nil)
+		if err != nil {
+			return result, c.cause(err)
+		}
+		finishClassify := observeStage(workCtx, options, StageClassify)
+		groups, err := c.classify(merged)
+		finishClassify(err == nil)
+		if err != nil {
+			return result, c.cause(err)
+		}
+		finishPartition := observeStage(workCtx, options, StagePartition)
+		for i, path := range groups {
+			if path == "" {
+				continue
+			}
+			var scope scope
+			if i == 0 {
+				scope.prefix = netip.MustParsePrefix("0.0.0.0/0")
+			} else if i == 1 {
+				scope.prefix = netip.MustParsePrefix("::/0")
+			} else {
+				scope.asn = true
+				scope.last = ^uint32(0)
+			}
+			if err := c.partition(path, scope); err != nil {
+				finishPartition(false)
+				return result, c.cause(err)
+			}
+		}
+		if len(c.routes) == 0 {
+			finishPartition(false)
+			return result, errors.New("pipeline requires at least one public fact")
+		}
+		if err := c.router(); err != nil {
+			finishPartition(false)
+			return result, c.cause(err)
+		}
+		finishPartition(true)
 	}
-	if len(c.routes) == 0 {
-		return result, errors.New("pipeline requires at least one public fact")
-	}
-	if err := c.router(); err != nil {
-		return result, c.cause(err)
-	}
+	finishPublish := observeStage(workCtx, options, StagePublish)
+	published := false
+	defer func() { finishPublish(published) }()
 	infos := make([]via3.ObjectInfo, 0, len(c.objects))
 	for _, info := range c.objects {
 		infos = append(infos, info)
@@ -288,8 +317,24 @@ func Build(ctx context.Context, options Options, produce Producer) (Candidate, e
 	if err := c.write(filepath.Join(c.output, "current.json"), pointer); err != nil {
 		return result, err
 	}
+	// Retained objects and their authenticated index are part of this build's
+	// measured work. Keep the existing final gate/resource checks after that IO.
+	defer func() {
+		if cache := options.materializationCache; !published && cache != nil && cache.created {
+			_ = os.RemoveAll(cache.root)
+		}
+	}()
+	result.Stats = c.stats
+	if err := c.retainMaterialization(result, c.output); err != nil {
+		return Candidate{}, err
+	}
 	if err := gate(workCtx); err != nil {
 		return result, err
+	}
+	if reused {
+		if err := options.materializationCache.verifyInputs(workCtx); err != nil {
+			return result, err
+		}
 	}
 	if err := checkResources(); err != nil {
 		return result, err
@@ -303,6 +348,7 @@ func Build(ctx context.Context, options Options, produce Producer) (Candidate, e
 	if err := os.Rename(c.output, output); err != nil {
 		return result, err
 	}
+	published = true
 	c.stats.ProcessRSSMeasured = measured.Load()
 	c.stats.ProcessRSSPeak = rssPeak.Load()
 	result.Stats = c.stats
@@ -344,6 +390,7 @@ func (c *compiler) remove(path string) error {
 	if err := os.Remove(path); err != nil {
 		return err
 	}
+	delete(c.partitionSizes, path)
 	c.used -= uint64(info.Size())
 	if c.options.scratchUsage != nil {
 		c.options.scratchUsage(c.used)
@@ -372,8 +419,11 @@ func (c *compiler) write(path string, data []byte) error {
 }
 
 type encoded struct {
-	key  string
-	data []byte
+	key          string
+	data         []byte
+	logicalBytes int64
+	sparse       bool
+	compact      bool
 }
 
 func normalize(record via3.PublicRecord) (via3.PublicRecord, error) {
@@ -429,13 +479,11 @@ func identity(r via3.PublicRecord) string {
 
 func decode(data []byte) (via3.PublicRecord, error) {
 	var r via3.PublicRecord
-	d := json.NewDecoder(bytes.NewReader(data))
-	d.DisallowUnknownFields()
-	if err := d.Decode(&r); err != nil {
+	// The complete bounded frame is already in memory. Decode it directly,
+	// preserving v1 field/method semantics and strict unknown-member rejection,
+	// instead of copying and scanning it through an intermediate stream buffer.
+	if err := jsonv2.Unmarshal(data, &r, json.DefaultOptionsV1(), jsonv2.RejectUnknownMembers(true)); err != nil {
 		return r, errors.New("invalid private sort record")
-	}
-	if err := d.Decode(new(json.RawMessage)); err != io.EOF {
-		return r, errors.New("trailing private sort record")
 	}
 	return r, nil
 }
@@ -448,21 +496,20 @@ func (c *compiler) sort(produce Producer) ([]string, error) {
 		if len(batch) == 0 {
 			return nil
 		}
-		sort.Slice(batch, func(i, j int) bool {
-			if batch[i].key != batch[j].key {
-				return batch[i].key < batch[j].key
-			}
-			return bytes.Compare(batch[i].data, batch[j].data) < 0
-		})
+		sort.Slice(batch, func(i, j int) bool { return lessEncoded(batch[i], batch[j]) })
 		path := c.next()
 		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 		if err != nil {
 			return err
 		}
 		defer file.Close()
-		writer := bufio.NewWriterSize(file, 64<<10)
+		writer, err := newPrivateRunWriter(c, file)
+		if err != nil {
+			return err
+		}
+		defer writer.Close()
 		for _, row := range batch {
-			if err := c.writeRecord(writer, row.data); err != nil {
+			if err := c.writeRow(writer, row); err != nil {
 				return err
 			}
 		}
@@ -489,14 +536,14 @@ func (c *compiler) sort(produce Producer) ([]string, error) {
 		if err != nil {
 			return err
 		}
-		data, err := json.Marshal(r)
+		row, err := encodeCompactRunRecord(r)
 		if err != nil {
 			return err
 		}
-		if int64(len(data)) > c.options.Limits.RecordBytes {
+		if row.logicalBytes > c.options.Limits.RecordBytes {
 			return errors.New("single fact exceeds bounded record size")
 		}
-		cost := int64(len(data) + 128)
+		cost := row.logicalBytes + 128
 		if cost > c.options.Limits.SortBytes {
 			return errors.New("single fact exceeds sort buffer")
 		}
@@ -505,7 +552,7 @@ func (c *compiler) sort(produce Producer) ([]string, error) {
 				return err
 			}
 		}
-		batch = append(batch, encoded{identity(r), data})
+		batch = append(batch, row)
 		size += cost
 		c.stats.InputRecords++
 		if uint64(size) > c.stats.SortBufferPeak {
@@ -523,26 +570,28 @@ func (c *compiler) sort(produce Producer) ([]string, error) {
 }
 
 func (c *compiler) writeRecord(w io.Writer, data []byte) error {
+	return c.writeRow(w, encoded{data: data, logicalBytes: int64(len(data))})
+}
+
+func (c *compiler) writeRow(w io.Writer, row encoded) error {
 	if err := c.ctx.Err(); err != nil {
 		return err
 	}
-	if err := c.reserve(uint64(4 + len(data))); err != nil {
-		return err
+	if _, compressed := w.(*privateRunWriter); !compressed {
+		if err := c.reserve(uint64(row.frameBytes())); err != nil {
+			return err
+		}
+
 	}
-	var head [4]byte
-	binary.LittleEndian.PutUint32(head[:], uint32(len(data)))
-	if _, err := w.Write(head[:]); err != nil {
-		return err
-	}
-	_, err := w.Write(data)
-	return err
+	return writeRunFrame(w, row)
 }
 
 type runReader struct {
-	file   *os.File
-	reader *bufio.Reader
+	file   *privateRunFile
+	reader io.Reader
 	limit  int64
 	row    encoded
+	record via3.PublicRecord
 }
 
 func openRun(path string, limit int64) (*runReader, error) {
@@ -550,7 +599,25 @@ func openRun(path string, limit int64) (*runReader, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &runReader{file: f, reader: bufio.NewReaderSize(f, 64<<10), limit: limit}, nil
+	input := bufio.NewReaderSize(f, 64<<10)
+	owned := &privateRunFile{File: f}
+	var reader io.Reader = input
+	prefix, peekErr := input.Peek(len(privateRunMagic))
+	if len(prefix) >= 4 && string(prefix[:4]) == "VPRZ" {
+		if peekErr != nil || string(prefix) != privateRunMagic {
+			f.Close()
+			return nil, errors.New("private run compression version invalid")
+		}
+		_, _ = input.Discard(len(privateRunMagic))
+		compressed, err := newPrivateRunReader(input)
+		if err != nil {
+			f.Close()
+			return nil, err
+		}
+		owned.compressed = compressed
+		reader = compressed
+	}
+	return &runReader{file: owned, reader: reader, limit: limit}, nil
 }
 func (r *runReader) next() error {
 	var head [4]byte
@@ -558,18 +625,19 @@ func (r *runReader) next() error {
 		return err
 	}
 	n := int64(binary.LittleEndian.Uint32(head[:]))
-	if n <= 0 || n > r.limit {
+	if n <= 0 || n > r.limit+int64(len(sparseRunMarker)) {
 		return errors.New("private sort frame exceeds limit")
 	}
 	data := make([]byte, n)
 	if _, err := io.ReadFull(r.reader, data); err != nil {
 		return err
 	}
-	record, err := decode(data)
+	row, record, err := decodeRunPayload(data, r.limit)
 	if err != nil {
 		return err
 	}
-	r.row = encoded{identity(record), data}
+	r.row = row
+	r.record = record
 	return nil
 }
 
@@ -577,10 +645,7 @@ type mergeHeap []*runReader
 
 func (h mergeHeap) Len() int { return len(h) }
 func (h mergeHeap) Less(i, j int) bool {
-	if h[i].row.key != h[j].row.key {
-		return h[i].row.key < h[j].row.key
-	}
-	return bytes.Compare(h[i].row.data, h[j].row.data) < 0
+	return lessEncoded(h[i].row, h[j].row)
 }
 func (h mergeHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
 func (h *mergeHeap) Push(x any)   { *h = append(*h, x.(*runReader)) }
@@ -593,7 +658,11 @@ func (c *compiler) mergeGroup(paths []string) (string, error) {
 		return "", err
 	}
 	defer f.Close()
-	w := bufio.NewWriterSize(f, 64<<10)
+	w, err := newPrivateRunWriter(c, f)
+	if err != nil {
+		return "", err
+	}
+	defer w.Close()
 	var h mergeHeap
 	for _, path := range paths {
 		r, err := openRun(path, c.options.Limits.RecordBytes)
@@ -611,11 +680,11 @@ func (c *compiler) mergeGroup(paths []string) (string, error) {
 	for h.Len() > 0 {
 		r := heap.Pop(&h).(*runReader)
 		if previous.key == r.row.key {
-			if !bytes.Equal(previous.data, r.row.data) {
+			if !equalEncoded(previous, r.row) {
 				return "", errors.New("conflicting fused fact identity")
 			}
 		} else {
-			if err := c.writeRecord(w, r.row.data); err != nil {
+			if err := c.writeRow(w, r.row); err != nil {
 				return "", err
 			}
 			previous = r.row
@@ -667,8 +736,15 @@ func (c *compiler) merge(runs []string) (string, error) {
 
 func (c *compiler) classify(path string) ([3]string, error) {
 	var paths [3]string
+	var sizes [3]partitionSize
 	var files [3]*os.File
+	var writers [3]*privateRunWriter
 	defer func() {
+		for _, w := range writers {
+			if w != nil {
+				_ = w.Close()
+			}
+		}
 		for _, f := range files {
 			if f != nil {
 				f.Close()
@@ -686,10 +762,7 @@ func (c *compiler) classify(path string) ([3]string, error) {
 		} else if err != nil {
 			return paths, err
 		}
-		record, err := decode(r.row.data)
-		if err != nil {
-			return paths, err
-		}
+		record := r.record
 		i := 0
 		if record.Kind == 8 || record.Kind >= 11 {
 			i = 2
@@ -702,17 +775,27 @@ func (c *compiler) classify(path string) ([3]string, error) {
 			if err != nil {
 				return paths, err
 			}
+			writers[i], err = newPrivateRunWriter(c, files[i])
+			if err != nil {
+				return paths, err
+			}
 		}
-		if err := c.writeRecord(files[i], r.row.data); err != nil {
+		if err := c.writeRow(writers[i], r.row); err != nil {
 			return paths, err
 		}
+		sizes[i].records++
+		sizes[i].bytes += r.row.logicalBytes + 512
 		c.stats.UniqueRecords++
 	}
-	for _, f := range files {
+	for i, f := range files {
 		if f != nil {
+			if err := writers[i].Flush(); err != nil {
+				return paths, err
+			}
 			if err := f.Close(); err != nil {
 				return paths, err
 			}
+			c.rememberPartitionSize(paths[i], sizes[i])
 		}
 	}
 	r.file.Close()
@@ -776,37 +859,40 @@ func (s scope) children() (scope, scope, error) {
 }
 
 func (c *compiler) partition(path string, s scope) error {
-	r, err := openRun(path, c.options.Limits.RecordBytes)
-	if err != nil {
-		return err
-	}
+	var err error
 	var records []via3.PublicRecord
 	var size int64
-	overflow := false
-	for {
-		if err := r.next(); err == io.EOF {
-			break
-		} else if err != nil {
-			r.file.Close()
-			return err
-		}
-		cost := int64(len(r.row.data) + 512)
-		if len(records) >= c.options.Limits.PartitionRecords || size+cost > c.options.Limits.PartitionBytes {
-			overflow = true
-			break
-		}
-		record, err := decode(r.row.data)
+	// These exact totals belong only to this compiler's newly closed immutable
+	// run. An oversized run must split regardless of its content, so avoid a
+	// partial decode that the strict split pass would immediately repeat. Runs
+	// without totals, and every eventual leaf, retain the full bounded scan.
+	total := c.partitionSizes[path]
+	overflow := total.records > int64(c.options.Limits.PartitionRecords) || total.bytes > c.options.Limits.PartitionBytes
+	if !overflow {
+		r, err := openRun(path, c.options.Limits.RecordBytes)
 		if err != nil {
-			r.file.Close()
 			return err
 		}
-		records = append(records, record)
-		size += cost
-		if uint64(size) > c.stats.PartitionBufferPeak {
-			c.stats.PartitionBufferPeak = uint64(size)
+		for {
+			if err := r.next(); err == io.EOF {
+				break
+			} else if err != nil {
+				r.file.Close()
+				return err
+			}
+			cost := r.row.logicalBytes + 512
+			if len(records) >= c.options.Limits.PartitionRecords || size+cost > c.options.Limits.PartitionBytes {
+				overflow = true
+				break
+			}
+			records = append(records, r.record)
+			size += cost
+			if uint64(size) > c.stats.PartitionBufferPeak {
+				c.stats.PartitionBufferPeak = uint64(size)
+			}
 		}
+		r.file.Close()
 	}
-	r.file.Close()
 	var compiled via3.CompiledPartition
 	if !overflow {
 		compiled, err = via3.CompilePartition(c.ctx, via3.PartitionInput{Partition: s.name(), Records: records, PrefixProvider: c.options.prefixProvider})
@@ -831,21 +917,32 @@ func (c *compiler) partition(path string, s scope) error {
 	if overflow {
 		records = nil
 		compiled = via3.CompiledPartition{}
+		if runs, scattered, err := c.scatterPartition(path, s); err != nil {
+			return err
+		} else if scattered {
+			for _, run := range runs {
+				if err := c.partition(run.path, run.scope); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
 		left, right, err := s.children()
 		if err != nil {
 			return err
 		}
-		children, err := c.split(path, left, right)
+		scopes := [2]scope{left, right}
+		children, err := c.split(path, &scopes)
 		if err != nil {
 			return err
 		}
 		if children[0] != "" {
-			if err := c.partition(children[0], left); err != nil {
+			if err := c.partition(children[0], scopes[0]); err != nil {
 				return err
 			}
 		}
 		if children[1] != "" {
-			if err := c.partition(children[1], right); err != nil {
+			if err := c.partition(children[1], scopes[1]); err != nil {
 				return err
 			}
 		}
@@ -899,10 +996,17 @@ func compact(values []uint32) []uint32 {
 	return out
 }
 
-func (c *compiler) split(path string, left, right scope) ([2]string, error) {
+func (c *compiler) split(path string, children *[2]scope) ([2]string, error) {
 	var paths [2]string
+	var sizes [2]partitionSize
 	var files [2]*os.File
+	var writers [2]*privateRunWriter
 	defer func() {
+		for _, w := range writers {
+			if w != nil {
+				_ = w.Close()
+			}
+		}
 		for _, f := range files {
 			if f != nil {
 				f.Close()
@@ -914,17 +1018,30 @@ func (c *compiler) split(path string, left, right scope) ([2]string, error) {
 		return paths, err
 	}
 	defer r.file.Close()
+	var cover netip.Prefix
+	var firstASN, lastASN uint32
 	for {
 		if err := r.next(); err == io.EOF {
 			break
 		} else if err != nil {
 			return paths, err
 		}
-		record, err := decode(r.row.data)
-		if err != nil {
-			return paths, err
+		record := r.record
+		if children[0].asn {
+			if firstASN == 0 || record.ASN < firstASN {
+				firstASN = record.ASN
+			}
+			if record.ASN > lastASN {
+				lastASN = record.ASN
+			}
+		} else if !cover.IsValid() {
+			cover = record.Prefix
+		} else {
+			for cover.Bits() > record.Prefix.Bits() || !cover.Contains(record.Prefix.Addr()) {
+				cover = netip.PrefixFrom(cover.Addr(), cover.Bits()-1).Masked()
+			}
 		}
-		for i, child := range []scope{left, right} {
+		for i, child := range children {
 			copy := record
 			if child.asn {
 				if record.ASN < child.first || record.ASN > child.last {
@@ -938,9 +1055,15 @@ func (c *compiler) split(path string, left, right scope) ([2]string, error) {
 			} else if !child.prefix.Contains(record.Prefix.Addr()) {
 				continue
 			}
-			data, err := json.Marshal(copy)
-			if err != nil {
-				return paths, err
+			// Most rows only move to a narrower run. Their validated frame
+			// already has the canonical bytes; only a newly inherited overlay
+			// changes the record and needs encoding again.
+			row := r.row
+			if copy.Inherited != record.Inherited {
+				row, err = reencodeRunRecord(copy, r.row)
+				if err != nil {
+					return paths, err
+				}
 			}
 			if files[i] == nil {
 				paths[i] = c.next()
@@ -948,24 +1071,72 @@ func (c *compiler) split(path string, left, right scope) ([2]string, error) {
 				if err != nil {
 					return paths, err
 				}
+				writers[i], err = newPrivateRunWriter(c, files[i])
+				if err != nil {
+					return paths, err
+				}
 			}
-			if err := c.writeRecord(files[i], data); err != nil {
+			if err := c.writeRow(writers[i], row); err != nil {
 				return paths, err
 			}
+			sizes[i].records++
+			sizes[i].bytes += row.logicalBytes + 512
 		}
 	}
-	for _, f := range files {
+	for i, f := range files {
 		if f != nil {
+			if err := writers[i].Flush(); err != nil {
+				return paths, err
+			}
 			if err := f.Close(); err != nil {
 				return paths, err
 			}
+			c.rememberPartitionSize(paths[i], sizes[i])
 		}
 	}
 	r.file.Close()
 	if err := c.remove(path); err != nil {
 		return paths, err
 	}
+	// An overflowing partition whose rows all move unchanged into one child
+	// still overflows at every intervening empty branch. Jump to their common
+	// enclosing scope, where the ordinary split can first divide the rows.
+	// Ancestor overlays populate both children, so they can never take this
+	// path or lose their coverage outside a cluster of more-specific rows.
+	if (paths[0] == "") != (paths[1] == "") {
+		i := 0
+		if paths[0] == "" {
+			i = 1
+		}
+		if children[i].asn {
+			for children[i].first != children[i].last {
+				left, right, err := children[i].children()
+				if err != nil {
+					return paths, err
+				}
+				if lastASN <= left.last {
+					children[i] = left
+				} else if firstASN >= right.first {
+					children[i] = right
+				} else {
+					break
+				}
+			}
+		} else if cover.IsValid() && cover.Bits() > children[i].prefix.Bits() {
+			if cover.Addr().Is4() && cover.Bits() > 24 {
+				cover = netip.PrefixFrom(cover.Addr(), 24).Masked()
+			}
+			children[i].prefix = cover
+		}
+	}
 	return paths, nil
+}
+
+func (c *compiler) rememberPartitionSize(path string, size partitionSize) {
+	if c.partitionSizes == nil {
+		c.partitionSizes = make(map[string]partitionSize)
+	}
+	c.partitionSizes[path] = size
 }
 
 func (c *compiler) object(object via3.BuiltObject) error {

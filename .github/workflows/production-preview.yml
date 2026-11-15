@@ -2,7 +2,7 @@ name: Atlas qualified production Pages preview
 
 on:
   workflow_run:
-    workflows: ["Atlas qualified production candidate"]
+    workflows: ["Atlas completed production benchmark join"]
     types: [completed]
     branches: [main]
   workflow_dispatch:
@@ -42,7 +42,7 @@ jobs:
         id: context
         run: python tools/hosted/production_workflow.py context --kind preview
       - name: Restore authenticated encrypted state
-        run: python tools/hosted/runner_budget.py --report reports/checkpoint-restore-budget.json -- python tools/hosted/checkpoint.py restore --kind candidate --run-id "$ATLAS_UPSTREAM_RUN"
+        run: python tools/hosted/runner_budget.py --report reports/checkpoint-restore-budget.json -- python tools/hosted/checkpoint.py restore --kind benchmark --run-id "$ATLAS_UPSTREAM_RUN"
       - name: Resolve original frozen candidate
         id: candidate
         run: |
@@ -104,14 +104,4 @@ jobs:
           if-no-files-found: error
       - name: Remove plaintext state
         if: always()
-        run: |
-          python - <<'PY'
-          import os, shutil
-          from pathlib import Path
-          root=Path(os.environ['GITHUB_WORKSPACE']).resolve()
-          target=root/'.atlas-private'
-          if target.exists():
-              if target.is_symlink() or not target.resolve().is_relative_to(root):
-                  raise SystemExit('unsafe state cleanup path')
-              shutil.rmtree(target)
-          PY
+        run: python tools/hosted/production_workflow.py cleanup-private

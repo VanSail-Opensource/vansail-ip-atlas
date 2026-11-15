@@ -30,7 +30,7 @@ class ProductionQualificationTests(unittest.TestCase):
         directory = atlas / "releases" / release_id
         directory.mkdir(parents=True)
         (directory / "manifest.json").write_bytes(manifest)
-        record = {"schema_version": 1, "release_scope": "release-scope-v5", "mode": "production",
+        record = {"schema_version": 1, "release_scope": "release-scope-v6", "mode": "production",
             "evaluated_at": 100, "valid_until": 200, "release_id": release_id,
             "release_manifest_sha256": sha256(manifest),
             "source_catalog_sha256": sha256((root / "configs/sources.yaml").read_bytes()),
@@ -71,6 +71,8 @@ class ProductionQualificationTests(unittest.TestCase):
             "success_boolean": lambda r: r.update(production_eligible=True),
             "synthetic": lambda r: r.update(mode="synthetic"),
             "scope": lambda r: r.update(release_scope="release-scope-v2"),
+            "old_full_scope": lambda r: r.update(release_scope="release-scope-v5"),
+            "empty_inclusion": lambda r: r.update(included_sources=[]),
             "expiry": lambda r: r.update(valid_until=150),
             "future": lambda r: r.update(evaluated_at=151),
             "wrong_manifest": lambda r: r.update(release_manifest_sha256="0" * 64),

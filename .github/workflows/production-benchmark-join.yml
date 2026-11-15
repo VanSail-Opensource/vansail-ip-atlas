@@ -1,0 +1,83 @@
+name: Atlas completed production benchmark join
+
+on:
+  workflow_run:
+    workflows: ["Atlas parallel production benchmark cases"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      upstream_run_id:
+        description: Completed exact-head fifteen-case benchmark run
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: atlas-production-benchmark-join
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    if: github.repository == 'VanSail-Opensource/vansail-ip-atlas' && github.ref == 'refs/heads/main' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-24.04
+    environment: atlas-private-build
+    timeout-minutes: 360
+    env:
+      GOMAXPROCS: '2'
+      GOMEMLIMIT: 5GiB
+      RUNNER_TOOL_CACHE: ${{ github.workspace }}/build-private/toolcache
+      GH_TOKEN: ${{ github.token }}
+      ATLAS_STATE_AGE_IDENTITY: ${{ secrets.ATLAS_STATE_AGE_IDENTITY }}
+      ATLAS_STATE_AGE_RECIPIENT: ${{ vars.ATLAS_STATE_AGE_RECIPIENT }}
+    steps:
+      - uses: actions/checkout@v7.0.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/atlas-setup
+      - name: Verify completed exact-head benchmark producer
+        run: python tools/hosted/production_workflow.py context --kind benchmark
+      - name: Authenticate all fifteen jobs and resolve original candidate
+        id: candidate
+        run: python tools/hosted/runner_budget.py --report reports/benchmark-resolve-budget.json -- python tools/hosted/production_workflow.py benchmark-resolve
+      - name: Restore original authenticated candidate state
+        env:
+          ATLAS_CANDIDATE_RUN: ${{ steps.candidate.outputs.candidate_run_id }}
+        run: python tools/hosted/runner_budget.py --report reports/checkpoint-restore-budget.json -- python tools/hosted/checkpoint.py restore --kind candidate --run-id "$ATLAS_CANDIDATE_RUN"
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: atlas-production-public
+          path: build-private/frozen-production
+          run-id: ${{ steps.candidate.outputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+      - name: Independently join all measured cases and recheck current eligibility
+        run: python tools/hosted/runner_budget.py --report reports/benchmark-join-budget.json -- python tools/hosted/production_workflow.py benchmark-join
+      - name: Encrypt immutable original state and joined evidence
+        run: python tools/hosted/runner_budget.py --report reports/checkpoint-pack-budget.json -- python tools/hosted/checkpoint.py pack --kind benchmark
+      - uses: actions/upload-artifact@v7.0.0
+        with:
+          name: atlas-benchmark-checkpoint
+          path: |
+            build-private/checkpoint/checkpoint.tar.gz.age
+            build-private/checkpoint/envelope.json
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7.0.0
+        with:
+          name: production-benchmark-evidence
+          path: reports/production-build.json
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7.0.0
+        with:
+          name: atlas-benchmark-checkpoint-index
+          path: build-private/checkpoint/envelope.json
+          retention-days: 7
+          if-no-files-found: error
+      - name: Remove plaintext state
+        if: always()
+        run: python tools/hosted/production_workflow.py cleanup-private

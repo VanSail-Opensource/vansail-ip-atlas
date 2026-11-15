@@ -2,10 +2,11 @@
 
 ## Current shortlist - 2026-11-15
 
-The catalog contains 14 entries: ten reviewed active intake candidates and four
-routing candidates that remain blocked. Active permits attempted intake; it is
+The v6 release catalog contains ten reviewed active intake candidates. The four
+unqualified routing entries were removed after the user explicitly approved
+verified-data release with unavailable routing facts shown as unknown. Active permits attempted intake; it is
 not a current authenticated source receipt or production approval. Public data
-uses release-scope-v5, observed risk and CC BY-SA 4.0 compiled-data distribution.
+uses release-scope-v6, observed risk and CC BY-SA 4.0 compiled-data distribution.
 There is no per-IP source catalog or public provenance section.
 
 | Entries | Reviewed meaning and rights | Publication/parser evidence |
@@ -30,7 +31,7 @@ and [data notice](https://metrics.torproject.org/about.html). Ipverse's
 [license/category documentation](https://github.com/ipverse/as-metadata/blob/master/README.md)
 makes categories contextual defaults; networkRole never establishes Tier-1.
 
-## Required routing qualification remains unresolved
+## Excluded routing sources; qualification remains unresolved
 
 | Candidate | Remaining conditions |
 |---|---|
@@ -39,9 +40,10 @@ makes categories contextual defaults; networkRole never establishes Tier-1.
 | caida-asrel2 | Public acceptable-use citation/date/publication-reporting review and CC BY-SA compatibility. No external notification sent. Exact serial2 body and publication binding; filename date alone is not proof. |
 | rpki-client-vrps | Actual RPKI data/relying-party redistribution rights, not software license alone. Complete current JSON/expiry/completeness certificate. Prior payload had approximately 101 minutes validity: measure headroom without omitting valid short-lived authorizations. |
 
-BGP, relationships, RPKI and source-derived Tier-1 remain required and blocked
-until these conditions pass. Parser implementation and source labels cannot
-substitute for actual rights, current-payload and fixture qualification.
+These feeds are excluded from the production catalog. Their facts remain unknown;
+no origin, relationship, RPKI not-found result or Tier-1 membership is inferred.
+Reintroduction requires the rights, full-payload and fixture conditions above.
+Parser implementation and source labels cannot substitute for that qualification.
 
 ## Removed production entries; retained independent tests
 

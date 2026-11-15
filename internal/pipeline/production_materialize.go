@@ -14,16 +14,17 @@ import (
 	"vansail-ip-atlas/internal/via3"
 )
 
-// ProductionInputs cannot be manufactured from completeness booleans. Both
-// qualified objects independently bind the sealed real-source state and clock.
+// ProductionInputs cannot be manufactured from completeness booleans. Source qualification
+// and the authenticated Tier-1 observation bind the complete state and clock.
+// Missing routing observations remain unknown, never caller-supplied completeness.
 type ProductionInputs struct {
 	Qualification *admission.ProductionQualification
 	Tier1         *intelligence.QualifiedTier1
 }
 
 // BuildEngineeringBenchmark exercises the production materializer with isolated
-// benchmark records. The original authenticated baseline qualifies routing
-// completeness; transformed inputs can never create a production artifact or
+// benchmark records. The original authenticated baseline determines routing
+// availability; transformed inputs can never create a production artifact or
 // receipt. With empty inputs, expiry/withdrawal scenarios retain unknown routing
 // completeness. Callers must separately prove their measured record transition.
 func BuildEngineeringBenchmark(ctx context.Context, options Options, baseline, state intelligence.BuildState, policy intelligence.Policy, inputs ProductionInputs) (Candidate, error) {
@@ -44,7 +45,7 @@ func BuildEngineeringBenchmark(ctx context.Context, options Options, baseline, s
 		if err := inputs.Qualification.Validate(baseline, clock); err != nil {
 			return Candidate{}, err
 		}
-		if err := inputs.Tier1.Validate(baseline, clock); err != nil {
+		if err := inputs.Tier1.ValidateObservation(baseline, clock); err != nil {
 			return Candidate{}, err
 		}
 		if time.Unix(options.ValidUntil, 0).After(inputs.Tier1.ValidUntil()) {
@@ -98,7 +99,7 @@ func BuildProductionIntelligence(ctx context.Context, options Options, state int
 	if err := inputs.Qualification.Validate(state, clock); err != nil {
 		return Candidate{}, err
 	}
-	if err := inputs.Tier1.Validate(state, clock); err != nil {
+	if err := inputs.Tier1.ValidateObservation(state, clock); err != nil {
 		return Candidate{}, err
 	}
 	if time.Unix(options.ValidUntil, 0).After(inputs.Tier1.ValidUntil()) {
@@ -114,7 +115,7 @@ func BuildProductionIntelligence(ctx context.Context, options Options, state int
 		if err := inputs.Qualification.Validate(state, clock); err != nil {
 			return err
 		}
-		if err := inputs.Tier1.Validate(state, clock); err != nil {
+		if err := inputs.Tier1.ValidateObservation(state, clock); err != nil {
 			return err
 		}
 		return originalGate(gateCtx)
@@ -129,10 +130,16 @@ func buildStreamedCandidate(ctx context.Context, options Options, state intellig
 	if err := options.Limits.validate(); err != nil {
 		return Candidate{}, err
 	}
+	cache, err := openMaterializationCache(ctx, options, state, policy, inputs)
+	if err != nil {
+		return Candidate{}, err
+	}
+	options.materializationCache = cache
 	disk, err := stateDiskBytes(options.Workspace)
 	if err != nil {
 		return Candidate{}, err
 	}
+	disk += cache.bytes
 	if disk >= options.Limits.ScratchBytes {
 		return Candidate{}, errors.New("normalized state exhausted scratch budget")
 	}
@@ -141,6 +148,7 @@ func buildStreamedCandidate(ctx context.Context, options Options, state intellig
 	if err != nil {
 		return Candidate{}, err
 	}
+	spool.observe = options.ObserveStage
 	defer func() {
 		if spool.prefixFile != nil {
 			returnErr = errors.Join(returnErr, spool.prefixFile.Close())
@@ -206,11 +214,13 @@ func (g *globalASNAggregates) family(v *globalASNSummary, family string) error {
 	return nil
 }
 func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, policy intelligence.Policy, clock time.Time, inputs ProductionInputs, spool *bulkSpool) Producer {
-	return func(ctx context.Context, emit func(via3.PublicRecord) error) error {
+	return func(ctx context.Context, emit func(via3.PublicRecord) error) (returnErr error) {
 		if inputs.Tier1 != nil {
 			spool.relations = nil
 		}
+		seedPhase := spool.stage(ctx, StageSeed)
 		spatial, asnRoot, err := spool.seed(ctx, workspace, state)
+		seedPhase(err == nil)
 		if err != nil {
 			return err
 		}
@@ -218,10 +228,12 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 		if inputs.Tier1 == nil {
 			relations = spool.relations
 		}
+		pathsPhase := spool.stage(ctx, StagePaths)
 		if err = spool.preparePrefixes(ctx); err != nil {
+			pathsPhase(false)
 			return err
 		}
-		if err = spool.reducePaths(ctx, relations, func(path intelligence.Path, rank uint16) error {
+		err = spool.reducePaths(ctx, relations, func(path intelligence.Path, rank uint16) error {
 			data := via3.PathData{GraphEligible: path.GraphEligible, Visibility: path.VisibilityBand}
 			var previous uint32
 			for _, segment := range path.Segments {
@@ -244,13 +256,18 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 				}
 			}
 			return emit(via3.PublicRecord{Version: 3, Kind: 11, ASN: path.Origin, Rank: rank, Path: &data})
-		}); err != nil {
+		})
+		pathsPhase(err == nil)
+		if err != nil {
 			return err
 		}
+		riskPhase := spool.stage(ctx, StageASNRisk)
 		aggregates := globalASNAggregates{values: map[uint32]*globalASNSummary{}, families: map[string]string{}}
 		// The first spatial pass computes exact-IP mass in canonical global address
 		// order. No partial per-bucket ASN context is allowed to reach public output.
-		if spool.hasExact {
+		// Without any observed origin mapping no exact IP can contribute ASN
+		// mass. The final IP risk and /24 pass still processes every observation.
+		if spool.hasExact && len(spool.prefixIndex) > 0 {
 			spatial, err = spool.leaves(ctx, spatial, false, func(bucket *bulkBucket, part intelligence.BuildState) error {
 				prepare := func(engine *intelligence.Engine) error {
 					return engine.WalkExactRisks(ctx, func(_ netip.Addr, risk float64, families []string, origins []uint32) error {
@@ -271,15 +288,16 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 						return nil
 					})
 				}
-				return IntelligenceProducer(part, policy, clock, MaterializationInputs{scope: bucket.prefix, prepare: prepare, prepareOnly: true})(ctx, func(via3.PublicRecord) error { return nil })
+				return IntelligenceProducer(part, policy, clock, MaterializationInputs{scope: bucket.prefix, prepare: prepare, prepareOnly: true, encodedLengths: bucket.recordBytes})(ctx, func(via3.PublicRecord) error { return nil })
 			})
 		}
 		if err != nil {
+			riskPhase(false)
 			return err
 		}
 		asnLeaves := []*bulkBucket{asnRoot}
 		if spool.hasASNDirect {
-			asnLeaves, err = spool.leaves(ctx, asnLeaves, false, func(_ *bulkBucket, part intelligence.BuildState) error {
+			asnLeaves, err = spool.leaves(ctx, asnLeaves, false, func(bucket *bulkBucket, part intelligence.BuildState) error {
 				prepare := func(engine *intelligence.Engine) error {
 					for _, source := range part.Sources {
 						for _, record := range source.Records {
@@ -303,10 +321,11 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 					}
 					return nil
 				}
-				return IntelligenceProducer(part, policy, clock, MaterializationInputs{prepare: prepare, prepareOnly: true})(ctx, func(via3.PublicRecord) error { return nil })
+				return IntelligenceProducer(part, policy, clock, MaterializationInputs{prepare: prepare, prepareOnly: true, encodedLengths: bucket.recordBytes})(ctx, func(via3.PublicRecord) error { return nil })
 			})
 		}
 		if err != nil {
+			riskPhase(false)
 			return err
 		}
 		contexts := make(map[uint32]intelligence.ASNContext, len(aggregates.values))
@@ -317,8 +336,10 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 		}
 		aggregates.values = nil
 		aggregates.families = nil
+		riskPhase(true)
+		spatialPhase := spool.stage(ctx, StageSpatial)
 		spatial, err = spool.leaves(ctx, spatial, true, func(bucket *bulkBucket, part intelligence.BuildState) error {
-			return IntelligenceProducer(part, policy, clock, MaterializationInputs{VRPComplete: inputs.Qualification.VRPComplete(), verifiedEmptyVRP: inputs.Qualification.VRPComplete(), scope: bucket.prefix, contexts: contexts, resolver: relations})(ctx, func(record via3.PublicRecord) error {
+			return IntelligenceProducer(part, policy, clock, MaterializationInputs{VRPComplete: inputs.Qualification.VRPComplete(), verifiedEmptyVRP: inputs.Qualification.VRPComplete(), scope: bucket.prefix, contexts: contexts, resolver: relations, encodedLengths: bucket.recordBytes})(ctx, func(record via3.PublicRecord) error {
 				if record.Kind >= 8 && record.Kind != 9 {
 					return nil
 				}
@@ -330,13 +351,16 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 				return emit(record)
 			})
 		})
+		spatialPhase(err == nil)
 		if err != nil {
 			return err
 		}
 		_ = spatial
+		asnPhase := spool.stage(ctx, StageASN)
+		defer func() { asnPhase(returnErr == nil) }()
 		emitted := map[uint32]bool{}
 		_, err = spool.leaves(ctx, asnLeaves, false, func(bucket *bulkBucket, part intelligence.BuildState) error {
-			return IntelligenceProducer(part, policy, clock, MaterializationInputs{contexts: contexts, resolver: relations})(ctx, func(record via3.PublicRecord) error {
+			return IntelligenceProducer(part, policy, clock, MaterializationInputs{contexts: contexts, resolver: relations, encodedLengths: bucket.recordBytes})(ctx, func(record via3.PublicRecord) error {
 				switch record.Kind {
 				case 8:
 					if record.ASN < bucket.first || record.ASN > bucket.last {

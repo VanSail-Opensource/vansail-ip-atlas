@@ -126,6 +126,10 @@ func (s *Shard) Rows(id uint16) ([]byte, int) {
 	if s.lookup != nil && id < uint16(len(s.lookup.rows)) {
 		return s.lookup.rows[id], s.lookup.widths[id]
 	}
+	return s.unindexedRows(id)
+}
+
+func (s *Shard) unindexedRows(id uint16) ([]byte, int) {
 	b := s.Section(id)
 	if len(b) < 8 {
 		return nil, 0
@@ -134,10 +138,13 @@ func (s *Shard) Rows(id uint16) ([]byte, int) {
 }
 func (s *Shard) Record(index uint32) []byte {
 	b, w := s.Rows(3)
-	if w == 0 || uint64(index) >= uint64(len(b)/w) {
+	// Widths are u32 on disk. Computing the end in u64 keeps the complete
+	// bound check without a variable-width division on every indexed record.
+	end := (uint64(index) + 1) * uint64(w)
+	if w == 0 || end > uint64(len(b)) {
 		return nil
 	}
-	return b[int(index)*w : (int(index)+1)*w]
+	return b[int(end)-w : int(end)]
 }
 
 func Write(ctx context.Context, shard Shard) ([]byte, error) {

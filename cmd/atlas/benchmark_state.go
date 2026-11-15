@@ -49,7 +49,7 @@ type benchmarkMarker struct {
 
 // The benchmark transforms an isolated copy, never the authenticated intake or
 // its seals. Every output is engineering, including its unmodified warm-up.
-func benchmarkState(ctx context.Context, args []string) error {
+func benchmarkState(ctx context.Context, args []string) (returnErr error) {
 	fs := flag.NewFlagSet("benchmark-state", flag.ContinueOnError)
 	workspace := fs.String("workspace", ".", "authenticated source workspace")
 	out := fs.String("out", "", "isolated directory beneath workspace/build-private")
@@ -71,8 +71,20 @@ func benchmarkState(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	engine, err := admission.New(root)
+	if err != nil {
+		return err
+	}
+	defer func() { returnErr = errors.Join(returnErr, engine.Close()) }()
 	baseClock := time.Unix(*clock, 0).UTC()
-	binding, err := loadProductionBinding(ctx, root, baseClock)
+	// Use the production compiler's exact process-local validation path. The
+	// observed source epoch precedes unrelated capability failures, while the
+	// opaque handle rechecks every object byte before source qualification.
+	tier, verified, err := observeVerifiedCurrentTier1(ctx, root, baseClock)
+	if err != nil {
+		return err
+	}
+	binding, err := loadVerifiedProductionBinding(ctx, root, baseClock, verified)
 	if err != nil {
 		return err
 	}
@@ -80,11 +92,7 @@ func benchmarkState(ctx context.Context, args []string) error {
 	if !baseline.EvaluatedAt.Equal(baseClock) {
 		return errors.New("benchmark baseline clock mismatch")
 	}
-	tier, err := observeCurrentTier1(ctx, root, baseClock)
-	if err != nil {
-		return err
-	}
-	if err = tier.Validate(baseline, baseClock); err != nil {
+	if err = tier.ValidateObservation(baseline, baseClock); err != nil {
 		return err
 	}
 	policyFile, err := openRegularInput(filepath.Join(root, "configs", "scoring.yaml"), 2<<20)

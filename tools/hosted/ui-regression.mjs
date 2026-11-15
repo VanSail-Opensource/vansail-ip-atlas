@@ -272,11 +272,13 @@ try {
         const assertGraphSurface = async () => {
           const surface = await page.locator('.bgp-graph').evaluate(element => ({
             backdrop: getComputedStyle(element).backdropFilter,
-            background: getComputedStyle(element).backgroundImage,
-            edgeMask: getComputedStyle(element, '::before').maskImage,
+            background: getComputedStyle(element).backgroundColor,
+            edgeMask: getComputedStyle(element.querySelector('.edge-accent')).maskImage,
+            edgeLight: getComputedStyle(element.querySelector('.edge-accent')).backgroundImage,
           }))
           assert.equal(surface.backdrop, 'none', 'The interactive SVG must not invalidate a backdrop blur on every frame')
-          assert.notEqual(surface.background, 'none', 'The graph retains its themed surface lighting')
+          assert.notEqual(surface.background, 'rgba(0, 0, 0, 0)', 'The graph retains its themed surface backing')
+          assert.notEqual(surface.edgeLight, 'none', 'The graph retains its edge lighting')
           assert.notEqual(surface.edgeMask, 'none', 'The graph retains masked edge lighting')
         }
         await assertGraphSurface()
@@ -353,7 +355,7 @@ try {
       const geometry = await svg.evaluate(svg => {
         const box = element => { const r = element.getBoundingClientRect(); return { left:r.left, top:r.top, right:r.right, bottom:r.bottom, width:r.width, height:r.height } }
         return { svg:box(svg), bounds:{ width:svg.viewBox.baseVal.width, height:svg.viewBox.baseVal.height },
-          items:[...svg.querySelectorAll('.graph-node')].flatMap((node,index) => ['circle','text'].map(kind =>
+          items:[...svg.querySelectorAll('.graph-node')].flatMap((node,index) => ['circle','.graph-node-label'].map(kind =>
             ({ id:`${index}:${kind}`, ...box(node.querySelector(kind)) }))),
           layout:[...svg.querySelectorAll('.graph-node')].map(node => node.getAttribute('transform')) }
       })

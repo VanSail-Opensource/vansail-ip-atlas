@@ -192,10 +192,11 @@ func (r *Release) prefixPage(ctx context.Context, s *Shard, row []byte, asn, cur
 	if !rangeOK(first, total, len(rows)/24) {
 		return answer, fail("record")
 	}
+	answer.Prefixes = make([]string, total)
 	for k := first; k < first+total; k++ {
 		key := rows[k*24 : (k+1)*24]
 		ip, _ := keyAddr(key)
-		answer.Prefixes = append(answer.Prefixes, netip.PrefixFrom(ip, int(key[1])).String())
+		answer.Prefixes[k-first] = netip.PrefixFrom(ip, int(key[1])).String()
 	}
 	if cursor+1 < count {
 		next := cursor + 1
@@ -271,17 +272,23 @@ type Release struct {
 // The metadata is owned by its shard and is released with it on cache eviction.
 // Directory strings reuse canonical manifest hash strings; no mutable answer
 // or caller-owned scalar is retained here.
-// No decoded payload is copied: row slices are views, reference pointers cost
-// one machine word per 40-byte directory row, and the fixed row/depth tables
-// occur at most once per loaded manifest object (<18500). Reference-slot and
-// used-slot counts are likewise bounded by that manifest inventory. Decoded
-// section admission remains unchanged; process RSS still needs full-corpus
-// measurement including this bounded metadata and Go allocator overhead.
+// No decoded payload is copied. Prefix search adds one u32 ordinal per 32-byte
+// prefix row (at most 4 MiB for a 32 MiB decoded object), plus fixed family bounds.
+// These are native index metadata, not extra decoded bytes in the shared Go/TS
+// payload profile. They are owned and evicted with the shard; measured process
+// RSS includes their allocation. Reference pointers cost one word per directory
+// row; all metadata/slot populations remain bounded by the validated inventory.
 type shardLookup struct {
 	rows       [13][]byte
 	widths     [13]int
-	depths     [2][129]bool
+	depths     [2][3]uint64
 	references []*objectReference
+	prefixes   [2]prefixLookup
+}
+
+type prefixLookup struct {
+	parents  []uint32  // immediate containing prefix, or None; never answer data
+	families [3]uint32 // contiguous ranges in the original address-ordered rows
 }
 
 type objectReference struct {
@@ -298,15 +305,46 @@ func shardLookupMetadata(s *Shard, references []*objectReference) *shardLookup {
 		index.rows[section.ID] = section.Data[8:]
 		index.widths[section.ID] = int(u32(section.Data, 4))
 	}
-	for _, id := range []uint16{1, 8} {
+	for section, id := range []uint16{1, 8} {
 		rows := index.rows[id]
+		prefixes := &index.prefixes[section]
+		// RPKI has repeated prefix keys for distinct origins and retains its
+		// specialized origin-run search. Other validated prefix keys are unique.
+		if s.Kind != 9 {
+			prefixes.parents = make([]uint32, len(rows)/32)
+		}
+		var stack [2][130]uint32 // /0 through /128, plus explicit/exact tie
+		var heights [2]int
 		for p := 0; p < len(rows); p += 32 {
 			family := 0
 			if rows[p] == 6 {
 				family = 1
 			}
-			index.depths[family][rows[p+1]] = true
+			depth := int(rows[p+1])
+			index.depths[family][depth/64] |= 1 << (depth % 64)
+			prefixes.families[family+1]++
+			if s.Kind == 9 {
+				continue
+			}
+			addr, _ := keyAddr(rows[p : p+32])
+			height := heights[family]
+			for height > 0 {
+				previous := int(stack[family][height-1]) * 32
+				start, _ := keyAddr(rows[previous : previous+32])
+				if netip.PrefixFrom(start, int(rows[previous+1])).Contains(addr) {
+					break
+				}
+				height--
+			}
+			ordinal := uint32(p / 32)
+			prefixes.parents[ordinal] = None
+			if height > 0 {
+				prefixes.parents[ordinal] = stack[family][height-1]
+			}
+			stack[family][height] = ordinal
+			heights[family] = height + 1
 		}
+		prefixes.families[2] += prefixes.families[1]
 	}
 	return index
 }
@@ -647,6 +685,24 @@ func (r *Release) asnDestinations(ctx context.Context, asn uint32) (destinationS
 	row, ok := r.router.ASNRecord(asn)
 	return r.rowDestinations(ctx, row, ok)
 }
+
+// Relationship lookup needs only its own routed shard. Loading every ASN fact
+// object for every observed adjacency would decode and pin unrelated data.
+func (r *Release) asnDestination(ctx context.Context, asn uint32, kind uint16) (*Shard, error) {
+	row, ok := r.router.ASNRecord(asn)
+	if !ok {
+		return nil, nil
+	}
+	ints, _ := r.router.Rows(4)
+	directory, _ := r.router.Rows(7)
+	for j := uint32(0); j < uint32(u16(row, 4)); j++ {
+		object := u32(ints, int(u32(row, 0)+j)*4)
+		if u16(directory, int(object)*40) == kind {
+			return r.reference(ctx, r.router, object)
+		}
+	}
+	return nil, nil
+}
 func (r *Release) rowDestinations(ctx context.Context, row []byte, ok bool) (destinationSet, error) {
 	var out destinationSet
 	if !ok {
@@ -699,12 +755,42 @@ type asnLookupValues struct {
 	customerCone, transitDegree uint32
 }
 
+// Wire country values are a fixed two-letter enum. Their immutable spelling
+// needs no per-answer byte allocation; each mutable string header is still
+// stored in its own caller-owned answer block.
+const countrySpellings = "AAABACADAEAFAGAHAIAJAKALAMANAOAPAQARASATAUAVAWAXAYAZ" +
+	"BABBBCBDBEBFBGBHBIBJBKBLBMBNBOBPBQBRBSBTBUBVBWBXBYBZ" +
+	"CACBCCCDCECFCGCHCICJCKCLCMCNCOCPCQCRCSCTCUCVCWCXCYCZ" +
+	"DADBDCDDDEDFDGDHDIDJDKDLDMDNDODPDQDRDSDTDUDVDWDXDYDZ" +
+	"EAEBECEDEEEFEGEHEIEJEKELEMENEOEPEQERESETEUEVEWEXEYEZ" +
+	"FAFBFCFDFEFFFGFHFIFJFKFLFMFNFOFPFQFRFSFTFUFVFWFXFYFZ" +
+	"GAGBGCGDGEGFGGGHGIGJGKGLGMGNGOGPGQGRGSGTGUGVGWGXGYGZ" +
+	"HAHBHCHDHEHFHGHHHIHJHKHLHMHNHOHPHQHRHSHTHUHVHWHXHYHZ" +
+	"IAIBICIDIEIFIGIHIIIJIKILIMINIOIPIQIRISITIUIVIWIXIYIZ" +
+	"JAJBJCJDJEJFJGJHJIJJJKJLJMJNJOJPJQJRJSJTJUJVJWJXJYJZ" +
+	"KAKBKCKDKEKFKGKHKIKJKKKLKMKNKOKPKQKRKSKTKUKVKWKXKYKZ" +
+	"LALBLCLDLELFLGLHLILJLKLLLMLNLOLPLQLRLSLTLULVLWLXLYLZ" +
+	"MAMBMCMDMEMFMGMHMIMJMKMLMMMNMOMPMQMRMSMTMUMVMWMXMYMZ" +
+	"NANBNCNDNENFNGNHNINJNKNLNMNNNONPNQNRNSNTNUNVNWNXNYNZ" +
+	"OAOBOCODOEOFOGOHOIOJOKOLOMONOOOPOQOROSOTOUOVOWOXOYOZ" +
+	"PAPBPCPDPEPFPGPHPIPJPKPLPMPNPOPPPQPRPSPTPUPVPWPXPYPZ" +
+	"QAQBQCQDQEQFQGQHQIQJQKQLQMQNQOQPQQQRQSQTQUQVQWQXQYQZ" +
+	"RARBRCRDRERFRGRHRIRJRKRLRMRNRORPRQRRRSRTRURVRWRXRYRZ" +
+	"SASBSCSDSESFSGSHSISJSKSLSMSNSOSPSQSRSSSTSUSVSWSXSYSZ" +
+	"TATBTCTDTETFTGTHTITJTKTLTMTNTOTPTQTRTSTTTUTVTWTXTYTZ" +
+	"UAUBUCUDUEUFUGUHUIUJUKULUMUNUOUPUQURUSUTUUUVUWUXUYUZ" +
+	"VAVBVCVDVEVFVGVHVIVJVKVLVMVNVOVPVQVRVSVTVUVVVWVXVYVZ" +
+	"WAWBWCWDWEWFWGWHWIWJWKWLWMWNWOWPWQWRWSWTWUWVWWWXWYWZ" +
+	"XAXBXCXDXEXFXGXHXIXJXKXLXMXNXOXPXQXRXSXTXUXVXWXXXYXZ" +
+	"YAYBYCYDYEYFYGYHYIYJYKYLYMYNYOYPYQYRYSYTYUYVYWYXYYYZ" +
+	"ZAZBZCZDZEZFZGZHZIZJZKZLZMZNZOZPZQZRZSZTZUZVZWZXZYZZ"
+
 func countryInto(v uint16, target *string) *string {
 	if v == 0 {
 		return nil
 	}
-	n := int(v) - 1
-	*target = string([]byte{byte(n/26) + 'A', byte(n%26) + 'A'})
+	n := (int(v) - 1) * 2
+	*target = countrySpellings[n : n+2]
 	return target
 }
 func confidence(v byte) string { return []string{"unrated", "low", "medium", "high"}[v] }
@@ -757,16 +843,20 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 		return LookupAnswer{}, err
 	}
 	answer := LookupAnswer{Q: input.Canonical, Kind: input.Kind, ReleaseID: r.Manifest.ReleaseID, Synthetic: r.Manifest.Mode == "synthetic", ValidUntil: r.Manifest.ValidUntil, ASNs: []ASNAnswer{}, BGP: BGPAnswer{Origins: []uint32{}, Paths: []PathAnswer{}, Relationships: []RelationshipAnswer{}, Tier1: []TierAnswer{}, RPKI: []RPKIAnswer{}}}
-	dest, err := r.destinations(ctx, input)
-	if err != nil {
-		return answer, err
-	}
 	var addr netip.Addr
+	var dest destinationSet
+	if input.Kind == "ip" {
+		addr = netip.MustParseAddr(input.Canonical)
+		row, _, ok := r.router.findPrefix(addr)
+		dest, err = r.rowDestinations(ctx, row, ok)
+		if err != nil {
+			return answer, err
+		}
+	}
 	var announcement netip.Prefix
 	var geoValues *geoLookupValues
 	networkOriginsKnown := false
 	if input.Kind == "ip" {
-		addr = netip.MustParseAddr(input.Canonical)
 		if s := dest[2]; s != nil {
 			if row, _, ok := s.findPrefix(addr); ok {
 				geoValues = &geoLookupValues{}
@@ -870,6 +960,7 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 		n, _ := strconv.ParseUint(input.Canonical[2:], 10, 32)
 		answer.BGP.Origins = []uint32{uint32(n)}
 	}
+	var asnValues []asnLookupValues
 	for _, asn := range answer.BGP.Origins {
 		asndest, err := r.asnDestinations(ctx, asn)
 		if err != nil {
@@ -880,7 +971,10 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 				if err := budget.charge(4096); err != nil {
 					return answer, err
 				}
-				values := &asnLookupValues{}
+				if asnValues == nil {
+					asnValues = make([]asnLookupValues, len(answer.BGP.Origins))
+				}
+				values := &asnValues[len(answer.ASNs)]
 				a := ASNAnswer{ASN: asn, Country: countryInto(u16(row, 24), &values.country), Risk: riskValue(row, 28, 23, &values.risk), RiskBand: []string{"unknown", "low", "medium", "high"}[row[26]], Confidence: confidence(row[27]), Prefixes: []string{}, NetworkClass: className(row[52]), Stability: stability(row[53])}
 				if a.Name, err = r.label(ctx, s, row, 8, &values.name, &labels); err != nil {
 					return answer, err
@@ -918,6 +1012,9 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 			if first, end, ok := s.asnBounds(asn); ok {
 				if end-first > 12 {
 					return answer, fail("record")
+				}
+				if cap(answer.BGP.Paths) == 0 {
+					answer.BGP.Paths = make([]PathAnswer, 0, end-first)
 				}
 				segments, _ := s.Rows(9)
 				ints, _ := s.Rows(4)
@@ -977,7 +1074,8 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 	}
 	// Only actual consecutive retained path hops are queried. Relationship runs
 	// may be large; binary lookup avoids allocating or scanning an ASN's degree.
-	pairs := make(map[uint64]bool)
+	var pairStorage [64]uint64
+	ordered := pairStorage[:0]
 	for _, path := range answer.BGP.Paths {
 		if !path.GraphEligible {
 			continue
@@ -985,29 +1083,27 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 		for i := 1; i < len(path.ASNs); i++ {
 			from, to := path.ASNs[i-1], path.ASNs[i]
 			if from != to {
-				pairs[uint64(from)<<32|uint64(to)] = true
+				ordered = append(ordered, uint64(from)<<32|uint64(to))
 			}
 		}
 	}
-	ordered := make([]uint64, 0, len(pairs))
-	for pair := range pairs {
-		ordered = append(ordered, pair)
-	}
 	slices.Sort(ordered)
+	ordered = slices.Compact(ordered)
+	if err := budget.charge(256 * len(ordered)); err != nil {
+		return answer, err
+	}
+	answer.BGP.Relationships = make([]RelationshipAnswer, 0, len(ordered))
 	for _, pair := range ordered {
-		if err := budget.charge(256); err != nil {
-			return answer, err
-		}
 		if err := ctx.Err(); err != nil {
 			return answer, err
 		}
 		from, to := uint32(pair>>32), uint32(pair)
-		related, err := r.asnDestinations(ctx, from)
+		related, err := r.asnDestination(ctx, from, 12)
 		if err != nil {
 			return answer, err
 		}
 		edge := RelationshipAnswer{From: from, To: to, Relation: "unknown", Observed: true}
-		if s := related[12]; s != nil {
+		if s := related; s != nil {
 			if row, ok := s.FindRelationship(from, to); ok {
 				edge.Relation = []string{"unknown", "transit_upstream", "peer", "customer", "sibling"}[row[12]]
 				edge.Inferred = row[13]&2 != 0

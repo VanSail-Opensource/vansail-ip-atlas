@@ -1,4 +1,4 @@
-// Mandatory production populations. Never substitutes synthetic data or missing metrics.
+// Real candidate populations and separately scoped component capacity evidence.
 import { chromium } from 'playwright'
 import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises'
 import { createRequire } from 'node:module'
@@ -9,6 +9,8 @@ import { isIP } from 'node:net'
 import { cpus, totalmem } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import { graphVisibleNodeCount } from './performance-gates.mjs'
+import { auditAccessibility } from './browser-accessibility.mjs'
+import { parseInput } from '../../web/app/lib/query.ts'
 
 const root = new URL('../../', import.meta.url)
 const base = new URL(process.env.ATLAS_PREVIEW_URL ?? '')
@@ -20,28 +22,68 @@ if (candidate.mode !== 'production' || candidate.status !== 'passed' || !/^[a-f0
   throw new Error('A qualified frozen production candidate is required')
 const corpusBytes = await readFile(process.env.ATLAS_PRODUCTION_CORPUS ?? '.atlas-private/production-browser-corpus.json')
 const corpus = JSON.parse(corpusBytes)
-const validQuery = q => typeof q === 'string' && (isIP(q) !== 0 || /^AS[1-9][0-9]{0,9}$/.test(q) && Number(q.slice(2)) <= 4294967294)
+const validQuery = q => { try { return typeof q === 'string' && parseInput(q).canonical === q } catch { return false } }
 const strata = ['ipv4_exact', 'ipv4_lpm', 'ipv6_exact', 'ipv6_lpm', 'moas', 'sparse_asn', 'dense_asn', 'inherited', 'unknown']
-if (Object.keys(corpus).sort().join() !== ['format_version','graph_query','interaction_query','mode','queries'].sort().join() || corpus.format_version !== 1 || corpus.mode !== 'production' ||
-    !Array.isArray(corpus.queries) || corpus.queries.length !== 10000 || !validQuery(corpus.interaction_query) || !isIP(corpus.interaction_query) || !validQuery(corpus.graph_query) ||
-    corpus.queries.some(q => Object.keys(q).sort().join() !== 'q,stratum' || !validQuery(q.q) || !strata.includes(q.stratum)) || strata.some(s => !corpus.queries.some(q => q.stratum === s)))
+const keys = (value, expected) => value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).sort().join() === [...expected].sort().join()
+if (!keys(corpus,['format_version','graph_query','interaction_query','map_query','mode','queries','release_id','availability','unknown_queries']) || corpus.format_version !== 2 || corpus.mode !== 'production' || corpus.release_id !== candidate.release_id ||
+    !Array.isArray(corpus.queries) || corpus.queries.length !== 10000 || !validQuery(corpus.interaction_query) || isIP(corpus.interaction_query) !== 4 ||
+    !(corpus.map_query === null || validQuery(corpus.map_query) && isIP(corpus.map_query) === 4 && corpus.map_query === corpus.interaction_query) ||
+    !(corpus.graph_query === null || validQuery(corpus.graph_query) && corpus.graph_query.startsWith('AS')) ||
+    !keys(corpus.unknown_queries,['ipv4','ipv6','asn']) || !validQuery(corpus.unknown_queries.ipv4) || isIP(corpus.unknown_queries.ipv4) !== 4 || !validQuery(corpus.unknown_queries.ipv6) || isIP(corpus.unknown_queries.ipv6) !== 6 || !validQuery(corpus.unknown_queries.asn) || !corpus.unknown_queries.asn.startsWith('AS') ||
+    !Array.isArray(corpus.availability) || corpus.availability.length !== strata.length || new Set(corpus.availability.map(row=>row.stratum)).size !== strata.length ||
+    corpus.availability.some((row,index)=>!keys(row,['stratum','status','sampled_queries']) || row.stratum !== strata[index] || !['observed','absent'].includes(row.status) || !Number.isInteger(row.sampled_queries) || row.sampled_queries < 0 || row.sampled_queries > 1200 || (row.status === 'observed') !== (row.sampled_queries > 0)) ||
+    corpus.queries.some(q => !keys(q,['q','stratum']) || !validQuery(q.q) || !corpus.availability.some(row=>row.stratum === q.stratum && row.status === 'observed')) ||
+    corpus.availability.some(row=>row.status === 'observed' && !corpus.queries.some(q=>q.stratum === row.stratum)) ||
+    corpus.availability.some(row=>new Set(corpus.queries.filter(q=>q.stratum === row.stratum).map(q=>q.q)).size > row.sampled_queries) ||
+    !corpus.availability.some(row=>row.stratum !== 'unknown' && row.status === 'observed') ||
+    Object.values(corpus.unknown_queries).some(q=>!corpus.queries.some(row=>row.stratum === 'unknown' && row.q === q)))
   throw new Error('A versioned 10000-query real-input stratified corpus is required')
+const canonical = value => value === null || typeof value !== 'object' ? JSON.stringify(value) : Array.isArray(value) ? `[${value.map(canonical).join(',')}]` : `{${Object.keys(value).sort().map(key=>`${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`
+const sha256 = bytes => createHash('sha256').update(bytes).digest('hex')
+const fixtureBytes = await readFile(new URL('fixtures/bin/synthetic-graph24-via3.json',root))
+const fixture = JSON.parse(fixtureBytes)
+if (fixture.manifest.mode !== 'synthetic' || !fixture.vectors.some(row=>row.q === 'AS424240')) throw new Error('Expected independently scoped graph capacity fixture')
+const fixtureFiles = new Map()
+for (const object of fixture.objects) {
+  const bytes = Buffer.from(object.base64,'base64')
+  if (bytes.length !== object.info.bytes || sha256(bytes) !== object.info.sha256 || !fixture.manifest.objects.some(info=>canonical(info) === canonical(object.info))) throw new Error('Graph fixture object integrity failed')
+  fixtureFiles.set(`/_atlas/objects/${object.info.sha256}.via3`,bytes)
+}
+// Only the isolated fixture's clock/control envelope changes. Its checked-in
+// compressed observations are never added to the frozen production candidate.
+const fixtureDescriptor = {...fixture.manifest};delete fixtureDescriptor.release_id
+fixtureDescriptor.valid_from = Math.floor(Date.now()/1000) - 60
+fixtureDescriptor.valid_until = fixtureDescriptor.valid_from + 720 * 3600
+const fixtureRelease = sha256(Buffer.from(canonical(fixtureDescriptor)))
+const fixtureManifest = Buffer.from(canonical({...fixtureDescriptor,release_id:fixtureRelease}))
+const fixtureManifestPath = `/_atlas/releases/${fixtureRelease}/manifest.json`
+fixtureFiles.set(fixtureManifestPath,fixtureManifest)
+fixtureFiles.set('/_atlas/current.json',Buffer.from(canonical({format_version:3,release_id:fixtureRelease,manifest_path:fixtureManifestPath,manifest_sha256:sha256(fixtureManifest)})))
+const fixtureCredits = Buffer.from(canonical({format_version:2,mode:'synthetic',release_id:fixtureRelease,entries:[]}))
+const fixtureCreditsHash = sha256(fixtureCredits),fixtureCreditsPath = `/_atlas/credits/${fixtureCreditsHash}.json`
+fixtureFiles.set(fixtureCreditsPath,fixtureCredits)
+fixtureFiles.set('/dataset-credits.json',Buffer.from(canonical({format_version:1,current_release_id:fixtureRelease,releases:[{release_id:fixtureRelease,credits_path:fixtureCreditsPath,credits_sha256:fixtureCreditsHash}]})))
 const axeSource = await readFile(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8')
 const tile = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j9zEAAAAASUVORK5CYII=', 'base64')
-const report = { scope:'hosted-production-browser-v1',mode:'production',url:base.origin,
+const report = { scope:'hosted-production-browser-v2',release_scope:'release-scope-v6',mode:'production',url:base.origin,
   release_id:candidate.release_id,candidate_bundle_sha256:candidate.candidate_bundle_sha256,
+  corpus_release_id:corpus.release_id,corpus_availability:corpus.availability,
+  corpus_features:{map:corpus.map_query!==null,graph:corpus.graph_query!==null},
   corpus_sha256:createHash('sha256').update(corpusBytes).digest('hex'),browser:null,head_sha:process.env.GITHUB_SHA??null,
   execution_host:{platform:process.platform,arch:process.arch,node:process.versions.node,logical_cpus:cpus().length,memory_bytes:totalmem()},
-  populations:[],cold_queries:[],hot_queries:[],errors:[],worker_memory_samples:[],
+  populations:[],component_populations:[],cold_queries:[],hot_queries:[],errors:[],worker_memory_samples:[],
   worst_case_worker_memory:JSON.parse(await readFile(new URL('reports/worker-memory.json',root),'utf8')),
   protocol:{widths:[320,390,1280,1440],themes:['light','dark'],independent_contexts_per_population:30,
     mobile_dpr:2,mobile_cpu_slowdown:4,network_rtt_ms:150,network_down_bits_per_second:1600000,network_up_bits_per_second:750000,
-    graph_phase_ms:10000,graph_wheel_pair:'deltaY=-50,+50',graph_population:'all24completecircles-insideSVG-and-screen-each1000ms',
+    graph_phase_ms:10000,graph_wheel_pair:'deltaY=-50,+50',graph_population:'isolated-synthetic-component-capacity;exact-production-assets;all24completecircles-insideSVG-and-screen-each1000ms',
+    real_candidate:'all-owner-routes-and-verified-unknown-states;observed-graph-population-is-reported-without-substitution',
     lab_INP:'EventTiming interactionId-grouped maximum durations; 16ms observer floor; not field INP',
     CLS:'maximum-layout-shift-session-window-through-complete-trusted-interaction-script',
     memory:'100ms-browser-process-tree-RSS-diagnostic-only; between-poll peaks and separate worst-case worker proof remain unmeasured',
     accessibility:'axe-core4.14.0 WCAG2A/AA+2.1AA on every owner route; incomplete rules require review and cannot pass',
     map_tiles:'same-origin-atlas-real-HTTP;external-OSM-tiles-mocked-and-excluded-from-atlas-payload'}}
+report.graph_component_fixture={scope:'isolated-synthetic-capacity',fixture_sha256:sha256(fixtureBytes),worker_sha256:report.worst_case_worker_memory.worker_sha256,candidate_bundle_sha256:report.candidate_bundle_sha256}
+if (!/^[a-f0-9]{64}$/.test(report.graph_component_fixture.worker_sha256 ?? '')) throw new Error('Component capacity must bind the exact measured emitted worker')
 
 let browser,server,memoryTimer,memoryBusy=false,rootPid
 async function processTreeRSS() {
@@ -61,7 +103,7 @@ async function processTreeRSS() {
   return {supported:count>0,at_ms:performance.now(),rss_bytes:rss,processes:count}
 }
 
-async function newSample(width,theme) {
+async function newSample(width,theme,{componentFixture=false}={}) {
   const mobile=width<1000
   const context=await browser.newContext({viewport:{width,height:mobile?844:900},deviceScaleFactor:mobile?2:1,colorScheme:theme,reducedMotion:'no-preference',serviceWorkers:'block'})
   await context.route('**/*',route=>{
@@ -73,8 +115,8 @@ async function newSample(width,theme) {
   await context.addInitScript(({theme})=>{
     localStorage.setItem('nuxt-color-mode',theme)
     const NativeWorker=window.Worker
-    window.__atlasWorkers=[]
-    window.Worker=class extends NativeWorker{constructor(...args){super(...args);window.__atlasWorkers.push(this)}}
+    window.__atlasWorkers=[];window.__atlasWorkerURLs=[]
+    window.Worker=class extends NativeWorker{constructor(...args){super(...args);window.__atlasWorkers.push(this);window.__atlasWorkerURLs.push(String(args[0]));this.addEventListener('message',event=>{const a=event.data.answer;if(a?.q&&a?.releaseId)window.__atlasLastLookup={q:a.q,releaseId:a.releaseId,synthetic:a.synthetic}})}}
     const state=window.__atlasProduction={lcp_ms:null,cls:0,interactions:{},trusted_inputs:0,event_supported:PerformanceObserver.supportedEntryTypes.includes('event'),lcp_supported:PerformanceObserver.supportedEntryTypes.includes('largest-contentful-paint'),cls_supported:PerformanceObserver.supportedEntryTypes.includes('layout-shift')}
     for(const event of ['keydown','pointerdown','wheel'])addEventListener(event,e=>{if(e.isTrusted)state.trusted_inputs++},{capture:true,passive:true})
     if(state.lcp_supported)new PerformanceObserver(list=>{for(const e of list.getEntries())state.lcp_ms=e.startTime}).observe({type:'largest-contentful-paint',buffered:true})
@@ -87,13 +129,13 @@ async function newSample(width,theme) {
   await cdp.send('Network.enable');await cdp.send('Network.setCacheDisabled',{cacheDisabled:true})
   await cdp.send('Emulation.setCPUThrottlingRate',{rate:mobile?4:1})
   await cdp.send('Network.emulateNetworkConditions',{offline:false,latency:150,downloadThroughput:1600000/8,uploadThroughput:750000/8,connectionType:'cellular3g'})
-  const js=new Map(),atlas=[],pending=[]
+  const js=new Map(),jsHashes=new Map(),atlas=[],pending=[]
   context.on('response',response=>{
     const url=new URL(response.url());if(url.origin!==base.origin||(!/\.(?:m?js)$/.test(url.pathname)&&!url.pathname.startsWith('/_atlas/')))return
-    pending.push((async()=>{if(response.status()!==200)throw new Error('Static asset unavailable');const bytes=await response.body();if(/\.(?:m?js)$/.test(url.pathname))js.set(url.pathname,gzipSync(bytes,{level:9}).length);else{const sizes=await response.request().sizes();if(!Number.isFinite(sizes.responseBodySize)||sizes.responseBodySize<=0)throw new Error('Wire bytes unavailable');atlas.push({path:url.pathname,body_bytes:sizes.responseBodySize})}})().catch(()=>report.errors.push('Static response accounting failed')))
+    pending.push((async()=>{if(response.status()!==200)throw new Error('Static asset unavailable');const bytes=await response.body();if(/\.(?:m?js)$/.test(url.pathname)){js.set(url.pathname,gzipSync(bytes,{level:9}).length);jsHashes.set(url.pathname,sha256(bytes))}else if(!componentFixture){const sizes=await response.request().sizes();if(!Number.isFinite(sizes.responseBodySize)||sizes.responseBodySize<=0)throw new Error('Wire bytes unavailable');atlas.push({path:url.pathname,body_bytes:sizes.responseBodySize})}})().catch(()=>report.errors.push('Static response accounting failed')))
   })
   const settle=async()=>{await page.waitForLoadState('networkidle');await Promise.all(pending)}
-  return {context,page,cdp,js,atlas,settle}
+  return {context,page,cdp,js,jsHashes,atlas,settle}
 }
 
 async function credits(s) {
@@ -133,7 +175,7 @@ async function population(page) {
     return {svg_bounds:a,visible_bounds:{left:Math.max(0,a.left,v.left),right:Math.min(innerWidth,a.right,v.right),top:Math.max(0,a.top,v.top),bottom:Math.min(innerHeight,a.bottom,v.bottom)},circles:[...svg.querySelectorAll('.graph-node circle')].map(box)}
   })
   value.fully_visible_nodes=graphVisibleNodeCount(value)
-  if(value.circles.length!==24||value.fully_visible_nodes!==24)throw new Error('The real graph workload does not paint all24 complete circles')
+  if(value.circles.length!==24||value.fully_visible_nodes!==24)throw new Error('The isolated capacity graph does not paint all24 complete circles')
   return value
 }
 async function graphPhase(page,name,action) {
@@ -147,16 +189,96 @@ async function graphPhase(page,name,action) {
   return {action:name,actions,duration_ms,complete_second_fps,frame_intervals_ms:result.times.slice(1).map((t,i)=>t-result.times[i]),population_checkpoints}
 }
 async function accessible(page) {
-  await page.evaluate(axeSource)
-  const value=await page.evaluate(async()=>{const r=await window.axe.run(document,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}});return {violations:r.violations.map(x=>({id:x.id,impact:x.impact,nodes:x.nodes.length})),incomplete:r.incomplete.map(x=>({id:x.id,nodes:x.nodes.length}))}})
-  return value
+  return auditAccessibility(page,axeSource)
 }
 async function owner(page,name,ready) {
   await page.getByRole('navigation',{name:'Atlas views'}).getByRole('link',{name,exact:true}).click()
-  await page.getByRole('heading',{name,exact:true,level:1}).waitFor();await page.locator(ready).waitFor()
+  await page.getByRole('heading',{name:name==='ASN'?'Autonomous systems':name,exact:true,level:1}).waitFor()
+  await page.locator('.view-page [role=status]').waitFor({state:'hidden'});await page.locator(ready).waitFor()
   if(await page.locator('.demo-label').count()||await page.getByRole('alert').count())throw new Error('Production owner route unavailable or labelled synthetic')
   for(const [owner,selector]of Object.entries({Overview:'.fact-list','Observed risk':'.quality-layout','Class C':'.ip-grid',BGP:'.bgp-graph',ASN:'.asn-list'}))
     if(owner!==name&&await page.locator(selector).count())throw new Error('A route duplicated another canonical fact owner')
+}
+async function submit(page,q,{synthetic=false}={}) {
+  await page.evaluate(()=>{window.__atlasLastLookup=null})
+  await page.getByRole('textbox',{name:'IP address or ASN'}).fill(q)
+  await page.getByRole('button',{name:'Look up address'}).click()
+  await page.waitForFunction(({q,releaseId,synthetic})=>window.__atlasLastLookup?.q===q&&window.__atlasLastLookup.releaseId===releaseId&&window.__atlasLastLookup.synthetic===synthetic,{q,releaseId:synthetic?fixtureRelease:candidate.release_id,synthetic})
+  await page.getByRole('heading',{name:isIP(q)?'Overview':'Autonomous systems',exact:true,level:1}).waitFor()
+  await page.locator('.view-page [role=status]').waitFor({state:'hidden'})
+  if(await page.getByRole('alert').count()||Boolean(await page.locator('.demo-label').count())!==synthetic)throw new Error('Query did not render its verified release')
+}
+async function noFacts(page,q) {
+  const answer=await page.evaluate(q=>new Promise((resolve,reject)=>{
+    const worker=window.__atlasWorkers[0];if(!worker)return reject(new Error('No actual atlas worker'))
+    const id=window.__atlasProbeId=(window.__atlasProbeId??0)-1
+    const timer=setTimeout(()=>{worker.removeEventListener('message',receive);reject(new Error('Unknown query timeout'))},30000)
+    const receive=event=>{if(event.data.id!==id)return;clearTimeout(timer);worker.removeEventListener('message',receive);event.data.error?reject(new Error('Unknown query rejected')):resolve(event.data.answer)}
+    worker.addEventListener('message',receive);worker.postMessage({action:'lookup',id,q})
+  }),q)
+  const origins=isIP(q)?[]:[Number(q.slice(2))]
+  if(answer.releaseId!==candidate.release_id||answer.synthetic||answer.geo!==null||answer.network!==null||answer.usage!==null||answer.observedRisk!==null||answer.asns.length||['paths','relationships','tier1'].some(key=>answer.bgp[key].length)||answer.bgp.rpki.some(row=>row.status!=='unavailable')||JSON.stringify(answer.bgp.origins)!==JSON.stringify(origins))throw new Error('Unknown corpus query manufactured facts')
+}
+async function unknownStates(page) {
+  await submit(page,corpus.unknown_queries.ipv4);await page.locator('.fact-list').waitFor();await noFacts(page,corpus.unknown_queries.ipv4)
+  if(!await page.locator('.fact-list dd').evaluateAll(nodes=>nodes.length>0&&nodes.every(node=>node.textContent.trim()==='Unknown'))||await page.locator('.leaflet-container').count())throw new Error('Unknown IPv4 displayed identity or coordinates')
+  await page.getByText('No evidenced city location.',{exact:true}).waitFor()
+  await owner(page,'Observed risk','.quality-layout');await page.getByRole('heading',{name:'Unrated',exact:true}).waitFor()
+  if(await page.locator('.reason-chip').count()||(await page.locator('.score-value').innerText()).trim()!=='—')throw new Error('Unknown IPv4 displayed scored evidence')
+  await owner(page,'Class C','.ip-grid')
+  const target=page.getByRole('gridcell',{name:`${corpus.unknown_queries.ipv4}, unknown`,exact:true})
+  if(await page.getByRole('gridcell').count()!==256||await target.count()!==1||await target.evaluate(node=>node.classList.contains('observed')||node.classList.contains('positive')))throw new Error('Unknown IPv4 cell was treated as observed')
+  await owner(page,'ASN','.asn-list,.status-panel:not([role])');await page.getByText('No origin is evidenced for this query.',{exact:true}).waitFor()
+  if(await page.locator('.asn-card').count())throw new Error('Unknown IPv4 displayed an ASN')
+  await owner(page,'BGP','.bgp-controls');await page.getByRole('heading',{name:'No observed origin',exact:true}).waitFor()
+  if(await page.locator('.graph-node,.graph-edge').count())throw new Error('Unknown IPv4 invented routing')
+  await submit(page,corpus.unknown_queries.ipv6);await page.locator('.fact-list').waitFor();await noFacts(page,corpus.unknown_queries.ipv6)
+  await owner(page,'Class C','.status-panel:not([role])');await page.getByRole('heading',{name:'IPv4 only',exact:true}).waitFor()
+  if(await page.getByRole('gridcell').count())throw new Error('Unknown IPv6 acquired a /24')
+  await submit(page,corpus.unknown_queries.asn);await noFacts(page,corpus.unknown_queries.asn);await page.getByText('No origin is evidenced for this query.',{exact:true}).waitFor()
+  if(await page.locator('.asn-card').count())throw new Error('Unknown ASN displayed aggregate facts')
+  await owner(page,'BGP','.bgp-graph svg');await page.getByText('No observed path is available',{exact:true}).waitFor()
+  if(await page.locator('.graph-node,.graph-edge,.graph-original').count())throw new Error('Unknown ASN invented a path')
+  return {ipv4:true,ipv6:true,asn:true}
+}
+async function actualGraph(page) {
+  await submit(page,corpus.graph_query??corpus.unknown_queries.asn)
+  await owner(page,'BGP','.bgp-graph svg')
+  const original=page.locator('.graph-original');let observed_routes=0
+  if(await original.count()){await original.locator('summary').click();observed_routes=await original.locator('li').count();await original.locator('summary').click()}
+  const visible_nodes=await page.locator('.graph-node').count()
+  if(corpus.graph_query!==null){if(!observed_routes)throw new Error('Observed graph corpus lost its actual paths');return {state:'observed',visible_nodes,observed_routes,empty_state_verified:false}}
+  await page.getByText('No observed path is available',{exact:true}).waitFor()
+  if(visible_nodes||observed_routes||await page.locator('.graph-edge').count())throw new Error('Unavailable routing displayed observations')
+  return {state:'unavailable',visible_nodes,observed_routes,empty_state_verified:true}
+}
+async function componentPopulation(width,theme,index) {
+  const s=await newSample(width,theme,{componentFixture:true}),row={width,theme,sample:index}
+  try {
+    await s.context.route(url=>url.origin===base.origin&&(url.pathname.startsWith('/_atlas/')||url.pathname==='/dataset-credits.json'),route=>{
+      const url=new URL(route.request().url()),bytes=fixtureFiles.get(url.pathname)
+      if(!bytes||url.search||url.hash){report.errors.push('Unexpected graph fixture data request');return route.abort('blockedbyclient')}
+      return route.fulfill({status:200,contentType:url.pathname.endsWith('.json')?'application/json':'application/octet-stream',headers:{'content-length':String(bytes.length)},body:bytes})
+    })
+    await s.page.goto(new URL('/ip/',base).href,{waitUntil:'networkidle'});await s.page.getByRole('textbox').waitFor();await submit(s.page,'AS424240',{synthetic:true})
+    await s.page.getByRole('navigation',{name:'Atlas views'}).getByRole('link',{name:'BGP',exact:true}).click()
+    await s.page.locator('.bgp-graph svg').waitFor();await s.page.locator('.demo-label').waitFor();await s.settle()
+    const workerURLs=await s.page.evaluate(()=>window.__atlasWorkerURLs)
+    const workerHashes=[...new Set(workerURLs.map(url=>s.jsHashes.get(new URL(url,base).pathname)))]
+    if(workerHashes.length!==1||workerHashes[0]!==report.graph_component_fixture.worker_sha256)throw new Error('Graph capacity used a different emitted worker')
+    row.worker_sha256=workerHashes[0]
+    const svg=s.page.locator('.bgp-graph svg'),focus=s.page.getByRole('combobox',{name:'Focus observed route'}),count=await focus.locator('option').count()
+    if(count<2||await s.page.locator('.graph-node').count()!==24)throw new Error('Graph capacity fixture must paint24 nodes and selectable routes')
+    const layout=await s.page.locator('.graph-node').evaluateAll(nodes=>nodes.map(node=>node.getAttribute('transform')))
+    const fit=async()=>{await s.page.getByRole('button',{name:'Fit',exact:true}).click();await svg.scrollIntoViewIfNeeded();await svg.focus();await population(s.page)}
+    await fit();const phases=[await graphPhase(s.page,'keyboard-pan',i=>s.page.keyboard.press(i%2?'ArrowLeft':'ArrowRight'))]
+    await fit();const bounds=await svg.boundingBox();await s.page.mouse.move(bounds.x+bounds.width/2,bounds.y+bounds.height/2);phases.push(await graphPhase(s.page,'wheel-zoom',i=>s.page.mouse.wheel(0,i%2?50:-50)))
+    await fit();await focus.focus();await focus.selectOption('-1');phases.push(await graphPhase(s.page,'route-focus',i=>s.page.keyboard.press(i%(2*(count-1))<count-1?'ArrowDown':'ArrowUp')))
+    if(JSON.stringify(layout)!==JSON.stringify(await s.page.locator('.graph-node').evaluateAll(nodes=>nodes.map(node=>node.getAttribute('transform')))))throw new Error('Capacity route focus reconstructed layout')
+    row.graph={visible_nodes:24,active_frames:phases};row.accessibility=await accessible(s.page)
+    if(row.accessibility.violations.length||row.accessibility.incomplete.length)throw new Error('Graph capacity accessibility incomplete')
+    await s.settle()
+  } finally {report.component_populations.push(row);await s.context.close()}
 }
 
 try {
@@ -173,34 +295,30 @@ try {
       checks.push(await accessible(s.page))
       const redirect=await s.context.request.get(new URL('/',base).href,{maxRedirects:0});if(redirect.status()!==302||redirect.headers().location!=='/ip')throw new Error('Actual root HTTP302 missing')
       row.dataset_credits=await credits(s)
-      await s.page.getByRole('textbox').fill(corpus.interaction_query);await s.page.getByRole('button',{name:'Look up address'}).click();await s.page.locator('.leaflet-container').waitFor();await s.page.locator('.leaflet-control-attribution').waitFor()
+      await submit(s.page,corpus.interaction_query);await s.page.locator('.fact-list').waitFor()
+      if(corpus.map_query!==null){await s.page.locator('.leaflet-container').waitFor();await s.page.locator('.leaflet-control-attribution').waitFor();row.map={state:'observed',unknown_state_verified:false}}
+      else {await s.page.locator('.map-empty').waitFor();if(await s.page.locator('.leaflet-container').count())throw new Error('Unavailable map corpus displayed a map');row.map={state:'unavailable',unknown_state_verified:true}}
       checks.push(await accessible(s.page))
       await owner(s.page,'Observed risk','.quality-layout,.unrated-panel,.quality-panel');checks.push(await accessible(s.page))
       await owner(s.page,'Class C','.ip-grid');const cell=s.page.getByRole('gridcell').first();await cell.focus();await s.page.keyboard.press('ArrowRight');if(await s.page.getByRole('gridcell').nth(1).getAttribute('tabindex')!=='0')throw new Error('Class C keyboard selection failed');checks.push(await accessible(s.page))
-      await owner(s.page,'ASN','.asn-panel,.asn-list,.asn-page,.detail-panel,.status-panel');checks.push(await accessible(s.page))
-      await s.page.getByRole('textbox',{name:'IP address or ASN'}).fill(corpus.graph_query);await s.page.getByRole('button',{name:'Look up address'}).click();await s.page.getByRole('heading',{name:'ASN',exact:true,level:1}).waitFor()
-      await owner(s.page,'BGP','.bgp-graph svg');const svg=s.page.locator('.bgp-graph svg'),focus=s.page.getByRole('combobox',{name:'Focus observed route'}),count=await focus.locator('option').count()
-      if(count<2||await s.page.locator('.graph-node').count()!==24)throw new Error('Production graph corpus must contain24 real observed nodes and selectable routes')
-      const layout=await s.page.locator('.graph-node').evaluateAll(nodes=>nodes.map(n=>n.getAttribute('transform')))
-      const fit=async()=>{await s.page.getByRole('button',{name:'Fit',exact:true}).click();await svg.scrollIntoViewIfNeeded();await svg.focus();await population(s.page)}
-      await fit();const phases=[await graphPhase(s.page,'keyboard-pan',i=>s.page.keyboard.press(i%2?'ArrowLeft':'ArrowRight'))]
-      await fit();const b=await svg.boundingBox();await s.page.mouse.move(b.x+b.width/2,b.y+b.height/2);phases.push(await graphPhase(s.page,'wheel-zoom',i=>s.page.mouse.wheel(0,i%2?50:-50)))
-      await fit();await focus.focus();await focus.selectOption('-1');phases.push(await graphPhase(s.page,'route-focus',i=>s.page.keyboard.press(i%(2*(count-1))<count-1?'ArrowDown':'ArrowUp')))
-      if(JSON.stringify(layout)!==JSON.stringify(await s.page.locator('.graph-node').evaluateAll(nodes=>nodes.map(n=>n.getAttribute('transform')))))throw new Error('Focus reconstructed graph layout')
-      row.graph={visible_nodes:24,active_frames:phases};checks.push(await accessible(s.page));await s.settle()
+      await owner(s.page,'ASN','.asn-list,.status-panel:not([role])');checks.push(await accessible(s.page))
+      row.graph=await actualGraph(s.page);checks.push(await accessible(s.page))
+      row.completed_routes=['overview','quality','class-c','asn','bgp']
+      row.unknown_states=await unknownStates(s.page);checks.push(await accessible(s.page));await s.settle()
       const metric=await s.page.evaluate(()=>window.__atlasProduction)
       row.interaction_cls=metric.cls_supported?metric.cls:null;row.event_timing_supported=metric.event_supported
       row.interaction_durations_ms=metric.event_supported&&metric.trusted_inputs>0?[16,...Object.values(metric.interactions)]:[]
       row.trusted_input_events=metric.trusted_inputs;row.complete_interaction_script=true
-      row.accessibility={engine:'axe-core',version:'4.14.0',violations:checks.flatMap(x=>x.violations),incomplete:checks.flatMap(x=>x.incomplete)}
+      row.accessibility={engine:checks[0].engine,version:checks[0].version,violations:checks.flatMap(x=>x.violations),incomplete:checks.flatMap(x=>x.incomplete)}
     } finally {report.populations.push(row);await s.context.close()}
+    await componentPopulation(width,theme,index)
     console.log(`Production browser population ${width}/${theme} ${index}/30`)
   }
   const ipQueries=corpus.queries.filter(query=>isIP(query.q))
   if(ipQueries.length<100)throw new Error('Cold payload corpus needs at least100 real IP queries')
   for(let index=0;index<100;index++){
     const s=await newSample(390,'light'),query=ipQueries[Math.floor(index*ipQueries.length/100)]
-    try{await s.page.goto(new URL(`/ip/overview/?q=${encodeURIComponent(query.q)}`,base).href,{waitUntil:'networkidle'});await s.page.getByRole('heading',{name:'Overview',exact:true}).waitFor();await s.page.locator('[role=status]').waitFor({state:'hidden'});await s.settle();if(s.atlas.length<2)throw new Error('Cold lookup did not fetch required controls');report.cold_queries.push({sample:index+1,stratum:query.stratum,atlas_body_bytes:s.atlas.reduce((sum,x)=>sum+x.body_bytes,0),responses:s.atlas})}finally{await s.context.close()}
+    try{await s.page.goto(new URL(`/ip/overview/?q=${encodeURIComponent(query.q)}`,base).href,{waitUntil:'networkidle'});await s.page.getByRole('heading',{name:'Overview',exact:true}).waitFor();await s.page.locator('.view-page [role=status]').waitFor({state:'hidden'});await s.page.locator('.fact-list').waitFor();if(await s.page.getByRole('alert').count())throw new Error('Cold lookup failed');await s.settle();if(s.atlas.length<2)throw new Error('Cold lookup did not fetch required controls');report.cold_queries.push({sample:index+1,stratum:query.stratum,atlas_body_bytes:s.atlas.reduce((sum,x)=>sum+x.body_bytes,0),responses:s.atlas})}finally{await s.context.close()}
   }
   for(let index=1;index<=3;index++){
     const s=await newSample(1280,'light')

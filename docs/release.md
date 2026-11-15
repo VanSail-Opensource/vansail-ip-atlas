@@ -4,7 +4,7 @@ This contract freezes C07/C08; its executable vectors are
 `tools/release_contract/test_contracts.py`. Passing these vectors does not certify
 a real dataset, a complete binary scanner, a hosted preview or a production release.
 
-Current `release-scope-v5` preserves CC BY-SA 4.0 compiled-data licensing while
+Current `release-scope-v6` preserves CC BY-SA 4.0 compiled-data licensing while
 adding public schema 4 observed risk, verified global publisher logos, encrypted
 private-state transport and automatic promotion under reviewed policy. Source rights
 remain individually reviewed and current; no license or policy revision activates
@@ -258,14 +258,44 @@ not grant approval. No report is stored in the public tree.
 
 Automatic production authorization is defined by `configs/production-policy.json`
 and recomputed by `promotion.py --automatic`. It requires successful exact-head
-integration/candidate/preview runs, current source-store qualification, every raw
+integration/candidate/benchmark-matrix/benchmark-join/preview runs and exact attempts,
+current source-store qualification, every raw
 measurement gate, protected main and a main-only production environment. The legacy
 manual approval validator remains available only for historical contract fixtures;
 it is not the active release path. Policy booleans alone are never evidence.
 
 Official `ubuntu-24.04` intake starts on main push, hourly at minute 17 or manual
-recovery and waits for exact-head integration success. Candidate, preview and
-promotion follow through three `workflow_run` levels. Enforced cgroup limits and
+recovery and waits for exact-head integration success. A completed candidate
+triggers a read-only-state relay that dispatches the benchmark matrix with scoped
+Actions write permission. The relay first verifies the completed successful
+exact-head candidate; it holds no private-state or Cloudflare credentials. This
+explicit dispatch starts a new chain because GitHub permits only three successive
+`workflow_run` levels. The completed matrix triggers the separate benchmark join,
+then preview, then promotion. Every consumer independently verifies its completed
+producer; no in-progress workflow can supply accepted artifacts.
+
+The matrix runs all five real scenarios with three samples each in fifteen
+independent official hosted jobs. Each restores the original authenticated
+candidate checkpoint and checks current source eligibility before and after its
+case. Warm preparation and the actual measured native workload are unchanged.
+Finalized outer runner-budget reports are uploaded only after the measurement
+command exits. Mutated engineering outputs never become production artifacts.
+
+The join authenticates exactly fifteen completed successful current-attempt job
+names and fifteen immutable case artifacts, including GitHub ZIP digests, exact
+JSON digests, candidate/state/configuration/clock/limit identities and each job's
+finished resource report. Missing, duplicated, cross-attempt or failed cases
+block the join. It reconstructs the same raw measurement gates and preserves the
+candidate's original 100,000 native lookup timings. The native strict 2-microsecond
+p95 gate also runs before candidate completion. The join restores the original
+candidate checkpoint independently, rechecks current eligibility and packs only
+authenticated original state plus the joined source-free evidence.
+
+Preview and promotion continue downloading the original public tree from
+`candidate_run_id`. The version-2 acceptance packet binds candidate, benchmark-join
+and preview artifact attempts. Promotion independently fetches and verifies all
+fifteen matrix job/artifact bindings again and reconstructs the aggregate report;
+an aggregate success flag alone never authorizes production. Enforced cgroup limits and
 workspace accounting establish the 2-CPU/8-GiB/14-GiB workload budget independently
 of the public runner's larger physical host. No self-hosted label is used.
 

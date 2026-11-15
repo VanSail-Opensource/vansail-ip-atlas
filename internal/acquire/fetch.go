@@ -33,12 +33,13 @@ type Result struct {
 	Bytes  int64
 }
 type Fetcher struct {
-	client          *http.Client
-	attempts        int
-	delay           func(context.Context, time.Duration) error
-	slots           chan struct{}
-	budget          *atomic.Int64
-	secondaryBudget *atomic.Int64
+	client              *http.Client
+	attempts            int
+	delay               func(context.Context, time.Duration) error
+	slots               chan struct{}
+	budget              *atomic.Int64
+	secondaryBudget     *atomic.Int64
+	githubMetadataToken string
 }
 
 // WithByteBudget adds one shared acquisition-group ceiling while retaining the
@@ -259,6 +260,9 @@ func checkRedirect(request *http.Request, via []*http.Request) error {
 	}
 	// Do not forward the source path or an ephemeral asset signature as referrer.
 	request.Header.Del("Referer")
+	// net/http may copy sensitive headers to same-origin and subdomain redirects.
+	// Authentication belongs only to the original, narrowly checked metadata URL.
+	request.Header.Del("Authorization")
 	for _, previous := range via {
 		if previous == nil || previous.URL == nil || !validURL(previous.URL.String()) {
 			return ErrFetch
@@ -335,6 +339,10 @@ func (f *Fetcher) Fetch(ctx context.Context, raw, destination string, maxBytes i
 			return Result{}, ErrFetch
 		}
 		request.Header.Set("User-Agent", "VanSail-IP-Atlas/3 (+https://github.com/VanSail-Opensource/vansail-ip-atlas)")
+		metadata := githubMetadataURL(raw)
+		if metadata && f.githubMetadataToken != "" {
+			request.Header.Set("Authorization", "Bearer "+f.githubMetadataToken)
+		}
 		response, err := f.client.Do(request)
 		if err != nil {
 			if attempt+1 < f.attempts && f.delay(ctx, time.Second) == nil {
@@ -348,8 +356,12 @@ func (f *Fetcher) Fetch(ctx context.Context, raw, destination string, maxBytes i
 			if seconds, e := strconv.Atoi(response.Header.Get("Retry-After")); e == nil && seconds > 0 && seconds <= 5 {
 				retry = time.Duration(seconds) * time.Second
 			}
+			retryable := status == 429 || status >= 500
+			if metadata {
+				retry, retryable = githubMetadataRetry(status, response.Header, time.Now())
+			}
 			response.Body.Close()
-			if (status == 429 || status >= 500) && attempt+1 < f.attempts && f.delay(ctx, retry) == nil {
+			if retryable && attempt+1 < f.attempts && f.delay(ctx, retry) == nil {
 				continue
 			}
 			return Result{}, ErrFetch

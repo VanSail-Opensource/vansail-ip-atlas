@@ -41,6 +41,21 @@ type SourceStatistics struct {
 	Signals                                  map[intelligence.Signal]bool
 }
 
+const ProductionReleaseScope = "release-scope-v6"
+
+// Routing observations remain independently derived and recorded even when
+// absent. V6 permits that absence; it does not assert routing completeness.
+func requiredProductionCapability(name string) (required, known bool) {
+	switch name {
+	case "country", "region_city", "coordinates", "usage", "risk_reasons", "class_c":
+		return true, true
+	case "asn_prefix", "rpki", "bgp_origins_paths", "relationships", "tier1":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
 // ProductionQualification can only be constructed by revalidating a sealed
 // intake. Its fields are private so materializers cannot turn a boolean into
 // complete VRP or source coverage. Validate binds the exact normalized roots.
@@ -50,14 +65,37 @@ type ProductionQualification struct {
 	report      CapabilityReport
 	validUntil  time.Time
 	vrpComplete bool
+	validation  *sourceValidation
 }
 
 func QualifyProductionState(ctx context.Context, root string, catalog []Source, now time.Time, binding [32]byte) (*ProductionQualification, error) {
-	state, err := intelligence.VerifyPrivateStateSeal(ctx, root, binding)
+	state, report, validation, err := validateSourceSet(ctx, root, catalog, now, binding)
 	if err != nil {
 		return nil, err
 	}
-	return productionFromAuthenticatedState(ctx, root, catalog, state, now, binding)
+	q, err := qualificationFromReport(state, report)
+	if err != nil {
+		return nil, err
+	}
+	q.validation = validation
+	return q, nil
+}
+
+// QualifyProductionStateVerified accepts only an opaque handle minted by a
+// full semantic seal verification in this process. It rechecks the same root,
+// seal/key/state and every chunk before the unchanged source-semantic admission
+// pass. This lets Tier-1 observation precede unrelated capability failures.
+func QualifyProductionStateVerified(ctx context.Context, root string, catalog []Source, now time.Time, binding [32]byte, verified *intelligence.VerifiedPrivateState) (*ProductionQualification, error) {
+	state, report, validation, err := validateVerifiedSourceSet(ctx, root, catalog, now, binding, verified)
+	if err != nil {
+		return nil, err
+	}
+	q, err := qualificationFromReport(state, report)
+	if err != nil {
+		return nil, err
+	}
+	q.validation = validation
+	return q, nil
 }
 
 // QualifyProductionStateAtHash selects the exact current or retained generation.
@@ -103,7 +141,10 @@ func productionFromAuthenticatedState(ctx context.Context, root string, catalog 
 	if err != nil {
 		return nil, err
 	}
-	if err = report.RequireProduction(); err != nil {
+	return qualificationFromReport(state, report)
+}
+func qualificationFromReport(state intelligence.BuildState, report CapabilityReport) (*ProductionQualification, error) {
+	if err := report.RequireProduction(); err != nil {
 		return nil, err
 	}
 	data, err := json.Marshal(state)
@@ -265,9 +306,22 @@ func RightsDigests(s Source) (string, *string, error) {
 // actual records. It accepts neither caller success flags nor a release manifest
 // as proof of source coverage. The caller must first verify the private seal.
 func RevalidateStoredSources(ctx context.Context, root string, catalog []Source, state intelligence.BuildState, now time.Time, binding [32]byte) (CapabilityReport, []SourceStatistics, error) {
+	return revalidateStoredSources(ctx, root, catalog, state, now, binding, nil)
+}
+
+// Only sourceValidation supplies prior statistics, after authenticating its
+// exact original state and checking every current normalized object byte.
+// Source controls, certification, deadlines and dependencies still run below.
+func revalidateStoredSources(ctx context.Context, root string, catalog []Source, state intelligence.BuildState, now time.Time, binding [32]byte, prior map[string]SourceStatistics) (CapabilityReport, []SourceStatistics, error) {
 	var report CapabilityReport
 	if state.Version != 2 || state.PolicyHash != binding || binding == ([32]byte{}) || now.IsZero() || state.EvaluatedAt.After(now) || len(state.Sources) > 1000 {
 		return report, nil, errors.New("production requires current sealed intake")
+	}
+	if err := ctx.Err(); err != nil {
+		return report, nil, err
+	}
+	if prior != nil && len(prior) != len(state.Sources) {
+		return report, nil, errors.New("verified source statistics differ from current state")
 	}
 	byID := make(map[string]Source, len(catalog))
 	for _, s := range catalog {
@@ -369,7 +423,13 @@ func RevalidateStoredSources(ctx context.Context, root string, catalog []Source,
 			}
 		}
 		stat := SourceStatistics{ID: s.ID, Family: find(s.Family), Signals: map[intelligence.Signal]bool{}}
-		if err := intelligence.WalkStoredSource(ctx, root, v, func(record intelligence.NormalizedRecord) error {
+		if prior != nil {
+			previous, ok := prior[s.ID]
+			if !ok || previous.ID != stat.ID || previous.Family != stat.Family {
+				return report, nil, errors.New("verified source statistics differ from current controls")
+			}
+			stat = previous
+		} else if err := intelligence.WalkStoredSource(ctx, root, v, func(record intelligence.NormalizedRecord) error {
 			if err := record.Validate(); err != nil {
 				return err
 			}
@@ -505,7 +565,7 @@ func deriveCapabilities(stats []SourceStatistics, clock time.Time) CapabilityRep
 		sort.Strings(values)
 		return values
 	}
-	report := CapabilityReport{EvaluatedAt: clock.Unix(), IncludedSources: len(stats), ReleaseScope: "release-scope-v5", SchemaVersion: 1}
+	report := CapabilityReport{EvaluatedAt: clock.Unix(), IncludedSources: len(stats), ReleaseScope: ProductionReleaseScope, SchemaVersion: 1}
 	add := func(name string, minimum int, match func(SourceStatistics) bool) {
 		fs := families(match)
 		report.Capabilities = append(report.Capabilities, Capability{Capability: name, Families: fs, Qualified: len(fs) >= minimum, Required: true})
@@ -538,6 +598,9 @@ func deriveCapabilities(stats []SourceStatistics, clock time.Time) CapabilityRep
 	// capability; absent categories and unlisted addresses remain unknown.
 	risk := len(allSignals) > 0
 	report.Capabilities = append(report.Capabilities, Capability{Capability: "risk_reasons", Families: families(func(s SourceStatistics) bool { return len(s.Signals) > 0 }), Qualified: risk, Required: true})
+	for i := range report.Capabilities {
+		report.Capabilities[i].Required, _ = requiredProductionCapability(report.Capabilities[i].Capability)
+	}
 	sort.Slice(report.Capabilities, func(i, j int) bool { return report.Capabilities[i].Capability < report.Capabilities[j].Capability })
 	return report
 }
@@ -551,13 +614,22 @@ func uniqueStrings(values []string) []string {
 	return out
 }
 func (r CapabilityReport) RequireProduction() error {
+	if r.SchemaVersion != 1 || r.ReleaseScope != ProductionReleaseScope || r.IncludedSources <= 0 || len(r.Capabilities) != 11 {
+		return errors.New("production_blocked: current nonempty source capability report required")
+	}
 	var missing []string
+	seen := make(map[string]bool, len(r.Capabilities))
 	for _, c := range r.Capabilities {
-		if c.Required && !c.Qualified {
+		required, known := requiredProductionCapability(c.Capability)
+		if !known || seen[c.Capability] || c.Required != required {
+			return errors.New("production_blocked: source capability policy differs")
+		}
+		seen[c.Capability] = true
+		if required && !c.Qualified {
 			missing = append(missing, c.Capability)
 		}
 	}
-	if len(r.Capabilities) != 11 || len(missing) > 0 {
+	if len(missing) > 0 {
 		return fmt.Errorf("production_blocked: unqualified source capabilities: %s", strings.Join(missing, ", "))
 	}
 	return nil

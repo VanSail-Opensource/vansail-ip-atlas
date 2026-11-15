@@ -12,8 +12,8 @@ const href = (view: string) => `/ip/${view}${query.value ? `?q=${encodeURICompon
     <div class="atlas-shell">
       <a class="skip" href="#main">Skip to content</a>
       <header class="site-header">
-        <NuxtLink to="/ip" class="brand" aria-label="VanSail IP Atlas home"><span class="brand-symbol" aria-hidden="true">V</span><span>VanSail<span class="brand-secondary"> / IP Atlas</span></span></NuxtLink>
-        <button class="theme-toggle" aria-label="Toggle color theme" @click="mode.preference = mode.value === 'dark' ? 'light' : 'dark'"><span aria-hidden="true">◐</span></button>
+        <NuxtLink to="/ip" class="brand" aria-label="VanSail IP Atlas home"><span class="brand-symbol" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m5 5 7 14 7-14" /></svg></span><span>VanSail<span class="brand-secondary"> / IP Atlas</span></span></NuxtLink>
+        <button class="theme-toggle" aria-label="Toggle color theme" @click="mode.preference = mode.value === 'dark' ? 'light' : 'dark'"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M12 4a8 8 0 0 1 0 16Z" fill="currentColor" /></svg></button>
       </header>
       <nav v-if="path !== '/ip'" class="view-nav" aria-label="Atlas views">
         <NuxtLink v-for="[label, view] in links" :key="view" :to="href(view!)" :class="{ selected: path === `/ip/${view}` }">{{ label }}</NuxtLink>

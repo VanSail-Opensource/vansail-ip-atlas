@@ -146,6 +146,109 @@ func TestQualifiedTier1HistoryUsesRealSeparatedAuthenticatedEpochs(t *testing.T)
 	}
 }
 
+func TestUnavailableTier1ObservationRemainsAuthenticatedAndUnknown(t *testing.T) {
+	root, now := t.TempDir(), clock()
+	binding := sha256.Sum256([]byte("synthetic-unavailable-tier-policy"))
+	state := qualifiedTier1Fixture(t, root, now, binding, true)
+	q, err := ObserveTier1State(context.Background(), root, state, binding, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = q.ValidateObservation(state, now); err != nil {
+		t.Fatal("missing family invalidated authenticated observation", err)
+	}
+	if q.Validate(state, now) == nil || SaveQualifiedTier1History(context.Background(), root, q) == nil {
+		t.Fatal("unavailable observation asserted positive qualification")
+	}
+	for _, asn := range []uint32{100, 101, 999} {
+		result := q.Result(asn)
+		if result.Class != "unknown" || result.Stability != "unavailable" || result.StatisticsKnown {
+			t.Fatal("missing family invented Tier-1 information", result)
+		}
+	}
+	before, err := os.ReadFile(filepath.Join(root, ".atlas-private", "tier1-history-v2.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = VerifyTier1ObservationHistory(context.Background(), root, q); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(filepath.Join(root, ".atlas-private", "tier1-history-v2.json"))
+	if err != nil || string(after) != string(before) {
+		t.Fatal("verification changed observed history", err)
+	}
+	changed := state
+	changed.EvaluatedAt = now.Add(time.Second)
+	if q.ValidateObservation(changed, now.Add(time.Second)) == nil || q.ValidateObservation(state, q.ValidUntil()) == nil || (*QualifiedTier1)(nil).ValidateObservation(state, now) == nil {
+		t.Fatal("missing observations bypassed state or lifetime binding")
+	}
+}
+
+func TestNonRoutingStatePreservesUnavailableTier1History(t *testing.T) {
+	root := t.TempDir()
+	policy, snapshot, binding := stateFixture()
+	plan, err := ReconcilePartitioned(context.Background(), root, BuildState{}, []SourcePolicy{policy}, []SourceSnapshot{snapshot}, clock(), binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = SavePrivateState(root, plan.State); err != nil {
+		t.Fatal(err)
+	}
+	if err = SealPrivateState(context.Background(), root, binding); err != nil {
+		t.Fatal(err)
+	}
+	q, err := ObserveTier1State(context.Background(), root, plan.State, binding, clock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = q.ValidateObservation(plan.State, clock()); err != nil {
+		t.Fatal(err)
+	}
+	if q.Validate(plan.State, clock()) == nil || q.Result(13335).Class != "unknown" || q.Relation(13335, 15169) != UnknownRelation {
+		t.Fatal("nonrouting state invented classification or relationships")
+	}
+	if err = VerifyTier1ObservationHistory(context.Background(), root, q); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTier1MaterializationIdentityBindsDerivedHistoryOutcome(t *testing.T) {
+	root, now := t.TempDir(), clock()
+	binding := sha256.Sum256([]byte("synthetic-materialization-policy"))
+	state := qualifiedTier1Fixture(t, root, now, binding, false)
+	q, err := ObserveTier1State(context.Background(), root, state, binding, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := q.MaterializationIdentity()
+	if err != nil || want == ([32]byte{}) {
+		t.Fatal("identity unavailable", err)
+	}
+	if again, err := q.MaterializationIdentity(); err != nil || again != want {
+		t.Fatal("identity is not deterministic", err)
+	}
+	for _, mutate := range []func(*QualifiedTier1){
+		func(v *QualifiedTier1) { v.expires = v.expires.Add(-time.Second) },
+		func(v *QualifiedTier1) { v.observationHash[0] ^= 1 },
+		func(v *QualifiedTier1) { v.snapshot.Eligible = false },
+		func(v *QualifiedTier1) { v.snapshot.Results[0].Stability = "stable" },
+		func(v *QualifiedTier1) { v.snapshot.Results[0].CustomerCone++ },
+	} {
+		changed := *q
+		changed.snapshot.Results = append([]Tier1Result(nil), q.snapshot.Results...)
+		mutate(&changed)
+		got, err := changed.MaterializationIdentity()
+		if err != nil || got == want {
+			t.Fatal("different derived routing outcome reused materialization identity", err)
+		}
+	}
+	for _, invalid := range []*QualifiedTier1{nil, {}} {
+		if _, err = invalid.MaterializationIdentity(); err == nil {
+			t.Fatal("ordinary zero context supplied an authenticated cache identity")
+		}
+	}
+}
+
 func TestQualifiedTier1HistoryNeverSkipsInterveningObservation(t *testing.T) {
 	for _, disqualified := range []bool{false, true} {
 		t.Run(map[bool]string{false: "recent_eligible", true: "disqualified"}[disqualified], func(t *testing.T) {

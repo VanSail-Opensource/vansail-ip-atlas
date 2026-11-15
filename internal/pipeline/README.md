@@ -49,6 +49,23 @@ and immediately before atomic publication in either mode. Failure retracts the
 candidate without replacing any prior release. It never supplies the production
 capability approval.
 
+The streamed materializer retains one private exact-input cache generation.
+Production and engineering builds use the same cache path. Its authenticated
+index binds the running executable, complete normalized state, scoring policy,
+evaluation/deadline clocks, mode, packing limits, verified VRP availability and
+derived Tier-1/history result. Any changed input causes a real rebuild, including
+clock changes that alter risk decay. This does not yet reuse unaffected partitions
+for changed-input builds.
+
+A hit runs both input and production gates, checks local normalized object
+hashes before and after reuse, validates every cached VIA3 object and its public
+profile, and hashes the actual new output files. Publication remains atomic.
+Cache keys/indexes stay private; neither cache presence nor an index can qualify
+a source. Cache objects, staging, output and current resource measurements remain
+charged to the compiler budget. Retention is bounded to one generation of at
+most one quarter of the existing scratch ceiling; inability to retain that
+generation leaves the normal full-build path available.
+
 `BuildMappings(ctx, options, state, policy)` is the mapping-only entry point. It
 refuses production and requires the release validity deadline to be no later
 than the earliest surviving source receipt. Its lower-level

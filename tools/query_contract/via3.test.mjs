@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import test from 'node:test'
 import { AtlasReader, parseShard, hash, answerJSONBytes, PathSegmentPool, prefixKeyValid, comparePrefixKeys } from '../../web/app/workers/atlas.ts'
+import { hasMapLocation } from '../../web/app/lib/via3.ts'
 
 const golden = JSON.parse(readFileSync(new URL('../../fixtures/bin/synthetic-via3.json', import.meta.url), 'utf8'))
 const canonical = value => JSON.stringify(value, Object.keys(value).sort())
@@ -15,6 +16,18 @@ const response = (path, options) => {
   const bytes = files.get(path)
   return Promise.resolve(new Response(bytes, { status: bytes ? 200 : 404, headers: { 'content-length': String(bytes?.length ?? 0) } }))
 }
+
+test('city and finer area coordinates can show a map while missing, coarse and anycast data remain unknown', () => {
+  const answer = { geo: { latitude: 0, longitude: 0, precision: 'area' }, usage: null }
+  assert.equal(hasMapLocation(answer), true, 'VIA3 precision 4 is a finer evidenced area')
+  assert.equal(hasMapLocation({ ...answer, geo: { ...answer.geo, precision: 'city_centroid' } }), true)
+  for (const precision of [null, 'unknown', 'country', 'region']) assert.equal(hasMapLocation({ ...answer, geo: { ...answer.geo, precision } }), false)
+  assert.equal(hasMapLocation({ ...answer, geo: { ...answer.geo, latitude: null } }), false)
+  assert.equal(hasMapLocation({ ...answer, geo: { ...answer.geo, longitude: null } }), false)
+  assert.equal(hasMapLocation({ ...answer, usage: { anycast: true } }), false)
+  assert.equal(hasMapLocation({ geo: null, usage: null }), false)
+  assert.equal(hasMapLocation(null), false)
+})
 
 test('worker SHA-256 preserves standard digests, sliced inputs and maximum-sized sections', async () => {
   for (const [text, expected] of [

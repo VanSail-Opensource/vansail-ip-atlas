@@ -11,6 +11,12 @@ export type LookupAnswer = { q: string; kind: 'ip' | 'asn'; releaseId: string; s
 export type CellAnswer = { ip: string; observed: boolean; coverage: 'complete' | 'incomplete'; observedRiskScore: number | null; confidence: string; reasons: string[]; usage: string; origins: number[] }
 export type ClassCAnswer = { prefix: string; cells: CellAnswer[]; observedCount: number; assessedCount: number; positiveCount: number; scoredCount: number; meanObservedRisk: number | null }
 
+/** Only an evidenced city or finer area can support the approximate map. */
+export function hasMapLocation(answer: Pick<LookupAnswer, 'geo' | 'usage'> | null | undefined): boolean {
+  return answer?.geo?.latitude != null && answer.geo.longitude != null && answer.usage?.anycast !== true &&
+    ['city_centroid', 'area', 'city centroid', 'city-centroid', 'finer', 'finer_evidenced_area'].includes(answer.geo.precision ?? '')
+}
+
 /** All VIA3 decoding and lookup work stays in one bounded worker. */
 export class AtlasClient extends EventTarget {
   private worker: Worker

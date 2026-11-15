@@ -32,7 +32,9 @@ from tools.hosted.candidate import check_candidate, check_preview_origin, verify
 REPOSITORY = "VanSail-Opensource/vansail-ip-atlas"
 CI_KINDS = {
     "candidate": (".github/workflows/production-candidate.yml", "production-candidate-evidence",
-                  {"static-candidate.json", "production-build.json"}),
+                  {"static-candidate.json", "production-lookup.json"}),
+    "benchmark": (".github/workflows/production-benchmark-join.yml", "production-benchmark-evidence",
+                  {"production-build.json"}),
     "preview": (".github/workflows/production-preview.yml", "production-preview-evidence",
                 {"preview-identity.json", "production-browser.json", "pages-deployment.json"}),
 }
@@ -56,7 +58,7 @@ def json_object(data: bytes) -> dict:
 class TrustedCI:
     """Read only GitHub CLI requests; tokens remain managed by gh, never logged."""
     def _get(self, route: str) -> bytes:
-        if not re.fullmatch(r"(?:actions/(?:runs/[1-9][0-9]*(?:/artifacts|/jobs)?|artifacts/[1-9][0-9]*(?:/zip)?)|environments/atlas-production|branches/main)", route):
+        if not re.fullmatch(r"(?:actions/(?:runs/[1-9][0-9]*(?:/artifacts(?:\?per_page=100)?|/jobs|/attempts/[1-9][0-9]*/jobs\?per_page=100)?|artifacts/[1-9][0-9]*(?:/zip)?)|environments/atlas-production|branches/main)", route):
             raise ContractError("unsupported trusted evidence route")
         with tempfile.TemporaryFile() as output:
             try:
@@ -144,13 +146,25 @@ def _completed_before_packet(run: dict, assembled_at: int) -> None:
         raise ContractError("acceptance packet must follow all completed hosted evidence")
 
 
+def verify_corpus_binding(browser: dict, build: dict) -> None:
+    lookup = build.get('go_lookup')
+    if type(lookup) is not dict:
+        raise ContractError('native lookup corpus evidence missing')
+    native_digest = lookup.get('corpus_sha256')
+    browser_digest = browser.get('corpus_sha256')
+    _hash(native_digest)
+    _hash(browser_digest)
+    if native_digest != browser_digest:
+        raise ContractError('native and browser evidence use different real query corpora')
+
+
 def acceptance(public: Path, receipt_paths: list[Path], packet: dict, now: int, *, ci=None,
                verify_live=True) -> dict:
     packet = _keys(packet, {"format_version", "scope", "repository", "head_sha", "release_id",
         "candidate_bundle_sha256", "qualification_receipt_sha256", "preview_url", "preview_deployment_id",
-        "assembled_at", "integration_run_id", "artifacts"}, "acceptance packet")
-    if (type(packet["format_version"]) is not int or packet["format_version"] != 1
-            or packet["scope"] != "production-acceptance-v1" or packet["repository"] != REPOSITORY
+        "assembled_at", "integration_run_id", "integration_run_attempt", "artifacts"}, "acceptance packet")
+    if (type(packet["format_version"]) is not int or packet["format_version"] != 2
+            or packet["scope"] != "production-acceptance-v2" or packet["repository"] != REPOSITORY
             or not re.fullmatch(r"[0-9a-f]{40}", str(packet["head_sha"]))
             or type(packet["assembled_at"]) is not int or not 0 <= packet["assembled_at"] <= now
             or not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", str(packet["preview_deployment_id"]))):
@@ -164,20 +178,26 @@ def acceptance(public: Path, receipt_paths: list[Path], packet: dict, now: int, 
     run_id = packet["integration_run_id"]
     if type(run_id) is not int or run_id <= 0:
         raise ContractError("invalid integration run")
-    _completed_before_packet(ci.run(run_id, packet["head_sha"], ".github/workflows/p0-contracts.yml"), packet["assembled_at"])
+    integration = ci.run(run_id, packet["head_sha"], ".github/workflows/p0-contracts.yml")
+    if type(packet['integration_run_attempt']) is not int or packet['integration_run_attempt'] < 1 or integration.get('run_attempt') != packet['integration_run_attempt']:
+        raise ContractError('integration attempt changed')
+    _completed_before_packet(integration, packet["assembled_at"])
     artifacts = packet["artifacts"]
-    if not isinstance(artifacts, list) or len(artifacts) != 2:
-        raise ContractError("candidate and preview trusted artifacts are required")
+    if not isinstance(artifacts, list) or len(artifacts) != 3:
+        raise ContractError("candidate, benchmark and preview trusted artifacts are required")
     reports, seen = {}, set()
     for value in artifacts:
-        value = _keys(value, {"kind", "run_id", "artifact_id", "artifact_sha256"}, "trusted artifact")
+        value = _keys(value, {"kind", "run_id", "run_attempt", "artifact_id", "artifact_sha256"}, "trusted artifact")
         kind = value["kind"]
         if (kind not in CI_KINDS or kind in seen or type(value["run_id"]) is not int or value["run_id"] <= 0
                 or type(value["artifact_id"]) is not int or value["artifact_id"] <= 0):
             raise ContractError("invalid trusted artifact population")
         seen.add(kind)
         _hash(value["artifact_sha256"])
-        _completed_before_packet(ci.run(value["run_id"], packet["head_sha"], CI_KINDS[kind][0]), packet["assembled_at"])
+        producer = ci.run(value["run_id"], packet["head_sha"], CI_KINDS[kind][0])
+        if type(value['run_attempt']) is not int or value['run_attempt'] < 1 or producer.get('run_attempt') != value['run_attempt']:
+            raise ContractError('evidence producer attempt changed')
+        _completed_before_packet(producer, packet["assembled_at"])
         reports.update(ci.reports(kind, value["run_id"], value["artifact_id"], value["artifact_sha256"], packet["head_sha"]))
     parsed = {name: json_object(data) for name, data in reports.items()}
     candidate = parsed["static-candidate.json"]
@@ -185,6 +205,8 @@ def acceptance(public: Path, receipt_paths: list[Path], packet: dict, now: int, 
         raise ContractError("candidate was not packaged from the qualified inclusion set")
     if parsed["production-build.json"].get("normalized_state_sha256") != candidate.get("normalized_state_sha256") or not candidate.get("normalized_state_sha256"):
         raise ContractError("build scenarios do not bind the candidate's exact normalized corpus")
+    verify_parallel_benchmarks(ci, packet, candidate, reports, receipt_paths)
+    verify_corpus_binding(parsed['production-browser.json'], parsed['production-build.json'])
     check_candidate(public, candidate, now)
     for name in ("static-candidate.json", "production-build.json", "preview-identity.json", "production-browser.json"):
         report = parsed[name]
@@ -216,6 +238,7 @@ def acceptance(public: Path, receipt_paths: list[Path], packet: dict, now: int, 
     scan_frontend(public, private_values)
     if verify_live:
         verify_preview(public, candidate, packet["preview_url"], now)
+    verify_completed_producers(ci,packet,parsed['production-build.json'])
     return {"format_version": 1, "scope": "production-promotion-authorization-v1", "status": "passed",
         "production_eligible": False,
         "pages_release": {"capability": "pages_release", "required": True, "status": "awaiting_policy",
@@ -224,6 +247,19 @@ def acceptance(public: Path, receipt_paths: list[Path], packet: dict, now: int, 
         "evidence_sha256": sha256(canonical_bytes(packet)), "head_sha": packet["head_sha"],
         "preview_deployment_id": packet["preview_deployment_id"], "valid_until": metadata["valid_until"],
         "gates": gates, "report_sha256": {name: sha256(data) for name, data in sorted(reports.items())}}
+
+
+def verify_completed_producers(ci, packet, build):
+    """No producer rerun may supersede evidence during lengthy final checks."""
+    from tools.hosted.benchmark_transport import MATRIX_WORKFLOW, positive
+    producers=[(packet['integration_run_id'],packet['integration_run_attempt'],'.github/workflows/p0-contracts.yml')]
+    producers.extend((v['run_id'],v['run_attempt'],CI_KINDS[v['kind']][0]) for v in packet['artifacts'])
+    producers.append((build['benchmark_run_id'],build['benchmark_run_attempt'],MATRIX_WORKFLOW))
+    for run_id,attempt,workflow in producers:
+        run=ci.run(positive(run_id),packet['head_sha'],workflow)
+        if run.get('run_attempt')!=positive(attempt):
+            raise ContractError('completed evidence attempt changed before authorization')
+        _completed_before_packet(run,packet['assembled_at'])
 
 
 def approve(public: Path, receipt_paths: list[Path], evidence: bytes, approval: dict, now: int, **kwargs) -> dict:
@@ -256,11 +292,11 @@ def automatic(public: Path, receipt_paths: list[Path], evidence: bytes, now: int
     """The reviewed policy authorizes exact passing bytes, never source admission."""
     policy_bytes = (ROOT / 'configs/production-policy.json').read_bytes().rstrip(b'\n')
     policy = parse_canonical(policy_bytes)
-    expected = {'automatic_promotion': True, 'contract_revision': 1,
+    expected = {'automatic_promotion': True, 'contract_revision': 2,
         'maximum_checkpoint_age_seconds': 604800, 'maximum_rollback_age_seconds': 172800,
         'repository': REPOSITORY, 'require_all_measured_gates': True,
         'require_current_source_qualification': True, 'require_exact_head_integration': True,
-        'require_protected_main': True, 'scope': 'release-scope-v5'}
+        'require_protected_main': True, 'scope': 'release-scope-v6'}
     if policy != expected:
         raise ContractError('unrecognized automatic production policy')
     ci = ci or TrustedCI()
@@ -272,37 +308,73 @@ def automatic(public: Path, receipt_paths: list[Path], evidence: bytes, now: int
     result.update(production_eligible=True, authorization='reviewed-automatic-policy-v1',
                   policy_sha256=sha256(policy_bytes))
     result['pages_release']['status'] = 'qualified'
+    if not rollback and ci.current_head() != packet['head_sha']:
+        raise ContractError('protected main changed during authorization')
     return result
 
 
+def verify_parallel_benchmarks(ci, packet, candidate, reports, receipt_paths):
+    from tools.hosted.benchmark_transport import collect_cases, candidate_reports
+    from tools.hosted.production_benchmarks import aggregate_reports, benchmark_identity
+    build = json_object(reports['production-build.json'])
+    candidate_artifact = next(v for v in packet['artifacts'] if v['kind'] == 'candidate')
+    _, original = candidate_reports(ci, candidate_artifact['run_id'], candidate_artifact['run_attempt'], packet['head_sha'])
+    if original != {name: reports[name] for name in ('static-candidate.json', 'production-lookup.json')}:
+        raise ContractError('candidate evidence changed during aggregation')
+    receipts = [read_private(path) for path in receipt_paths]
+    matches = [data for data in receipts if sha256(data) == candidate['qualification_receipt_sha256']]
+    if len(matches) != 1:
+        raise ContractError('one exact candidate qualification receipt is required')
+    identity = benchmark_identity(candidate, json_object(matches[0]), head_sha=packet['head_sha'],
+        candidate_run_id=candidate_artifact['run_id'], candidate_run_attempt=candidate_artifact['run_attempt'])
+    matrix, cases = collect_cases(ci, build.get('benchmark_run_id'), packet['head_sha'])
+    if matrix['run_attempt'] != build.get('benchmark_run_attempt'):
+        raise ContractError('benchmark matrix attempt changed')
+    _completed_before_packet(matrix, packet['assembled_at'])
+    expected = aggregate_reports(candidate, reports['production-lookup.json'], cases, identity=identity,
+        benchmark_run_id=matrix['id'], benchmark_run_attempt=matrix['run_attempt'])
+    if canonical_bytes(build) != canonical_bytes(expected):
+        raise ContractError('aggregate differs from all fifteen authenticated benchmark cases')
+
+
 def assemble(public: Path, receipt_paths: list[Path], head: str, integration: int, candidate_run: int,
-             preview_run: int, now: int, *, ci=None) -> tuple[bytes, dict]:
-    """Create reviewable canonical evidence only after the underlying gates pass."""
+             benchmark_run: int, preview_run: int, now: int, *, attempts: dict, ci=None) -> tuple[bytes, dict]:
+    """Create evidence only after every original producer completed successfully."""
+    from tools.hosted.benchmark_transport import timestamp
     ci = ci or TrustedCI()
     artifacts, reports = [], {}
-    for kind, run_id in (("candidate", candidate_run), ("preview", preview_run)):
+    for kind, run_id in (("candidate", candidate_run), ("benchmark", benchmark_run), ("preview", preview_run)):
         if type(run_id) is not int or run_id <= 0:
             raise ContractError("invalid acceptance run identity")
-        ci.run(run_id, head, CI_KINDS[kind][0])
-        listing = json_object(ci._get(f"actions/runs/{run_id}/artifacts"))
-        matches = [entry for entry in listing.get("artifacts", []) if entry.get("name") == CI_KINDS[kind][1]
+        producer = ci.run(run_id, head, CI_KINDS[kind][0])
+        attempt = attempts.get(kind)
+        if type(attempt) is not int or attempt < 1 or producer.get('run_attempt') != attempt:
+            raise ContractError('acceptance producer attempt changed')
+        listing = json_object(ci._get(f"actions/runs/{run_id}/artifacts?per_page=100"))
+        values = listing.get('artifacts')
+        if type(values) is not list or listing.get('total_count') != len(values) or len(values) > 100:
+            raise ContractError('bounded complete evidence artifact listing required')
+        matches = [entry for entry in values if entry.get("name") == CI_KINDS[kind][1]
                    and entry.get("expired") is False]
         if len(matches) != 1:
             raise ContractError("one unexpired trusted evidence artifact is required per run")
         entry = matches[0]
+        if not timestamp(producer.get('run_started_at')) <= timestamp(entry.get('created_at')) <= timestamp(producer.get('updated_at')):
+            raise ContractError('evidence artifact does not bind the current producer attempt')
         digest = entry.get("digest", "")
         if not isinstance(digest, str) or not digest.startswith("sha256:"):
             raise ContractError("GitHub evidence artifact digest unavailable")
         digest = _hash(digest.removeprefix("sha256:"))
-        artifacts.append({"kind": kind, "run_id": run_id, "artifact_id": entry["id"], "artifact_sha256": digest})
+        artifacts.append({"kind": kind, "run_id": run_id, "run_attempt": attempt,
+                          "artifact_id": entry["id"], "artifact_sha256": digest})
         reports.update(ci.reports(kind, run_id, entry["id"], digest, head))
     candidate = json_object(reports["static-candidate.json"])
     preview = json_object(reports["pages-deployment.json"])
-    packet = {"format_version": 1, "scope": "production-acceptance-v1", "repository": REPOSITORY,
+    packet = {"format_version": 2, "scope": "production-acceptance-v2", "repository": REPOSITORY,
         "head_sha": head, "release_id": candidate["release_id"], "candidate_bundle_sha256": candidate["candidate_bundle_sha256"],
         "qualification_receipt_sha256": candidate["qualification_receipt_sha256"], "preview_url": preview["url"],
         "preview_deployment_id": preview["deployment_id"], "assembled_at": now, "integration_run_id": integration,
-        "artifacts": artifacts}
+        "integration_run_attempt": attempts.get('integration'), "artifacts": artifacts}
     result = acceptance(public, receipt_paths, packet, now, ci=ci)
     return canonical_bytes(packet), result
 
@@ -319,6 +391,9 @@ def main() -> int:
     parser.add_argument("--integration-run-id", type=int)
     parser.add_argument("--candidate-run-id", type=int)
     parser.add_argument("--preview-run-id", type=int)
+    parser.add_argument("--benchmark-run-id", type=int)
+    for stage in ("integration", "candidate", "benchmark", "preview"):
+        parser.add_argument("--"+stage+"-run-attempt", type=int)
     parser.add_argument("--report", type=Path, default=Path("reports/production-authorization.json"))
     args = parser.parse_args()
     try:
@@ -328,7 +403,8 @@ def main() -> int:
             if args.approval or args.evidence.resolve().is_relative_to(args.public.resolve()):
                 raise ContractError("evidence assembly is separate from approval and outside the frozen tree")
             evidence, result = assemble(args.public, args.qualification_receipt, args.head, args.integration_run_id,
-                                       args.candidate_run_id, args.preview_run_id, int(time.time()))
+                                       args.candidate_run_id, args.benchmark_run_id, args.preview_run_id, int(time.time()),
+                                       attempts={stage: getattr(args, stage+"_run_attempt") for stage in ("integration", "candidate", "benchmark", "preview")})
             args.evidence.parent.mkdir(parents=True, exist_ok=True)
             with args.evidence.open("xb") as output:
                 output.write(evidence)

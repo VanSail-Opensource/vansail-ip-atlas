@@ -1,6 +1,6 @@
 # Source Admission and Freshness Policy
 
-## Current release scope `release-scope-v5` - 2026-11-15
+## Current release scope `release-scope-v6` - 2026-11-15
 
 The approved model is `via-observed-risk-v1`: positive-evidence observed risk
 with explicit incomplete coverage. All categories and product views remain
@@ -16,7 +16,7 @@ product license does not approve a source. V5 additionally permits required
 publisher logos in the single global credit display, with no per-IP attribution.
 The source config is schema3/contract revision4, public VIA3 schema4, private
 normalized records schema3. Credit documents use format2 and their index format1.
-The private capability report remains schema3 with release-scope-v5.
+The private capability report remains schema3 with release-scope-v6.
 
 ## Static Admission States
 
@@ -28,8 +28,8 @@ The private capability report remains schema3 with release-scope-v5.
 
 Runtime state is not stored in YAML. A source may be statically `active` but dynamically `stale`, `missing`, `invalid`, or `quarantined`.
 
-The November 15 shortlist has fourteen entries: ten active intake candidates
-and four unresolved routing candidates. Active entries are the eight previously
+The November 15 v6 release catalog has ten active intake candidates; four
+unqualified routing entries were removed. Active entries are the eight previously
 reviewed sources plus timestamped Tor exits and contextual Ipverse ASN usage.
 Static status cannot establish current production coverage. See SOURCES_AUDIT.md.
 
@@ -163,7 +163,7 @@ Only literal public IPs are accepted. Credentials, ports, protocols, transports,
 ## Rights
 
 Public hosting of a derived database can constitute redistribution. Sources
-prohibiting the proposed redistribution remain excluded. Under `release-scope-v5`,
+prohibiting the proposed redistribution remain excluded. Under `release-scope-v6`,
 public attribution is permitted through the reviewed global dataset credits when
 that placement and content satisfy the actual license and upstream obligations.
 Compiled database material uses the owner-approved CC BY-SA 4.0 license; each
@@ -180,9 +180,14 @@ Production is blocked unless approved current sources exist for every required c
 
 - at least one geolocation family for country;
 - two independent families for region/city/coordinates;
-- current ASN/prefix mapping and usage classification;
+- current usage classification;
 - proxy/risk reasons and exact `/24` observations;
-- current MRT paths, directed relationships, origin data, and RPKI for BGP/Tier-1.
+
+Routing capabilities (ASN/prefix mapping, paths, relationships, RPKI and Tier-1)
+are optional under the explicitly approved v6 scope. Their actual availability is
+still derived and bound into the private receipt; missing data stays unknown.
+Every included record and source must independently pass rights, publication,
+parser and expiry checks. At least one authenticated source must be included.
 
 Observed risk requires positive evidence from a qualified family and follows
 configs/scoring.yaml exactly. Unlisted addresses and absent categories stay

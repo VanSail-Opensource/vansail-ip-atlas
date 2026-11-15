@@ -62,7 +62,7 @@ def _frame_window(frame: memoryview, decoded: int) -> int:
 def inspect_object(data: bytes) -> dict:
     """Return actual container/window metrics; do not trust profile declarations."""
     require(64 <= len(data) < 24 << 20, "object length")
-    require(data[:4] == b"VIA3" and struct.unpack_from("<HHH", data, 4) == (3, 4, 64), "object version")
+    require(data[:4] == b"VIA3" and struct.unpack_from("<HHH", data, 4) == (3, 5, 64), "object version")
     kind = struct.unpack_from("<H", data, 10)[0]
     require(kind in SECTIONS and data[12:16] == bytes(4) and data[44] == 1 and data[45:64] == bytes(19), "object header")
     count = struct.unpack_from("<I", data, 16)[0]

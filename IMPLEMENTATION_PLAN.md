@@ -1,544 +1,136 @@
-# VanSail IP Atlas v3 - Execution-Ready Implementation Plan
-
-## Status, authority and production gate
-
-Implementation and source qualification are in progress (2026-11-09). Dated synthetic execution results remain in `docs/implementation-status.md` and `VALIDATION_REPORT.md`; the authenticated production path and measured-evidence requirements are described in `docs/production-qualification.md` and `docs/production-evidence.md`. Source-specific review is advancing, so historical zero-active counts are not the current admission state. Current eligibility must be derived from the exact catalog, certification bytes and revalidated private intake. No phase or production release is declared complete by this checkpoint.
-
-**Approved product-scope amendment `release-scope-v2` — 2026-11-08:** numeric quality is optional for production release. The user removed the prerequisite to obtain two complete risk-assessment families before releasing. Production may publish `quality=null`, unrated confidence and supported positive reason flags while numeric coverage is inadequate. The existing requirements for publishing a non-null score remain unchanged: two independent current complete families covering all four required IPv4 layers. This amendment changes release gating only; it changes no scoring coefficient, confidence threshold, coverage meaning, source-admission rule or VIA3 field. All other required capabilities and hosted quality gates remain mandatory.
-
-**Approved prior product-scope amendment `release-scope-v3` — 2026-11-08:** the user approved dataset credit display. Reviewed legally required credits may appear in one global shared frontend display and its dedicated static artifact, solely for real datasets included in the immutable release. Source admission may accept `attribution_required: true` with reviewed credit metadata and proof that the global display satisfies the actual obligations. Unresolved attribution and prohibited redistribution remain blocking. This replaced the blanket no-credit prohibition, retained v2's optional numeric quality, and left source IDs/per-IP provenance and source metadata in VIA3/lookup answers forbidden.
-
-**Current approved product-scope amendment `release-scope-v4` — 2026-11-09:** the user approved **CC BY-SA 4.0 for compiled database material**. `DATA_LICENSE.md`, the exact public data-license notice and the included release's reviewed global credits define that distribution. Source code and dependency licenses remain separate. Each source still requires its own compatible rights, attribution, exact publication proof and current parser certification; this is not approval to enable the entire catalog. The private production receipt and capability report identify v4. Complete negative risk feeds remain optional for release, unknown quality stays null, and all non-null scoring rules and other mandatory capabilities remain unchanged.
-
-This document is the implementation plan; it is not a release claim. `AGENTS.md` remains the normative engineering contract. If this plan conflicts with `AGENTS.md`, `AGENTS.md` wins. The documents listed under **Authoritative contracts** define the executable details that this plan schedules and gates.
-
-The starting workspace/capture review was **2026-11-08**. Its counts and unresolved fixtures describe that historical baseline, not the later source-by-source qualification work. Use the closed-schema catalog audit for static admission and authenticated intake for runtime `current` status; neither an old count nor an `active` label proves a presently eligible dataset. Source-only capability qualification is separate from the subsequent Pages release gate. Full current production measurements and exact-artifact approval remain required.
-
-All 21 proxy-subscription repositories remain one `public-subscription-aggregators` evidence family. No complete negative risk-assessment family is required to release null quality with supported positive reasons. Missing complete assessment coverage still prevents a non-null score. MRT, RPKI, city, usage and the required reason types must each pass their own source and completeness rules; qualifying some feeds does not qualify the remaining capabilities.
-
-The workspace also contains format reconnaissance, which is separate from admission:
-
-- The local, Git-ignored `fixtures/source-samples/manifest.json` covers the 91 entries from the 2026-11-08 capture snapshot. Its original catalog SHA-256 is retained; the later attribution-policy revision changes the current catalog bytes without renewing or rewriting those captures.
-- It records 68 raw fragments, 21 sanitized subscription fragments, and 2 retired entries. No blocked or failed source entries remain in the catalog or current inventory. Captures do not establish present upstream availability.
-- These 89 captures are not full-payload schema/parser fixtures. Sanitized fragments may omit the structure needed to exercise the production decoder. Neither capture status nor the capture tool's historical tests promote a source to `fixture_tested` or `active`.
-- At the starting snapshot, only the Go module, sample tool, structural validator and static header templates existed. The current compiler, readers, Nuxt application and remaining production integration are recorded in `docs/implementation-status.md`; this historical inventory is not the current implementation status.
-
-Consequences:
-
-1. Production is hard-blocked until every required capability in the capability matrix has approved, current, fixture-tested real-source coverage. Numeric quality is the explicit optional exception under `release-scope-v2`.
-2. Rights approval alone does not qualify a source. Every included feed needs its own matching observed fixture, current code/ledger binding, compatible rights and credit decision, exact payload-bound publication proof and current runtime result.
-3. Synthetic fixtures may validate engineering behavior in previews. They must never satisfy a production gate or be described as real coverage. Known-real `compile-state` output is private `engineering` material and is rejected by the public candidate packager.
-4. No required feature may be silently dropped, replaced by an allowlist, or filled with a placeholder to bypass the block. The optional numeric-quality scope change is explicit; an unrated result must not be presented as a numeric assessment.
-
-## Product contract
-
-VanSail IP Atlas is a download-only IP and ASN intelligence site with source-free lookup facts and a separate global dataset-credit display. A Go compiler ingests approved bulk datasets, emits deterministic VIA3 shards, and packages them with a Nuxt 4 static site in one Cloudflare Pages deployment. There is no lookup API, Pages Function, proxy probe, DNS resolution of subscription or query hosts, runtime database, or remote enrichment request.
-
-The v1 product contract covers:
-
-- IPv4 and IPv6 country, region, city and quantized coordinates.
-- Network identity and every origin for MOAS prefixes.
-- Usage, assignment, anycast and IPv4 directed-broadcast facts when explicitly evidenced.
-- Explainable risk reasons and unrated states, with optional numeric IPv4 quality only when coverage is adequate. Complete risk feeds are not a production prerequisite under `release-scope-v2`.
-- IPv4 `/24` context, ASN-wide context, RPKI, observed BGP paths, directed relationships and source-derived Tier-1 candidates.
-
-Non-negotiable constraints:
-
-- Standard 2 vCPU / 8 GiB / 14 GiB hosted-runner budget.
-- Indexed lookups use O(1) expected or O(log n) bounded-depth operations.
-- The complete immutable release is bundled into Pages; there is no R2, API or network fallback.
-- Fewer than 18,500 files and less than 24 MiB per asset.
-- Freshness is at most 720 hours from a verifiable upstream content-publication clock.
-- VIA3, lookup answers and ordinary frontend data contain no source name, source ID, source URL, per-source record, credential, proxy URI, domain, protocol, port, collector identity, latency, timezone, postal code or continent. The dedicated global credit artifact/display is the sole source-credit exception; the separate CC BY-SA 4.0 data notice is a legal asset, not an IP fact.
-- Latest stable Chrome only; no polyfills or alternate codec.
-- Missing, stale, corrupt or incomplete input fails closed.
-
-## Authoritative contracts and precedence
-
-The following documents are normative and must be implemented together. Listing them here does not mean their contracts are complete:
-
-- `docs/binary-format-via3.md`: VIA3 container layout, reader validation, limits, determinism and golden fixtures.
-- `docs/data-model.md`: internal evidence, public presence masks, multi-origin identity, quality states and reason flags.
-- `docs/scoring.md`: formulas, coverage semantics, confidence, geolocation and usage fusion.
-- `docs/source-policy.md`: admission/runtime states, publication proof, evidence families, rights and capability gating.
-- `docs/performance.md`: build, lookup, browser and Pages budgets.
-- `docs/release.md`: immutable manifest, approval binding, preview, deployment and rollback.
-- `docs/bgp-tier1.md`: deterministic relationship, path, Tier-1 and graph contracts.
-
-`configs/sources.yaml`, `configs/scoring.yaml`, `configs/tier1.yaml`, `configs/web.yaml` and `configs/release-approval.yaml` must validate against typed schemas with unknown fields rejected.
-
-Precedence is:
-
-1. `AGENTS.md` and the non-negotiable constraints above.
-2. The public data/source/release contracts and versioned configs, with `configs/scoring.yaml` authoritative for scoring equations and coefficients as required by `AGENTS.md`.
-3. Explanatory material, examples and historical validation reports.
-4. This plan's delivery order.
-
-An unresolved conflict among normative files blocks the affected implementation. It must be recorded and reconciled during P0; an implementer must not silently choose a formula, enum spelling or fallback. Requirements introduced below describe work to freeze in the owning contracts, not a claim that the current schemas already contain those fields.
-
-Any semantic change to a public field, risk weight, T1 threshold, prefix overlay, freshness rule or source-admission rule requires a contract amendment, a version bump where applicable, and new Go/TypeScript golden coverage before code can land.
-
-## Source admission, freshness and independence
-
-### Static admission
-
-`admission` records a certification milestone; it is not a substitute for evaluating each gate. `fixture_tested` and `rights_approved` are peer milestones, not a linear ladder. A source can be rights-approved while its fixture is still missing. When both milestones pass but activation has not occurred, the label may retain the most recently reviewed milestone; qualification is always derived from the individual fixture, rights, proof and runtime fields, never from the label alone.
-
-- `candidate`: cataloged; must not be fetched for publication, used for scoring or admitted to a release. Bounded build-private reconnaissance and parser certification may inspect candidates without enabling them; their artifacts never enter the production input cache or public tree.
-- `fixture_tested`: the parser ran against a pinned observed payload, the expected schema matched and the fixture SHA-256 is recorded. This state alone does not grant use.
-- `rights_approved`: the redistribution decision claims that public derived output is permitted. Activation additionally requires an explicit attribution decision: `false` for no required credit, or `true` with reviewed compliant `license.attribution` metadata. The decision must not be inferred from absence. This state alone does not grant use.
-- `active`: every static gate below passes. Only this state is eligible for production ingestion, subject to runtime revalidation.
-- `retired`: immediately excluded from current compilation, with all current contributions retracted. Private audit or rollback retention never delays that retraction and is allowed only under the bounded eligibility/rights rules in C07.
-
-An entry may be changed to `active` only when all of the following are true:
-
-1. An exact downloadable asset or deterministic snapshot-discovery rule is defined.
-2. Parser and expected schema are recorded.
-3. `fixture.status` is a passing state, `schema_observed` is true, the fixture has a valid SHA-256 and the tested fixture identifies the same parser/schema.
-4. `publication_proof` is not `unavailable` and is bound to the exact payload.
-5. Redistribution under the approved CC BY-SA 4.0 compiled-data contract is allowed and the rights review is recorded, including retained upstream notices and compatible derivative-license conditions. `attribution_required` is explicitly `false`, or explicitly `true` with reviewed `license.attribution` metadata whose obligations are satisfied by the global shared credits. An unresolved/null decision remains ineligible.
-6. `evidence_family`, `coverage`, `scope`, public-field allowlist and dependencies are explicit.
-7. The source is current under the 720-hour clock at fetch time.
-8. The admission and runtime state machines accept the transition.
-
-An `active` entry is still rechecked on every build. The static label does not override a runtime `missing`, `stale`, `invalid` or `quarantined` result; an ineligible payload contributes nothing even if the YAML milestone has not changed.
-
-### Runtime state
-
-- `current`: verified fresh payload with matching schema and fixture.
-- `stale`: publication age exceeds 720 hours, or a changed publisher asset invalidates the prior proof.
-- `missing`: asset cannot be discovered or downloaded within the bounded retry policy.
-- `invalid`: schema, hash, archive, parser or safety validation failed.
-- `quarantined`: freshness is unknown, proof is untrustworthy, rights are ambiguous or the source must be reviewed.
-
-Only `current` sources contribute records. When a source leaves `current`, delete its eligible internal snapshot, remove all its contributions and rebuild every dependent exact, prefix, ASN, `/24`, routing and graph partition. Build-private audit may retain permitted hashes and decisions, never subscription secrets. A cache hit must never mask withdrawal or staleness. Missing required coverage blocks the new release even when recomputation succeeds.
-
-The 720-hour limit is a ceiling, not an extension of a stricter policy. Subscription items have a 168-hour ceiling. For every dated observation, retain its verified item clock and use the earlier source/item deadline; a fresh wrapper cannot renew an older IOC. Content-validity bounds, including the earliest surviving RPKI authorization expiry, further clamp the source and release deadline. Every incremental build, including a no-change build, reevaluates time-based expiry and policy/rights withdrawal before declaring a cache hit.
-
-### Publication proof
-
-The accepted clocks are:
-
-- an embedded publisher timestamp in the payload;
-- publisher release metadata tied to the exact asset;
-- an explicitly allowlisted authoritative header from an allowlisted origin.
-
-The header allowlist is empty initially. Adding one requires a contract change with origin, header, cache/proxy caveat and fixture coverage. GitHub commit proof is accepted only when the downloaded URL is pinned to an immutable commit or the payload blob is proven to belong to that commit. A commit to a repository is not proof for a mutable branch asset.
-
-The following never establish or extend publication age: HTTP fetch time, cache time, local timestamp, mirror modification time, a different asset in the same release, HTTP `304`, repository description, or release title without per-asset binding. A source with no proof is quarantined and its prior contributions are removed. Times more than 24 hours in the future quarantine the source; future times within 24 hours are clamped to zero age. Negative historical age is also clamped to zero.
-
-### Evidence independence
-
-`evidence_family` is the sole scoring-independence key. Mirrors, protocol partitions, multi-file publisher releases and all 21 proxy-subscription repositories count once per signal and applicable scope. `correlation_group` is operational metadata, not an additional vote. The subscription category is `proxy_subscription_ip`; the catalog's shared independence key is `public-subscription-aggregators`. These labels do not create separate voting families. Other aggregators must also be traced to their original families; unresolved dependence cannot manufacture independent votes. Splitting a family requires documented original-source provenance and a reviewed contract change.
-
-### Coverage
-
-- `complete`: absence over the declared scope is an authoritative negative observation.
-- `positive_only`: absence is unknown and must never be treated as zero risk.
-- `mapping`: complete only for the mapped geographic/network fact, never for reputation or safety.
-
-A parser must not infer coverage from a source's name. Coverage is a reviewed property of the exact observed payload and scope.
-
-## Capability gate
-
-The release tooling must derive qualification mechanically from the exact catalog, fixtures, rights decisions and current sealed snapshots. Do not freeze starting-state counts or mark every row blocked after some sources qualify. Under `release-scope-v4`, numeric quality is optional and inadequate coverage remains unrated. The source-only production report evaluates the required source capabilities; Pages acceptance is a subsequent independent gate, so it cannot form a circular prerequisite for source qualification. Neither a static active label nor a manually edited report qualifies a row.
-
-| Capability | Required approved current evidence | Qualification boundary |
-|---|---|---|
-| Country | At least one current mapping family | Derive from surviving authenticated records |
-| Region/city | Two independent current mapping families with deterministic fusion | A country-only feed cannot supply city support |
-| Coordinates | Two independent city-capable families; coordinates copied from the winning city, never averaged | Preserve the publisher's accuracy limits and suppress false precision |
-| ASN/prefix mapping | Current origin/prefix mapping with all MOAS origins preserved | ASN identity alone is not an announcement mapping |
-| Usage | Current direct classification evidence with conflict handling | A VPN/datacenter union cannot manufacture exclusive hosting usage |
-| Proxy/risk reasons | Genuine current positive evidence for the required reason categories | Missing categories remain missing; aggregator counts and names cannot create categories or families |
-| Numeric quality (optional) | For a non-null score only: two independent current complete-coverage risk families; all contributing layers assessed | Otherwise publish null quality and supported positive reasons; this does not block release |
-| `/24` context | Current exact-address observations; no prefix imputation | Unobserved cells remain unknown |
-| RPKI | Current complete payload-bound VRP snapshot with its authorization-expiry bounds | A positive VRP subset does not establish global `not_found`; validate every MOAS origin independently |
-| BGP origins/paths | Current origins and approved MRT paths from at least two independent path families | Replayed archives require exact base/session/interval proof and retain the earliest content clock |
-| Relationships | Current directed relationship snapshot | Missing/conflicting relations remain unknown, never default peer |
-| Tier-1 | Current relationships plus two independent current path families and valid source-derived history | First observations remain pending; do not skip an intervening observation to borrow older stability |
-| Pages release | Complete immutable manifest, legal assets, inventory, hosted gates and exact-artifact approval | Check after source qualification; a passing source report alone cannot authorize publication |
-
-Synthetic data may satisfy test-fixture rows only. It never qualifies real-source coverage for a capability row. Optional numeric quality is not marked qualified merely because a synthetic score fixture passes.
-
-## P0 contract closure
-
-P0 is the first implementation work package: it may add contract schemas, validators, fixtures and the hosted test harness. Application/compiler feature work in P1-P7 depends on its exit gate. This document review implements none of those changes and promotes no sources.
-
-The following register records concrete gaps found in the current files. Each row needs an owning-contract amendment, an observable acceptance artifact and a focused regression where executable. An unresolved row blocks the P0 exit gate.
-
-| ID | Contract gap and required decision | Owning files and acceptance evidence |
-|---|---|---|
-| C01 | VIA3 lacks section record layouts, section IDs/flags, dictionary references, address encoding, router entries, inherited overlays, presence/reason bit numbers, quantization and overflow rules. Define required/optional sections and deterministic IDs without serializing Go structs. | `docs/binary-format-via3.md`, `docs/data-model.md`: byte tables for every shard kind, IPv4/IPv6 and corruption vectors, schema migration behavior. |
-| C02 | Strict schemas do not exist. Scope spellings include `exact`, `exact-ip`, `exact_ip` and `asn-edge`; BGP config uses `provider_transit` while public contracts use `transit_upstream`; assignment field aliases also differ. Separate source-schema fields from the public allowlist and define explicit normalization. | All five configs, `docs/source-policy.md`, validator: reject unknown/duplicate keys, invalid unions, duplicate IDs, bad hashes, invalid state combinations and unresolved aliases. No guessed parser or `unknown` format may become active. |
-| C03 | Scoring YAML uses undefined `u_asn` and `C_asn_diversity`; `docs/scoring.md` substitutes `C_asn` for the latter. Define the quantities, scope/family dedupe, MOAS combination, coverage counting and rounding without changing coefficients by implication. Freeze weighted geo-vote denominators, hierarchy, winning-city selection and coordinate precision too. | `configs/scoring.yaml`, `docs/scoring.md`, `docs/data-model.md`: worked numeric vectors, order/idempotence/monotonicity cases and conflicting-country/city fixtures. Formula changes require an explicit versioned amendment. |
-| C04 | The starting validator used the obsolete `enabled` field and lacked complete admission/proof/rights checks. Freeze runtime failure classification and explicit attribution decisions. | `tools/validate_blueprint.py`, `configs/sources.yaml`, `docs/source-policy.md`: negative activation tests and a derived report that matches the actual reviewed source state. Neither a historical zero-active baseline nor a label is an override. `release-scope-v4` retains compliant global credits and adds the approved compiled-data license. |
-| C05 | The executable CAIDA URL is dated; MRT is disabled, `max_mrt_sources_per_run` is 1, but path qualification requires two independent families. Two collectors from one family do not satisfy it. | `configs/sources.yaml`, `configs/tier1.yaml`: payload-bound discovery and a cold-build acquisition plan covering both families within existing budgets. Keep production MRT off while certifying its parser in isolation. |
-| C06 | Header/decoded limits need strict boundary parity with Pages; native browser Zstandard support is assumed rather than demonstrated. | Binary/performance contracts and toolchain locks: reject assets at or above 24 MiB, prove bounded Zstandard decoding on the selected stable Chrome, and freeze browser worker/cache memory limits. No alternate codec or legacy fallback. |
-| C07 | Session pinning and immutable caching do not define how an aging static release stops being current. Subscription expiry is shorter than 720 hours, and rollback can reintroduce withdrawn data. | Source/release/data contracts: aggregate release expiry, scheduling, client expiry checks, rollback eligibility and bounded private-cache/quarantine retention, with clock-advance fixtures. No source metadata is added to VIA3/lookup facts; v3 global credits are separate. |
-| C08 | Release ID, manifest serialization and bundle digest inputs are not frozen. Approval points at `releases/current/manifest.json` instead of the release-ID path, and the source config's asset root differs from the object layout. | `docs/release.md`, `configs/release-approval.yaml`, `configs/sources.yaml`: canonical serialization, acyclic hash inputs, exact manifest-path resolution, inventory and approval tamper vectors. |
-| C09 | Browser input cannot literally call Go `net/netip`; BGP-origin membership cannot be checked before loading the relevant prefix. Reserved ASN policy and duplicate/empty query parameters are unspecified. | `docs/data-model.md`, `configs/web.yaml`: Go/TypeScript canonicalization corpus, bounded input, route/query rules and distinct syntax versus membership-error tests. |
-| C10 | Tier-1 core/cone/degree populations, near-complete-core algorithm, stability window and first-snapshot behavior are unspecified. Graph overflow can conflict with protected hops. | `configs/tier1.yaml`, data contract: deterministic derivation and graph-selection rules, missing-input/first-snapshot/overflow fixtures, with all existing thresholds preserved. |
-| C11 | Performance gates lack sample protocols, byte accounting and a process-wide disk/memory envelope. Public scanning needs schema-aware rules so required OSM URLs and library syntax are not confused with leaked IP metadata. | `docs/performance.md`, release/web contracts: hosted measurement protocol, full inventory accounting, scanner positive/negative fixtures and generated-page CSP checks. |
-| C12 | `SOURCES_AUDIT.md` says one subscription family per repository and calls starter records active; `VALIDATION_REPORT.md` still says starter-enabled. Neither overrides current admission. Historical sample results need their own evidence boundary. | `README.md`, `SOURCES_AUDIT.md`, `VALIDATION_REPORT.md`: one shared subscription family, accurate admission counts, dated evidence and explicit unrun gates. |
-
-Pin the Go, Node/pnpm, Nuxt/UI, Motion, Leaflet and compression toolchains as P0 artifacts. Select a supported stable Go when implementation starts; a `go.mod` directive alone does not prove runner/toolchain support. Lock the compressor version and settings. Verify Chrome/codec behavior in hosted CI and record the actual browser build; do not infer it from the target label.
-
-Create a minimal synthetic corpus for public records, all VIA3 sections, decoder syntax and URL semantics. Keep full real captures and source-rich certification evidence private. Small reviewed redistributable observed parser excerpts may be checked in outside the deploy tree with their actual notices; they do not certify freshness or complete dataset capacity. Record the IPv4-only numeric-quality restriction, origin deep links, reviewed attribution obligations and release-expiry semantics in their owning contracts before readers or UI depend on them. Synthetic credit artifacts are empty and cannot certify real data inclusion. Known-real engineering state is not relabeled synthetic to enter a public preview.
-
-Exit criterion: C01-C12 have resolved contracts and their required checks have run; unknown config fields fail; all public layouts are frozen; source states are unambiguous; the CAIDA/MRT contradictions are resolved; a derived capability report truthfully distinguishes qualified and missing real-source capabilities, while inadequate numeric quality remains unrated. Source qualification may continue later without blocking synthetic engineering work.
-
-## Public data and VIA3
-
-VIA3 is a versioned, little-endian, read-only, content-addressed container. The 64-byte header carries magic `VIA3`, format/schema versions, shard kind, flags, section-table offset, file and decoded lengths, and codec. Fixed 64-byte descriptors carry kind, codec, flags, offsets, lengths and SHA-256. Section descriptors are unique and sorted by kind. The release manifest separately carries the whole-file hash.
-
-Readers must, in order:
-
-1. Reject files shorter than the header or at or above the 24 MiB asset ceiling. C06 must reconcile the binary spec's currently inclusive wording with this strict deployment limit.
-2. Validate magic, versions, header length, codec, reserved bytes and counts.
-3. Validate table bounds and every descriptor with overflow-safe arithmetic before allocating decoded output. JavaScript must reject 64-bit lengths outside the supported bounded range before converting to `Number`.
-4. Reject unknown required versions/kinds/codecs, duplicate or overlapping sections, truncation and out-of-bounds payloads.
-5. Decompress with a hard output limit, then verify decoded length and SHA-256.
-6. Reject trailing or unaccounted bytes.
-
-Go and TypeScript readers consume the same golden corpus and must return byte-for-byte equivalent canonical answers and defined error classes. Bounds cover compressed input, decoder window, emitted output, record counts and dictionary references; advertised decoded length alone is not an allocation budget. Hash verification precedes exposure of a section. The browser verifies the manifest and each object hash before parsing and never falls back to another release or codec. Schema changes require a version bump, migration/rejection fixtures and matching reader updates; a manifest must never point an old reader at an incompatible schema.
-
-Required shard families are router, geo, coordinates, network, usage, quality, IPv4 `/24`, ASN, RPKI, BGP origin, BGP path, BGP relationship, Tier-1 and dictionary. No source/provenance family exists. A compact router maps prefixes to content-addressed shards; planning repacks by bytes, not prefix count.
-
-Freeze the lookup plan with C01: bounded-depth IPv4/IPv6 prefix routing, inherited ancestors at shard boundaries, exact-record precedence and an indexed ASN directory. A lookup must not scan all objects, prefix records or ASNs. The 256-cell view performs a bounded `/24` read; ASN prefix lists use an index and bounded paging. Dictionary/overlay references identify objects in the pinned manifest, and repacking cannot silently change their meaning. Test overlapping prefixes on both sides of a shard boundary, including an exact override and a withdrawn parent overlay.
-
-Public records use integer references and presence masks. A zero value is valid only when its presence bit is set. Presence is independent for:
-
-- coordinates, usage, assignment mode, anycast and IPv4 directed broadcast;
-- quality and each of exact, explicit-prefix, ASN and neighbor risk layers;
-- registration country and physical country;
-- network identity, reason flags, RPKI and BGP facts.
-
-Network identity stores a sorted multi-origin list, never a single arbitrary ASN. Quality stores `unrated` separately from score zero. Country registration and physical geolocation are separate facts. Organization/ISP labels are sanitized; URLs, domains, email addresses and credentials are removed, and an all-unsafe label becomes unknown.
-
-Public records preserve unknown as unknown. No reader, UI component, aggregate or fallback may render a missing layer as safe, clean or zero.
-
-## URL and query contract
-
-Canonicalization happens locally before any query-specific database request. Loading the static application shell is independent of query validation:
-
-- Go uses `net/netip`; the TypeScript browser parser must match its accepted address forms and canonical output using shared fixtures, without a runtime API. IPv4-mapped IPv6 is normalized to IPv4. Zone IDs, hostnames, URLs, CIDRs where an address is required, and malformed ASNs are rejected locally.
-- An ASN accepts `AS<number>` or decimal digits, normalizes to `AS<number>` without leading zeroes, and rejects values outside the public ASN range.
-- Invalid input remains on the current page with an inline error and performs no data request. It is not silently rewritten to an unrelated query.
-- Missing `q` returns to `/ip`. Valid queries preserve `q` while navigating between subviews.
-- C09 must define whitespace, case, empty/repeated `q` and `origin`, maximum input length, numeric overflow and the reserved/private ASN ranges. Malformed percent encoding and ambiguous repeated parameters fail locally; no decoder may interpret the same URL differently.
-
-| Route | Behavior |
-|---|---|
-| `/` | HTTP 302 to `/ip`. |
-| `/ip` | Exactly one IP/ASN input and no summary cards. IP submission goes to `/ip/overview?q=<canonical-IP>`; ASN submission goes to `/ip/asn?q=AS<number>`. |
-| `/ip/overview` | IP only. Owns physical geography, map, ISP, usage, assignment and anycast. ASN query redirects to `/ip/asn`. |
-| `/ip/quality` | IP only. Owns quality state, reason chips and layer contributions. ASN query redirects to `/ip/asn`. |
-| `/ip/class-c` | IP only. IPv4 shows the owned 256-cell `/24` view; IPv6 shows an explicit not-applicable state. ASN query redirects to `/ip/asn`. |
-| `/ip/bgp` | Accepts an IP or ASN. IP mode shows every origin and a deterministic origin selector; ASN mode shows that origin's observed paths and relationships. |
-| `/ip/asn` | An IP query lists every origin for its prefix; an ASN query shows the ASN summary, risk, cone and prefixes. |
-
-For `/ip/bgp?q=<IP>`, the default origin is the numerically lowest origin and the selected origin is represented as `origin=AS<number>`. Validate `origin` syntax before a query-specific request; validate membership after loading the verified prefix/origin record. An absent origin produces an inline error without requesting that unrelated ASN's paths or substituting an origin. A valid selected origin is preserved in its BGP deep link; `origin` is removed when `q` changes and is not carried as an active filter to other views. IP-in-ASN routes never choose an arbitrary primary ASN. Browser back/forward navigation restores the canonical query and selected path without leaking a prior query's result.
-
-Reserved routes `/latency`, `/dns-leak`, `/webrtc`, `/cloudflare` and `/split` are not implemented. Direct visits must not imply that those tests exist.
-
-Each fact has one display owner. `/ip/overview` owns physical geo/map/ISP/usage/assignment/anycast; `/ip/quality` owns quality and explanations; `/ip/class-c` owns the 256-cell grid; `/ip/asn` owns ASN risk and summaries; `/ip/bgp` owns paths, relationships, Tier-1 and per-origin RPKI. Other views link rather than repeat.
-
-## Scoring, coverage and fusion
-
-The equations, weights, half-lives and thresholds in `configs/scoring.yaml` are normative and remain provisional hypotheses, not calibrated probabilities.
-
-For each signal and evidence family, take the maximum decayed contribution across observations. Reliability is `source_weight / 100`; specificity comes from the declared evidence scope; severity comes from the configured signal. Age uses item publication time when present, otherwise the verified source publication time. All terms are finite and clamped to their declared ranges.
-
-Exact, explicit-prefix, ASN and `/24` are separate risk layers. Each layer has one status:
-
-- `assessed`: current complete-coverage evidence supports both positive and negative observation across the layer's required scope.
-- `positive_only`: positive observations may be shown, but absence is not an assessment.
-- `unknown`: coverage is missing, stale, conflicting or otherwise ineligible.
-
-A qualifying family must be current, fixture-tested, rights-approved with any required global credits satisfied, complete for the relevant risk scope, and independent under `evidence_family`. Mapping sources and positive-only blocklists never qualify as complete risk coverage. Credit entries cannot increase independence or score confidence.
-
-Numeric quality is emitted only when all four configured IPv4 layers are `assessed` and at least two independent current families qualify. Otherwise quality is `unrated`; confirmed reason flags and any observed layer contributions remain visible. Confidence is `low` for two qualifying families, `medium` for three, `high` for four or more, and `unrated` otherwise. Confidence describes coverage only.
-
-Under `release-scope-v2`, this is a per-result numeric-publication gate, not a production-release prerequisite. The quality route, supported reason flags, observed contributions and explicit unrated/null behavior remain required and tested even if no production address qualifies for a number. Missing complete feeds never justify treating positive-only absence as clean or assigning a fallback score.
-
-Numeric quality v1 is IPv4-only because the configured neighbor layer is `/24`. IPv6 may show confirmed reasons and available layer facts but remains explicitly `unrated` until a separately specified IPv6 prefix-context model is approved; the system must not treat an absent IPv6 neighbor layer as zero risk by renormalization.
-
-ASN risk is a capped contextual contribution, not inherited customer/provider guilt. For MOAS, compute context for every origin; if any origin required by the quality layer is unassessed, the ASN layer is `unknown` and numeric quality remains unrated. C03 must define how assessed per-origin values combine into the single IP-quality ASN contribution; selecting the first origin is not a rule. `/24` risk uses only exact-address observations, excludes the queried address, and counts each unique positive address and evidence family once. No unobserved host is imputed positive or clean.
-
-The current equations are not yet executable contracts for every quantity: `u_asn`, `C_asn_diversity`, the disagreement with `docs/scoring.md`, and `/24` aggregate-quality semantics must be resolved in C03. Freeze family counting per assessed layer, signal aliases before dedupe, deterministic summation order, integer quantization and rounding. Keep unrounded internal contributions until the specified serialization step. Property tests compare like-for-like eligible coverage; a new positive observation must not make an eligible score better through a changed denominator or origin choice.
-
-For geolocation:
-
-- Each mapping family resolves its own longest-prefix match and contributes at most one vote per field; IPv4/IPv6 files from the same family never multiply support.
-- Country uses source-weight-weighted plurality from current mapping families. An unresolved tie or unsupported conflict yields unknown.
-- Region and city require two independent families and a winning margin of at least 0.15. Missing evidence from one family is not a vote for another.
-- Coordinates and precision are copied from the winning city provider, never averaged or synthesized.
-- Explicit anycast suppresses physical city, coordinates and map presentation. Any retained country/region is labelled by the fact actually supported; physical evidence must never be relabelled registration evidence to keep it visible.
-
-Country, region and city must form a consistent hierarchy. Two participating families are not necessarily two agreeing families. C03 must define support for the winning place, the normalized winning margin and a deterministic winner among agreeing city families when their coordinates differ. Coordinates retain the winning provider's precision class; quantization must not create greater apparent precision. These rules require contract amendments rather than implementation defaults.
-
-Usage requires direct classification; an unresolved conflict yields `unknown`. Proxy, VPN, Tor, datacenter, abuse, country or ASN facts never determine usage. Assignment mode and anycast remain unknown without explicit evidence. IPv4 directed broadcast is a separate technical flag.
-
-Once quality is eligible, adding independent positive evidence cannot improve the score and duplicate family evidence is idempotent. The transition from `unrated` to a numeric score is tracked separately from the monotonicity requirement and must be covered by tests.
-
-## BGP and Tier-1
-
-Production MRT ingestion is disabled until all of the following exist: approved current MRT sources, payload-bound snapshot discovery, a tested bounded streaming parser, at least two independent current path families, and resource budgets that fit the standard runner. Build-private parser work uses bounded fixtures while the production flag remains off; it does not require first enabling an uncertified source. Until qualification, real-data BGP-dependent views fail closed with an unavailable state; synthetic engineering previews remain explicitly synthetic.
-
-Reconcile the one-snapshot-per-run cap before activation. A cold build must acquire the required independent evidence, possibly through bounded acquisition stages, without depending on an undocumented previous cache. Reusing two current certified snapshots is allowed only when both are revalidated and their byte/proof identities are retained. Collector count and independent family count are separate quantities.
-
-BGP origin and RPKI are prefix/ASN facts and are computed per origin. MOAS announcements preserve every origin. An AS_PATH observation is not a business relationship. Directed relationship data determines provider/transit, peer, customer or sibling; missing or conflicting relationship evidence yields `unknown`. `peer` is never a fallback.
-
-AS paths are retained as observations with collector identity kept build-private. Canonical path encoding removes duplicate evidence without changing AS order. Preserve the uncollapsed observed ASN sequence; display-only prepend collapsing never changes source observations, visibility counts or hop meaning. A public sequence of ASN IDs is a BGP fact, not a raw publisher line or a provenance record. Paths containing AS sets or other non-linear constructs are retained as build facts where possible but excluded from a linear graph unless a deterministic representation preserves their real semantics.
-
-P5 fixtures must cover collector-to-origin versus origin-outward orientation, prepends, loops, AS sets/confederations and four-octet ASN reconstruction. RPKI validation uses each actual announced prefix and origin against current VRPs, including maximum length and covering/multiple VRPs. Missing or invalid VRP input yields unavailable/unknown, never the `not_found` answer that requires a valid assessed VRP snapshot. Exact public enum values are frozen in C01.
-
-Retain at most 12 unique paths per origin, ranked deterministically by relationship coverage descending, path length ascending, visibility descending, then canonical path bytes ascending. The graph projection then selects at most 24 nodes, two protected hops and three backbone exits per second-hop ASN. Freeze which paths are selected before protecting their first two hops; if the union exceeds the budget, deterministically select fewer complete path projections and disclose truncation. Never drop a protected hop to connect nonadjacent ASNs. Preserve observed-versus-inferred edges, relationship direction and Tier-1 trunk continuity. A collapsed display segment represents its real underlying sequence, not a new observed adjacency; unrelated gaps must not be merged. Route selection changes focus/visibility without reconstructing the graph layout.
-
-Tier-1 is source-derived for each snapshot: provider-free relationship position, relationship-core/peer support, customer-cone/degree thresholds and independent path visibility. It requires current directed relationships and at least two independent current path observations. Missing or conflicting inputs produce `unknown`; zero observed upstreams alone is insufficient. C10 freezes the eligible ASN population, cone traversal/cycle rules, peer-core discovery, percentile ties and cross-snapshot stability/bootstrap behavior while preserving 0.80 core support and 0.98 cone/degree percentile thresholds. A fixed ASN list or repository description cannot fill the gap.
-
-CAIDA snapshots must be discovered from the publication index and bound to a verified timestamp. A dated URL is not an executable default. The same rule applies to RouteViews and RIPE RIS snapshots.
-
-## Frontend and privacy
-
-The frontend is Nuxt 4 static generation with Nuxt UI first, shadcn-vue only for a genuinely missing primitive, one shared light/dark token system, Motion for interaction-driven transitions, and Leaflet lazy-loaded only on `/ip/overview`. TresJS is deferred beyond v1 to protect initial JS and accessibility budgets. Components load only same-origin static facts and the dedicated global credit artifact, with OSM tiles as the map exception; no runtime lookup API or other source metadata is exposed.
-
-Global dataset credits use one shared frontend display, distinct from every IP/ASN fact owner. The packager includes only reviewed required credits for real datasets that actually contribute to the release. It strips source IDs/private lineage, deduplicates exact approved entries and renders plain text plus safe attribution/license links. Merely cataloged, candidate, stale, withdrawn or synthetic datasets never receive a displayed inclusion credit. The closed credit schema, immutable path/current alias, candidate/cache identity and scanner exception are frozen in `docs/release.md`; VIA3 and lookup answers gain no provenance field.
-
-Design requirements:
-
-- Minimal copy, generous whitespace, layered liquid-glass surfaces and thin masked edge lighting with accessible contrast.
-- Light/dark parity for every state: loading, empty, unrated, stale/unavailable, error, partial and fully rated.
-- Motion is purposeful and honors `prefers-reduced-motion`; no decorative infinite loop.
-- The `/ip` hero has exactly one input and no summary cards.
-- Dense graph labels do not use glass blur.
-- The map shows OSM attribution, discloses approximate placement and never implies street-level precision.
-- BGP uses native SVG with pan, pinch, wheel, fit, keyboard and path-focus controls. Exactly one graph is rendered.
-- Responsive acceptance covers 320, 390, 1280 and 1440 pixel widths, with no horizontal overflow at 320.
-
-Security and privacy:
-
-- Automatic requests are same-origin except `https://tile.openstreetmap.org` when a map is mounted. Reviewed dataset-credit links are navigation only; they are not fetched automatically and never include a query IP/ASN.
-- `Referrer-Policy: no-referrer` ensures `q` cannot reach OSM.
-- CSP restricts script/style/data origins to same-origin and images to the necessary same-origin/data/OSM sources; generated inline script/style handling must be explicitly reviewed. Omit broad wildcards.
-- `X-Content-Type-Options: nosniff` and a restrictive Permissions Policy are mandatory.
-- No analytics, cookies, telemetry, remote fonts, remote icons or third-party embeds.
-- Map and BGP chunks load only on their owning routes.
-- A missing or corrupt release shows a fail-closed unavailable state with no stale render.
-
-P1/P6 must define worker cancellation and query ownership: a late response for an earlier query cannot replace the current result. IndexedDB stores verified immutable objects under their hashes and schema/release identity, with bounded eviction; it is not an independent authority for freshness or current eligibility. Do not retain query history or secrets. Expired data is unavailable even when its checksum is valid.
-
-Test the generated Nuxt output against the deployed CSP, including hydration, payload loading, workers, Leaflet styles and theme switching. Do not assume templates prove the generated site works. Any required inline script must have a reviewed static hash policy; do not relax `script-src` to unrestricted inline execution. The OSM attribution link and tile origin are permitted map requirements, not enrichment-source metadata.
-
-## Build and data pipeline
-
-The build is an explicit dependency graph:
-
-1. Strictly validate configs, source admission, rights and dependencies before the production fetch set is selected. Candidate reconnaissance is a separate build-private operation.
-2. Resolve deterministic source snapshots, enforce download bounds, and bind publication proof, coverage and observed schema to the exact payload.
-3. Parse streaming input into typed normalized evidence; never retain post-parse `map[string]any`.
-4. Deduplicate exact bytes, canonical records and evidence families without losing the private contributor index needed for retraction.
-5. Partition and external-sort within declared RSS and scratch limits.
-6. Recompute every partition invalidated by a source change, withdrawal, expiry, parser/schema/config change or mapping change.
-7. Fuse geo, network, usage, quality, ASN, `/24`, RPKI, BGP and Tier-1 outputs deterministically and derive the capability report. An unmet required production capability blocks promotion; optional numeric quality remains unrated when unqualified.
-8. Encode content-addressed VIA3 objects, verify every object, compute conservative expiry and freeze the immutable manifest.
-9. Generate Nuxt, copy the entire `_atlas` tree into `web/.output/public`, build the complete Pages inventory and scan public output.
-10. Deploy that candidate to preview, run hosted gates and bind their results to its artifact digest.
-11. Verify exact-hash approval and recheck expiry, rights/withdrawal state and all gates before promoting those same bytes. If revalidation changes the artifact, start a new preview/approval cycle.
-
-Every fetch uses HTTPS, bounded redirects, private-network redirect rejection, per-host concurrency one, global worker caps, response-size limits and bounded retries. The build may resolve approved bulk-download origins; it must never resolve a host extracted from subscription content or user input. Validate initial destinations as well as every redirect, bind the connection to validated public addresses, and reject rebinding/private targets. Archive processing rejects traversal, links, duplicate/overlapping paths, excessive entries, invalid UTF-8 and decompression bombs. Writes are staged and atomic. Context cancellation stops all work and leaves no partial object eligible for release.
-
-The source cache is an optimization only. A cold full rebuild must produce the same canonical public output as a warm incremental rebuild for the same inputs and evaluation clock. Freeze the evaluation clock for deterministic tests; item/source publication time still controls decay and expiry. Source changes invalidate dependent exact, prefix, ASN, `/24`, RPKI, path, relationship, Tier-1 and graph partitions. Recompute an affected partition from surviving evidence instead of subtracting rounded scores from the prior aggregate. Cache keys include normalized snapshot hashes, parser/schema versions and relevant policy/config hashes. Source-list deletion is a withdrawal, not a no-change build.
-
-Use a clean, allowlisted publication tree. Repository files, source-sample manifests, audit reports, raw caches, quarantine, fixture payloads and private source configs must never be copied recursively into the public output. Freeze numeric retention and cleanup bounds in C07; raw subscription material stays in controlled build-local quarantine only and is removed after the bounded certification/build task.
-
-## Delivery sequence and exit gates
-
-No phase is complete until its exit gate has actually run in the repository. Static review or a written assertion is not execution evidence. The dependencies below schedule work; they do not waive `AGENTS.md` section 11. If a mandatory material-PR suite does not yet exist, record it as pending/blocking and use draft/integration checkpoints, never a skipped-pass claim.
-
-| Phase | Depends on | Reviewable work product | Exit gate |
-|---|---|---|---|
-| P0 | Repository contracts | C01-C12 amendments, strict schemas/validator, synthetic corpus, toolchain locks, hosted harness and capability report | Register resolved; unknown fields and impossible states fail; source admission and missing capabilities are derived accurately; optional numeric quality remains unrated when coverage is inadequate |
-| P1 | P0 | Synthetic end-to-end release: typed records, writer, Go/TS readers, indexed router, worker, minimal static `/ip` and `/ip/overview`, manifest/inventory | Deterministic bytes and canonical answers; corruption/migration fixtures fail closed; hosted preview serves every synthetic object and is visibly synthetic |
-| P2 | P0-P1 | Secure fetch, proof, archive handling, private lineage, source state machine, subscription decoders and source-certification reports | Initial/private redirect, size/bomb, cancellation, stale/304, withdrawal, decoder and family-dedupe regressions pass; candidate certification never enables publication implicitly |
-| P3 | P1-P2 | Geo/network/usage fusion, inherited overlays, MOAS, coordinate ownership and sparse `/24` records | LPM/shard-boundary, conflict, presence, retraction and deterministic cold/warm resource checks pass |
-| P4 | P2-P3 | Quality layers, unrated semantics, reasons, ASN and leave-one-out `/24` context, confidence/bias reports | Formula vectors, bounds, no-clean-from-absence, family idempotence, monotonicity, ASN cap, self-exclusion and bias sentinels pass |
-| P5 | P2-P3 and C05/C10 | MRT/VRP/relationships, derived Tier-1, retained paths and bounded graph projection; production MRT activation remains a separate source gate | MOAS, origin-specific RPKI, reversed polarity, unknown versus peer, missing/stale inputs, first-snapshot behavior, route continuity and graph overflow tests pass |
-| P6 | P1 shell, then P3-P5 | All canonical routes/deep links, lazy map/SVG graph, themes, accessibility, CSP/privacy and cache/error states | Hosted stable-Chrome route/network/responsive/keyboard/reduced-motion tests pass; no duplicate owner facts; obsolete query work cannot render |
-| P7 | P0-P6 and qualified real sources | Immutable full candidate, fresh capability report, complete Pages preview, hosted quality/performance reports and exact-hash approval | Every mandatory gate and full inventory passes; approval/artifact/manifest hashes match; candidate remains eligible at promotion; rollback is still eligible |
-
-The synthetic vertical slice may be demonstrated before real-source qualification. It contains synthetic data, is clearly labelled and cannot be used for production approval. `compile-state` materializes admitted real records only into private `engineering` artifacts; the public packager rejects that mode. Real publication uses authenticated `compile-production`, exact included-dataset credits and the separate mandatory hosted/approval gates.
-
-Source rights, exact-asset discovery and coverage certification form a continuing workstream from P0/P2 through P7. They need not block synthetic parser/UI development, but no phase test may relabel a synthetic capability as approved real-source coverage. Finding a valid complete-coverage pair remains a dependency for non-null numeric quality; `release-scope-v2` removes it as a production-release prerequisite. Required reason coverage and the other mandatory capabilities still need qualified real sources.
-
-Each implementation change records affected source schemas, VIA3 kinds/public fields, routes, resource budgets and regression fixtures before editing. Its evidence packet includes revision/config hashes, modified paths, hosted run and preview URLs, actual commands and outcomes, benchmark inputs/results, pending gates and assumptions. Publish only source-free public test reports; provenance-rich evidence remains build-private. A green subjob is not a completed phase or production approval.
-
-## Required tests and acceptance evidence
-
-### Configuration and source policy
-
-- Strict schemas reject unknown YAML fields, duplicate IDs, invalid enum values and malformed hashes.
-- Duplicate YAML keys, unresolved parser/scope aliases, cross-config enum conflicts and the obsolete `enabled` activation path are rejected.
-- State tests prove no entry can become `active` with a missing/failed fixture, unavailable proof, unresolved rights/attribution, missing required credit metadata, invalid coverage or missing family. An explicit reviewed attribution requirement is permitted only when the global display satisfies its obligations.
-- Tests prove all 21 subscription repositories share one family and mirrors/partitions do not create votes.
-- Tests prove `304`, local mtime, fetch time, cache time and mutable GitHub branch commits cannot refresh age.
-- Tests prove withdrawal removes prior contributions and triggers all dependent rebuilds.
-- Clock-advance tests expire unchanged snapshots/items, honor the stricter subscription lifetime, retract source-list deletions and invalidate warm builds on policy/schema/config changes.
-- Capability reports identify why each required capability is blocked without treating sanitized reconnaissance as a tested schema or complete coverage.
-
-### Fetch and parser security
-
-- Redirects to loopback, link-local, private, multicast, reserved and rebinding targets are rejected.
-- Oversized bodies, slow bodies, excessive redirects, retries, cancellation, malformed archives, traversal paths, duplicate archive entries and decompression bombs fail closed.
-- Subscription fixtures cover plaintext URI lines, Base64 wrappers, VMess JSON/Base64, VLESS/VMess/Trojan/SS/SSR/HY/HY2/TUIC/AnyTLS syntax, Mihomo YAML and sing-box JSON.
-- Fixture assertions prove only literal public IPs survive; credentials, ports, protocols, SNI, hostnames, domains, URIs, labels and comments do not appear in bytes, logs, fixtures or caches outside controlled build-local quarantine.
-- Bracketed IPv6, malformed ports, non-IP hosts, private/special IPs, malformed YAML/JSON, excessive line lengths, nested Base64 and repeated duplicates are covered.
-
-### VIA3 and lookup
-
-- Unknown versions, unknown shard/section kinds, unknown codecs, truncation, arithmetic overflow, bad offsets, overlapping sections, duplicate kinds, hash mismatch and decompression limits are rejected before unsafe allocation.
-- Tests cover IPv4, IPv6, exact records, inherited prefix overlays, exact overrides, empty facts and multi-origin records.
-- Go and TypeScript tests consume one golden corpus and compare canonical answers and failure classes.
-- The browser verifies object hashes and fails closed without mixing releases.
-- Length-boundary fixtures include exactly 24 MiB, overflowing 64-bit values, oversized decoder windows, invalid dictionary IDs and corrupt inherited overlays. Lookup tests assert bounded shard reads rather than scanning all shards.
-- Latest-stable Chrome runs the actual Zstandard golden corpus, migration/rejection vectors and worker cancellation; support is measured rather than assumed.
-
-### Scoring and fusion
-
-- Positive-only absence produces `unrated`, not score 100.
-- Duplicate families are idempotent; source order does not affect bytes or scores; added independent evidence does not improve an eligible quality score.
-- ASN context is capped and never propagates one host's malice to every customer; `/24` self-exclusion and no-host-imputation hold.
-- MOAS ASN context is origin-specific. Region/city require two families and the configured margin. Coordinates are never averaged.
-- Residential/mobile bias sentinels and policy-driven conflict fixtures run before any production approval.
-- Numeric vectors resolve every ASN symbol, MOAS aggregation and rounding boundary; geo fixtures test winner support, hierarchy, margin ties and coordinate ownership. Positive-only reason flags survive an unrated score.
-
-### BGP and Tier-1
-
-- Multi-origin announcements, per-origin RPKI, reversed provider/customer fixtures, peer/unknown distinction and missing relationships are covered.
-- Tier-1 derivation fails to `unknown` when either path or relationship inputs are missing, stale or conflicting.
-- Path selection is deterministic; graph projection stays within 24 nodes, two protected hops and three exits; observed and inferred edges remain distinct.
-- AS-set/non-linear path fixtures prove the graph does not invent ordering.
-- Graph overflow preserves protected hops of selected routes; prepends/reverse orientation/four-octet ASNs, RPKI maximum length and valid-snapshot `not_found` versus unavailable data are covered.
-
-### Hosted browser, privacy and output scanning
-
-- Playwright on a Pages preview uses current-stable Chrome and covers root redirect, all `/ip/*` routes, IP/ASN canonicalization, MOAS origin selection, IPv6 Class C state, invalid queries, themes, reduced motion and 320/390/1280/1440 widths.
-- Network interception proves no external request except OSM tiles and no query reaches OSM through a referrer.
-- Missing/corrupt shards show a fail-closed state; redirects and cache headers match the contract.
-- Warm IndexedDB caches and long-open tabs refuse an expired release; no-change builds retract expired data. A late response cannot render a prior query. Back/forward and origin-membership errors preserve the intended route state.
-- Public-output scans inspect HTML, JS, CSS, manifests and decompressed VIA3 string tables for source names/IDs/URLs, credentials, domains, protocol/port, collector, latency, timezone, postal and continent data. Only independently validated exact global-credit paths/fields may carry their reviewed attribution names/text/URLs; VIA3, dictionaries, lookup answers and other frontend data keep the full provenance ban.
-- Scanner fixtures distinguish the narrow global-credit exception, library implementation tokens and required OSM attribution from forbidden metadata. Verify included-dataset binding, required-credit completeness, safe plain text/links, synthetic emptiness, canonical deduplication and rejection of unused/fabricated credits or source IDs. This never permits domains or source strings in IP records. Scan encoded strings and generated source maps as applicable; prevent private artifacts from entering the tree in the first place.
-- The complete manifest inventory matches deployed assets; no 404, stale object or mixed release is allowed.
-- Approval mismatch, post-preview byte mutation, an expired candidate, an ineligible rollback and orphaned/extra public objects block promotion. Verify the deployed root's actual 302 response, not only a Nuxt client redirect.
-
-## Performance and resource gates
-
-Measurements must come from the standard hosted runner and a hosted browser preview.
-
-| Gate | Target |
-|---|---|
-| Cold full build | Under the catalog's 35-minute soft deadline; hard abort before RSS/scratch limits |
-| Small-source incremental build | Under 8 minutes |
-| No-change incremental build | Under 3 minutes |
-| Peak build RSS | Below 6.5 GiB |
-| Peak scratch | Below 10 GiB |
-| Generated static tree | At most 3,072 MiB, within the complete 14 GiB runner disk envelope |
-| Indexed Go lookup p95 | Under 2 microseconds |
-| Cached browser lookup p95 | Under 15 milliseconds |
-| Typical initial IP payload | Under 400 KiB compressed |
-| Initial JS | Under 200 KiB gzip |
-| Mobile LCP | Under 2.5 seconds |
-| INP | Under 200 milliseconds |
-| CLS | Under 0.1 |
-| BGP interaction | 50+ FPS target at 24 nodes |
-| Pages bundle | Under 18,500 files and under 24 MiB per asset |
-
-Record p50/p95/p99, RSS, scratch, allocation count, input size and cold/warm behavior. Absolute thresholds gate the first release baseline; relative thresholds are added only after enough hosted samples. A failed threshold is fixed or explicitly reviewed as a regression; it is not silently replaced by a looser number.
-
-C11 freezes the measurement protocol before collecting the baseline:
-
-- Identify runner/browser versions, revision, config/input hashes, source-family counts, record/path counts and fixture versus real dataset. Use repeated samples and report their count and distribution; a synthetic throughput result does not establish full-dataset capacity.
-- Measure the entire process group and physical disk high-water mark, including Go, Node, decoders, downloads, expanded input, external-sort runs, caches, current/previous objects and upload staging. `GOMEMLIMIT` is not an RSS bound. The 10 GiB scratch and 3 GiB tree ceilings are not independent disk reservations; leave room for the checkout and toolchains within 14 GiB. Stream expanded input, cap concurrent decoders and reclaim scratch before packaging.
-- Define cold full, warm changed, warm no-change and expiry/withdrawal rebuild scenarios with identical input/evaluation clocks where comparison requires it. Measure end-to-end stages as well as hot/cold lookup latency; an incremental result must include required freshness revalidation.
-- Fix the benchmark query corpus across IPv4/IPv6, exact/LPM/MOAS, sparse/large ASN and worst-case overlays. For the typical-IP payload gate, account for pointer, manifest, router, dictionaries and every initially needed object; report worst-case payload separately. Initial JS includes executed entry/worker dependencies, with lazy map/BGP costs reported separately.
-- Specify hosted mobile emulation, network/CPU conditions and scripted search, map, Class C and graph interactions. Report observed LCP/CLS and interaction timings with their sample method; distinguish lab INP estimates from field evidence. An idle page or an absent metric is not a pass. Measure graph responsiveness during pan/zoom/path selection at the 24-node limit.
-
-No budget is raised by this checkpoint. Browser decoded-memory/cache caps and sample counts are defined in the versioned configs and owning performance contract; they must not be changed after observing a failing run to force a pass.
-
-## Release contract and approval binding
-
-The static release layout is:
-
-- `/_atlas/current.json`: revalidated pointer with `format_version`, `release_id`, `manifest_path` and `manifest_sha256`.
-- `/_atlas/releases/<release_id>/manifest.json`: immutable release manifest identifying every object, byte size, SHA-256, shard kind and partition coverage.
-- `/_atlas/objects/<sha256>.via3`: immutable content-addressed objects.
-- `/dataset-credits.json` and `/_atlas/credits/<sha256>.json`: revalidated index and immutable reviewed included-dataset notices.
-- `/data-license.txt`: exact approved CC BY-SA 4.0 compiled-data notice, included in the frozen inventory and approval digest.
-
-The client pins one release for the session, validates pointer structure, verifies the manifest against the pointer and objects against the manifest, and fails closed if anything is missing or corrupt. Hashes establish byte integrity against the pinned same-origin metadata; they are not upstream freshness proof. The client never falls back to another release or mixes objects from two releases.
-
-C08 must freeze an acyclic identity chain: derive the release ID from a canonical source-free content descriptor, then serialize the final manifest, hash it, and write the pointer. The release ID must not require hashing a manifest that already embeds that same hash as its ID. Freeze JSON byte canonicalization, path validation, unique manifest entries, object ordering, schema/codec compatibility and bundle-digest inputs. Resolve approval's manifest path through the actual release ID; `releases/current/manifest.json` is not the proposed layout. Approval and provenance-rich reports remain outside the public bundle and cannot create a self-referential artifact digest.
-
-### Static freshness and withdrawal
-
-The source-free aggregate `valid_until` is no later than the earliest applicable expiry among contributing snapshots/items and content-validity bounds, including the stricter subscription lifetime and VRP authorization expiry; it is not `built_at + 720h`. Its encoding is frozen in the release contract. No per-source timestamp, family or expiry list is public.
-
-Schedule refresh and certification early enough to replace the release before this bound. Reevaluate unchanged inputs and known withdrawals; a failed gate must not renew an old release's validity. The browser checks expiry before exposing cached results and after a suspended tab resumes, and clears rendered data when eligibility is lost. Freeze bounded same-origin pointer revalidation in C07 so known withdrawals can invalidate a pinned session; a replacement starts a new fully verified release-pinned session, never an object-by-object fallback. If a replacement cannot qualify, lookups remain unavailable. Static immutable bytes do not remain eligible merely because they are cached.
-
-Publication eligibility is rechecked after preview/approval delays and immediately before promotion. If the candidate has expired, or any contributing source has been withdrawn under current policy, rebuild/repreview/reapprove rather than altering the signed-off manifest or extending its clock.
-
-The normal deployment bundle contains the current and immediate previous eligible releases, sharing identical content-addressed objects. A previous generation that is expired or contains withdrawn/disallowed contributions is not a safe rollback and must not be kept as eligible data merely to reach a generation count. C07 must reconcile that exception with the current two-generation config before implementation; if no safe rollback remains, report that blocker explicitly.
-
-The Pages planner verifies the entire asset inventory, rejects 18,500 or more files or any asset of 24 MiB or more, and checks every manifest entry against the deployed bytes. Count frontend files, control files and both retained generations; reject unreferenced database objects and private extras. Hashed assets and `/_atlas/objects` receive immutable caching; HTML and `current.json` receive revalidation. `/ /ip 302` remains in `_redirects`. A failed bundle or gate leaves the previous successful deployment intact, but cannot extend its data's eligibility beyond expiry or withdrawal.
-
-Production approval is bound to the exact SHA-256 of:
-
-1. `configs/sources.yaml` as reviewed;
-2. `SOURCES_AUDIT.md` as reviewed;
-3. the release manifest as built.
-
-`configs/release-approval.yaml` must be default-deny, record the approver/time, use those exact hashes, and include the derived release ID. The booleans under `requirements` describe required checks; they are not test results. CI must independently verify bound evidence, not trust checked-in `true` values. No workflow may flip approval, alter hashes, or deploy when any required capability, hosted gate, output scan or inventory check fails. A preview and production deployment must use the same candidate artifact digest; rebuilding between approval and production invalidates approval.
-
-Freeze the candidate tree before preview upload. Hosted reports identify its digest and preview deployment ID. After approval, promote the same artifact through an explicit protected production action; branch names or a successful sample-tool workflow are not authorization. Post-deploy read-only checks verify the production pointer/manifest hashes, actual root 302, cache/CSP headers and full object availability. A byte mismatch or missing asset is a failed deployment, even if upload succeeded.
-
-Rollback selects a previously verified immutable artifact only after current freshness, rights, withdrawal and schema checks establish it is still eligible; a historical green run alone is insufficient. Keep that safe artifact until the replacement is verified. Freeze the numeric rollback/private retention windows in C07. Prune objects after retention when no eligible retained release references them, and remove disallowed generations from subsequent deploy trees. If no prior artifact is eligible, fail closed rather than restoring stale data.
-
-## Execution blockers and review disposition
-
-Current execution blockers must be evaluated from actual evidence, not copied from the starting gap register:
-
-- Any required source capability still lacking compatible reviewed rights, original publication proof, a matching observed fixture/current-code certification and surviving authenticated records blocks production. Activating a reviewed subset does not waive missing capabilities or authorize the entire catalog.
-- Real two-family MRT, directed relationships, complete current RPKI, usage and required risk reasons need their actual source-specific proof. An implementation, synthetic fixture or generic positive subset cannot replace missing coverage or full-snapshot completeness.
-- Full real-source runner capacity, cold/changed/unchanged/expiry/withdrawal populations, semantic one-percent mutation, lookup distributions, allocation accounting and versioned baseline comparison need measured evidence on the standard private runner.
-- Full real-query hosted browser populations, observed 24-node responsiveness, accessibility/INP/CLS and the separate worst-case whole-worker memory proof remain mandatory. A sampled heap/RSS diagnostic or earlier synthetic preview is not a pass.
-- The exact complete production candidate needs legal assets, decoded public scans, hosted preview identity/performance, current source revalidation, final exact-artifact approval, live postchecks and an eligible rollback. Missing private infrastructure/bootstrap or insufficient source validity also blocks that execution.
-
-VIA3 layouts, browser codec and the earlier P0 issues have owning contracts and engineering evidence; historical wording does not reopen a completed focused check or declare the entire production plan complete. `docs/implementation-status.md`, the production qualification/evidence guides and exact-head reports distinguish implemented mechanisms, local/synthetic evidence and remaining real-release acceptance.
-
-Numeric quality has no current complete-coverage pair and therefore remains unrated. Under the approved `release-scope-v2` amendment, this optional capability is not a release blocker and receives no invented fallback number. The amendment does not waive another required capability. If any other required capability cannot be sourced under the public-output and rights rules, production stays blocked until it is supported or the user explicitly changes that scope.
-
-## Completion checklist
-
-- [ ] P0 contracts frozen, strict configs validated, impossible states rejected and capability report generated.
-- [ ] All public fields and VIA3 section layouts have deterministic byte-level definitions.
-- [ ] C01-C12 are closed in their owning contracts, including ASN quantities, enum normalization, browser parsing and MRT cold-build independence.
-- [ ] No source is active without a passing fixture, exact publication proof and redistribution rights.
-- [ ] Source withdrawal and staleness remove all contributions and rebuild dependent partitions.
-- [ ] No-change builds, client caches and suspended tabs enforce source/item/release expiry; rollback cannot restore withdrawn data.
-- [ ] Subscription decoders retain only literal public IPs and one evidence family.
-- [ ] Score, confidence, fusion, MOAS, ASN, `/24` and unrated invariants pass.
-- [ ] BGP origins, RPKI, relationships, Tier-1 and graph projection preserve observed semantics.
-- [ ] Go and TypeScript VIA3 readers pass the same golden and corruption corpus.
-- [ ] Every `/ip/*` route, query edge case, theme, responsive width and fail-closed state passes hosted Chrome.
-- [ ] Only same-origin assets and OSM tiles are requested; no query reaches OSM by referrer.
-- [ ] Manifest, object hashes, Pages inventory, file/size limits and public-output scans pass.
-- [ ] RSS, scratch, cold/warm build, lookup and browser performance measurements pass on hosted infrastructure.
-- [ ] Hosted measurement protocols and sample counts are fixed; whole-process/whole-disk peaks and cold-query payload accounting are reported.
-- [ ] Every required capability matrix row is satisfied by approved current real-source coverage; optional numeric quality is explicitly reported as qualified or unrated, with non-null scores obeying the unchanged coverage rules.
-- [ ] Global credits contain exactly the reviewed obligations of included real datasets, with no source IDs/per-IP provenance; immutable/current credit bytes are included in the frozen candidate, scanner, cache and approval checks.
-- [ ] The exact CC BY-SA 4.0 compiled-data notice is included and verified, upstream obligations are compatible, and private engineering artifacts cannot enter public packaging.
-- [ ] Release approval binds the exact source catalog, rights audit and manifest hashes; deployment verifies the preview and production artifact digest matches.
-- [ ] Rollback release remains available until the new release is verified.
-
-The original refinement was a document review only. Its historical disposition did not claim implementation, activation, builds, tests or deployment. The later implementation and scope-v4 checkpoint is recorded in `docs/implementation-status.md`; dated measurements remain in `VALIDATION_REPORT.md` and exact-head evidence. Full current production acceptance and deployment are not claimed here.
+# VanSail IP Atlas production implementation plan
+
+## Current approved scope
+
+`release-scope-v5` (2026-11-15) retains every product view, introduces versioned
+observed risk, permits reviewed required local publisher logos in global credits,
+and authorizes automatic gated publishing from the existing public repository on
+official GitHub runners. `AGENTS.md` is normative. Earlier dated reports remain
+historical evidence, not proof of current source or production qualification.
+
+Compiled data remains CC BY-SA 4.0. Every included source independently needs
+compatible rights, publication proof, an observed parser fixture and required
+credits. Source code and dependencies retain their separate licenses.
+
+## Implementation contracts
+
+- Go ingests approved downloaded bulk files and emits deterministic VIA3 objects.
+  There is no live enrichment API, probe, subscription-host DNS or server runtime.
+- Nuxt 4 generates static Pages assets. Every database object belongs to the same
+  frozen upload; there is no R2 or network lookup fallback.
+- Root returns HTTP 302 to `/ip`. One input opens overview, quality, class-c, BGP
+  and ASN routes. The quality route owns observed risk and retains its deep links.
+  Each view has one canonical fact display; reserved diagnostics stay unimplemented.
+- VIA3 container version 3 carries public schema 4. Go and browser readers reject
+  incompatible schemas and share golden answers and hostile corruption fixtures.
+- No source IDs, provenance, credentials, domains, ports, protocols, collectors,
+  latency, timezone, postal or continent fields enter public facts. Only separate
+  global legal artifacts contain reviewed source credits.
+
+## Sources and freshness
+
+The shortlist contains 14 entries: ten statically admitted and four routing
+candidates. Active is not proof of current availability. Runtime intake binds
+actual bytes, certification, policy and publication clocks before inclusion.
+Tor dated exits and Ipverse dated ASN categories supply observed risk and usage;
+Ipverse role labels never determine Tier-1. Deprecated, stale and unqualified
+lists are removed from the production catalog; useful parser regressions remain.
+
+Two independent MRT path families, directed relationships and a complete RPKI
+snapshot still require full qualification. A software license does not approve
+an upstream dataset. Unknown redistribution obligations block admission. Missing
+required routing coverage blocks production; synthetic data or an allowlist
+cannot replace it. Keep all twelve detection categories implemented, but require
+available verified observations rather than twelve simultaneously active feeds.
+Absent categories remain unknown.
+
+Publication age is at most 720 hours. Retain earlier item and authorization
+expiry. Downloads, mirrors and HTTP 304 cannot renew old observations. Withdrawal
+or expiry retracts dependent contributions. Subscription parsing extracts only
+literal public IPs, strips secrets immediately, stays bounded and deduplicates
+correlated repositories as one evidence family.
+
+## Observed risk and routing
+
+`configs/scoring.yaml` and `docs/scoring.md` define `via-observed-risk-v1`.
+Higher means more supported adverse evidence, neither probability nor safety.
+Preserve signal coefficients, decay, independence, exact/prefix specificity,
+ASN caps and leave-one-out neighbor calculations.
+
+`observedRisk` has nullable score, confidence, reasons, four contributions and
+explicit assessment coverage. No scored positive support yields null. Positive
+support can produce a number with incomplete coverage; rounded positive zero
+displays `<1`. IPv6 omits /24 influence without redistributing its weight. The
+/24 mean includes only scored observed cells and exposes its denominator.
+
+Preserve all MOAS origins and origin-specific RPKI. AS_PATH adjacency does not
+establish a business relationship; conflicts and missing data yield unknown.
+The graph retains actual hop semantics within 24 nodes, two protected hops and
+three backbone exits per second-hop ASN. Tier-1 derives from relationships,
+provider-free status, customer cone and independent visibility. Stability uses
+real authenticated consecutive epochs at least 24 hours apart, never fake clocks.
+
+## Legal assets and frozen candidates
+
+One shared credit display contains only included real datasets' obligations.
+Credit document version 2 permits reviewed bounded local hash-addressed PNGs;
+the index remains version 1. Publisher links and required logos remain visible
+when notices collapse. The browser verifies legal assets before exposing facts.
+No remote logos or query-linked attribution are allowed.
+
+Bind the exact data-license notice, credits, logos, application and database into
+one inventory and candidate digest. Changed bytes require new evidence. Synthetic
+previews have empty dataset credits; real engineering output cannot be published.
+
+## Official hosted delivery
+
+Integration, intake, candidate, preview and promotion use official `ubuntu-24.04`
+runners, pinned toolchains and enforced resource ceilings. Keep the 2 CPU, 8 GiB
+RAM and 14 GiB disk target plus stricter RSS/scratch limits in `docs/performance.md`.
+A physically larger runner does not increase the allowed budget.
+
+1. Integration runs schema, Go tests/vet/race/fuzz, source fixtures, scoring/BGP
+   invariants, Go/TypeScript parity, static generation and browser regressions.
+2. Trusted-main intake restores authenticated encrypted state, revalidates source
+   inputs, persists real Tier-1 epochs and prunes stale data. Only an allowlisted
+   age-encrypted checkpoint crosses jobs; raw secrets and lineage stay private.
+3. Candidate compilation independently qualifies sources, derives benchmark
+   queries from actual indexes, packages every asset and measures build/lookup
+   performance before freezing the immutable tree.
+4. Preview uploads that tree and runs stable Chrome regression, accessibility,
+   disclosure, integrity and performance against the Pages preview URL. Synthetic
+   worst-case worker profiles are engineering stress tests, not real-data proof.
+5. Automatic promotion verifies protected main, exact successful upstream runs,
+   current source rights/deadlines, policy, inventory and every measured gate.
+   Deploy the same frozen bytes and verify live hashes, redirect and headers.
+
+GitHub stores the age identity and Cloudflare token as encrypted secrets; account,
+project and public recipient are variables. Main-only environments do not require
+manual per-candidate review. Policy booleans never substitute for test evidence.
+
+## Measurement, failure and completion
+
+Measure three isolated cold-full, warm-changed, warm-unchanged, expiry and
+withdrawal samples. Change `ceil(N/100)` actual normalized records in isolated
+engineering copies and prove the deltas. Every scenario executes the same
+materializer as production; no benchmark-only shortcut or production receipt.
+Derive lookup strata, map and graph cases from actual current indexes. Report
+p50/p95/p99, allocation counts, RSS, scratch, input size and browser metrics.
+Missing populations, unmeasured bounds and failed original ceilings block release.
+
+Keep fewer than 18,500 files and each asset below 24 MiB. Verify all object hashes,
+public fields and legal assets before upload and on the hosted preview. OSM tiles
+are the sole remote runtime data exception.
+
+A failed candidate preserves the previous deployment. Rollback independently
+revalidates the exact previously verified artifact against current freshness,
+rights, withdrawal and bounded retention. Historical success never renews data.
+Prune unreferenced objects and aged encrypted checkpoints.
+
+Completion evidence includes modified paths, exact commit, hosted run URLs,
+preview and production identity, measured benchmarks and unresolved assumptions.
+Local or synthetic success is not production success. Production is complete only
+when real qualification and all exact-candidate hosted gates pass and live bytes
+verify. See `docs/source-policy.md`, `docs/release.md`,
+`docs/production-qualification.md` and `docs/production-evidence.md` for executable
+source, release and evidence contracts.

@@ -1,0 +1,322 @@
+[{
+    "asn": 1,
+    "metadata": {"handle": "LVLT-1", "description": "Level 3 Parent LLC", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "isp", "networkRole": "access_provider", "registered": "2001-09-20", "lastModified": "2026-08-01"},
+    "stats": {"ipv4": {"prefixes": 8, "prefixesAggregated": 7, "largestPrefix": 22, "totalAddresses": 2816}, "ipv6": null, "connectivity": {"providers": 5, "providerAsns": [7046, 29132, 198941, 262544, 264773], "customers": 1, "peers": 3, "unclassified": 1, "degree": 10, "reach": 1}, "prefixesLastModified": "2026-11-04"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 2,
+    "metadata": {"handle": "UDEL-DCN", "description": "University of Delaware", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "access_provider", "registered": "1991-01-10", "lastModified": "2026-07-01"},
+    "stats": {"ipv4": {"prefixes": 11, "prefixesAggregated": 10, "largestPrefix": 16, "totalAddresses": 84224}, "ipv6": null, "connectivity": {"providers": 9, "providerAsns": [37613, 37628, 41837, 45609, 52752, 61763, 203794, 270792, 327753], "customers": 1, "peers": 0, "unclassified": 6, "degree": 16, "reach": 1}, "prefixesLastModified": "2026-10-31"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 3,
+    "metadata": {"handle": "MIT-GATEWAYS", "description": "Massachusetts Institute of Technology", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "access_provider", "registered": null, "lastModified": "2026-10-01"},
+    "stats": {"ipv4": {"prefixes": 89, "prefixesAggregated": 17, "largestPrefix": 13, "totalAddresses": 1836544}, "ipv6": {"prefixes": 10, "prefixesAggregated": 7, "largestPrefix": 31, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 8, "providerAsns": [174, 3356, 7015, 11164, 11537, 16713, 133296, 138279], "customers": 2, "peers": 3, "unclassified": 6, "degree": 19, "reach": 2}, "prefixesLastModified": "2026-11-01"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 4,
+    "metadata": {"handle": "ISI-AS", "description": "University of Southern California", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "access_provider", "registered": "1984-02-22", "lastModified": "2026-05-01"},
+    "stats": {"ipv4": {"prefixes": 44, "prefixesAggregated": 15, "largestPrefix": 17, "totalAddresses": 66304}, "ipv6": {"prefixes": 9, "prefixesAggregated": 7, "largestPrefix": 32, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 6, "providerAsns": [174, 226, 567, 10886, 30844, 266306], "customers": 2, "peers": 2, "unclassified": 3, "degree": 13, "reach": 2}, "prefixesLastModified": "2026-11-14"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 5,
+    "metadata": {"handle": "SYMBOLICS", "description": "WFA Group LLC", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "business", "networkRole": "stub", "registered": "1984-02-02", "lastModified": "2026-04-01"},
+    "stats": {"ipv4": {"prefixes": 5, "prefixesAggregated": 5, "largestPrefix": 24, "totalAddresses": 1280}, "ipv6": null, "connectivity": {"providers": 4, "providerAsns": [26550, 55839, 269111, 395240], "customers": 0, "peers": 0, "unclassified": 2, "degree": 6, "reach": 0}, "prefixesLastModified": "2026-11-13"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 6,
+    "metadata": {"handle": "BULL-NETWORK", "description": "ATOS IT Solutions and Services, Inc.", "countryCode": "US", "country": "United States", "origin": "overlaid", "category": "hosting", "networkRole": "stub", "registered": "1984-02-02", "lastModified": "2026-10-01"},
+    "stats": {"ipv4": {"prefixes": 32, "prefixesAggregated": 6, "largestPrefix": 16, "totalAddresses": 133376}, "ipv6": null, "connectivity": {"providers": 5, "providerAsns": [3356, 16128, 22773, 37548, 197251], "customers": 0, "peers": 0, "unclassified": 6, "degree": 11, "reach": 0}, "prefixesLastModified": "2026-10-18"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 7,
+    "metadata": {"handle": "DSTL", "description": "The Defence Science and Technology Laboratory", "countryCode": "GB", "country": "United Kingdom", "origin": "authoritative", "category": "education_research", "networkRole": "access_provider", "registered": "2002-05-27", "lastModified": "2026-11-01"},
+    "stats": {"ipv4": {"prefixes": 18, "prefixesAggregated": 11, "largestPrefix": 16, "totalAddresses": 68864}, "ipv6": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 29, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 3, "providerAsns": [786, 327707, 327708], "customers": 1, "peers": 1, "unclassified": 0, "degree": 5, "reach": 7}, "prefixesLastModified": "2026-07-10"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 8,
+    "metadata": {"handle": "RICE-AS", "description": "Rice University", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "access_provider", "registered": "1984-03-26", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 16, "prefixesAggregated": 8, "largestPrefix": 14, "totalAddresses": 462848}, "ipv6": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 32, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 4, "providerAsns": [302, 17400, 40187, 133317], "customers": 7, "peers": 1, "unclassified": 3, "degree": 15, "reach": 8}, "prefixesLastModified": "2026-10-03"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 9,
+    "metadata": {"handle": "CMU-ROUTER", "description": "Carnegie Mellon University", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": "1984-04-17", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 9, "prefixesAggregated": 9, "largestPrefix": 16, "totalAddresses": 134656}, "ipv6": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 32, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 5, "providerAsns": [2153, 3356, 5050, 6461, 399855], "customers": 0, "peers": 0, "unclassified": 0, "degree": 5, "reach": 0}, "prefixesLastModified": "2026-09-02"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 10,
+    "metadata": {"handle": "CSNET-EXT-AS", "description": "CSNET Coordination and Information Center (CSNET-CIC)", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": null, "lastModified": "2026-10-31"},
+    "stats": {"ipv4": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 23, "totalAddresses": 512}, "ipv6": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 48, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 3, "providerAsns": [17400, 48527, 201717], "customers": 0, "peers": 1, "unclassified": 1, "degree": 5, "reach": 0}, "prefixesLastModified": "2026-10-31"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 11,
+    "metadata": {"handle": "HARVARD", "description": "Harvard University", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": null, "registered": "1984-07-04", "lastModified": null},
+    "stats": null,
+    "lastAnnounced": null
+  },{
+    "asn": 12,
+    "metadata": {"handle": "NYU-DOMAIN", "description": "New York University", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "access_provider", "registered": "1984-07-05", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 13, "prefixesAggregated": 9, "largestPrefix": 16, "totalAddresses": 163328}, "ipv6": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 32, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 7, "providerAsns": [137, 3257, 3269, 3356, 3754, 6461, 8220], "customers": 1, "peers": 0, "unclassified": 1, "degree": 9, "reach": 1}, "prefixesLastModified": "2026-07-10"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 13,
+    "metadata": {"handle": "DNIC-AS-00013", "description": "Headquarters USAISC", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "government_admin", "networkRole": "stub", "registered": "1984-07-16", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 7, "prefixesAggregated": 7, "largestPrefix": 16, "totalAddresses": 79104}, "ipv6": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 48, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 1, "providerAsns": [668], "customers": 0, "peers": 0, "unclassified": 0, "degree": 1, "reach": 0}, "prefixesLastModified": "2026-04-27"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 14,
+    "metadata": {"handle": "COLUMBIA-GW", "description": "Columbia University", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": null, "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 11, "prefixesAggregated": 11, "largestPrefix": 16, "totalAddresses": 208896}, "ipv6": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 32, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 3, "providerAsns": [174, 3630, 3754], "customers": 0, "peers": 0, "unclassified": 0, "degree": 3, "reach": 0}, "prefixesLastModified": "2026-03-04"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 15,
+    "metadata": {"handle": "NET-DYNAMICS-EXP", "description": "DYNAMICS", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": null, "networkRole": "stub", "registered": null, "lastModified": "2026-08-01"},
+    "stats": null,
+    "lastAnnounced": null
+  },{
+    "asn": 16,
+    "metadata": {"handle": "LBL", "description": "Lawrence Berkeley National Laboratory", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": null, "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 2, "prefixesAggregated": 2, "largestPrefix": 16, "totalAddresses": 131072}, "ipv6": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 48, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 2, "providerAsns": [293, 2152], "customers": 0, "peers": 1, "unclassified": 0, "degree": 3, "reach": 0}, "prefixesLastModified": "2026-10-16"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 17,
+    "metadata": {"handle": "PURDUE", "description": "Purdue University", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": "1984-08-01", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 9, "prefixesAggregated": 6, "largestPrefix": 15, "totalAddresses": 262912}, "ipv6": {"prefixes": 3, "prefixesAggregated": 2, "largestPrefix": 32, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 2, "providerAsns": [11114, 19782], "customers": 0, "peers": 0, "unclassified": 1, "degree": 3, "reach": 0}, "prefixesLastModified": "2026-11-10"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 18,
+    "metadata": {"handle": "UTEXAS", "description": "University of Texas at Austin", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": "1984-07-27", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 8, "prefixesAggregated": 8, "largestPrefix": 16, "totalAddresses": 299520}, "ipv6": null, "connectivity": {"providers": 3, "providerAsns": [174, 276, 6922], "customers": 0, "peers": 0, "unclassified": 0, "degree": 3, "reach": 0}, "prefixesLastModified": "2026-03-04"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 19,
+    "metadata": {"handle": "LEIDOS-AS", "description": "Leidos Inc.", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "business", "networkRole": "stub", "registered": "1984-07-27", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 26, "prefixesAggregated": 8, "largestPrefix": 16, "totalAddresses": 135168}, "ipv6": {"prefixes": 3, "prefixesAggregated": 1, "largestPrefix": 36, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 3, "providerAsns": [62, 3356, 6461], "customers": 0, "peers": 0, "unclassified": 0, "degree": 3, "reach": 0}, "prefixesLastModified": "2026-05-09"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 20,
+    "metadata": {"handle": "UR", "description": "University of Rochester", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": "1984-07-27", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 3, "prefixesAggregated": 3, "largestPrefix": 16, "totalAddresses": 66048}, "ipv6": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 40, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 4, "providerAsns": [174, 3356, 3630, 3754], "customers": 0, "peers": 0, "unclassified": 0, "degree": 4, "reach": 0}, "prefixesLastModified": "2026-03-04"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 21,
+    "metadata": {"handle": "RAND", "description": "The RAND Corporation", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "business", "networkRole": "stub", "registered": "1984-07-30", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 10, "prefixesAggregated": 9, "largestPrefix": 23, "totalAddresses": 2560}, "ipv6": null, "connectivity": {"providers": 4, "providerAsns": [5650, 7016, 7046, 46887], "customers": 0, "peers": 0, "unclassified": 0, "degree": 4, "reach": 0}, "prefixesLastModified": "2026-03-04"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 22,
+    "metadata": {"handle": "DNIC-AS-00022", "description": "Navy Network Information Center (NNIC)", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "government_admin", "networkRole": "stub", "registered": "1984-07-30", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 5, "prefixesAggregated": 5, "largestPrefix": 16, "totalAddresses": 139520}, "ipv6": {"prefixes": 2, "prefixesAggregated": 2, "largestPrefix": 48, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 1, "providerAsns": [668], "customers": 0, "peers": 0, "unclassified": 0, "degree": 1, "reach": 0}, "prefixesLastModified": "2026-03-04"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 23,
+    "metadata": {"handle": "AS23", "description": "National Aeronautics and Space Administration", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "government_admin", "networkRole": null, "registered": "1984-08-02", "lastModified": null},
+    "stats": null,
+    "lastAnnounced": null
+  },{
+    "asn": 24,
+    "metadata": {"handle": "AS24", "description": "National Aeronautics and Space Administration", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "government_admin", "networkRole": "stub", "registered": "1984-08-03", "lastModified": "2026-10-12"},
+    "stats": {"ipv4": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 16, "totalAddresses": 65536}, "ipv6": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 48, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 3, "providerAsns": [2152, 2153, 7575], "customers": 0, "peers": 2, "unclassified": 2, "degree": 7, "reach": 1}, "prefixesLastModified": "2026-03-04"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 25,
+    "metadata": {"handle": "UCB", "description": "University of California at Berkeley", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": "1984-08-03", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 12, "prefixesAggregated": 11, "largestPrefix": 16, "totalAddresses": 199936}, "ipv6": {"prefixes": 2, "prefixesAggregated": 1, "largestPrefix": 32, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 1, "providerAsns": [2152], "customers": 0, "peers": 0, "unclassified": 0, "degree": 1, "reach": 0}, "prefixesLastModified": "2026-10-07"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 26,
+    "metadata": {"handle": "CORNELL", "description": "Cornell University", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": "1984-08-10", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 6, "prefixesAggregated": 6, "largestPrefix": 16, "totalAddresses": 197376}, "ipv6": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 44, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 5, "providerAsns": [1299, 3630, 3754, 13536, 394019], "customers": 0, "peers": 0, "unclassified": 0, "degree": 5, "reach": 0}, "prefixesLastModified": "2026-03-04"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 27,
+    "metadata": {"handle": "UMDNET", "description": "University of Maryland", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": "1984-08-28", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 5, "prefixesAggregated": 4, "largestPrefix": 16, "totalAddresses": 133632}, "ipv6": {"prefixes": 6, "prefixesAggregated": 5, "largestPrefix": 47, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 0, "providerAsns": [], "customers": 0, "peers": 0, "unclassified": 1, "degree": 1, "reach": 0}, "prefixesLastModified": "2026-06-22"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 28,
+    "metadata": {"handle": "DFVLR-SYS", "description": "Deutsches Zentrum fuer Luft- und Raumfahrt e.V.", "countryCode": "DE", "country": "Germany", "origin": "authoritative", "category": "business", "networkRole": null, "registered": "2002-08-21", "lastModified": null},
+    "stats": null,
+    "lastAnnounced": null
+  },{
+    "asn": 29,
+    "metadata": {"handle": "YALE-AS", "description": "Yale University", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": "1984-09-18", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 6, "prefixesAggregated": 5, "largestPrefix": 16, "totalAddresses": 131840}, "ipv6": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 32, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 3, "providerAsns": [174, 3356, 22742], "customers": 0, "peers": 0, "unclassified": 0, "degree": 3, "reach": 0}, "prefixesLastModified": "2026-03-04"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 30,
+    "metadata": {"handle": "SRI-AICNET", "description": "SRI International", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": null, "networkRole": null, "registered": "1984-09-21", "lastModified": null},
+    "stats": null,
+    "lastAnnounced": null
+  },{
+    "asn": 31,
+    "metadata": {"handle": "CIT", "description": "California Institute of Technology", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": "1984-09-21", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 12, "prefixesAggregated": 5, "largestPrefix": 16, "totalAddresses": 131840}, "ipv6": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 32, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 3, "providerAsns": [2152, 2153, 13335], "customers": 0, "peers": 0, "unclassified": 0, "degree": 3, "reach": 0}, "prefixesLastModified": "2026-03-04"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 32,
+    "metadata": {"handle": "STANFORD", "description": "Stanford University", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": "1984-09-24", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 3, "prefixesAggregated": 3, "largestPrefix": 14, "totalAddresses": 329728}, "ipv6": {"prefixes": 2, "prefixesAggregated": 2, "largestPrefix": 32, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 2, "providerAsns": [2153, 46749], "customers": 0, "peers": 0, "unclassified": 1, "degree": 3, "reach": 0}, "prefixesLastModified": "2026-03-04"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 33,
+    "metadata": {"handle": "HPINC", "description": "HP Inc.", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "business", "networkRole": "stub", "registered": "1984-09-24", "lastModified": "2026-11-01"},
+    "stats": {"ipv4": {"prefixes": 9, "prefixesAggregated": 3, "largestPrefix": 20, "totalAddresses": 4608}, "ipv6": null, "connectivity": {"providers": 1, "providerAsns": [7018], "customers": 0, "peers": 1, "unclassified": 1, "degree": 3, "reach": 1}, "prefixesLastModified": "2026-08-13"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 34,
+    "metadata": {"handle": "UDELNET", "description": "University of Delaware", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": "1984-10-03", "lastModified": "2026-10-12"},
+    "stats": {"ipv4": {"prefixes": 2, "prefixesAggregated": 2, "largestPrefix": 16, "totalAddresses": 65792}, "ipv6": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 32, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 5, "providerAsns": [174, 3630, 3754, 33287, 33659], "customers": 0, "peers": 0, "unclassified": 1, "degree": 6, "reach": 1}, "prefixesLastModified": "2026-03-04"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 35,
+    "metadata": {"handle": "MITRE-AS-1", "description": "The MITRE Corporation", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "business", "networkRole": "stub", "registered": null, "lastModified": "2026-04-01"},
+    "stats": {"ipv4": {"prefixes": 9, "prefixesAggregated": 8, "largestPrefix": 16, "totalAddresses": 136448}, "ipv6": null, "connectivity": {"providers": 1, "providerAsns": [3356], "customers": 0, "peers": 0, "unclassified": 0, "degree": 1, "reach": 0}, "prefixesLastModified": "2026-03-04"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 36,
+    "metadata": {"handle": "EGP-TESTOR", "description": "SRI International", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": null, "networkRole": null, "registered": "1985-01-04", "lastModified": null},
+    "stats": null,
+    "lastAnnounced": null
+  },{
+    "asn": 37,
+    "metadata": {"handle": "DNIC-AS-00037", "description": "Navy Network Information Center (NNIC)", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "government_admin", "networkRole": "stub", "registered": "1985-01-04", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 17, "prefixesAggregated": 5, "largestPrefix": 16, "totalAddresses": 69632}, "ipv6": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 48, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 1, "providerAsns": [668], "customers": 0, "peers": 0, "unclassified": 0, "degree": 1, "reach": 0}, "prefixesLastModified": "2026-03-04"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 38,
+    "metadata": {"handle": "UIUC", "description": "University of Illinois", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": "1985-01-24", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 6, "prefixesAggregated": 4, "largestPrefix": 16, "totalAddresses": 212992}, "ipv6": {"prefixes": 3, "prefixesAggregated": 2, "largestPrefix": 28, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 2, "providerAsns": [11537, 40387], "customers": 0, "peers": 0, "unclassified": 0, "degree": 2, "reach": 0}, "prefixesLastModified": "2026-08-29"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 39,
+    "metadata": {"handle": "DNIC-AS-00039", "description": "United States Department of Defense (DoD)", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "government_admin", "networkRole": null, "registered": "1985-02-08", "lastModified": null},
+    "stats": null,
+    "lastAnnounced": null
+  },{
+    "asn": 40,
+    "metadata": {"handle": "MIT-TEST", "description": "Massachusetts Institute of Technology", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": "1985-02-28", "lastModified": null},
+    "stats": null,
+    "lastAnnounced": null
+  },{
+    "asn": 41,
+    "metadata": {"handle": "AS41", "description": "National Aeronautics and Space Administration", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "government_admin", "networkRole": null, "registered": "1985-02-20", "lastModified": null},
+    "stats": null,
+    "lastAnnounced": null
+  },{
+    "asn": 42,
+    "metadata": {"handle": "WOODYNET-1", "description": "WoodyNet Inc.", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "hosting", "networkRole": "midsize_transit", "registered": "2001-05-16", "lastModified": "2026-10-01"},
+    "stats": {"ipv4": {"prefixes": 200, "prefixesAggregated": 92, "largestPrefix": 20, "totalAddresses": 57088}, "ipv6": {"prefixes": 205, "prefixesAggregated": 91, "largestPrefix": 43, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 15, "providerAsns": [1299, 2914, 3320, 3356, 3741, 6797, 7717, 15802, 37474, 39686, 47498, 50869, 51095, 58115, 196959], "customers": 9, "peers": 1495, "unclassified": 6, "degree": 1525, "reach": 11}, "prefixesLastModified": "2026-11-15"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 43,
+    "metadata": {"handle": "BNL-AS", "description": "Brookhaven National Laboratory", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": "1985-04-11", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 5, "prefixesAggregated": 5, "largestPrefix": 16, "totalAddresses": 66560}, "ipv6": {"prefixes": 3, "prefixesAggregated": 3, "largestPrefix": 44, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 1, "providerAsns": [293], "customers": 0, "peers": 0, "unclassified": 0, "degree": 1, "reach": 0}, "prefixesLastModified": "2026-03-04"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 44,
+    "metadata": {"handle": "S1-DOMAIN", "description": "Lawrence Livermore National Laboratory", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": "1985-06-05", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 6, "prefixesAggregated": 6, "largestPrefix": 18, "totalAddresses": 23552}, "ipv6": null, "connectivity": {"providers": 1, "providerAsns": [293], "customers": 0, "peers": 0, "unclassified": 0, "degree": 1, "reach": 0}, "prefixesLastModified": "2026-03-04"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 45,
+    "metadata": {"handle": "LLL-TIS-AS", "description": "Lawrence Livermore National Laboratory", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": "1985-07-03", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 11, "prefixesAggregated": 10, "largestPrefix": 16, "totalAddresses": 175360}, "ipv6": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 40, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 1, "providerAsns": [293], "customers": 0, "peers": 0, "unclassified": 0, "degree": 1, "reach": 0}, "prefixesLastModified": "2026-03-04"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 46,
+    "metadata": {"handle": "RUTGERS", "description": "Rutgers The State University", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": "1985-08-16", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 9, "prefixesAggregated": 7, "largestPrefix": 16, "totalAddresses": 197632}, "ipv6": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 46, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 4, "providerAsns": [1299, 11164, 11537, 21976], "customers": 0, "peers": 1, "unclassified": 0, "degree": 5, "reach": 0}, "prefixesLastModified": "2026-03-04"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 47,
+    "metadata": {"handle": "USC-AS", "description": "University of Southern California", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": "1985-08-16", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 17, "prefixesAggregated": 4, "largestPrefix": 16, "totalAddresses": 67072}, "ipv6": null, "connectivity": {"providers": 3, "providerAsns": [226, 567, 2153], "customers": 0, "peers": 0, "unclassified": 0, "degree": 3, "reach": 0}, "prefixesLastModified": "2026-03-04"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 48,
+    "metadata": {"handle": "DNIC-AS-00048", "description": "Navy Network Information Center (NNIC)", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "government_admin", "networkRole": "stub", "registered": "1985-08-28", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 2, "prefixesAggregated": 2, "largestPrefix": 16, "totalAddresses": 131072}, "ipv6": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 48, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 1, "providerAsns": [668], "customers": 0, "peers": 0, "unclassified": 0, "degree": 1, "reach": 0}, "prefixesLastModified": "2026-10-13"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 49,
+    "metadata": {"handle": "US-NATIONAL-INSTITUTE-OF-STANDARDS-AND-TECHNOLOGY", "description": "National Institute of Standards and Technology", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": "1985-09-04", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 23, "prefixesAggregated": 12, "largestPrefix": 17, "totalAddresses": 65536}, "ipv6": {"prefixes": 7, "prefixesAggregated": 5, "largestPrefix": 37, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 3, "providerAsns": [3356, 3477, 13335], "customers": 0, "peers": 0, "unclassified": 0, "degree": 3, "reach": 0}, "prefixesLastModified": "2026-04-21"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 50,
+    "metadata": {"handle": "ORNL-MSRNET", "description": "Oak Ridge National Laboratory", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": "1985-09-20", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 10, "prefixesAggregated": 10, "largestPrefix": 16, "totalAddresses": 133632}, "ipv6": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 44, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 2, "providerAsns": [293, 10490], "customers": 0, "peers": 0, "unclassified": 0, "degree": 2, "reach": 0}, "prefixesLastModified": "2026-03-04"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 51,
+    "metadata": {"handle": "DNIC-AS-00051", "description": "Headquarters USAISC", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "government_admin", "networkRole": null, "registered": "1985-10-09", "lastModified": null},
+    "stats": null,
+    "lastAnnounced": null
+  },{
+    "asn": 52,
+    "metadata": {"handle": "UCLA", "description": "University of California Los Angeles", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": "1985-10-24", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 10, "prefixesAggregated": 10, "largestPrefix": 16, "totalAddresses": 328960}, "ipv6": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 32, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 2, "providerAsns": [2152, 2153], "customers": 0, "peers": 0, "unclassified": 0, "degree": 2, "reach": 0}, "prefixesLastModified": "2026-07-24"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 53,
+    "metadata": {"handle": "NORTHROP-AS", "description": "Northrop Grumman Corporation - Automation Sciences Laboratory", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": null, "registered": "1985-12-24", "lastModified": null},
+    "stats": null,
+    "lastAnnounced": null
+  },{
+    "asn": 54,
+    "metadata": {"handle": "DNIC-AS-00054", "description": "Headquarters USAISC", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "government_admin", "networkRole": null, "registered": "1985-12-24", "lastModified": null},
+    "stats": null,
+    "lastAnnounced": null
+  },{
+    "asn": 55,
+    "metadata": {"handle": "UPENN", "description": "University of Pennsylvania", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "access_provider", "registered": "1985-12-18", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 5, "prefixesAggregated": 5, "largestPrefix": 16, "totalAddresses": 262400}, "ipv6": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 32, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 4, "providerAsns": [174, 3356, 11164, 11537], "customers": 1, "peers": 0, "unclassified": 1, "degree": 6, "reach": 2}, "prefixesLastModified": "2026-03-04"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 56,
+    "metadata": {"handle": "DNIC-AS-00056", "description": "United States Department of Defense (DoD)", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "government_admin", "networkRole": "stub", "registered": "1985-12-18", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 926, "prefixesAggregated": 420, "largestPrefix": 14, "totalAddresses": 7780096}, "ipv6": null, "connectivity": {"providers": 0, "providerAsns": [], "customers": 0, "peers": 0, "unclassified": 2, "degree": 2, "reach": 0}, "prefixesLastModified": "2026-11-15"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 57,
+    "metadata": {"handle": "NL-GIGAPOP", "description": "University of Minnesota", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "midsize_transit", "registered": "1985-12-18", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 4, "prefixesAggregated": 4, "largestPrefix": 21, "totalAddresses": 2816}, "ipv6": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 32, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 7, "providerAsns": [1299, 2381, 3257, 6939, 11164, 11537, 64289], "customers": 20, "peers": 5, "unclassified": 1, "degree": 33, "reach": 32}, "prefixesLastModified": "2026-03-04"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 58,
+    "metadata": {"handle": "SSC-299-Z-58", "description": "Shared Services Canada", "countryCode": "CA", "country": "Canada", "origin": "authoritative", "category": "business", "networkRole": null, "registered": "1985-12-18", "lastModified": null},
+    "stats": null,
+    "lastAnnounced": null
+  },{
+    "asn": 59,
+    "metadata": {"handle": "WISC-MADISON-AS", "description": "University of Wisconsin Madison", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": "1986-01-21", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 16, "prefixesAggregated": 12, "largestPrefix": 15, "totalAddresses": 331008}, "ipv6": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 32, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 3, "providerAsns": [3128, 11164, 11537], "customers": 0, "peers": 2, "unclassified": 0, "degree": 5, "reach": 0}, "prefixesLastModified": "2026-05-30"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 60,
+    "metadata": {"handle": "AINET-AS60", "description": "American Information Network", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "hosting", "networkRole": "stub", "registered": "1986-02-12", "lastModified": "2026-10-12"},
+    "stats": {"ipv4": {"prefixes": 7, "prefixesAggregated": 7, "largestPrefix": 19, "totalAddresses": 13568}, "ipv6": {"prefixes": 1, "prefixesAggregated": 1, "largestPrefix": 32, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 2, "providerAsns": [3356, 6461], "customers": 0, "peers": 0, "unclassified": 1, "degree": 3, "reach": 4}, "prefixesLastModified": "2026-10-03"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 61,
+    "metadata": {"handle": "DEC-MARLBORO-AS", "description": "Air Force Systems Networking", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "government_admin", "networkRole": null, "registered": "1986-02-18", "lastModified": null},
+    "stats": null,
+    "lastAnnounced": null
+  },{
+    "asn": 62,
+    "metadata": {"handle": "CONE", "description": "CyrusOne LLC", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "hosting", "networkRole": "midsize_transit", "registered": "2012-09-28", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 161, "prefixesAggregated": 99, "largestPrefix": 18, "totalAddresses": 152320}, "ipv6": {"prefixes": 10, "prefixesAggregated": 7, "largestPrefix": 32, "totalAddresses": 9223372036854775807}, "connectivity": {"providers": 4, "providerAsns": [174, 3257, 3356, 6461], "customers": 72, "peers": 11, "unclassified": 3, "degree": 90, "reach": 77}, "prefixesLastModified": "2026-11-13"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 63,
+    "metadata": {"handle": "LL-MI", "description": "Massachusetts Institute of Technology", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "education_research", "networkRole": "stub", "registered": "1986-02-24", "lastModified": "2026-03-04"},
+    "stats": {"ipv4": {"prefixes": 6, "prefixesAggregated": 5, "largestPrefix": 16, "totalAddresses": 67584}, "ipv6": null, "connectivity": {"providers": 3, "providerAsns": [11164, 11537, 13789], "customers": 0, "peers": 0, "unclassified": 0, "degree": 3, "reach": 0}, "prefixesLastModified": "2026-03-04"},
+    "lastAnnounced": "2026-11-15"
+  },{
+    "asn": 64,
+    "metadata": {"handle": "MITRE-AS-2", "description": "The MITRE Corporation", "countryCode": "US", "country": "United States", "origin": "authoritative", "category": "business", "networkRole": null, "registered": "1986-03-04", "lastModified": null},
+    "stats": null,
+    "lastAnnounced": null
+  }
+]

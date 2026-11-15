@@ -338,11 +338,11 @@ def measure(plan: dict, private: Path, atlas_binary: Path, report: dict | None =
             metadata = workspace / "build-private/software-license-metadata.json"
             metadata.parent.mkdir(parents=True, exist_ok=True)
             with metadata.open("wb") as output:
-                if command(["npm", "exec", "--yes", "--package", "pnpm@12.18.0", "--", "pnpm", "--dir", "web", "licenses", "list", "--prod", "--json"], workspace, metric, stdout=output):
+                if command(["npm", "exec", "--yes", "--package", "pnpm@11.28.12", "--", "pnpm", "--dir", "web", "licenses", "list", "--prod", "--json"], workspace, metric, stdout=output):
                     raise ContractError("measurement software notice metadata failed")
             for args in (["python", "tools/release_contract/software_licenses.py"],
-                ["npm", "exec", "--yes", "--package", "pnpm@12.18.0", "--", "pnpm", "--dir", "web", "typecheck"],
-                ["npm", "exec", "--yes", "--package", "pnpm@12.18.0", "--", "pnpm", "--dir", "web", "generate"],
+                ["npm", "exec", "--yes", "--package", "pnpm@11.28.12", "--", "pnpm", "--dir", "web", "typecheck"],
+                ["npm", "exec", "--yes", "--package", "pnpm@11.28.12", "--", "pnpm", "--dir", "web", "generate"],
                 ["python", "tools/release_contract/software_licenses.py", "--bundle-audit", "build-private/software-bundle-audit.json", "--require-runtime-review"],
                 ["python", "tools/release_contract/prepare_static.py", "--atlas", str(atlas), "--qualification-receipt", str(receipt)]):
                 allocation = None
@@ -367,9 +367,65 @@ def measure(plan: dict, private: Path, atlas_binary: Path, report: dict | None =
     return report
 
 
+def measure_replay(atlas_binary: Path, report: dict) -> None:
+    """Replay authenticated real input through the native engineering compiler.
+
+    The mutation output is engineering-only. It cannot qualify a source, become
+    a production receipt, or enter the frozen public candidate.
+    """
+    profile_path = os.environ.get('ATLAS_RUNNER_PROFILE')
+    if sys.platform != 'linux' or not profile_path:
+        raise ContractError('official hosted cgroup execution profile required')
+    report['execution_envelope'] = json.loads(read_private(Path(profile_path)))
+    report['execution_host'] = {'logical_cpus': os.cpu_count(),
+        'memory_bytes': os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES'),
+        'disk_bytes': shutil.disk_usage(ROOT).total}
+    receipt = json.loads(read_private(ROOT/'.atlas-private/production-receipt.json'))
+    clock = receipt['evaluated_at']
+    plan = {'version': 2, 'scope': 'authenticated-real-input-engineering-benchmark',
+        'clock': clock, 'baseline': receipt['normalized_state_sha256'],
+        'scenarios': list(BUILD_SCENARIOS), 'samples': 3, 'changed_records': 'max(1,ceil(N/100))'}
+    report['benchmark_plan_sha256'] = sha256(canonical_bytes(plan))
+    report['measurement_scope'] = plan['scope']
+    report['resource_accounting'] = {'scope':'entire-child-process-group','poll_ms':100,
+        'scratch_scope':'all-baseline-inputs-and-isolated-replay-output','blind_spots':'procfs-between-poll-peaks; cgroup peak recorded separately'}
+    for name in BUILD_SCENARIOS:
+        for sample in (1,2,3):
+            with tempfile.TemporaryDirectory(prefix='benchmark-', dir=ROOT/'build-private') as directory:
+                target = Path(directory)/'workspace'
+                argv = [str(atlas_binary),'benchmark-state','-workspace',str(ROOT),'-out',str(target),
+                        '-scenario',name,'-clock',str(clock)]
+                if name != 'cold_full' and command([*argv,'-prepare'], ROOT):
+                    raise ContractError('authenticated engineering baseline preparation failed')
+                metric = {'scenario':name,'sample':sample,'measurement_scope':plan['scope'],
+                    'process_group_peak_rss_bytes':0,'scratch_peak_bytes':0,
+                    'physical_free_low_water_bytes':shutil.disk_usage(ROOT).free,
+                    'allocation_count':0,'allocated_bytes':0,'allocation_process_count':0,
+                    'allocation_scope':GO_ALLOCATION_SCOPE,'go_processes':[],'go_invocations':[],
+                    'allocation_exclusions':'non-Go orchestration and baseline preparation'}
+                metric['_go_metrics_root'] = tempfile.mkdtemp(prefix='benchmark-metrics-',dir=ROOT/'.atlas-private')
+                metric['_started'] = time.monotonic()
+                report['scenarios'].append(metric)
+                result_path=Path(directory)/'measurement.json'
+                with result_path.open('wb') as output:
+                    result=command(argv,ROOT,metric,stdout=output,atlas_commands={'benchmark-state':1},phase='benchmark-state')
+                if result:
+                    raise ContractError('authenticated engineering benchmark failed')
+                observed=json.loads(read_private(result_path))
+                if (observed.get('schema_version')!=1 or observed.get('scope')!=plan['scope']
+                        or observed.get('scenario')!=name or observed.get('before_state_sha256')!=plan['baseline']):
+                    raise ContractError('engineering replay does not bind authentic baseline')
+                allowed=('input_records','normalized_input_bytes','before_state_sha256','after_state_sha256',
+                         'release_id','compile_exit_code','transition')
+                metric.update({key:observed[key] for key in allowed})
+                metric['runtime_ms']=(time.monotonic()-metric.pop('_started'))*1000
+                finish_go_metrics(metric)
+                print(f'Authenticated engineering {name} sample {sample}/3 measured')
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--plan", type=Path, default=ROOT / ".atlas-private/production-benchmark-plan.json")
+    parser.add_argument("--plan", type=Path, help="legacy reviewed scenario plan; default derives authenticated replay cases")
     parser.add_argument("--atlas-binary", type=Path, required=True)
     parser.add_argument("--candidate-report", type=Path, default=ROOT / "reports/static-candidate.json")
     parser.add_argument("--lookup-report", type=Path, default=ROOT / "reports/production-lookup.json")
@@ -377,9 +433,12 @@ def main() -> int:
     args = parser.parse_args()
     report = {"scope": "hosted-production-build-v1", "mode": "production", "errors": [], "scenarios": []}
     try:
-        plan_bytes = read_private(args.plan)
-        measure(json.loads(plan_bytes), args.plan.parent, args.atlas_binary.resolve(strict=True), report)
-        report["benchmark_plan_sha256"] = sha256(plan_bytes)
+        if args.plan:
+            plan_bytes = read_private(args.plan)
+            measure(json.loads(plan_bytes), args.plan.parent, args.atlas_binary.resolve(strict=True), report)
+            report["benchmark_plan_sha256"] = sha256(plan_bytes)
+        else:
+            measure_replay(args.atlas_binary.resolve(strict=True), report)
         candidate = json.loads(read_private(args.candidate_report))
         if candidate["mode"] != "production":
             raise ContractError("synthetic candidate cannot bind production resource measurements")

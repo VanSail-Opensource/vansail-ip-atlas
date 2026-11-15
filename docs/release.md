@@ -1,17 +1,14 @@
-# Release and deployment contract v3.3 (compiled-data license amendment)
+# Release and deployment contract v5 (automatic verified delivery)
 
 This contract freezes C07/C08; its executable vectors are
 `tools/release_contract/test_contracts.py`. Passing these vectors does not certify
 a real dataset, a complete binary scanner, a hosted preview or a production release.
 
-Current `release-scope-v4` (user-approved 2026-11-09) distributes compiled database
-material under CC BY-SA 4.0 with the exact notice in `DATA_LICENSE.md` and its
-dedicated public asset. It retains v3's reviewed global dataset credits and v2's
-optional numeric quality with unchanged per-score qualification. Complete
-negative risk feeds are not a release prerequisite. Each source still needs
-compatible reviewed rights and actual current source qualification; this product
-license activates no source. Source code and dependency licenses stay separate.
-No source/provenance field is added to VIA3 or lookup answers.
+Current `release-scope-v5` preserves CC BY-SA 4.0 compiled-data licensing while
+adding public schema 4 observed risk, verified global publisher logos, encrypted
+private-state transport and automatic promotion under reviewed policy. Source rights
+remain individually reviewed and current; no license or policy revision activates
+a source. Source code and dependency licenses stay separate.
 
 ## Identity and canonical bytes
 
@@ -31,7 +28,7 @@ The descriptor has exactly these keys:
 
 | Key | Encoding |
 |---|---|
-| `format_version`, `schema_version` | Integer `3` |
+| `format_version`, `schema_version` | Integer `3`, integer `4` respectively |
 | `codec` | `zstd-1` |
 | `mode` | Public candidates: `synthetic` or `production`; synthetic cannot be approved. Private `engineering` artifacts are never publishable. |
 | `valid_from` | Nonnegative UTC Unix seconds; evaluation clock, not an upstream clock |
@@ -259,60 +256,45 @@ binary dictionary and freezes the complete tree. Its source-free report contains
 the private receipt SHA-256, never its source IDs or proof details. Packaging does
 not grant approval. No report is stored in the public tree.
 
-Approval schema v3 remains default-deny. It binds `source_catalog_sha256`,
-`rights_audit_sha256`, `release_manifest_sha256`, `candidate_bundle_sha256`,
-`evidence_sha256`, `release_id`, named `approver` and UTC `approved_at`.
-`approval_scope.release_manifest_template` resolves `{release_id}` after validating
-the ID; it is never `releases/current/manifest.json`. The evidence digest covers
-the private immutable acceptance packet with candidate digest, preview deployment
-ID, exact revision/config hashes and every required report. `requirements: true`
-is policy, not evidence. `verify_approval` checks identity binding only; it cannot
-replace independent report verification, production capabilities or current rights.
+Automatic production authorization is defined by `configs/production-policy.json`
+and recomputed by `promotion.py --automatic`. It requires successful exact-head
+integration/candidate/preview runs, current source-store qualification, every raw
+measurement gate, protected main and a main-only production environment. The legacy
+manual approval validator remains available only for historical contract fixtures;
+it is not the active release path. Policy booleans alone are never evidence.
 
-The production workflows are manual main-branch operations; no push/schedule can
-promote production. `production-candidate.yml` requires successful exact-head
-integration and qualified real inputs; `production-preview.yml` deploys the exact
-frozen artifact to an immutable preview and runs the full production harness.
-`production-promotion.yml` requires an independently approved acceptance packet,
-current private source receipts and a reviewer-protected `atlas-production`
-environment with protected main and self-review disabled. The verifier checks the
-actual GitHub environment policy rather than treating an environment name as proof.
-These workflows require a privately provisioned ephemeral runner labelled
-`atlas-private-2cpu-8g-14g`; the resource report independently checks its actual
-CPU/memory/disk. Merely adding a label cannot meet the capacity gate.
+Official `ubuntu-24.04` intake starts on main push, hourly at minute 17 or manual
+recovery and waits for exact-head integration success. Candidate, preview and
+promotion follow through three `workflow_run` levels. Enforced cgroup limits and
+workspace accounting establish the 2-CPU/8-GiB/14-GiB workload budget independently
+of the public runner's larger physical host. No self-hosted label is used.
 
-`promotion.py` retrieves successful exact-head main integration/candidate/preview
-runs from GitHub, verifies originating run IDs plus API artifact sizes/SHA-256 and
-reads an exact source-free report allowlist from the archives. Locally edited
-reports cannot substitute for archived trusted bytes. It derives every mandatory
-gate from raw measurements, rechecks source eligibility/withdrawal/expiry, all
-decoded binaries, exact global credit completeness and the entire live preview.
-Only then can the named UTC approval bind the canonical packet, catalog, rights,
-manifest and complete candidate digest. Approval must be dated after the packet
-and before promotion. The approved result exposes the separate `pages_release`
-capability; source qualification alone never satisfies that row.
+The candidate is compiled once and frozen with the full inventory, data license,
+credits and required local publisher logo hashes. The preview deploys those bytes
+and runs all hosted checks. Promotion retrieves immutable GitHub evidence archives,
+validates API artifact IDs/digests, recomputes all gates, reopens the authenticated
+source store, rechecks every public object and the live preview, and verifies main
+has not changed. The canonical acceptance packet binds the catalog, rights,
+receipt, release, bundle, preview and exact evidence identities.
 
-`pages.py` performs bounded REST Direct Upload using an ephemeral asset JWT held
-only in memory. It verifies exact bytes before/after asset preparation and rechecks
-approval/current qualification immediately before creating production. No build,
-CSP rewrite, credit edit or timestamp normalization occurs during promotion.
-Postchecks verify every served file and effective root 302/cache/CSP policy on both
-the immutable deployment URL and actual production Pages alias. Upload success
-alone is insufficient. If these checks fail, the workflow may restore only the
-independently approved, original production deployment after current rights,
-complete served bytes, original hosted reports and the strict 48-hour rollback
-bound are reverified. Missing eligible rollback state is reported as unavailable;
-it cannot cause restoration of stale, withdrawn or synthetic records.
+`pages.py` uploads through the Cloudflare REST API with credentials and ephemeral
+asset JWTs kept out of logs. It rechecks authorization immediately before creating
+production, then verifies every served file, effective control policy and the
+production alias. No rebuild, legal edit or timestamp change occurs during promotion.
+A known failed new deployment may restore only a previously verified original
+production artifact that independently passes current rights, expiry, hosted
+reports and the 48-hour rollback bound. Otherwise rollback is unavailable.
 
-The private bootstrap must supply observed source fixtures, original authenticated
-state/receipt and the versioned real query/scenario corpus. Do not download current
-mutable upstream bytes and assume they reproduce an earlier receipt. Do not move
-these files through public Actions artifacts. Candidate/preview/promotion upload
-only explicit source-free reports and the already-scanned public tree. The private
-bootstrap is erased from the ephemeral checkout after the job; permitted original
-audit state is retained separately within the rights/expiry/168-hour bounds below.
-Missing bootstrap, required runner protection, measurements, current sources or
-approval fails closed. The repository approval remains disabled by default.
+Authenticated state crosses ephemeral jobs only inside pinned age encrypted
+checkpoint artifacts. The closed source-free envelope binds producer/run/revision,
+key ID, ciphertext hash/length and expiry. Original normalized partitions, seals,
+clocks, Tier-1 history and private corpus remain encrypted; subscription raw bytes,
+quarantine, locks and scratch are excluded. Plaintext is removed after each job.
+The checkpoint expires by the earliest current source deadline and at most seven
+days; automated cleanup deletes expired ciphertext using its small source-free
+index. Missing state triggers real reacquisition and history warm-up, never an
+assumed reconstruction of old mutable upstream bytes. See
+[production evidence](production-evidence.md) for exact workflows and boundaries.
 
 ## Retention and rollback
 

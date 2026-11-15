@@ -94,6 +94,8 @@ class AcceptanceTests(unittest.TestCase):
 
     def test_overshoot_one_build_sample_fails_maximum_gate(self):
         data = {"scope": "hosted-production-build-v1", "mode": "production", "errors": [],
+                "execution_envelope": {'scope':'github-hosted-cgroup-v2','cpu_quota_us':200000,
+                    'cpu_period_us':100000,'memory_max_bytes':8*1024**3,'swap_max_bytes':0,'workspace_limit_bytes':14*1024**3},
                 "execution_host": {"logical_cpus": 2, "memory_bytes": 8 * 1024**3, "disk_bytes": 14 * 1024**3},
                 "scenarios": [{"scenario": "cold_full", "runtime_ms": value,
                     "process_group_peak_rss_bytes": 100, "scratch_peak_bytes": 100}
@@ -101,6 +103,11 @@ class AcceptanceTests(unittest.TestCase):
         gates = build_gates(data)
         self.assertEqual(gates["standard_runner"], "passed")
         self.assertEqual(gates["cold_full_runtime"], "failed")
+
+    def test_runner_claims_without_kernel_envelope_are_not_capacity_evidence(self):
+        report={'scope':'hosted-production-build-v1','mode':'production','errors':[],
+            'execution_host':{'logical_cpus':2,'memory_bytes':8*1024**3,'disk_bytes':14*1024**3}}
+        self.assertEqual(build_gates(report)['standard_runner'],'unmeasured')
 
     def test_real_transition_counts_and_exact_baseline_corpus_are_required(self):
         state, release = 'a' * 64, 'b' * 64

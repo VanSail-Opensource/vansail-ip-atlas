@@ -6,7 +6,7 @@ the Pages public tree. The scripts do not activate sources or deploy anything.
 Pinned tools are in `toolchains.json` and the package/Go lockfiles. `web/package.json`
 and `web/pnpm-lock.yaml` freeze frontend dependencies. Chrome is deliberately the current stable branded
 channel; record its exact version on every run rather than freezing an obsolete
-browser. The pinned Node baseline is 26.13.0; record the actual Node version with
+browser. The pinned Node baseline is 26.13.1; record the actual Node version with
 each report. A local Chrome or Node run does not establish hosted acceptance.
 
 From the repository root:
@@ -26,8 +26,8 @@ Install the harness with the exact package manager and frozen lockfile:
 
 ```powershell
 cd tools/hosted
-npm exec --yes --package pnpm@12.18.0 -- pnpm install --frozen-lockfile --ignore-scripts
-npm exec --yes --package pnpm@12.18.0 -- pnpm exec playwright install chrome
+npm exec --yes --package pnpm@11.28.12 -- pnpm install --frozen-lockfile --ignore-scripts
+npm exec --yes --package pnpm@11.28.12 -- pnpm exec playwright install chrome
 ```
 
 `codec-probe.mjs` preserves the native diagnostic, which failed on local Chrome
@@ -106,11 +106,18 @@ does not claim that it has run; consult the exact revision's actual Actions resu
 
 ## Qualified production harness
 
-The separate `production-build.py`, `lookupbench`, and
-`production-browser.mjs` consume real privately provisioned inputs. They do not
-activate sources or reuse synthetic reports as acceptance. See
-[`docs/production-evidence.md`](../../docs/production-evidence.md) for the closed
-private corpus/scenario/receipt and source-free evidence contracts. Production
-workflows are manual, require current Go source-store revalidation and preserve
-the exact preview artifact through promotion. Worker worst-case memory proof is
-still explicitly unmeasured by the process-tree RSS diagnostic.
+The official-runner pipeline is intake, candidate, immutable Pages preview and
+policy-gated automatic promotion. No private runner bootstrap is required.
+`checkpoint.py` transports authenticated state with age encryption and explicit
+trusted-main artifact binding; raw private state and logs never enter public artifacts.
+`production-build.py` generates fifteen sequential engineering replay cases from
+sealed real input; `atlas corpus` derives the real 10,000-query population.
+`worker_memory.py` launches the entire Chrome tree in a fresh cgroup from birth
+and runs the exact worker against the accepted maximum-profile fixture. The usual
+process-tree RSS report remains diagnostic and never replaces this proof.
+
+`runner_budget.py` enforces the 2-CPU/8-GiB cgroup and 14-GiB task storage budget.
+All gates retain their existing thresholds. A missing population, actual failure
+or unsupported source capability blocks automatic promotion. See
+[production evidence](../../docs/production-evidence.md) and
+[release contract](../../docs/release.md) for the workflow, retention and rollback.

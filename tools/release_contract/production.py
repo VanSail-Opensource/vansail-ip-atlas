@@ -120,7 +120,7 @@ def qualify(receipt_path: Path, atlas: Path, now: int, *, workspace: Path = ROOT
         "normalization_config_sha256", "implementation_sha256", "certification_sha256", "normalized_state_sha256",
         "source_capabilities_sha256", "included_sources"}, "production receipt")
     if (receipt["schema_version"] != 1 or type(receipt["schema_version"]) is not int
-            or receipt["release_scope"] != "release-scope-v4" or receipt["mode"] != "production"):
+            or receipt["release_scope"] != "release-scope-v5" or receipt["mode"] != "production"):
         _fail("unsupported production qualification scope")
     for name, value in receipt.items():
         if name.endswith("_sha256") or name == "release_id":

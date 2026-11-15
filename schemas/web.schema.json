@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:vansail:contract:web:3:2",
+  "$id": "urn:vansail:contract:web:3:3",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -175,11 +175,12 @@
                 "owner_of": {
                   "type": "array",
                   "const": [
-                    "quality_state",
-                    "quality_score",
+                    "observed_risk_state",
+                    "observed_risk_score",
                     "score_reasons",
                     "classification_reasons",
-                    "layer_contributions"
+                    "layer_contributions",
+                    "assessment_coverage"
                   ]
                 }
               },
@@ -1274,7 +1275,7 @@
     },
     "contract_revision": {
       "type": "integer",
-      "const": 2
+      "const": 3
     },
     "dataset_credits": {
       "type": "object",

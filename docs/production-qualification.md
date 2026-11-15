@@ -7,11 +7,11 @@ public packager and deploy verifier. Synthetic fixture compilation is separate:
 public synthetic previews contain only synthetic data and have empty real-dataset
 credits. Raw `compile-facts` inputs cannot certify a production source.
 
-Current `release-scope-v4` distributes compiled database material under CC BY-SA
+Current `release-scope-v5` distributes compiled database material under CC BY-SA
 4.0, with the exact data-license notice and required included-dataset credits.
-This retains v3's single global credit display and v2's optional numeric quality.
-Complete negative risk feeds are not required to release null quality with
-supported positive reasons. Source-specific rights and all other required
+This retains the shared global legal display and adds reviewed local publisher logos.
+Observed risk describes supported positive evidence, separately from assessment
+coverage; absence remains unknown and never establishes safety. Source-specific rights and all other required
 capabilities remain mandatory. The product license alone approves no source.
 
 ```powershell
@@ -39,7 +39,8 @@ proof; it is not the SHA-256 of a metadata response. The Go verifier rechecks
 current controls, dependencies, actual records, reviewed credits, clocks and
 fixture parsing. Caller booleans and matching receipt hashes cannot replace that
 source-store verification. The receipt and source-rich capability report must
-never enter the public tree or public CI artifacts.
+never enter the public tree or plaintext public CI artifacts. Authenticated encrypted
+checkpoint transport is the narrowly approved build-state exception.
 
 After the compiler verifies its completed immutable output, it also authenticates
 the exact canonical receipt, manifest digest, normalized-state digest, policy
@@ -54,7 +55,8 @@ payloads join their evidence-family groups transitively before counting support.
 City and coordinate support still require two independent families. BGP requires
 an origin mapping and two independent path families; a path-only source need not
 also publish a separate mapping. Positive evidence cannot create assessment
-coverage. Numeric quality remains optional and insufficient coverage stays null.
+coverage. Observed-risk scores require supported positive evidence; coverage is explicit and
+inadequate coverage cannot be described as safety.
 The separate Pages acceptance gate requires the exact artifact and measured
 hosted evidence; source qualification alone cannot authorize deployment.
 
@@ -97,9 +99,9 @@ new wrapper cannot keep an older IOC current.
 `state-fingerprints` writes a private NDJSON semantic multiset and a companion
 `.meta.json` binding its exact state, byte hash and counts. Container publication
 and RIB first-heard clocks are excluded from fact identity; item clocks, family,
-weights and actual facts remain. The measurement harness externally compares
-these multisets to prove a changed, unchanged, expired or withdrawn input. It
-cannot manufacture a one-percent change from a plan flag.
+weights and actual facts remain. The engineering benchmark derives actual changed, unchanged, expired and withdrawn
+record populations from this authenticated baseline. Its rounded change population
+is max(1,ceil(N/100)); transformed engineering records never enter production.
 
 ```powershell
 go run ./cmd/atlas state-fingerprints -workspace . -clock <utc-seconds> -out build-private/record-fingerprints.ndjson
@@ -113,10 +115,10 @@ exact `/data-license.txt` and credit bytes enter the frozen inventory and approv
 digest. They identify only included datasets, never a query's provenance.
 
 Full production release also requires the source-free measured acceptance packet
-described in [the hosted workflow guide](../tools/hosted/README.md). Unavailable
-private bootstrap, a missing metric or a failed threshold blocks promotion. A
+described in [the hosted workflow guide](../tools/hosted/README.md). An unavailable
+authenticated checkpoint, missing metric or failed threshold blocks promotion. A
 synthetic preview or an engineering replay of downloaded files is not production
-source coverage. The standard private runner/bootstrap, full real-query and
-mutation populations, unchanged lookup/performance thresholds and worst-case
-whole-worker memory still require actual measured evidence. This document claims
+source coverage. The official hosted runner with its enforced 2-CPU/8-GiB/14-GiB workload envelope,
+real-query and engineering replay populations, unchanged performance thresholds
+and whole-browser peak memory require actual measured evidence. This document claims
 neither a full production measurement nor a successful production deployment.

@@ -159,7 +159,7 @@ def verify_preview(public: Path, report: dict, origin: str, now: int, fetch=None
             if " ".join(headers.get(name, "").split()) != " ".join(value.split()):
                 raise ContractError(f"preview effective header differs: {name}")
         cache = {token.strip() for token in headers.get("cache-control", "").lower().split(",")}
-        if path.startswith(("_atlas/objects/", "_atlas/releases/", "_atlas/credits/", "_nuxt/")):
+        if path.startswith(("_atlas/objects/", "_atlas/releases/", "_atlas/credits/", "_atlas/legal/", "_nuxt/")):
             if "immutable" not in cache or "max-age=31536000" not in cache:
                 raise ContractError("immutable preview object cache policy missing")
         elif path in ("_atlas/current.json", "dataset-credits.json") and ("max-age=0" not in cache or "must-revalidate" not in cache):

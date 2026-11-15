@@ -11,8 +11,7 @@ from urllib.parse import urlsplit
 
 HEX = re.compile(r"^[0-9a-f]{64}$")
 UTC_TIMESTAMP = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?Z$")
-LAYERS = ("exact", "explicit_prefix", "asn", "neighbors24")
-RELEASE_SCOPE = "release-scope-v4"
+RELEASE_SCOPE = "release-scope-v5"
 CREDIT_SECRET = re.compile(r"(?:vless|vmess|trojan|ss|ssr|hy|hy2|hysteria|hysteria2|tuic|anytls)://|-----BEGIN[^\r\n]*PRIVATE KEY-----|(?:gh[pousr]_|github_pat_)", re.IGNORECASE)
 
 
@@ -142,7 +141,7 @@ def attribution_url(value):
 def attribution_issues(value):
     """Validate the reviewed plain-text global credit boundary, never IP facts."""
     if (not isinstance(value, dict) or not {"name", "text", "url"}.issubset(value)
-            or set(value) - {"name", "text", "url", "license_url"}):
+            or set(value) - {"name", "text", "url", "license_url", "logo"}):
         return ["reviewed_dataset_attribution_required"]
     for name, maximum in (("name", 128), ("text", 2048)):
         text = value[name]
@@ -155,6 +154,13 @@ def attribution_issues(value):
         if name not in value:
             continue
         if not attribution_url(value[name]):
+            return ["reviewed_dataset_attribution_required"]
+    if "logo" in value:
+        logo = value["logo"]
+        if (type(logo) is not dict or set(logo) != {"path", "sha256", "alt"}
+                or not isinstance(logo["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", logo["sha256"])
+                or logo["path"] != "/_atlas/legal/" + logo["sha256"] + ".png"
+                or attribution_issues({"name": logo["alt"], "text": "Logo", "url": value["url"]})):
             return ["reviewed_dataset_attribution_required"]
     return []
 
@@ -169,6 +175,20 @@ def static_issues(source, root: Path):
         issues.append("explicit_attribution_requirement_required")
     if "attribution" in rights:
         issues.extend(attribution_issues(rights["attribution"]))
+        credit = rights["attribution"]
+        if not attribution_issues(credit) and "logo" in credit:
+            try:
+                try:
+                    from tools.release_contract.dataset_credits import _read, validate_logo
+                    from tools.release_contract.contracts import ContractError
+                except ModuleNotFoundError:
+                    from release_contract.dataset_credits import _read, validate_logo
+                    from release_contract.contracts import ContractError
+                logo = credit["logo"]
+                data = _read(root, "fixtures/source-certification/logos/" + logo["sha256"] + ".png", 256 * 1024)
+                validate_logo(data, logo["sha256"])
+            except (OSError, ValueError, ContractError):
+                issues.append("reviewed_dataset_logo_required")
     elif rights.get("attribution_required") is True:
         issues.append("reviewed_dataset_attribution_required")
     if proof["kind"] == "unavailable" or not proof.get("locator") or not proof.get("field"):
@@ -301,18 +321,11 @@ def capability_report(config, now, root, snapshots=None):
     country = families(lambda s: s["category"] == "geolocation" and fields("physical_country")(s) and s["coverage"]["kind"] == "mapping")
     city = families(lambda s: s["category"] == "geolocation" and s["coverage"]["kind"] == "mapping" and fields("physical_country", "region", "city")(s))
     coords = families(lambda s: s["category"] == "geolocation" and s["coverage"]["kind"] == "mapping" and fields("physical_country", "region", "city", "latitude", "longitude")(s))
-    mapping = families(lambda s: s["category"] == "bgp" and s["scope"] == "prefix" and s["coverage"]["kind"] == "mapping" and fields("origins")(s))
+    mapping = families(lambda s: s["category"] == "bgp" and s["scope"] in ("prefix", "path") and s["coverage"]["kind"] == "mapping" and bool(set(s["public_fields"]) & {"origins", "bgp_origins"}))
     exact = families(lambda s: s["scope"] == "exact_ip" and bool(set(s["public_fields"]) & {"reason_flags", "usage_type"}))
     paths = families(lambda s: s["category"] == "bgp" and s["scope"] == "path" and fields("bgp_paths")(s))
     relations = families(lambda s: s["category"] == "bgp" and s["scope"] == "asn_edge" and fields("as_relationships")(s))
-    complete = families(lambda s: s["category"] in ("abuse", "proxy", "proxy_ip", "proxy_subscription_ip")
-                        and s["coverage"]["kind"] == "complete")
-    layer_scopes = {"exact": "exact_ip", "neighbors24": "exact_ip", "explicit_prefix": "prefix", "asn": "asn"}
-    complete_layers = {f: {layer for s in eligible if family_root(s["evidence_family"]) == f and s["coverage"]["kind"] == "complete"
-                          and s["category"] in ("abuse", "proxy", "proxy_ip", "proxy_subscription_ip")
-                          and s["signals"] and "reason_flags" in s["public_fields"]
-                          for layer in s.get("assessment_layers", []) if layer_scopes[layer] == s["scope"]} for f in complete}
-    qualified = [f for f, layers in complete_layers.items() if set(LAYERS).issubset(layers)]
+    positive = families(lambda s: bool(s["signals"]) and "reason_flags" in s["public_fields"])
     reasons = ("malware", "botnet", "command_control", "abuse", "fraud", "scanning", "spam", "tor", "vpn", "proxy", "datacenter", "hosting")
     reason_alias = {"c2": "command_control", "scanner": "scanning", "cloudflare_proxyip": "proxy"}
     missing_reasons = [reason for reason in reasons if not families(lambda s: reason in {reason_alias.get(v, v) for v in s["signals"]} and "reason_flags" in s["public_fields"])]
@@ -323,9 +336,8 @@ def capability_report(config, now, root, snapshots=None):
         ("region_city", len(city) >= 2, city, "two_independent_city_mapping_families"),
         ("coordinates", len(coords) >= 2, coords, "two_independent_city_coordinate_families"),
         ("asn_prefix", bool(mapping), mapping, "current_multi_origin_mapping"),
-        ("usage", bool(usage), usage, "direct_usage_evidence"),
-        ("risk_reasons", not missing_reasons, [], "evidence_for_each_published_reason"),
-        ("numeric_quality", len(qualified) >= 2, qualified, "two_complete_families_assessing_all_layers"),
+        ("usage", bool(usage), usage, "direct_or_observed_origin_context_usage_evidence"),
+        ("risk_reasons", bool(positive), positive, "verified_positive_observations_absent_categories_unknown"),
         ("class_c", bool(exact), exact, "current_exact_observations"),
         ("rpki", bool(rpki), rpki, "current_vrp_data"),
         ("bgp_origins_paths", bool(mapping) and len(paths) >= 2, paths, "origins_and_two_path_families"),
@@ -333,12 +345,10 @@ def capability_report(config, now, root, snapshots=None):
         ("tier1", bool(relations) and len(paths) >= 2, sorted(set(paths + relations)), "relationships_and_two_path_families"),
         ("pages_release", False, [], "exact_artifact_hosted_preview_gates_and_approval_required"),
     ]
-    # User-approved release scope v2 permits an unrated quality view. V3 adds
-    # reviewed global dataset credits without putting provenance into IP facts.
-    # Neither amendment weakens assessment qualification needed for a number,
-    # invent negative evidence, or waive any other data/Pages capability gate.
-    capabilities = [{"capability": name, "status": "qualified" if ok else "unrated" if name == "numeric_quality" else "blocked",
-                     "required": name != "numeric_quality", "families": fs, "requirement": requirement}
+    # V5 requires actual positive risk observations and computes observed risk.
+    # Missing categories remain unknown and never become negative assessments.
+    capabilities = [{"capability": name, "status": "qualified" if ok else "blocked",
+                     "required": True, "families": fs, "requirement": requirement}
                     for name, ok, fs, requirement in rows]
     required = [row for row in capabilities if row["required"]]
     attributions = [{"source_id": source["id"], "attribution": dict(source["license"]["attribution"])}

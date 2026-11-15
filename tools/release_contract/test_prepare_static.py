@@ -21,7 +21,7 @@ class StaticCandidateTests(unittest.TestCase):
         struct.pack_into("<Q", data, 64 + 24, decoded)
         data = bytes(data)
         digest = sha256(data)
-        descriptor = {"format_version": 3, "schema_version": 3, "codec": "zstd-1", "mode": mode,
+        descriptor = {"format_version": 3, "schema_version": 4, "codec": "zstd-1", "mode": mode,
                       "valid_from": 100, "valid_until": 200,
                       "objects": [{"sha256": digest, "bytes": len(data), "kind": 1, "partition": "all"}]}
         manifest, pointer = make_manifest(descriptor)

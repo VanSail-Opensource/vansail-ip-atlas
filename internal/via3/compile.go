@@ -58,6 +58,8 @@ type QualityData struct {
 	Confidence                    uint8
 	Reasons                       uint32
 	Exact, Prefix, ASN, Neighbors *float64
+	Assessed                      [4]bool
+	CoverageComplete              bool
 }
 type CellData struct {
 	Address                    netip.Addr
@@ -68,6 +70,7 @@ type CellData struct {
 	Reasons                    uint32
 	ExactRisk                  *float64
 	AttachNetwork              bool
+	CoverageComplete           bool
 }
 type ProfileData struct {
 	Cells       []CellData
@@ -671,27 +674,42 @@ func CompilePartition(ctx context.Context, input PartitionInput) (CompiledPartit
 				}
 				p32(row, 0, bits(14))
 				p32(row, 4, v.Reasons)
-				if v.Score != nil {
-					if !r.Prefix.Addr().Is4() {
-						return out, fail("record")
+				for i, assessed := range v.Assessed {
+					if assessed {
+						row[11] |= 1 << i
 					}
+				}
+				if v.CoverageComplete {
+					row[11] |= 16
+				}
+				if r.Prefix.Addr().Is6() && row[11]&24 != 0 {
+					return out, fail("record")
+				}
+				risk := 0.0
+				for _, contribution := range []*float64{v.Exact, v.Prefix, v.ASN, v.Neighbors} {
+					if contribution != nil {
+						risk += *contribution
+					}
+				}
+				if v.Score != nil {
 					p32(row, 0, u32(row, 0)|bits(9))
 					row[8] = 1
 					row[9] = *v.Score
 					row[10] = v.Confidence
-					if v.Exact == nil || v.Prefix == nil || v.ASN == nil || v.Neighbors == nil {
+					if risk <= 0 || v.Reasons == 0 || v.Confidence == 0 {
 						return out, fail("record")
 					}
-					risk := *v.Exact + *v.Prefix + *v.ASN + *v.Neighbors
 					if risk < 0 {
 						risk = 0
 					}
 					if risk > 1 {
 						risk = 1
 					}
-					if *v.Score != uint8(math.Floor(100*(1-risk)+.5)) {
+					if *v.Score != uint8(math.Floor(100*risk+.5)) {
 						return out, fail("record")
 					}
+				} else if risk > 0 {
+					return out, fail("record")
 				}
 				for i, value := range []*float64{v.Exact, v.Prefix, v.ASN, v.Neighbors} {
 					if value != nil {
@@ -714,7 +732,7 @@ func CompilePartition(ctx context.Context, input PartitionInput) (CompiledPartit
 				p32(row, 4, uint32(len(cellRows)))
 				p16(row, 8, uint16(len(cells)))
 				p32(row, 16, v.DominantASN)
-				assessed, positive, sum := 0, 0, 0
+				assessed, positive, scored, sum := 0, 0, 0, 0
 				minimumConfidence := uint8(3)
 				for i, cell := range cells {
 					addr := cell.Address.Unmap()
@@ -738,12 +756,16 @@ func CompilePartition(ctx context.Context, input PartitionInput) (CompiledPartit
 					if cell.Reasons != 0 {
 						positive++
 					}
+					if cell.CoverageComplete {
+						c[10] = 1
+						assessed++
+					}
 					if cell.Score != nil {
 						c[1] |= 8
 						c[8] = *cell.Score
 						c[9] = cell.Confidence
 						sum += int(*cell.Score)
-						assessed++
+						scored++
 						if cell.Confidence < minimumConfidence {
 							minimumConfidence = cell.Confidence
 						}
@@ -788,9 +810,10 @@ func CompilePartition(ctx context.Context, input PartitionInput) (CompiledPartit
 				}
 				p16(row, 10, uint16(assessed))
 				p16(row, 12, uint16(positive))
-				if assessed == 256 && len(cells) == 256 {
+				p16(row, 14, uint16(scored))
+				if scored > 0 {
 					p32(row, 0, u32(row, 0)|bits(22))
-					row[20] = byte((sum + 128) / 256)
+					row[20] = byte((2*sum + scored) / (2 * scored))
 					row[21] = minimumConfidence
 				}
 			case 8:
@@ -1143,9 +1166,9 @@ func Build(ctx context.Context, input CompileInput) (BuiltRelease, error) {
 	for i, object := range objects {
 		infos[i] = object.Info
 	}
-	descriptor := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: input.Mode, Objects: infos, SchemaVersion: 3, ValidFrom: input.Clock, ValidUntil: input.ValidUntil}
+	descriptor := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: input.Mode, Objects: infos, SchemaVersion: 4, ValidFrom: input.Clock, ValidUntil: input.ValidUntil}
 	id := Hash(canonical(descriptor))
-	manifest := Manifest{Codec: descriptor.Codec, FormatVersion: 3, Mode: descriptor.Mode, Objects: infos, ReleaseID: id, SchemaVersion: 3, ValidFrom: input.Clock, ValidUntil: input.ValidUntil}
+	manifest := Manifest{Codec: descriptor.Codec, FormatVersion: 3, Mode: descriptor.Mode, Objects: infos, ReleaseID: id, SchemaVersion: 4, ValidFrom: input.Clock, ValidUntil: input.ValidUntil}
 	pointer := Pointer{FormatVersion: 3, ManifestPath: "/_atlas/releases/" + id + "/manifest.json", ManifestSHA256: Hash(canonical(manifest)), ReleaseID: id}
 	if input.Mode == "production" {
 		if err := input.ProductionGate(ctx); err != nil {

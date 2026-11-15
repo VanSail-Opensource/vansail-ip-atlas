@@ -18,6 +18,9 @@
 /_atlas/credits/*
   Cache-Control: public, max-age=31536000, immutable
 
+/_atlas/legal/*
+  Cache-Control: public, max-age=31536000, immutable
+
 /dataset-credits.json
   Cache-Control: public, max-age=0, must-revalidate
 

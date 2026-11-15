@@ -30,8 +30,7 @@ def main():
         print(f"PASS: strict contracts; {report['source_count']} sources; {report['active_count']} active; {report['current_count']} current")
         blocked = [row["capability"] for row in report["capabilities"] if row["required"] and row["status"] != "qualified"]
         print(f"Production BLOCKED: {len(blocked)}/{report['required_capability_count']} required capabilities: {', '.join(blocked)}")
-        quality = next(row for row in report["capabilities"] if row["capability"] == "numeric_quality")
-        print(f"Optional numeric quality: {quality['status']}; insufficient coverage remains unrated")
+        print("Observed risk: positive evidence only; absent categories remain unknown")
         return 2 if args.require_production and not report["production_eligible"] else 0
     except (ContractError, ValueError, OSError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)

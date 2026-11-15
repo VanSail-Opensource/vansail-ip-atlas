@@ -1,7 +1,8 @@
-# VIA3 Binary Format — schema 3, contract revision 1
+# VIA3 Binary Format - public schema 4, contract revision 2
 
-This is the first byte-level freeze of the previously unimplemented schema 3.
-Magic/format/public-schema remain `VIA3`/`3`/`3`. Machine-readable tables and
+This version introduces observed-risk scoring and independent coverage.
+Magic/format/public-schema are `VIA3`/`3`/`4`. Schema 3 is rejected; its quality
+score must never be interpreted with the new increasing-risk semantics. Machine-readable tables and
 uncompressed synthetic vectors are in `fixtures/contracts/via3-layouts.json`.
 They are contract fixtures, not a compiled real-source database or source
 certification. The compressed engineering corpus is now
@@ -55,7 +56,7 @@ The header is exactly 64 bytes:
 |---:|---:|---|
 | 0 | 4 | ASCII `VIA3` |
 | 4 | 2 | format version = 3 |
-| 6 | 2 | public schema = 3 |
+| 6 | 2 | public schema = 4 |
 | 8 | 2 | header length = 64 |
 | 10 | 2 | shard kind, below |
 | 12 | 4 | flags = 0 |
@@ -72,7 +73,7 @@ Each descriptor is exactly 64 bytes:
 |---:|---:|---|
 | 0 | 2 | section ID |
 | 2 | 1 | codec = 1 |
-| 3 | 1 | flags = 0; all schema-3 sections are required when present |
+| 3 | 1 | flags = 0; all schema-4 sections are required when present |
 | 4 | 4 | reserved |
 | 8 | 8 | compressed offset |
 | 16 | 8 | compressed length, nonzero |
@@ -182,27 +183,32 @@ RPKI and BGP-origin keys are prefix facts and never set the exact-address flag.
 * **Usage (8):** `0 presence:u32;4 usage_type:u8;5 assignment_mode:u8;
   6 bools:u8;7 reserved:u8`. Boolean bits 0 anycast,1 IPv4 directed broadcast;
   remaining bits zero. A true value requires its independent presence bit.
-* **Quality (32):** `0 presence:u32;4 reason_bits:u32;8 status:u8;9 score:u8;
-  10 confidence:u8;11 reserved:u8;12 exact_contribution:u32;
-  16 prefix_contribution:u32;20 asn_contribution:u32;
-  24 neighbor_contribution:u32;28 reserved:u32`. Four weighted risk contributions
-  are millionths, rounded half-up at serialization only, bounded respectively
-  by 550000,180000,150000,120000. Score uses the unrounded formula, range 0–100.
-  Status 0 unrated,1 assessed; confidence 0 unrated,1 low,2 medium,3 high.
-  Positive reasons survive an unrated score; absent contributions remain absent.
-  IPv6 keys cannot carry numeric quality or a `/24` neighbor contribution. Given
-  four rounded contributions, a reader accepts only scores possible within
-  their combined ±2 millionth rounding interval; it does not reconstruct one
-  falsely precise score from rounded layers. The typed compiler validates the
-  supplied score against the original unrounded contributions before encoding.
+* **Observed risk (kind 6, 32):** `0 presence:u32;4 reason_bits:u32;8 status:u8;
+  9 score:u8;10 confidence:u8;11 coverage_flags:u8;12 exact_contribution:u32;
+  16 prefix_contribution:u32;20 asn_contribution:u32;24 neighbor_contribution:u32;
+  28 reserved:u32`. Contributions remain millionths with respective caps
+  550000,180000,150000,120000. Score is half-up `100*sum` of unrounded positive
+  contributions, or absent when the sum is zero; higher means more observed risk.
+  Status 0 absent,1 scored; confidence 0 unrated,1 low,2 medium,3 high. A scored row
+  needs supported reasons and at least one present contribution, but may round
+  to score zero. Readers accept only scores within the rounded contribution
+  sum's +/-2-millionth interval; no score with a positive encoded sum is invalid.
+  Coverage bits 0-3 mark assessed exact/prefix/ASN/neighbors; bit 4 marks complete
+  assessment and requires bits 0-3. Other bits are zero. Assessed layers require
+  contribution presence, including authoritative zero. IPv6 allows scores but
+  forbids neighbor contribution/assessment and overall complete assessment.
+  Unknown contributions remain absent and confidence does not certify coverage.
 * **IPv4 `/24` (24):** `0 presence:u32;4 cells_first:u32;8 cells_count:u16;
-  10 assessed_count:u16;12 positive_count:u16;14 reserved:u16;
-  16 dominant_asn:u32;20 aggregate_score:u8;21 confidence:u8;22 reserved:u16`.
-  Counts <=256. Only exact observed cells exist; a prefix is never expanded into
-  256 facts. Aggregate score requires all 256 cells to be quality-eligible;
-  otherwise it is null. Average all 256 integer scores half-up when eligible.
-  Dominant ASN is absent on ties or MOAS ambiguity. `/24` distributions
-  are computed from its one bounded cell range, without duplicated scalars.
+  10 assessed_count:u16;12 positive_count:u16;14 scored_count:u16;
+  16 dominant_asn:u32;20 mean_observed_risk:u8;21 confidence:u8;22 reserved:u16`.
+  Only exact observed cells exist; a prefix is never expanded into 256 facts.
+  Counts are recomputed from the cells and at most cells_count <=256. Mean risk
+  exists iff scored_count>0 and is the half-up mean of those integer scores;
+  confidence is their minimum band. Unknown cells never enter the denominator.
+  Cell byte 10 is complete-assessment flag 0/1; byte 11 remains zero. The existing
+  score-present bit marks observed-risk score, independently of assessment.
+  Dominant ASN is absent on ties or MOAS ambiguity. `/24` distributions are
+  computed from the bounded cell range without duplicated scalars.
 * **ASN (64):** `0 presence:u32;4 asn:u32;8 name:StringRef;
   16 organization:StringRef;24 country:u16;26 risk_band:u8;27 confidence:u8;
   28 risk:u32;32 reason_bits:u32;36 prefix_pages_first:u32;
@@ -250,12 +256,13 @@ RPKI and BGP-origin keys are prefix facts and never set the exact-address flag.
 
 A class-C cell is **32 bytes**: `0 suffix:u8;1 presence:u8;2 usage_type:u8;
 3 assignment_mode:u8;4 reason_bits:u32;8 score:u8;9 confidence:u8;
-10 reserved:u16;12 exact_risk:u32;16 network:RecordRef;24 bools:u8;25 reserved:7`.
+10 complete_assessment:u8;11 reserved:u8;12 exact_risk:u32;16 network:RecordRef;24 bools:u8;25 reserved:7`.
 Cell presence bits: 0 usage,1 assignment,2 reasons,3 score,4 exact risk,5 network,
 6 anycast,7 directed broadcast. Exact risk is unweighted millionths. Network
 references require kind 4. Cells within a `/24` range sort by unique suffix.
 Absent suffixes stay unknown. Positive count counts nonzero reason flags;
-assessed count counts cells with score present. No source/family counts exist.
+assessed count counts cells with complete_assessment=1; scored count independently
+counts score presence. No source/family counts exist.
 
 ## Indexing, precedence and determinism
 

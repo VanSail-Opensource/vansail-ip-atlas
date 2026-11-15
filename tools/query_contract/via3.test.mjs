@@ -86,7 +86,7 @@ test('length, version, overflow and checksum failures remain closed', async () =
   const good = new Uint8Array(Buffer.from(golden.objects[0].base64, 'base64'))
   await assert.rejects(parseShard(good.subarray(0, 63)), { message: 'length' })
   await assert.rejects(parseShard(new Uint8Array(24 * 1024 * 1024)), { message: 'length' })
-  const version = good.slice(); version[6] = 4
+  const version = good.slice(); version[6] = 3
   await assert.rejects(parseShard(version), { message: 'version' })
   const reserved = good.slice(); reserved[45] = 1
   await assert.rejects(parseShard(reserved), { message: 'header' })

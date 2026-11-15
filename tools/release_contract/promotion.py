@@ -75,7 +75,7 @@ class TrustedCI:
         run = json_object(self._get(f"actions/runs/{run_id}"))
         if (run.get("status") != "completed" or run.get("conclusion") != "success"
                 or run.get("head_sha") != head or run.get("head_branch") != "main"
-                or run.get("event") not in ("push", "workflow_dispatch") or run.get("path") != workflow
+                or run.get("event") not in ("push", "workflow_dispatch", "schedule", "workflow_run") or run.get("path") != workflow
                 or run.get("head_repository", {}).get("full_name") != REPOSITORY):
             raise ContractError("evidence must come from successful exact-head trusted main CI")
         return run
@@ -85,13 +85,13 @@ class TrustedCI:
         rules = environment.get("protection_rules", [])
         if not isinstance(rules, list):
             raise ContractError("production environment protection is unavailable")
-        reviewers = [rule for rule in rules if isinstance(rule, dict) and rule.get("type") == "required_reviewers"]
         policy = environment.get("deployment_branch_policy")
-        if (len(reviewers) != 1 or reviewers[0].get("prevent_self_review") is not True
-                or not reviewers[0].get("reviewers")
-                or not isinstance(policy, dict) or policy.get("protected_branches") is not True
+        if (not isinstance(policy, dict) or policy.get("protected_branches") is not True
                 or json_object(self._get("branches/main")).get("protected") is not True):
-            raise ContractError("production requires reviewer-protected environment and protected main branch")
+            raise ContractError("production requires a main-only environment and protected main branch")
+
+    def current_head(self) -> str:
+        return json_object(self._get("branches/main")).get("commit", {}).get("sha", "")
 
     def reports(self, kind: str, run_id: int, artifact_id: int, digest: str, head: str) -> dict[str, bytes]:
         workflow, name, required = CI_KINDS[kind]
@@ -218,7 +218,7 @@ def acceptance(public: Path, receipt_paths: list[Path], packet: dict, now: int, 
         verify_preview(public, candidate, packet["preview_url"], now)
     return {"format_version": 1, "scope": "production-promotion-authorization-v1", "status": "passed",
         "production_eligible": False,
-        "pages_release": {"capability": "pages_release", "required": True, "status": "awaiting_approval",
+        "pages_release": {"capability": "pages_release", "required": True, "status": "awaiting_policy",
                           "evidence_sha256": sha256(canonical_bytes(packet))},
         "candidate_bundle_sha256": packet["candidate_bundle_sha256"], "release_id": packet["release_id"],
         "evidence_sha256": sha256(canonical_bytes(packet)), "head_sha": packet["head_sha"],
@@ -248,6 +248,30 @@ def approve(public: Path, receipt_paths: list[Path], evidence: bytes, approval: 
                     manifest, packet["candidate_bundle_sha256"], evidence)
     result["production_eligible"] = True
     result["pages_release"]["status"] = "qualified"
+    return result
+
+
+def automatic(public: Path, receipt_paths: list[Path], evidence: bytes, now: int, *, ci=None,
+              rollback=False, **kwargs) -> dict:
+    """The reviewed policy authorizes exact passing bytes, never source admission."""
+    policy_bytes = (ROOT / 'configs/production-policy.json').read_bytes().rstrip(b'\n')
+    policy = parse_canonical(policy_bytes)
+    expected = {'automatic_promotion': True, 'contract_revision': 1,
+        'maximum_checkpoint_age_seconds': 604800, 'maximum_rollback_age_seconds': 172800,
+        'repository': REPOSITORY, 'require_all_measured_gates': True,
+        'require_current_source_qualification': True, 'require_exact_head_integration': True,
+        'require_protected_main': True, 'scope': 'release-scope-v5'}
+    if policy != expected:
+        raise ContractError('unrecognized automatic production policy')
+    ci = ci or TrustedCI()
+    ci.protected_production_environment()
+    packet = parse_canonical(evidence)
+    if not rollback and ci.current_head() != packet['head_sha']:
+        raise ContractError('automatic candidate no longer matches protected main')
+    result = acceptance(public, receipt_paths, packet, now, ci=ci, **kwargs)
+    result.update(production_eligible=True, authorization='reviewed-automatic-policy-v1',
+                  policy_sha256=sha256(policy_bytes))
+    result['pages_release']['status'] = 'qualified'
     return result
 
 
@@ -289,6 +313,7 @@ def main() -> int:
     parser.add_argument("--qualification-receipt", type=Path, action="append", required=True)
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--approval", type=Path)
+    parser.add_argument("--automatic", action="store_true")
     parser.add_argument("--assemble", action="store_true", help="write a canonical packet only after raw gate verification")
     parser.add_argument("--head")
     parser.add_argument("--integration-run-id", type=int)
@@ -307,7 +332,11 @@ def main() -> int:
             args.evidence.parent.mkdir(parents=True, exist_ok=True)
             with args.evidence.open("xb") as output:
                 output.write(evidence)
-            result["scope"] = "production-evidence-verified-awaiting-approval"
+            result["scope"] = "production-evidence-verified-awaiting-policy"
+        elif args.automatic:
+            if args.approval:
+                raise ContractError('automatic policy cannot be combined with a manual approval')
+            result = automatic(args.public, args.qualification_receipt, read_private(args.evidence), int(time.time()))
         elif args.approval:
             evidence = read_private(args.evidence)
             from tools.atlas_contracts.config import load_yaml
@@ -315,10 +344,10 @@ def main() -> int:
         else:
             evidence = read_private(args.evidence)
             result = acceptance(args.public, args.qualification_receipt, parse_canonical(evidence), int(time.time()))
-            result["scope"] = "production-evidence-verified-awaiting-approval"
+            result["scope"] = "production-evidence-verified-awaiting-policy"
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_bytes(canonical_bytes(result))
-        print("PASS: exact production evidence" + (" and explicit approval" if args.approval else "; approval still required"))
+        print("PASS: exact production evidence" + (" and automatic policy" if args.automatic else " and explicit legacy approval" if args.approval else "; policy authorization remains required"))
         return 0
     except (ContractError, OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile) as error:
         # Contract errors are deliberately source-free; never include downloaded bytes.

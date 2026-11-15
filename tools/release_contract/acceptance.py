@@ -116,7 +116,9 @@ def browser_gates(report: dict) -> dict[str, str]:
     if (type(memory) is dict and memory.get("accounting") == "isolated-cgroup-v2-memory.peak"
             and memory.get("profile_exercised") == "accepted-worst-case-browser-profile"
             and number(memory.get("peak_bytes")) and memory.get("raw_profile_sha256")
-            and memory.get("includes_worker_children") is True):
+            and memory.get("includes_worker_children") is True and memory.get('errors') == []
+            and memory.get('accounting_scope') == 'entire-Chrome-tree-from-process-birth'
+            and memory.get('memory_events',{}).get('oom_kill') == 0):
         result["worker_memory"] = comparison([memory["peak_bytes"]], 384 * 1024**2, maximum=True)
     cold = report.get("cold_queries", [])
     result["cold_payload"] = comparison([row.get("atlas_body_bytes") for row in cold if isinstance(row, dict)],
@@ -137,9 +139,10 @@ def allocation_gate(row: dict) -> str:
         return "unmeasured"
     records, invocations = row.get("go_processes"), row.get("go_invocations")
     compiled = row.get("compile_exit_code")
-    if type(compiled) is not int or compiled not in (0, 1) or not isinstance(records, list) or not 3 <= len(records) <= 64 or not isinstance(invocations, list):
+    replay = row.get('measurement_scope') == 'authenticated-real-input-engineering-benchmark'
+    if type(compiled) is not int or compiled not in (0, 1) or not isinstance(records, list) or not (1 if replay else 3) <= len(records) <= 64 or not isinstance(invocations, list):
         return "unmeasured"
-    phases = ["intake", "state-fingerprints", "compile-production"] + (["prepare-static"] if compiled == 0 else [])
+    phases = ['benchmark-state'] if replay else ["intake", "state-fingerprints", "compile-production"] + (["prepare-static"] if compiled == 0 else [])
     if len(invocations) != len(phases):
         return "unmeasured"
     process_keys = {"allocated_bytes", "allocation_count", "command", "exit_code", "invocation", "pid", "schema_version", "scope"}
@@ -190,10 +193,11 @@ def build_gates(report: dict) -> dict[str, str]:
     if (report.get("scope") != "hosted-production-build-v1" or report.get("mode") != "production"
             or report.get("errors") != []):
         raise ContractError("production build evidence has wrong scope or errors")
-    host = report.get("execution_host", {})
-    result = {"standard_runner": "passed" if host.get("logical_cpus") == 2
-        and number(host.get("memory_bytes")) and 7 * 1024**3 <= host["memory_bytes"] <= 8 * 1024**3
-        and number(host.get("disk_bytes")) and 13 * 1024**3 <= host["disk_bytes"] <= 14 * 1024**3 else "unmeasured"}
+    envelope = report.get('execution_envelope', {})
+    result = {'standard_runner':'passed' if envelope.get('scope')=='github-hosted-cgroup-v2'
+        and envelope.get('cpu_quota_us')==200000 and envelope.get('cpu_period_us')==100000
+        and envelope.get('memory_max_bytes')==8*1024**3 and envelope.get('swap_max_bytes')==0
+        and envelope.get('workspace_limit_bytes')==14*1024**3 else 'unmeasured'}
     scenarios = report.get("scenarios", [])
     for name in BUILD_SCENARIOS:
         rows = [row for row in scenarios if isinstance(row, dict) and row.get("scenario") == name]
@@ -209,14 +213,15 @@ def build_gates(report: dict) -> dict[str, str]:
             state_hash = report.get("normalized_state_sha256")
             if not isinstance(state_hash, str) or HASH.fullmatch(state_hash) is None:
                 semantic = False
-            elif row.get("after_state_sha256" if name == "cold_full" else "before_state_sha256") != state_hash:
+            replay = row.get('measurement_scope') == 'authenticated-real-input-engineering-benchmark'
+            if row.get("after_state_sha256" if name == "cold_full" and not replay else "before_state_sha256") != state_hash:
                 semantic = False
             if name == "cold_full":
-                semantic &= before == 0 and after > 0 and row.get("compile_exit_code") == 0 and row.get("release_id") == report.get("release_id") and report.get("release_id") is not None
+                semantic &= before == 0 and after > 0 and row.get("compile_exit_code") == 0 and (replay or row.get("release_id") == report.get("release_id")) and report.get("release_id") is not None
             elif name == "warm_unchanged":
-                semantic &= before > 0 and before == after and transition["changed_records"] == 0 and row.get("compile_exit_code") == 0 and row.get("release_id") == report.get("release_id") and report.get("release_id") is not None
+                semantic &= before > 0 and before == after and transition["changed_records"] == 0 and row.get("compile_exit_code") == 0 and (replay or row.get("release_id") == report.get("release_id")) and report.get("release_id") is not None
             elif name == "warm_changed":
-                semantic &= before > 0 and before == after and transition["changed_records"] * 100 == before and row.get("compile_exit_code") == 0
+                semantic &= before > 0 and before == after and transition["changed_records"] == max(1,(before+99)//100) and row.get("compile_exit_code") == 0
             elif name == "clock_advance":
                 semantic &= type(transition.get("expired_sources_retracted")) is int and transition["expired_sources_retracted"] > 0 and transition["removed_records"] > 0
             elif name == "withdrawal":

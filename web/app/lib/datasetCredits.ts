@@ -1,5 +1,6 @@
-export type DatasetCredit = { name: string; text: string; url: string; license_url?: string }
-export type CreditDocument = { format_version: 1; release_id: string; mode: 'synthetic' | 'production'; entries: DatasetCredit[] }
+import { verifyDatasetLogo } from './datasetLogos.ts'
+export type DatasetCredit = { name: string; text: string; url: string; license_url?: string; logo?: { path: string; sha256: string; alt: string } }
+export type CreditDocument = { format_version: 2; release_id: string; mode: 'synthetic' | 'production'; entries: DatasetCredit[]; verifiedLogos?: Readonly<Record<string, string>> }
 type CreditRef = { release_id: string; credits_path: string; credits_sha256: string }
 type CreditIndex = { format_version: 1; current_release_id: string; releases: CreditRef[] }
 const HASH = /^[0-9a-f]{64}$/
@@ -67,18 +68,23 @@ function compare(a: string, b: string): number {
 }
 export function parseCreditDocument(bytes: Uint8Array, releaseId: string): CreditDocument {
   const doc = object(parse(bytes, LIMIT), ['format_version', 'release_id', 'mode', 'entries'])
-  if (doc.format_version !== 1 || doc.release_id !== releaseId || !HASH.test(releaseId) || doc.mode !== 'synthetic' && doc.mode !== 'production' || !Array.isArray(doc.entries) || doc.entries.length > 256 || doc.mode === 'synthetic' && doc.entries.length !== 0) return failure()
+  if (doc.format_version !== 2 || doc.release_id !== releaseId || !HASH.test(releaseId) || doc.mode !== 'synthetic' && doc.mode !== 'production' || !Array.isArray(doc.entries) || doc.entries.length > 256 || doc.mode === 'synthetic' && doc.entries.length !== 0) return failure()
   let previous = ''
   const entries = doc.entries.map(value => {
-    const row = object(value, ['name', 'text', 'url'], ['license_url'])
+    const row = object(value, ['name', 'text', 'url'], ['license_url', 'logo'])
     const credit: DatasetCredit = { name: label(row.name, 128), text: label(row.text, 2048), url: https(row.url) }
     if ('license_url' in row) credit.license_url = https(row.license_url)
+    if ('logo' in row) {
+      const logo = object(row.logo, ['path', 'sha256', 'alt'])
+      if (typeof logo.sha256 !== 'string' || !HASH.test(logo.sha256) || logo.path !== `/_atlas/legal/${logo.sha256}.png`) return failure()
+      credit.logo = { path: logo.path as string, sha256: logo.sha256, alt: label(logo.alt, 128) }
+    }
     const key = canonical(credit)
     if (previous && compare(previous, key) >= 0) return failure()
     previous = key
     return credit
   })
-  return { format_version: 1, release_id: releaseId, mode: doc.mode as CreditDocument['mode'], entries }
+  return { format_version: 2, release_id: releaseId, mode: doc.mode as CreditDocument['mode'], entries }
 }
 export function parseCreditIndex(bytes: Uint8Array): CreditIndex {
   const index = object(parse(bytes, 8192), ['format_version', 'current_release_id', 'releases'])
@@ -94,7 +100,7 @@ export function parseCreditIndex(bytes: Uint8Array): CreditIndex {
   return { format_version: 1, current_release_id: index.current_release_id, releases }
 }
 async function fetchBytes(fetcher: typeof fetch, path: string, maximum: number, signal?: AbortSignal): Promise<Uint8Array> {
-  const response = await fetcher(path, { cache: path === '/dataset-credits.json' ? 'no-cache' : 'force-cache', credentials: 'omit', referrerPolicy: 'no-referrer', signal })
+  const response = await fetcher(path, { cache: path === '/dataset-credits.json' ? 'no-cache' : 'force-cache', credentials: 'omit', referrerPolicy: 'no-referrer', mode: 'same-origin', redirect: 'error', signal })
   if (!response.ok || !response.body || Number(response.headers.get('content-length') ?? 0) > maximum) return failure()
   const reader = response.body.getReader(), chunks: Uint8Array[] = []
   let total = 0
@@ -120,5 +126,17 @@ export async function loadDatasetCredits(releaseId?: string, signal?: AbortSigna
   const bytes = await fetchBytes(fetcher, ref.credits_path, LIMIT, signal)
   const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as BufferSource))].map(b => b.toString(16).padStart(2, '0')).join('')
   if (signal?.aborted || hash !== ref.credits_sha256) return failure()
-  return parseCreditDocument(bytes, ref.release_id)
+  const document = parseCreditDocument(bytes, ref.release_id)
+  const images: Record<string, string> = {}
+  let total = 0
+  for (const entry of document.entries) {
+    if (!entry.logo || images[entry.logo.sha256]) continue
+    if (Object.keys(images).length >= 32) return failure()
+    const data = await fetchBytes(fetcher, entry.logo.path, 256 * 1024, signal)
+    total += data.length
+    if (total > 4 * 1024 * 1024) return failure()
+    images[entry.logo.sha256] = await verifyDatasetLogo(data, entry.logo.sha256, signal)
+  }
+  document.verifiedLogos = Object.freeze(images)
+  return document
 }

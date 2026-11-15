@@ -39,14 +39,20 @@ def layer(observations, signals):
     return 1 - math.exp(-mass)
 
 
-def quality(ipv4, layers, complete_families, weights):
+def observed_risk(ipv4, layers, complete_families, positive_families, weights):
     qualifying = set.intersection(*(set(f) for f in complete_families))
-    if not ipv4 or any(v is None for v in layers) or len(qualifying) < 2:
-        return None, "unrated"
-    risk = min(1, max(0, sum(v * w for v, w in zip(layers, weights))))
-    score = math.floor(100 * (1 - risk) + 0.5)
-    confidence = "high" if len(qualifying) >= 4 else "medium" if len(qualifying) == 3 else "low"
-    return score, confidence
+    coverage = "complete" if ipv4 and len(qualifying) >= 2 and all(v is not None for v in layers) else "incomplete"
+    if not ipv4 and layers[3] is not None:
+        raise ValueError("IPv6 neighbor layer")
+    contributions = [v*w if v is not None else None for v,w in zip(layers,weights)]
+    risk = min(1, max(0, sum(v for v in contributions if v is not None)))
+    if risk <= 0:
+        return None, "unrated", coverage
+    support = min(len(set(f)) for value,f in zip(contributions,positive_families) if value is not None and value > 0)
+    if support < 1:
+        raise ValueError("positive contribution without support")
+    confidence = "high" if support >= 4 else "medium" if support == 3 else "low"
+    return math.floor(100*risk + .5), confidence, coverage
 
 
 def asn_context(risks, families, explicit_risk):

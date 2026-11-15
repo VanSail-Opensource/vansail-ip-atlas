@@ -28,8 +28,10 @@ const (
 )
 
 type ScopedUsage struct {
-	Prefix   netip.Prefix
-	Evidence UsageEvidence
+	Prefix     netip.Prefix
+	ASN        uint32    `json:",omitempty"`
+	ObservedAt time.Time `json:",omitzero"`
+	Evidence   UsageEvidence
 }
 type ScopedPath struct {
 	Prefix      netip.Prefix
@@ -74,6 +76,15 @@ func (r NormalizedRecord) Validate() error {
 	}
 	if r.MRT != nil && (r.Kind != RecordOrigins && r.Kind != RecordPath || r.MRT.PeerTable == 0 || r.MRT.CapturedAt.IsZero() || !r.MRT.AddPath && r.MRT.PathID != 0) {
 		return errors.New("private MRT route identity invalid")
+	}
+	if u := r.Usage; u != nil {
+		if u.ASN != 0 {
+			if !IsPublicASN(u.ASN) || u.Prefix.IsValid() || u.ObservedAt.IsZero() || u.Evidence.Contextual {
+				return errors.New("ASN usage requires an exclusive ASN and observed clock")
+			}
+		} else if !u.Prefix.IsValid() {
+			return errors.New("prefix usage requires a prefix")
+		}
 	}
 	return nil
 }
@@ -400,6 +411,18 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 				v.Region = SafeLabel(v.Region)
 				v.City = SafeLabel(v.City)
 			case RecordUsage:
+				if observed := clone.Usage.ObservedAt; !observed.IsZero() {
+					if observed.After(now.Add(24 * time.Hour)) {
+						return errors.New("usage observation is in future")
+					}
+					deadline := observed.Add(policy.MaxAge)
+					if !now.Before(deadline) {
+						return nil
+					}
+					if deadline.Before(expiry[id]) {
+						expiry[id] = deadline
+					}
+				}
 				v := clone.Usage.Evidence
 				switch v.Type {
 				case "", "unknown", "residential", "business", "mobile", "datacenter", "hosting", "education", "government":
@@ -475,6 +498,10 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 		stored := StoredSource{ID: id, Fingerprint: sha256.Sum256(encoded), ExpiresAt: expiry[id], Records: records, RecordPartitions: parts, Receipt: receipt(policy, snapshot)}
 		if policy.Attribution != nil {
 			credit := *policy.Attribution
+			if credit.Logo != nil {
+				logo := *credit.Logo
+				credit.Logo = &logo
+			}
 			stored.Attribution = &credit
 		}
 		plan.State.Sources = append(plan.State.Sources, stored)

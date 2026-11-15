@@ -1,7 +1,7 @@
 import { decodeZstd } from '../lib/zstd.ts'
 import { parseInput } from '../lib/query.ts'
 import type { Input } from '../lib/query.ts'
-import type { LookupAnswer, ClassCAnswer, ASNAnswer, BGPAnswer, ASNPrefixPage } from '../lib/via3.ts'
+import type { LookupAnswer, ClassCAnswer, ASNAnswer, BGPAnswer, ASNPrefixPage, CoverageAnswer } from '../lib/via3.ts'
 
 const MAX_FILE = 24 * 1024 * 1024
 const MAX_SECTION = 64 * 1024 * 1024
@@ -34,6 +34,10 @@ const textDecoder = new TextDecoder('utf-8', { fatal: true })
 const reasonNames = ['malware', 'botnet', 'command_control', 'abuse', 'fraud', 'scanning', 'spam', 'tor', 'vpn', 'proxy', 'datacenter', 'hosting', 'asn_context', 'subnet_context']
 const reasons = (bits: number) => reasonNames.filter((_, bit) => (bits & (1 << bit)) !== 0)
 const confidence = (value: number) => ['unrated', 'low', 'medium', 'high'][value]!
+function coverageAnswer(flags: number, ipv6: boolean): CoverageAnswer {
+  const assessed = (bit: number) => flags & (1 << bit) ? 'assessed' as const : 'unassessed' as const
+  return { status: flags & 16 ? 'complete' : 'incomplete', layers: { exact: assessed(0), prefix: assessed(1), asn: assessed(2), neighbors: ipv6 ? 'not_applicable' : assessed(3) } }
+}
 const usage = (value: number) => ['unknown', 'residential', 'business', 'mobile', 'datacenter', 'hosting', 'education', 'government'][value]!
 const networkClass = (value: number) => ['unknown', 'tier1_candidate', 'global_transit', 'regional_transit', 'access_network'][value]!
 const stability = (value: number) => ['unavailable', 'pending', 'stable'][value]!
@@ -206,7 +210,7 @@ function validate(shard: Shard): void {
       const key = index.subarray(p, p + 32)
       if (!validKey(key) || u32(key, 20) >= count || (shard.kind === 7 && (key[0] !== 4 || key[1] !== 24 || u16(key, 2) !== 0))) fail('record')
       if ((shard.kind === 9 || shard.kind === 10) && u16(key, 2) !== 0) fail('record')
-      if (shard.kind === 6 && key[0] === 6) { const row = shard.record(u32(key, 20)); if (has(row, 9) || has(row, 13)) fail('record') }
+      if (shard.kind === 6 && key[0] === 6) { const row = shard.record(u32(key, 20)); if (has(row, 13) || (row[11]! & 24)) fail('record') }
       if (shard.kind === 9) { const row = shard.record(u32(key, 20)); if (row[9]! > (key[0] === 4 ? 32 : 128) || (row[8] === 1 && row[9]! < key[1]!) || ((row[8] === 0 || row[8] === 3) && row[9] !== 0)) fail('record') }
       if (p) { const comparison = compareKey(index.subarray(p - 32, p), key); if (comparison > 0 || (comparison === 0 && (shard.kind !== 9 || u32(shard.record(u32(index, p - 12)), 4) >= u32(shard.record(u32(key, 20)), 4)))) fail('record') }
     }
@@ -250,26 +254,28 @@ function validate(shard: Shard): void {
         if (row[4]! > 7 || row[5]! > 2 || row[6]! > 3 || row[7] !== 0 || (!has(row, 5) && row[4] !== 0) || (!has(row, 6) && row[5] !== 0) || (!has(row, 7) && (row[6]! & 1) !== 0) || (!has(row, 8) && (row[6]! & 2) !== 0)) fail('record')
         break
       case 6:
-        if (u32(row, 4) > 0x3fff || row[8]! > 1 || row[9]! > 100 || row[10]! > 3 || row[11] !== 0 || !zero(row.subarray(28)) || (!has(row, 14) && u32(row, 4) !== 0) || (row[8] === 1) !== has(row, 9) || (!has(row, 9) && (row[9] !== 0 || row[10] !== 0)) || (row[8] === 1 && (row[10] === 0 || (u32(row, 0) & mask(10, 11, 12, 13)) !== mask(10, 11, 12, 13)))) fail('record')
-        for (const [index, cap] of [550000, 180000, 150000, 120000].entries()) if (u32(row, 12 + index * 4) > cap || (!has(row, 10 + index) && u32(row, 12 + index * 4) !== 0)) fail('record')
-        if (has(row, 9)) { const sum = u32(row, 12) + u32(row, 16) + u32(row, 20) + u32(row, 24); const lowScore = Math.floor((1000000 - Math.min(1000000, sum + 2) + 5000) / 10000); const highScore = Math.floor((1000000 - Math.max(0, sum - 2) + 5000) / 10000); if (row[9]! < lowScore || row[9]! > highScore) fail('record') }
+        if (u32(row, 4) > 0x3fff || row[8]! > 1 || row[9]! > 100 || row[10]! > 3 || row[11]! > 31 || ((row[11]! & 16) !== 0 && (row[11]! & 15) !== 15) || !zero(row.subarray(28)) || (!has(row, 14) && u32(row, 4) !== 0) || (row[8] === 1) !== has(row, 9) || (!has(row, 9) && (row[9] !== 0 || row[10] !== 0)) || (row[8] === 1 && (row[10] === 0 || u32(row, 4) === 0 || (u32(row, 0) & mask(10, 11, 12, 13)) === 0))) fail('record')
+        for (const [index, cap] of [550000, 180000, 150000, 120000].entries()) if (u32(row, 12 + index * 4) > cap || (!has(row, 10 + index) && (u32(row, 12 + index * 4) !== 0 || (row[11]! & (1 << index)) !== 0))) fail('record')
+        if (has(row, 9)) { const sum = u32(row, 12) + u32(row, 16) + u32(row, 20) + u32(row, 24); const lowScore = Math.floor((Math.max(0, sum - 2) + 5000) / 10000); const highScore = Math.floor((Math.min(1000000, sum + 2) + 5000) / 10000); if (row[9]! < lowScore || row[9]! > highScore) fail('record') } else if ([12,16,20,24].some(p => u32(row,p)>0)) fail('record')
         break
       case 7: {
         const first = u32(row, 4); const count = u16(row, 8)
-        if (!range(first, count, cells.length / 32) || count > 256 || u16(row, 10) > count || u16(row, 12) > count || !zero(row.subarray(14, 16)) || !zero(row.subarray(22)) || row[20]! > 100 || row[21]! > 3 || (has(row, 22) ? count !== 256 || u16(row, 10) !== 256 || row[21] === 0 : row[20] !== 0 || row[21] !== 0)) fail('record')
-        let previous = -1; let assessed = 0; let positive = 0
+        if (!range(first, count, cells.length / 32) || count > 256 || u16(row, 10) > count || u16(row, 12) > count || u16(row, 14) > count || !zero(row.subarray(22)) || row[20]! > 100 || row[21]! > 3 || (has(row, 22) ? u16(row, 14) === 0 || row[21] === 0 : row[20] !== 0 || row[21] !== 0 || u16(row, 14) !== 0)) fail('record')
+        let previous = -1; let assessed = 0; let positive = 0; let scored = 0; let sum = 0; let minimumConfidence = 3
         for (let j = first; j < first + count; j++) {
           const c = cells.subarray(j * 32, (j + 1) * 32)
-          if (c[0]! <= previous || c[2]! > 7 || c[3]! > 2 || u32(c, 4) > 0x3fff || c[8]! > 100 || c[9]! > 3 || u16(c, 10) !== 0 || u32(c, 12) > 1000000 || c[24]! > 3 || !zero(c.subarray(25))) fail('record')
+          if (c[0]! <= previous || c[2]! > 7 || c[3]! > 2 || u32(c, 4) > 0x3fff || c[8]! > 100 || c[9]! > 3 || c[10]! > 1 || c[11] !== 0 || u32(c, 12) > 1000000 || c[24]! > 3 || !zero(c.subarray(25))) fail('record')
           previous = c[0]!
-          if (c[1]! & 8) { if (c[9] === 0) fail('record'); assessed++ } else if (c[8] !== 0 || c[9] !== 0) fail('record')
+          if (c[1]! & 8) { if (c[9] === 0) fail('record'); scored++; sum += c[8]!; minimumConfidence = Math.min(minimumConfidence,c[9]!) } else if (c[8] !== 0 || c[9] !== 0) fail('record')
           if (u32(c, 4)) positive++
+          if (c[10] === 1) assessed++
           for (const [bit, position, size] of [[0, 2, 1], [1, 3, 1], [2, 4, 4], [4, 12, 4]]) if (!(c[1]! & (1 << bit!)) && !zero(c.subarray(position!, position! + size!))) fail('record')
           const a = u32(c, 16); const b = u32(c, 20)
           if (c[1]! & 32 ? a === NONE || b === NONE || a >= objects.length / 40 || u16(objects, a * 40) !== 4 : a !== NONE || b !== NONE) fail('record')
           if (!(c[1]! & 64) && (c[24]! & 1) || !(c[1]! & 128) && (c[24]! & 2)) fail('record')
         }
-        if (assessed !== u16(row, 10) || positive !== u16(row, 12)) fail('record')
+        if (assessed !== u16(row, 10) || positive !== u16(row, 12) || scored !== u16(row, 14)) fail('record')
+        if (scored > 0 && (row[20] !== Math.floor((2*sum+scored)/(2*scored)) || row[21] !== minimumConfidence)) fail('record')
         break
       }
       case 8:
@@ -320,7 +326,7 @@ function validate(shard: Shard): void {
 export async function parseShard(bytes: Uint8Array, signal?: AbortSignal): Promise<Shard> {
   checkAbort(signal)
   if (bytes.length < 64 || bytes.length >= MAX_FILE) return fail('length')
-  if (bytes[0] !== 86 || bytes[1] !== 73 || bytes[2] !== 65 || bytes[3] !== 51 || u16(bytes, 4) !== 3 || u16(bytes, 6) !== 3) return fail('version')
+  if (bytes[0] !== 86 || bytes[1] !== 73 || bytes[2] !== 65 || bytes[3] !== 51 || u16(bytes, 4) !== 3 || u16(bytes, 6) !== 4) return fail('version')
   if (u16(bytes, 8) !== 64 || u32(bytes, 12) !== 0 || bytes[44] !== 1 || !zero(bytes.subarray(45, 64))) return fail('header')
   if (view(bytes).getBigUint64(36, true) > BigInt(PUBLIC_OBJECT)) return fail('resource_limit')
   const kind = u16(bytes, 10); const expected = schema(kind)
@@ -372,7 +378,7 @@ class ObjectCache {
   private db(): Promise<IDBDatabase | null> {
     if (typeof indexedDB === 'undefined') return Promise.resolve(null)
     this.database ??= new Promise(resolve => {
-      const request = indexedDB.open('via3-schema3', 1)
+      const request = indexedDB.open('via3-schema4', 1)
       request.onupgradeneeded = () => { const db = request.result; db.createObjectStore('objects'); db.createObjectStore('meta', { keyPath: 'hash' }) }
       request.onsuccess = () => resolve(request.result)
       request.onerror = request.onblocked = () => resolve(null)
@@ -515,7 +521,7 @@ export class AtlasReader {
     const bytes = await this.read(pointer.manifest_path, 4 * 1024 * 1024, signal)
     if (await hash(bytes) !== pointer.manifest_sha256) return fail('integrity')
     const manifest = parseCanonical<Manifest>(bytes)
-    if (!manifest || !exactKeys(manifest, ['codec', 'format_version', 'mode', 'objects', 'release_id', 'schema_version', 'valid_from', 'valid_until']) || manifest.codec !== 'zstd-1' || manifest.format_version !== 3 || manifest.schema_version !== 3 || !['synthetic', 'production'].includes(manifest.mode) || manifest.release_id !== pointer.release_id || !Number.isSafeInteger(manifest.valid_from) || !Number.isSafeInteger(manifest.valid_until) || manifest.valid_from < 0 || manifest.valid_until <= manifest.valid_from || manifest.valid_until - manifest.valid_from > 720 * 3600 || !Array.isArray(manifest.objects) || manifest.objects.length === 0 || manifest.objects.length >= 18500) return fail('manifest')
+    if (!manifest || !exactKeys(manifest, ['codec', 'format_version', 'mode', 'objects', 'release_id', 'schema_version', 'valid_from', 'valid_until']) || manifest.codec !== 'zstd-1' || manifest.format_version !== 3 || manifest.schema_version !== 4 || !['synthetic', 'production'].includes(manifest.mode) || manifest.release_id !== pointer.release_id || !Number.isSafeInteger(manifest.valid_from) || !Number.isSafeInteger(manifest.valid_until) || manifest.valid_from < 0 || manifest.valid_until <= manifest.valid_from || manifest.valid_until - manifest.valid_from > 720 * 3600 || !Array.isArray(manifest.objects) || manifest.objects.length === 0 || manifest.objects.length >= 18500) return fail('manifest')
     const { release_id: _id, ...descriptor } = manifest
     if (await hash(new TextEncoder().encode(canonical(descriptor))) !== manifest.release_id) return fail('manifest')
     let previous = ''; let routerHash = ''
@@ -585,7 +591,7 @@ export class AtlasReader {
   }
   private async lookupInput(input: Input, signal?: AbortSignal): Promise<LookupAnswer> {
     const budget = new AnswerBudget(); await this.ready(signal); const manifest = this.current(); const dest = await this.destinations(input, signal)
-    const answer: LookupAnswer = { q: input.canonical, kind: input.kind, releaseId: manifest.release_id, synthetic: manifest.mode === 'synthetic', validUntil: manifest.valid_until, geo: null, network: null, usage: null, quality: null, asns: [], bgp: { origins: [], paths: [], relationships: [], tier1: [], rpki: [] } }
+    const answer: LookupAnswer = { q: input.canonical, kind: input.kind, releaseId: manifest.release_id, synthetic: manifest.mode === 'synthetic', validUntil: manifest.valid_until, geo: null, network: null, usage: null, observedRisk: null, asns: [], bgp: { origins: [], paths: [], relationships: [], tier1: [], rpki: [] } }
     let announcement: string | null = null
     if (input.kind === 'ip') {
       let networkOriginsKnown = false
@@ -598,7 +604,7 @@ export class AtlasReader {
       const use = dest.get(5)?.prefix(input.canonical)?.row
       if (use) { answer.usage = { type: usage(use[4]!), assignment: ['unknown', 'native', 'broadcast_or_routed'][use[5]!]!, anycast: has(use, 7) ? !!(use[6]! & 1) : null, directedBroadcast: has(use, 8) ? !!(use[6]! & 2) : null }; if (answer.usage.anycast && answer.geo) { answer.geo.city = null; answer.geo.latitude = null; answer.geo.longitude = null; answer.geo.precision = null } }
       const quality = dest.get(6)?.prefix(input.canonical)?.row
-      if (quality) answer.quality = { score: has(quality, 9) ? quality[9]! : null, confidence: confidence(quality[10]!), reasons: reasons(u32(quality, 4)), layers: { exact: has(quality, 10) ? u32(quality, 12) / 1e6 : null, prefix: has(quality, 11) ? u32(quality, 16) / 1e6 : null, asn: has(quality, 12) ? u32(quality, 20) / 1e6 : null, neighbors: has(quality, 13) ? u32(quality, 24) / 1e6 : null } }
+      if (quality) answer.observedRisk = { coverage: coverageAnswer(quality[11]!, input.canonical.includes(':')), score: has(quality, 9) ? quality[9]! : null, confidence: confidence(quality[10]!), reasons: reasons(u32(quality, 4)), layers: { exact: has(quality, 10) ? u32(quality, 12) / 1e6 : null, prefix: has(quality, 11) ? u32(quality, 16) / 1e6 : null, asn: has(quality, 12) ? u32(quality, 20) / 1e6 : null, neighbors: has(quality, 13) ? u32(quality, 24) / 1e6 : null } }
       const originShard = dest.get(10); const originFound = originShard?.prefix(input.canonical); const originRow = originFound?.row
       if (originShard && originRow && has(originRow, 19)) { budget.charge(16 * u32(originRow, 8)); const values = this.originList(originShard, originRow); if (networkOriginsKnown && (answer.network!.origins.length !== values.length || values.some((value, index) => value !== answer.network!.origins[index]))) return fail('record'); answer.bgp.origins = values; announcement = originFound!.prefix }
     } else answer.bgp.origins = [Number(input.canonical.slice(2))]
@@ -667,9 +673,9 @@ export class AtlasReader {
     const dest = await this.destinations(input, signal); const shard = dest.get(7); const found = shard?.prefix(input.canonical)
     if (!shard || !found) return null
     const row = found.row; const base = input.canonical.split('.').slice(0, 3).join('.')
-    const answer: ClassCAnswer = { prefix: found.prefix, cells: Array.from({ length: 256 }, (_, suffix) => ({ ip: `${base}.${suffix}`, observed: false, score: null, confidence: 'unrated', reasons: [], usage: 'unknown', origins: [] })), observedCount: u16(row, 8), assessedCount: u16(row, 10), positiveCount: u16(row, 12), aggregateScore: has(row, 22) ? row[20]! : null }
+    const answer: ClassCAnswer = { prefix: found.prefix, cells: Array.from({ length: 256 }, (_, suffix) => ({ ip: `${base}.${suffix}`, observed: false, observedRiskScore: null, confidence: 'unrated', coverage: 'incomplete' as const, reasons: [], usage: 'unknown', origins: [] })), observedCount: u16(row, 8), assessedCount: u16(row, 10), positiveCount: u16(row, 12), scoredCount: u16(row, 14), meanObservedRisk: has(row, 22) ? row[20]! : null }
     const cells = shard.rows(10)
-    for (let index = u32(row, 4); index < u32(row, 4) + u16(row, 8); index++) { const cell = cells.subarray(index * 32, (index + 1) * 32); const target = answer.cells[cell[0]!]!; target.observed = true; target.confidence = confidence(cell[9]!); target.reasons = reasons(u32(cell, 4)); target.usage = usage(cell[2]!); target.score = cell[1]! & 8 ? cell[8]! : null; if (cell[1]! & 32) { const network = await this.reference(shard, u32(cell, 16), signal); const row = network.record(u32(cell, 20)); budget.cellOrigins(u32(row, 8)); target.origins = this.originList(network, row) } }
+    for (let index = u32(row, 4); index < u32(row, 4) + u16(row, 8); index++) { const cell = cells.subarray(index * 32, (index + 1) * 32); const target = answer.cells[cell[0]!]!; target.observed = true; target.confidence = confidence(cell[9]!); target.reasons = reasons(u32(cell, 4)); target.usage = usage(cell[2]!); target.coverage = cell[10] === 1 ? 'complete' : 'incomplete'; target.observedRiskScore = cell[1]! & 8 ? cell[8]! : null; if (cell[1]! & 32) { const network = await this.reference(shard, u32(cell, 16), signal); const row = network.record(u32(cell, 20)); budget.cellOrigins(u32(row, 8)); target.origins = this.originList(network, row) } }
     checkAbort(signal); this.current(); answerFits(answer); return answer
   }
 }

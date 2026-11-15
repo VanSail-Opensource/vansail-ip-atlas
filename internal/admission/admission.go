@@ -172,6 +172,9 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 	if *source.Rights.AttributionRequired && source.Rights.Attribution == nil || source.Rights.Attribution != nil && source.Rights.Attribution.Validate() != nil {
 		return deny("quarantined", "reviewed_dataset_attribution_required")
 	}
+	if source.Rights.Attribution != nil && intelligence.ValidateDatasetLogoFile(e.workspace, source.Rights.Attribution.Logo) != nil {
+		return deny("quarantined", "reviewed_dataset_logo_required")
+	}
 	if !safeHTTPS(source.URL) && !dbipProvider(source) || !publicationSupported(source) {
 		return deny("quarantined", "unsupported_or_unbound_publication_verifier")
 	}
@@ -261,6 +264,8 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 			published = geoProof.UpstreamClock
 			published, err = e.retainClock(ctx, decodedGeoClockKey(geoProof.DecodedSHA256), published)
 		}
+	} else if adapter == torExits {
+		published, err = verifyTorExitFile(ctx, payload, source, now)
 	} else if adapter == rpkiClientJSON {
 		proof, proofErr := verifyRPKIClientFile(ctx, payload, size, source, now)
 		err = proofErr

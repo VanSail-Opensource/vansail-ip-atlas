@@ -1,3 +1,2 @@
-self-hosted-runner:
-  labels:
-    - atlas-private-2cpu-8g-14g
+# Production uses only official GitHub-hosted Ubuntu runners.
+{}

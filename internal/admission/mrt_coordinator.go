@@ -89,6 +89,9 @@ func (e *Engine) IngestMRT(ctx context.Context, sources []Source, now time.Time,
 		if !validMRTControls(source) {
 			return deny("reviewed_mrt_controls_required")
 		}
+		if source.Rights.Attribution != nil && intelligence.ValidateDatasetLogoFile(e.workspace, source.Rights.Attribution.Logo) != nil {
+			return deny("reviewed_dataset_logo_required")
+		}
 		if err := e.certify(ctx, source, mrtRIB, now); err != nil {
 			return deny("reviewed_fixture_certification_required")
 		}

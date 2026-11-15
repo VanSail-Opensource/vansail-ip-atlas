@@ -1,128 +1,112 @@
-name: Atlas approved exact-artifact production promotion
+name: Atlas automatic exact-artifact production promotion
 
 on:
+  workflow_run:
+    workflows: ["Atlas qualified production Pages preview"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      upstream_run_id:
+        description: Successful exact-head upstream run
+        type: string
+        required: true
 
 permissions:
   contents: read
   actions: read
-  deployments: read
 
 concurrency:
   group: atlas-production-promotion
   cancel-in-progress: false
 
 jobs:
-  promote:
-    if: github.ref == 'refs/heads/main' && github.repository == 'VanSail-Opensource/vansail-ip-atlas'
-    runs-on: [self-hosted, linux, x64, atlas-private-2cpu-8g-14g]
-    # Configure required reviewers, prevent self-review and main-only deployment.
-    # The CLI also checks the separate named, dated, exact-evidence approval.
+  promotion:
+    if: github.repository == 'VanSail-Opensource/vansail-ip-atlas' && github.ref == 'refs/heads/main' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-24.04
     environment: atlas-production
-    timeout-minutes: 30
+    timeout-minutes: 360
+    env:
+      GOMAXPROCS: '2'
+      GOMEMLIMIT: 5GiB
+      RUNNER_TOOL_CACHE: ${{ github.workspace }}/build-private/toolcache
+      GH_TOKEN: ${{ github.token }}
+      ATLAS_STATE_AGE_IDENTITY: ${{ secrets.ATLAS_STATE_AGE_IDENTITY }}
+      ATLAS_STATE_AGE_RECIPIENT: ${{ vars.ATLAS_STATE_AGE_RECIPIENT }}
     steps:
       - uses: actions/checkout@v7.0.0
         with:
           persist-credentials: false
-          clean: false
-      - uses: actions/setup-go@v7.0.0
-        with:
-          go-version: '1.27.3'
-          cache: false
-      - uses: actions/setup-python@v7.0.0
-        with:
-          python-version: '3.13.7'
-      - name: Read exact reviewed acceptance identity
-        id: identity
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - uses: ./.github/actions/atlas-setup
+      - name: Verify trusted exact-head upstream
+        id: context
+        run: python tools/hosted/production_workflow.py context --kind promotion
+      - name: Restore authenticated encrypted state
+        run: python tools/hosted/checkpoint.py restore --kind preview --run-id "$ATLAS_UPSTREAM_RUN"
+      - name: Resolve original frozen candidate
+        id: candidate
         run: |
           python - <<'PY'
-          import os
-          from tools.release_contract.contracts import parse_canonical
-          from tools.release_contract.production import read_private
-          from tools.release_contract.promotion import TrustedCI
-          TrustedCI().protected_production_environment()
-          packet=parse_canonical(read_private(__import__('pathlib').Path('.atlas-private/production-acceptance.json')))
-          if packet['head_sha']!=os.environ['GITHUB_SHA']:
-              raise SystemExit('reviewed candidate revision differs from promotion checkout')
-          entry=next(value for value in packet['artifacts'] if value['kind']=='candidate')
-          if type(entry['run_id']) is not int or entry['run_id']<=0:
-              raise SystemExit('invalid reviewed candidate run')
-          TrustedCI().run(entry['run_id'],packet['head_sha'],'.github/workflows/production-candidate.yml')
+          import json, os
+          state=json.load(open('.atlas-private/workflow-context.json'))
           with open(os.environ['GITHUB_OUTPUT'],'a') as output:
-              output.write('candidate_run_id='+str(entry['run_id'])+'\n')
+              output.write('run_id='+str(state['candidate_run_id'])+'\n')
           PY
       - uses: actions/download-artifact@v8.0.2
         with:
           name: atlas-production-public
           path: build-private/frozen-production
-          run-id: ${{ steps.identity.outputs.candidate_run_id }}
+          run-id: ${{ steps.candidate.outputs.run_id }}
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@v8.0.2
         with:
           name: production-candidate-evidence
           path: reports
-          run-id: ${{ steps.identity.outputs.candidate_run_id }}
+          run-id: ${{ steps.candidate.outputs.run_id }}
           github-token: ${{ github.token }}
-      - name: Revalidate all raw gates current rights and explicit exact approval
+      - name: Run bounded production stage
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          python -m pip install -r tools/requirements.txt
-          python tools/release_contract/promotion.py --public build-private/frozen-production --qualification-receipt .atlas-private/production-receipt.json --evidence .atlas-private/production-acceptance.json --approval .atlas-private/final-approval.yaml
-      - name: Promote unchanged tested bytes and verify production
-        id: deploy
-        env:
-          GH_TOKEN: ${{ github.token }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           ATLAS_ACCOUNT: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           ATLAS_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
-        run: python tools/release_contract/pages.py promote --public build-private/frozen-production --qualification-receipt .atlas-private/production-receipt.json --evidence .atlas-private/production-acceptance.json --approval .atlas-private/final-approval.yaml --account "$ATLAS_ACCOUNT" --project "$ATLAS_PROJECT" --head "$GITHUB_SHA"
-      - name: Restore only an independently eligible approved prior deployment
-        if: failure() && steps.deploy.outcome == 'failure'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          ATLAS_ACCOUNT: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          ATLAS_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
-        run: |
-          python - <<'PY'
-          import json, os, subprocess
-          from pathlib import Path
-          failed=Path('reports/pages-deployment.json')
-          if not failed.is_file() or not json.loads(failed.read_text()).get('deployment_id'):
-              raise SystemExit('No verified new deployment identity is available; no automatic rollback attempted')
-          info=Path('.atlas-private/rollback/deployment.json')
-          if not info.is_file():
-              raise SystemExit('Rollback unavailable: no approved prior artifact was provisioned; no unsafe restore attempted')
-          value=json.loads(info.read_text())
-          subprocess.run(['python','tools/release_contract/pages.py','rollback','--public','.atlas-private/rollback/public','--candidate-report','.atlas-private/rollback/static-candidate.json','--qualification-receipt','.atlas-private/rollback/production-receipt.json','--evidence','.atlas-private/rollback/production-acceptance.json','--approval','.atlas-private/rollback/final-approval.yaml','--deployment-id',value['deployment_id'],'--head',value['head_sha'],'--account',os.environ['ATLAS_ACCOUNT'],'--project',os.environ['ATLAS_PROJECT'],'--report','reports/rollback.json'],check=True)
-          PY
+        run: python tools/hosted/runner_budget.py -- python tools/hosted/production_workflow.py promotion
+      - name: Encrypt immutable state for the next trusted job
+        run: python tools/hosted/checkpoint.py pack --kind promotion
+      - uses: actions/upload-artifact@v7.0.0
+        with:
+          name: atlas-promotion-checkpoint
+          path: |
+            build-private/checkpoint/checkpoint.tar.gz.age
+            build-private/checkpoint/envelope.json
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
       - uses: actions/upload-artifact@v7.0.0
         if: always()
         with:
           name: production-promotion-status
           path: |
+            reports/rollback.json
             reports/production-authorization.json
             reports/pages-deployment.json
-            reports/rollback.json
           if-no-files-found: error
           retention-days: 7
-      - name: Erase ephemeral private bootstrap
+      - uses: actions/upload-artifact@v7.0.0
+        with:
+          name: atlas-promotion-checkpoint-index
+          path: build-private/checkpoint/envelope.json
+          retention-days: 7
+          if-no-files-found: error
+      - name: Remove plaintext state
         if: always()
         run: |
           python - <<'PY'
           import os, shutil
           from pathlib import Path
           root=Path(os.environ['GITHUB_WORKSPACE']).resolve()
-          for relative in ('.atlas-private','fixtures/source-certification'):
-              target=root/relative
-              if target.exists():
-                  if target.is_symlink() or not target.resolve().is_relative_to(root) or target.resolve()==root:
-                      raise SystemExit('unsafe private cleanup target')
-                  shutil.rmtree(target)
+          target=root/'.atlas-private'
+          if target.exists():
+              if target.is_symlink() or not target.resolve().is_relative_to(root):
+                  raise SystemExit('unsafe state cleanup path')
+              shutil.rmtree(target)
           PY
-
-# No build occurs between preview and production. Missing inputs/reports/review
-# fail before upload. A green synthetic workflow cannot authorize this operation.

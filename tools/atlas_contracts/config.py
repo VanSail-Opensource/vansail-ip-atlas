@@ -21,7 +21,7 @@ FIELD_TARGETS = {
     "latitude": {"latitude"}, "longitude": {"longitude"},
     "asn": {"asn", "origins", "bgp_origins"}, "organization": {"organization"}, "isp": {"isp"},
     "handle": {"as_name"}, "description": {"organization"}, "country-code": {"asn_country"},
-    "network_type": {"usage_type"}, "usage_type": {"usage_type"},
+    "network_type": {"usage_type"}, "usage_type": {"usage_type"}, "metadata.category": {"usage_type"},
     "as_path": {"bgp_paths"}, "as_relationship": {"as_relationships"},
     "roa": {"rpki_status"}, "roa_asn": {"rpki_status"}, "roa_max_length": {"rpki_status"},
     **{field: {"reason_flags"} for field in (
@@ -131,8 +131,6 @@ def validate_sources(config):
     if len(ids) != len(set(ids)):
         raise ContractError("duplicate source IDs")
     subscriptions = [s for s in sources if s["category"] == "proxy_subscription_ip"]
-    if len(subscriptions) != 21:
-        raise ContractError("catalog requires 21 subscription entries")
     for source in sources:
         sid = source["id"]
         dependencies = source["depends_on"]

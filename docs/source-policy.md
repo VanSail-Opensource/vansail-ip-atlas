@@ -1,42 +1,22 @@
 # Source Admission and Freshness Policy
 
-## Current release scope `release-scope-v4` — 2026-11-09
+## Current release scope `release-scope-v5` - 2026-11-15
 
-The owner approved CC BY-SA 4.0 for compiled database material. The exact
-data-license notice and reviewed credits for included datasets are bound into the
-immutable candidate. Source code and dependencies retain their own licenses.
-This choice grants no permission for an unreviewed source: redistribution,
-derivative-license compatibility, publication proof and parser certification
-remain source-specific requirements. The private capability report uses schema
-version 3 and `release_scope: release-scope-v4`.
+The approved model is `via-observed-risk-v1`: positive-evidence observed risk
+with explicit incomplete coverage. All categories and product views remain
+supported. Production requires verified positive observations, not a feed for
+every category; missing categories and unlisted addresses remain unknown.
+Complete negative assessment is never inferred. Prior v2 optional numeric-quality
+rules are superseded by this versioned model; v3 global credits and v4 CC BY-SA
+4.0 compiled-data redistribution remain in force.
 
-V4 retains v3's global-credit exception and v2's optional numeric quality.
-Complete negative risk feeds are not required for production release; all
-existing coverage rules still govern every non-null score.
-
-## Approved prior release scope `release-scope-v3` — 2026-11-08
-
-The user explicitly approved dataset credit display. Reviewed, legally required
-attribution may appear in one global shared frontend display and its dedicated
-static artifact for real datasets included in the frozen release. This replaces
-the earlier blanket no-credit admission condition. It permits only approved
-credit names, plain text and attribution/license URLs; source IDs, per-IP
-provenance and source metadata in VIA3/lookup answers remain private.
-
-This credit amendment retains the numeric-quality amendment below. It does not
-make a dataset eligible by displaying its name or changing a catalog label.
-
-## Approved release scope `release-scope-v2` — 2026-11-08
-
-The user removed complete risk-assessment feeds as a production-release
-prerequisite. Numeric quality is optional for release. Without adequate complete
-assessment coverage, publish `quality=null`, unrated confidence and any supported
-positive reason flags. Publishing a non-null numeric score still requires the
-unchanged two independent complete families and all four assessed IPv4 layers
-specified in `configs/scoring.yaml` and `docs/scoring.md`. Source admission,
-freshness, independence and rights checks remain mandatory for every contribution.
-This is a versioned release-scope amendment; it does not activate any source or
-change the scoring model.
+Each dataset still needs reviewed redistribution and derivative-license
+compatibility, actual publication proof and an observed parser fixture. The
+product license does not approve a source. V5 additionally permits required
+publisher logos in the single global credit display, with no per-IP attribution.
+The source config is schema3/contract revision4, public VIA3 schema4, private
+normalized records schema3. Credit documents use format2 and their index format1.
+The private capability report remains schema3 with release-scope-v5.
 
 ## Static Admission States
 
@@ -48,10 +28,10 @@ change the scoring model.
 
 Runtime state is not stored in YAML. A source may be statically `active` but dynamically `stale`, `missing`, `invalid`, or `quarantined`.
 
-At the November 9 reviewed checkpoint, eight of 91 entries are statically active.
-Their observed fixtures and source-specific rights decisions do not establish
-current production coverage. Derive current eligibility from revalidated intake,
-not this dated count; see `SOURCES_AUDIT.md` for the review boundary.
+The November 15 shortlist has fourteen entries: ten active intake candidates
+and four unresolved routing candidates. Active entries are the eight previously
+reviewed sources plus timestamped Tor exits and contextual Ipverse ASN usage.
+Static status cannot establish current production coverage. See SOURCES_AUDIT.md.
 
 ## Required Source Fields
 
@@ -106,7 +86,24 @@ withdrawn or synthetic datasets cannot acquire a displayed inclusion credit.
 
 The P0 policy evaluator accepts trusted payload-verifier results only; it is not a network ingestor or proof verifier. Actual intake constructs receipts from complete downloaded bytes, schema validation, current policy and asset-specific metadata. `validate_blueprint.py` intentionally supplies no runtime snapshots and therefore reports no current sources; the authenticated production path independently reopens surviving normalized partitions. A config label or checked-in report cannot produce a current payload. Build-private reports include config hashes, decisions and missing capabilities and must never enter `web/` or a deploy artifact.
 
-The capability report counts distinct `evidence_family` values, explicit canonical fields and signal mappings. Numeric quality needs the same two complete families assessing all four layers to qualify for numeric publication. The current schema-version-3 report carries `release_scope: release-scope-v4`, retains the v2 numeric-quality row as `required: false` and reports `status: unrated` when unqualified; that optional row does not block production eligibility. Every other capability remains required. Usage cannot qualify from a provider name or a datacenter reason. The Pages row cannot qualify from config booleans; exact candidate evidence, preview and approval verification remain separate mandatory gates. Missing runtime evidence blocks each required data capability even if a source is statically active; it leaves optional numeric quality unrated.
+The report has twelve required rows: eleven source capabilities and Pages.
+Verified positive observations qualify risk; absent reasons remain unknown and
+are informational. There is no legacy optional numeric_quality row. Usage requires
+typed direct evidence or the reviewed ASN-category join. Two independent path
+families, directed relationships and complete current RPKI remain required.
+Pages needs the exact candidate's hosted preview and promotion gates.
+
+Source revision4 adds optional license.attribution.logo, exactly {path, sha256,
+alt}. Its public path is /_atlas/legal/<sha256>.png; the reviewed input is
+fixtures/source-certification/logos/<sha256>.png. Alt text obeys credit-name
+restrictions. Each PNG is at most 256 KiB and 512 x 512 pixels, non-interlaced 8-bit
+grayscale/RGB with optional alpha, with only IHDR/IDAT/IEND chunks. Embedded
+metadata, SVG, animation and trailing bytes are rejected. A release permits at
+most 32 distinct logos and 4 MiB of logo bytes. Rights digests include logo metadata;
+packaging verifies actual bytes and the complete frozen inventory. Missing,
+altered, orphaned and symlinked files fail. The browser verifies credit and logo
+hashes before exposing production lookup/ClassC facts and renders those verified
+bytes. Required links/logos stay visible when notices are collapsed.
 
 ## Event clocks, runtime failures and retraction
 
@@ -114,7 +111,7 @@ The publication clock must be tied to the exact payload hash. A GitHub commit qu
 
 Subscription evidence expires at the earliest of snapshot publication + 168h, verified upstream item publication + 168h, and the general 720h ceiling. An absent or unverified item publication timestamp quarantines the item; first local observation, fetch time and republishing a wrapper cannot establish item freshness. A newly wrapped old item never becomes new. All no-change builds must reevaluate these deadlines and current rights, policy, schema/config hashes, source-list deletions and retirement before any cache-hit return. HTTP 304 does not alter any deadline.
 
-When eligibility is lost, the production pipeline must discard every previous contribution, mark the union of its exact/prefix/ASN/neighborhood/routing/graph dependent partitions dirty and recompile from surviving current snapshots. The P0 evaluator tests exclusion and time/withdrawal decisions; it does not claim that the P2 storage/rebuild pipeline exists. Private retention and current-output retraction are separate: bounded audit retention cannot keep any record eligible. Release-level expiry, client revalidation and rollback are defined in `docs/release.md`.
+When eligibility is lost, the production pipeline must discard every previous contribution, mark the union of its exact/prefix/ASN/neighborhood/routing/graph dependent partitions dirty and recompile from surviving current snapshots. Bounded and partitioned reconciliation apply these decisions before materialization. Private retention and current-output retraction are separate: bounded audit retention cannot keep any record eligible. Release-level expiry, client revalidation and rollback are defined in `docs/release.md`.
 
 ## Cold BGP acquisition
 
@@ -128,7 +125,7 @@ CAIDA serial-2 discovery chooses the newest matching `YYYYMMDD.as-rel2.txt.bz2` 
 
 ## Evidence Independence
 
-The 21 proxy-subscription repositories all use `evidence_family: public-subscription-aggregators`. Repetition across those repositories counts once. Protocol partitions and mirrors from one publisher also share a family. A new family requires documented original-source provenance.
+The 21 unqualified subscription entries were removed from the production catalog. Their independent security fixtures remain. Future reviewed derivative subscription lists must share `evidence_family: public-subscription-aggregators`; repetition counts once. Protocol partitions and mirrors from one publisher also share a family. A new family requires documented original-source provenance.
 
 Reconciliation also correlates byte-identical current payloads before binding
 any normalized record to a family. Configured families connected by identical
@@ -166,7 +163,7 @@ Only literal public IPs are accepted. Credentials, ports, protocols, transports,
 ## Rights
 
 Public hosting of a derived database can constitute redistribution. Sources
-prohibiting the proposed redistribution remain excluded. Under `release-scope-v4`,
+prohibiting the proposed redistribution remain excluded. Under `release-scope-v5`,
 public attribution is permitted through the reviewed global dataset credits when
 that placement and content satisfy the actual license and upstream obligations.
 Compiled database material uses the owner-approved CC BY-SA 4.0 license; each
@@ -187,12 +184,10 @@ Production is blocked unless approved current sources exist for every required c
 - proxy/risk reasons and exact `/24` observations;
 - current MRT paths, directed relationships, origin data, and RPKI for BGP/Tier-1.
 
-Numeric quality remains optional under `release-scope-v4` (retaining v2). Two independent complete
-risk-assessment families covering all required layers remain necessary for a
-non-null score, but are not necessary to release supported reasons and unrated
-quality. The reason display, null-score semantics and scoring invariant tests
-remain required. Complete coverage cannot be inferred from positive-only lists,
-mapping records, mirror counts or a successful synthetic parser test.
+Observed risk requires positive evidence from a qualified family and follows
+configs/scoring.yaml exactly. Unlisted addresses and absent categories stay
+unknown. Mapping records, mirror counts and synthetic fixtures do not establish
+assessment coverage or source qualification.
 
 No allowlist, placeholder source, or synthetic record satisfies the gate.
 
@@ -213,3 +208,18 @@ CSV has 125,830 rows and is supported by version-2 partitioned intake. The
 source; whole-store and runner budgets remain unchanged. Exact publication proof,
 reviewed rights and current real-fixture certification remain mandatory on every
 intake, independently of the reviewed source's static active label.
+
+## Tor and contextual ASN usage
+
+Tor intake validates complete TorDNSEL descriptors, strips relay metadata and
+retains literal public exit addresses with original ExitAddress clocks. The
+newest accepted observation conservatively dates the body; each older item clock
+clamps expiry. Unlisted addresses are never declared non-Tor.
+
+Ipverse JSON keeps metadata.lastModified for unambiguous hosting/business/
+education/government categories. ISP/null does not imply residential/mobile.
+ASN primary function is fallback context on current observed origin prefixes.
+Direct IP/prefix usage wins; more-specific origin boundaries apply and mixed or
+missing MOAS classification stays unknown. networkRole never establishes Tier-1.
+File-specific commit proof downloads the complete immutable payload and matches
+its SHA-256 and size; a fresh wrapper cannot renew an old category observation.

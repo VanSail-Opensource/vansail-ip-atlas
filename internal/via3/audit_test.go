@@ -111,7 +111,8 @@ func auditCases() []auditCase {
 	out = append(out, auditCase{"ipv4_vrp_length_128", s, "203.0.113.1"})
 	quality := make([]byte, 32)
 	p32(quality, 0, bits(9, 10, 11, 12, 13, 14))
-	quality[8], quality[9], quality[10] = 1, 100, 1
+	quality[8], quality[9], quality[10] = 1, 0, 1
+	p32(quality, 4, 1)
 	for i, value := range []uint32{550000, 180000, 150000, 120000} {
 		p32(quality, 12+i*4, value)
 	}
@@ -123,12 +124,40 @@ func auditCases() []auditCase {
 	ipv6Quality[8], ipv6Quality[9], ipv6Quality[10] = 1, 100, 1
 	s = newShard(6, ipv6Quality)
 	s.set(1, prefixRows(key("2001:db8::/32", false, 0)))
-	out = append(out, auditCase{"ipv6_quality_numeric_score", s, "2001:db8::1"})
+	out = append(out, auditCase{"ipv6_numeric_without_positive_evidence", s, "2001:db8::1"})
 	ipv6Neighbors := make([]byte, 32)
 	p32(ipv6Neighbors, 0, bits(13))
 	s = newShard(6, ipv6Neighbors)
 	s.set(1, prefixRows(key("2001:db8::/32", false, 0)))
 	out = append(out, auditCase{"ipv6_neighbor_layer_present_zero", s, "2001:db8::1"})
+	for _, flags := range []byte{16, 32, 1} {
+		row := make([]byte, 32)
+		row[11] = flags
+		s = newShard(6, row)
+		s.set(1, prefixRows(key("203.0.113.0/24", false, 0)))
+		name := "coverage_complete_without_assessed_layers"
+		if flags == 32 {
+			name = "coverage_unknown_flags"
+		}
+		if flags == 1 {
+			name = "coverage_assessed_without_layer_presence"
+		}
+		out = append(out, auditCase{name, s, "203.0.113.1"})
+	}
+	meanRow, meanCell := make([]byte, 24), make([]byte, 32)
+	p32(meanRow, 0, bits(21, 22))
+	p16(meanRow, 8, 1)
+	p16(meanRow, 12, 1)
+	p16(meanRow, 14, 1)
+	meanRow[20], meanRow[21] = 18, 1
+	meanCell[0], meanCell[1], meanCell[8], meanCell[9] = 1, 12, 17, 1
+	p32(meanCell, 4, 1)
+	p32(meanCell, 16, None)
+	p32(meanCell, 20, None)
+	s = newShard(7, meanRow)
+	s.set(1, prefixRows(key("203.0.113.0/24", false, 0)))
+	s.set(10, Vector(32, meanCell))
+	out = append(out, auditCase{"observed_mean_disagrees_with_scored_cells", s, "203.0.113.1"})
 	return out
 }
 func auditUncheckedContainer(t *testing.T, s Shard) []byte {
@@ -141,7 +170,7 @@ func auditUncheckedContainer(t *testing.T, s Shard) []byte {
 	data := make([]byte, 64+len(s.Sections)*64)
 	copy(data, "VIA3")
 	p16(data, 4, 3)
-	p16(data, 6, 3)
+	p16(data, 6, 4)
 	p16(data, 8, 64)
 	p16(data, 10, s.Kind)
 	p32(data, 16, uint32(len(s.Sections)))
@@ -237,9 +266,9 @@ func auditReleaseFromFacts(t *testing.T, facts ...Shard) (*Release, map[string][
 	infos = append(infos, info)
 	files[info.SHA256] = data
 	sort.Slice(infos, func(i, j int) bool { return infos[i].SHA256 < infos[j].SHA256 })
-	desc := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: infos, SchemaVersion: 3, ValidFrom: 1700000000, ValidUntil: 1700003600}
+	desc := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: infos, SchemaVersion: 4, ValidFrom: 1700000000, ValidUntil: 1700003600}
 	id := Hash(canonical(desc))
-	manifest := Manifest{Codec: desc.Codec, FormatVersion: 3, Mode: desc.Mode, Objects: infos, ReleaseID: id, SchemaVersion: 3, ValidFrom: desc.ValidFrom, ValidUntil: desc.ValidUntil}
+	manifest := Manifest{Codec: desc.Codec, FormatVersion: 3, Mode: desc.Mode, Objects: infos, ReleaseID: id, SchemaVersion: 4, ValidFrom: desc.ValidFrom, ValidUntil: desc.ValidUntil}
 	pointer := Pointer{3, "/_atlas/releases/" + id + "/manifest.json", Hash(canonical(manifest)), id}
 	reader, err := NewRelease(canonical(pointer), canonical(manifest), func(hash string) ([]byte, error) { return files[hash], nil }, func() int64 { return 1700000001 })
 	if err != nil {
@@ -481,9 +510,9 @@ func auditRelease(t *testing.T, item auditCase) auditReleaseCase {
 	routerInfo := ObjectInfo{Bytes: len(encoded), Kind: 1, Partition: "all", SHA256: Hash(encoded)}
 	objects := []ObjectInfo{routerInfo, fact.Info}
 	sort.Slice(objects, func(i, j int) bool { return objects[i].SHA256 < objects[j].SHA256 })
-	desc := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: objects, SchemaVersion: 3, ValidFrom: 1700000000, ValidUntil: 1700003600}
+	desc := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: objects, SchemaVersion: 4, ValidFrom: 1700000000, ValidUntil: 1700003600}
 	id := Hash(canonical(desc))
-	manifest := Manifest{Codec: desc.Codec, FormatVersion: 3, Mode: desc.Mode, Objects: objects, ReleaseID: id, SchemaVersion: 3, ValidFrom: desc.ValidFrom, ValidUntil: desc.ValidUntil}
+	manifest := Manifest{Codec: desc.Codec, FormatVersion: 3, Mode: desc.Mode, Objects: objects, ReleaseID: id, SchemaVersion: 4, ValidFrom: desc.ValidFrom, ValidUntil: desc.ValidUntil}
 	pointer := Pointer{3, "/_atlas/releases/" + id + "/manifest.json", Hash(canonical(manifest)), id}
 	return auditReleaseCase{item.name, pointer, manifest, []auditObject{{routerInfo.SHA256, base64.StdEncoding.EncodeToString(encoded)}, {fact.Info.SHA256, base64.StdEncoding.EncodeToString(data)}}, item.query, "record", 1700000001}
 }

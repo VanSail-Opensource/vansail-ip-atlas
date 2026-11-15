@@ -32,6 +32,9 @@ func publicationSupported(source Source) bool {
 	if _, ok := ipapiCSVMember(source); ok {
 		return true
 	}
+	if torExitSource(source) {
+		return true
+	}
 	switch source.Publication.Kind {
 	case "github_release":
 		return (source.Publication.Field == "published_at" || source.Publication.Field == "assets.created_at") && validReleaseLocator(source.Publication.Locator, source.URL)

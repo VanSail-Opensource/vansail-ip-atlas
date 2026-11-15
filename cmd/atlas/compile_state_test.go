@@ -104,8 +104,8 @@ func TestCompileStateCommandRoundTripAndWithdrawal(t *testing.T) {
 		t.Fatal(err)
 	}
 	answer, err := reader.Lookup(context.Background(), "203.0.113.0")
-	if err != nil || !answer.Synthetic || answer.ValidUntil != 1794099600 || answer.Quality == nil || answer.Quality.Score != nil || !slices.Contains(answer.Quality.Reasons, "malware") {
-		t.Fatalf("private-state command changed unrated positive facts: %+v %v", answer, err)
+	if err != nil || !answer.Synthetic || answer.ValidUntil != 1794099600 || answer.Quality == nil || answer.Quality.Score == nil || *answer.Quality.Score == 0 || answer.Quality.Confidence != "low" || answer.Quality.Coverage.Status != "incomplete" || !slices.Contains(answer.Quality.Reasons, "malware") {
+		t.Fatalf("private-state command changed supported observed risk: %+v %v", answer, err)
 	}
 	state.Sources = state.Sources[1:]
 	if err := intelligence.SavePrivateState(root, state); err != nil {

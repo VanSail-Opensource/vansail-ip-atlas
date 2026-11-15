@@ -2,17 +2,48 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { parseCreditIndex, parseCreditDocument, loadDatasetCredits } from '../app/lib/datasetCredits.ts'
+import { verifyDatasetLogo } from '../app/lib/datasetLogos.ts'
 
 const id = 'a'.repeat(64)
 const encoder = new TextEncoder()
 const canonical = (v: unknown): string => Array.isArray(v) ? `[${v.map(canonical).join(',')}]` : v && typeof v === 'object' ? `{${Object.keys(v).sort().map(k => `${JSON.stringify(k)}:${canonical((v as Record<string, unknown>)[k])}`).join(',')}}` : JSON.stringify(v)
 const bytes = (v: unknown) => encoder.encode(canonical(v))
 const entry = { name: 'Example geography', text: 'Attribution for an included dataset.', url: 'https://example.org/data', license_url: 'https://example.org/license' }
+const logos = JSON.parse(readFileSync(new URL('../../fixtures/contracts/dataset-logos-v1.json', import.meta.url), 'utf8'))
+
+test('Go, Python and browser share bounded PNG logo integrity decisions', async () => {
+  for (const row of logos.cases) {
+    const check = verifyDatasetLogo(new Uint8Array(Buffer.from(row.base64, 'base64')), row.sha256)
+    if (row.valid) assert.equal(await check, 'data:image/png;base64,' + row.base64, row.name)
+    else await assert.rejects(check, row.name)
+  }
+})
+
+test('required logos are local, hash verified and complete before credits are returned', async () => {
+  const fixture = logos.cases[0]
+  const logo = { path: `/_atlas/legal/${fixture.sha256}.png`, sha256: fixture.sha256, alt: 'Example publisher' }
+  const document = bytes({ format_version: 2, release_id: id, mode: 'production', entries: [{ ...entry, logo }] })
+  const hash = Buffer.from(await crypto.subtle.digest('SHA-256', document)).toString('hex')
+  const index = bytes({ format_version: 1, current_release_id: id, releases: [{ release_id: id, credits_path: `/_atlas/credits/${hash}.json`, credits_sha256: hash }] })
+  for (const corrupt of [false, true]) {
+    const seen: string[] = []
+    const fetcher = async (path: string, options: RequestInit) => {
+      seen.push(path); assert.equal(options.mode, 'same-origin'); assert.equal(options.redirect, 'error')
+      return new Response(path === '/dataset-credits.json' ? index : path === logo.path ? Buffer.from(corrupt ? 'invalid' : fixture.base64, 'base64') : document)
+    }
+    if (corrupt) await assert.rejects(loadDatasetCredits(id, undefined, fetcher as typeof fetch))
+    else assert.equal((await loadDatasetCredits(id, undefined, fetcher as typeof fetch)).verifiedLogos?.[fixture.sha256], 'data:image/png;base64,' + fixture.base64)
+    assert.deepEqual(seen, ['/dataset-credits.json', `/_atlas/credits/${hash}.json`, logo.path])
+  }
+  for (const changed of [{ ...logo, path: 'https://publisher.example/logo.png' }, { ...logo, alt: 'private\u202elogo' }, { ...logo, extra: 'metadata' }])
+    assert.throws(() => parseCreditDocument(bytes({ format_version: 2, release_id: id, mode: 'production', entries: [{ ...entry, logo: changed }] }), id))
+  assert.throws(() => parseCreditDocument(bytes({ format_version: 1, release_id: id, mode: 'production', entries: [entry] }), id))
+})
 
 test('Go, Python and browser accept the same reviewed credit URL corpus', () => {
   const corpus = JSON.parse(readFileSync(new URL('../../fixtures/contracts/attribution-urls-v1.json', import.meta.url), 'utf8'))
   for (const row of corpus.cases) {
-    const parse = () => parseCreditDocument(bytes({ format_version: 1, release_id: id, mode: 'production', entries: [{ ...entry, url: row.url }] }), id)
+    const parse = () => parseCreditDocument(bytes({ format_version: 2, release_id: id, mode: 'production', entries: [{ ...entry, url: row.url }] }), id)
     if (row.valid) assert.doesNotThrow(parse, row.url)
     else assert.throws(parse, row.url)
   }
@@ -21,17 +52,17 @@ test('Go, Python and browser accept the same reviewed credit URL corpus', () => 
 test('shared credit text is plain Unicode data and never credentials or executable markup', () => {
   const corpus = JSON.parse(readFileSync(new URL('../../fixtures/contracts/attribution-text-v1.json', import.meta.url), 'utf8'))
   for (const row of corpus.cases) {
-    const parse = () => parseCreditDocument(bytes({ format_version: 1, release_id: id, mode: 'production', entries: [{ ...entry, text: row.text }] }), id)
+    const parse = () => parseCreditDocument(bytes({ format_version: 2, release_id: id, mode: 'production', entries: [{ ...entry, text: row.text }] }), id)
     if (row.valid) assert.doesNotThrow(parse)
     else assert.throws(parse)
   }
 })
 
 test('credits have a closed global schema and cannot claim real datasets in synthetic mode', () => {
-  assert.deepEqual(parseCreditDocument(bytes({ format_version: 1, release_id: id, mode: 'production', entries: [entry] }), id).entries, [entry])
+  assert.deepEqual(parseCreditDocument(bytes({ format_version: 2, release_id: id, mode: 'production', entries: [entry] }), id).entries, [entry])
   for (const mutation of [ { ...entry, source_id: 'private' }, { ...entry, url: 'https://127.0.0.1' }, { ...entry, url: 'https://user:secret@example.org' }, { ...entry, text: 'hidden\u202esecret' }, { ...entry, url: 'https://example.org?token=secret' } ])
-    assert.throws(() => parseCreditDocument(bytes({ format_version: 1, release_id: id, mode: 'production', entries: [mutation] }), id))
-  assert.throws(() => parseCreditDocument(bytes({ format_version: 1, release_id: id, mode: 'synthetic', entries: [entry] }), id))
+    assert.throws(() => parseCreditDocument(bytes({ format_version: 2, release_id: id, mode: 'production', entries: [mutation] }), id))
+  assert.throws(() => parseCreditDocument(bytes({ format_version: 2, release_id: id, mode: 'synthetic', entries: [entry] }), id))
   assert.throws(() => parseCreditDocument(encoder.encode(`{"entries":[],"entries":[],"format_version":1,"mode":"synthetic","release_id":"${id}"}`), id))
 })
 
@@ -45,7 +76,7 @@ test('credit index pins content-addressed documents and rejects unrelated or dup
 })
 
 test('credit verification fetches release-scoped static metadata without any query or external origin', async () => {
-  const document = bytes({ format_version: 1, release_id: id, mode: 'synthetic', entries: [] })
+  const document = bytes({ format_version: 2, release_id: id, mode: 'synthetic', entries: [] })
   const hash = Buffer.from(await crypto.subtle.digest('SHA-256', document)).toString('hex')
   const index = bytes({ format_version: 1, current_release_id: id, releases: [{ release_id: id, credits_path: `/_atlas/credits/${hash}.json`, credits_sha256: hash }] })
   const seen: string[] = []
@@ -63,7 +94,7 @@ test('cancelled and oversized credit requests cannot expose metadata or continue
   await assert.rejects(loadDatasetCredits(undefined, controller.signal, (async () => { requests++; return new Response('{}') }) as typeof fetch))
   assert.equal(requests, 0)
   await assert.rejects(loadDatasetCredits(undefined, undefined, (async () => new Response(new Uint8Array(8193))) as typeof fetch))
-  const document = { format_version: 1, release_id: id, mode: 'production', entries: [entry, { ...entry, text: 'Different required notice.' }] }
+  const document = { format_version: 2, release_id: id, mode: 'production', entries: [entry, { ...entry, text: 'Different required notice.' }] }
   document.entries.sort((a, b) => canonical(a) < canonical(b) ? -1 : 1)
   assert.equal(parseCreditDocument(bytes(document), id).entries.length, 2)
 })

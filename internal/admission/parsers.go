@@ -29,6 +29,8 @@ const (
 	rpkiClientJSON
 	ipapiCityZIP
 	riskAdapter
+	torExits
+	ipverseUsageJSON
 )
 
 // Adapter IDs describe implemented schemas, not source certification. None is
@@ -39,6 +41,10 @@ func selectAdapter(source Source) (adapter, bool) {
 		return 0, false
 	}
 	switch source.Parser.ID {
+	case "tor-exit-addresses":
+		return torExits, torExitSource(source)
+	case "ipverse-asn-usage-json":
+		return ipverseUsageJSON, source.Parser.Schema == "ipverse-as-category-json-v1" && source.Category == "asn" && source.Coverage == "mapping" && source.Scope == "asn" && source.Format == "json" && fieldsEqual(source.PublicFields, "usage_type") && mappedFields(source, map[string]string{"metadata.category": "usage_type"})
 	case "ip-count-tsv", "feodo-csv":
 		return riskAdapter, selectRiskAdapter(source)
 	case "ipapi-free-city-csv":
@@ -157,6 +163,11 @@ func parsePayloadTo(ctx context.Context, file *os.File, size int64, source Sourc
 	parse := func(_ string, reader io.Reader) error {
 		limits := intelligence.ParseLimits{Bytes: 3 << 30, Records: maxRecords, LineBytes: 1 << 20}
 		switch implementation {
+		case torExits:
+			_, err := parseTorExitAddresses(ctx, reader, published, source.MaxAge, maxRecords, emit)
+			return err
+		case ipverseUsageJSON:
+			return parseIPverseUsageJSON(ctx, reader, source.Family, min(maxRecords, 1_000_000), emit)
 		case riskAdapter:
 			return parseRiskPayload(ctx, reader, source, published, maxRecords, emit)
 		case rpkiClientJSON:

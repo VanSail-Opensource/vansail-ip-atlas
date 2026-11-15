@@ -33,7 +33,7 @@ const report = { scope:'hosted-production-browser-v1',mode:'production',url:base
   corpus_sha256:createHash('sha256').update(corpusBytes).digest('hex'),browser:null,head_sha:process.env.GITHUB_SHA??null,
   execution_host:{platform:process.platform,arch:process.arch,node:process.versions.node,logical_cpus:cpus().length,memory_bytes:totalmem()},
   populations:[],cold_queries:[],hot_queries:[],errors:[],worker_memory_samples:[],
-  worst_case_worker_memory:{accounting:'unmeasured',reason:'No isolated whole-worker cgroup peak at the accepted worst-case profile has been established'},
+  worst_case_worker_memory:JSON.parse(await readFile(new URL('reports/worker-memory.json',root),'utf8')),
   protocol:{widths:[320,390,1280,1440],themes:['light','dark'],independent_contexts_per_population:30,
     mobile_dpr:2,mobile_cpu_slowdown:4,network_rtt_ms:150,network_down_bits_per_second:1600000,network_up_bits_per_second:750000,
     graph_phase_ms:10000,graph_wheel_pair:'deltaY=-50,+50',graph_population:'all24completecircles-insideSVG-and-screen-each1000ms',
@@ -98,7 +98,7 @@ async function newSample(width,theme) {
 
 async function credits(s) {
   const requests=[]
-  const record=request=>{const url=new URL(request.url());if(url.pathname==='/dataset-credits.json'||url.pathname.startsWith('/_atlas/credits/')){if(url.origin!==base.origin||url.search||url.hash||request.headers().referer)report.errors.push('Credit request disclosed lookup association');requests.push(url.pathname)}}
+  const record=request=>{const url=new URL(request.url());if(url.pathname==='/dataset-credits.json'||url.pathname.startsWith('/_atlas/credits/')||url.pathname.startsWith('/_atlas/legal/')){if(url.origin!==base.origin||url.search||url.hash||request.headers().referer)report.errors.push('Credit request disclosed lookup association');requests.push(url.pathname)}}
   s.page.on('request',record)
   try {
     if(await s.page.getByTestId('dataset-credits').count()!==1)throw new Error('Dataset credits are not global and unique')
@@ -109,14 +109,18 @@ async function credits(s) {
     const response=await s.context.request.get(new URL(entry.credits_path,base).href),bytes=await response.body()
     if(createHash('sha256').update(bytes).digest('hex')!==entry.credits_sha256)throw new Error('Credit hash mismatch')
     const document=JSON.parse(bytes)
-    if(document.mode!=='production'||document.release_id!==candidate.release_id)throw new Error('Credits claim another release or mode')
+    if(document.format_version!==2||document.mode!=='production'||document.release_id!==candidate.release_id)throw new Error('Credits claim another release, schema or mode')
     await s.page.getByTestId('dataset-credits').locator('.credits-content').filter({hasNotText:'Loading credits'}).waitFor()
     if(document.entries.length)await s.page.getByTestId('dataset-credit').first().waitFor()
     else await s.page.getByText('No dataset attribution is required for this release.',{exact:true}).waitFor()
     const rendered=await s.page.getByTestId('dataset-credit').evaluateAll(nodes=>nodes.map(node=>({name:node.querySelector('a').textContent,text:node.querySelector('p').textContent,url:node.querySelector('a').getAttribute('href'),links:[...node.querySelectorAll('a')].map(a=>({rel:a.rel,policy:a.referrerPolicy}))})))
     if(rendered.length!==document.entries.length)throw new Error('Credit display population differs')
     for(let i=0;i<rendered.length;i++)if(['name','text','url'].some(k=>rendered[i][k]!==document.entries[i][k])||rendered[i].links.some(a=>!a.rel.includes('noopener')||!a.rel.includes('noreferrer')||a.policy!=='no-referrer'))throw new Error('Credit notice/link differs from reviewed bytes')
-    if(requests.length!==2)throw new Error('Credits did not use exactly the release-global index and document')
+    const logos=[...new Map(document.entries.filter(entry=>entry.logo).map(entry=>[entry.logo.path,entry.logo])).values()]
+    for(const logo of logos){const bytes=await(await s.context.request.get(new URL(logo.path,base).href)).body();if(createHash('sha256').update(bytes).digest('hex')!==logo.sha256)throw new Error('Required logo differs from reviewed bytes')}
+    const images=s.page.getByTestId('visible-dataset-credits').locator('img')
+    if(await images.count()!==document.entries.filter(entry=>entry.logo).length||!await images.evaluateAll(nodes=>nodes.every(node=>node.complete&&node.naturalWidth>0)))throw new Error('Required dataset logo was not decoded and displayed')
+    if(requests.length!==2+logos.length)throw new Error('Credits did not use exactly the global legal assets')
     await s.page.getByTestId('dataset-credits').locator('summary').click()
     return {entries:document.entries.length,same_origin_requests:requests.length,query_associations:0}
   }finally{s.page.off('request',record)}
@@ -151,7 +155,7 @@ async function owner(page,name,ready) {
   await page.getByRole('navigation',{name:'Atlas views'}).getByRole('link',{name,exact:true}).click()
   await page.getByRole('heading',{name,exact:true,level:1}).waitFor();await page.locator(ready).waitFor()
   if(await page.locator('.demo-label').count()||await page.getByRole('alert').count())throw new Error('Production owner route unavailable or labelled synthetic')
-  for(const [owner,selector]of Object.entries({Overview:'.fact-list',Quality:'.quality-layout','Class C':'.ip-grid',BGP:'.bgp-graph',ASN:'.asn-list'}))
+  for(const [owner,selector]of Object.entries({Overview:'.fact-list','Observed risk':'.quality-layout','Class C':'.ip-grid',BGP:'.bgp-graph',ASN:'.asn-list'}))
     if(owner!==name&&await page.locator(selector).count())throw new Error('A route duplicated another canonical fact owner')
 }
 
@@ -171,7 +175,7 @@ try {
       row.dataset_credits=await credits(s)
       await s.page.getByRole('textbox').fill(corpus.interaction_query);await s.page.getByRole('button',{name:'Look up address'}).click();await s.page.locator('.leaflet-container').waitFor();await s.page.locator('.leaflet-control-attribution').waitFor()
       checks.push(await accessible(s.page))
-      await owner(s.page,'Quality','.quality-layout,.unrated-panel,.quality-panel');checks.push(await accessible(s.page))
+      await owner(s.page,'Observed risk','.quality-layout,.unrated-panel,.quality-panel');checks.push(await accessible(s.page))
       await owner(s.page,'Class C','.ip-grid');const cell=s.page.getByRole('gridcell').first();await cell.focus();await s.page.keyboard.press('ArrowRight');if(await s.page.getByRole('gridcell').nth(1).getAttribute('tabindex')!=='0')throw new Error('Class C keyboard selection failed');checks.push(await accessible(s.page))
       await owner(s.page,'ASN','.asn-panel,.asn-list,.asn-page,.detail-panel,.status-panel');checks.push(await accessible(s.page))
       await s.page.getByRole('textbox',{name:'IP address or ASN'}).fill(corpus.graph_query);await s.page.getByRole('button',{name:'Look up address'}).click();await s.page.getByRole('heading',{name:'ASN',exact:true,level:1}).waitFor()
@@ -206,7 +210,7 @@ try {
       report.hot_queries.push({context:index,timing:'actual-worker-indexed-lookups',...result})
     }finally{await s.context.close()}
   }
-} catch(error) {report.errors.push(String(error))}
+} catch(error) {console.error(error);report.errors.push('production-browser-scenario-failed')}
 finally {
   clearInterval(memoryTimer);if(browser)await browser.close();if(server)await server.close()
   report.browser_process_tree_rss_peak_bytes=Math.max(0,...report.worker_memory_samples.filter(x=>x.supported).map(x=>x.rss_bytes))

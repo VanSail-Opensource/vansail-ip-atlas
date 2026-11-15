@@ -1,102 +1,69 @@
 name: Atlas qualified production candidate
 
 on:
+  workflow_run:
+    workflows: ["Atlas authenticated source checkpoint"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
-      integration_run_id:
-        description: Successful exact-head main integration run
-        required: true
+      upstream_run_id:
+        description: Successful exact-head upstream run
         type: string
+        required: true
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: atlas-private-production-build
+  group: atlas-production-candidate
   cancel-in-progress: false
 
 jobs:
   candidate:
-    if: github.ref == 'refs/heads/main' && github.repository == 'VanSail-Opensource/vansail-ip-atlas'
-    # This ephemeral runner is provisioned privately with reviewed source fixtures,
-    # sealed input state and the pinned benchmark/corpus bootstrap. Public Actions
-    # artifacts are never used to transport any of these private inputs.
-    runs-on: [self-hosted, linux, x64, atlas-private-2cpu-8g-14g]
+    if: github.repository == 'VanSail-Opensource/vansail-ip-atlas' && github.ref == 'refs/heads/main' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-24.04
     environment: atlas-private-build
     timeout-minutes: 360
     env:
       GOMAXPROCS: '2'
       GOMEMLIMIT: 5GiB
+      RUNNER_TOOL_CACHE: ${{ github.workspace }}/build-private/toolcache
+      GH_TOKEN: ${{ github.token }}
+      ATLAS_STATE_AGE_IDENTITY: ${{ secrets.ATLAS_STATE_AGE_IDENTITY }}
+      ATLAS_STATE_AGE_RECIPIENT: ${{ vars.ATLAS_STATE_AGE_RECIPIENT }}
     steps:
       - uses: actions/checkout@v7.0.0
         with:
           persist-credentials: false
-          clean: false
-      - uses: actions/setup-go@v7.0.0
+      - uses: ./.github/actions/atlas-setup
+      - name: Verify trusted exact-head upstream
+        id: context
+        run: python tools/hosted/production_workflow.py context --kind candidate
+      - name: Restore authenticated encrypted state
+        run: python tools/hosted/checkpoint.py restore --kind intake --run-id "$ATLAS_UPSTREAM_RUN"
+      - name: Install locked frontend and browser dependencies
+        run: |
+          npm exec --yes --package pnpm@11.28.12 -- pnpm --dir web install --frozen-lockfile --ignore-scripts
+          npm exec --yes --package pnpm@11.28.12 -- pnpm --dir tools/hosted install --frozen-lockfile --ignore-scripts
+      - name: Run bounded production stage
+        run: python tools/hosted/runner_budget.py -- python tools/hosted/production_workflow.py candidate
+      - name: Encrypt immutable state for the next trusted job
+        run: python tools/hosted/checkpoint.py pack --kind candidate
+      - uses: actions/upload-artifact@v7.0.0
         with:
-          go-version: '1.27.3'
-          cache: false
-      - uses: actions/setup-python@v7.0.0
-        with:
-          python-version: '3.13.7'
-      - uses: actions/setup-node@v7.1.0
-        with:
-          node-version: '26.13.0'
-      - name: Require trusted integration and private bootstrap
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ATLAS_INTEGRATION_RUN: ${{ inputs.integration_run_id }}
-        run: |
-          python - <<'PY'
-          import os, re
-          from pathlib import Path
-          from tools.release_contract.promotion import TrustedCI
-          value = os.environ['ATLAS_INTEGRATION_RUN']
-          if not re.fullmatch(r'[1-9][0-9]{0,19}', value):
-              raise SystemExit('invalid integration run')
-          TrustedCI().run(int(value), os.environ['GITHUB_SHA'], '.github/workflows/p0-contracts.yml')
-          for path in ('.atlas-private/production-benchmark-plan.json', '.atlas-private/production-browser-corpus.json', 'fixtures/source-certification/adapter-certifications.json'):
-              if not Path(path).is_file():
-                  raise SystemExit('reviewed private production bootstrap unavailable')
-          import json, time
-          plan=json.load(open('.atlas-private/production-benchmark-plan.json'))
-          clocks=[case['clock'] for case in plan['cases'] if case['scenario'] in ('cold_full','warm_unchanged')]
-          if len(clocks)!=6 or any(type(value) is not int for value in clocks) or len(set(clocks))!=1 or not 0<=clocks[0]<=int(time.time()):
-              raise SystemExit('baseline benchmark clock must bind the exact candidate')
-          with open(os.environ['GITHUB_ENV'],'a') as output:
-              output.write('ATLAS_BUILD_CLOCK='+str(clocks[0])+'\n')
-          PY
-      - name: Install pinned build tools
-        run: |
-          python -m pip install -r tools/requirements.txt
-          npm exec --yes --package pnpm@12.18.0 -- pnpm --dir web install --frozen-lockfile --ignore-scripts
-          mkdir -p build-private reports
-          go build -o build-private/atlas ./cmd/atlas
-      - name: Acquire and materialize actual qualified inputs
-        run: |
-          build-private/atlas intake -workspace . -clock "$ATLAS_BUILD_CLOCK"
-          build-private/atlas compile-production -workspace . -clock "$ATLAS_BUILD_CLOCK" -out build-private/production-atlas -receipt .atlas-private/production-receipt.json
-      - name: Generate and freeze complete production tree
-        run: |
-          npm exec --yes --package pnpm@12.18.0 -- pnpm --dir web licenses list --prod --json > build-private/software-license-metadata.json
-          python tools/release_contract/software_licenses.py
-          npm exec --yes --package pnpm@12.18.0 -- pnpm --dir web typecheck
-          npm exec --yes --package pnpm@12.18.0 -- pnpm --dir web generate
-          python tools/release_contract/software_licenses.py --bundle-audit build-private/software-bundle-audit.json --require-runtime-review
-          python tools/release_contract/prepare_static.py --atlas build-private/production-atlas --qualification-receipt .atlas-private/production-receipt.json
-      - name: Measure individual real indexed lookups
-        run: go run ./tools/hosted/lookupbench -atlas build-private/production-atlas -corpus .atlas-private/production-browser-corpus.json -report reports/production-lookup.json
-      - name: Measure actual full changed unchanged expiry and withdrawal builds
-        run: python tools/hosted/production-build.py --atlas-binary build-private/atlas
-      - name: Verify frozen candidate before preservation
-        run: python tools/hosted/candidate.py --public web/.output/public
+          name: atlas-candidate-checkpoint
+          path: |
+            build-private/checkpoint/checkpoint.tar.gz.age
+            build-private/checkpoint/envelope.json
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
       - uses: actions/upload-artifact@v7.0.0
         if: always()
         with:
           name: production-candidate-evidence
-          # Exact source-free allowlist; never upload the private receipt, plan,
-          # source fixtures, record fingerprints, source state, logs or audit tree.
           path: |
             reports/static-candidate.json
             reports/production-build.json
@@ -109,20 +76,22 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-      - name: Erase ephemeral private bootstrap
+      - uses: actions/upload-artifact@v7.0.0
+        with:
+          name: atlas-candidate-checkpoint-index
+          path: build-private/checkpoint/envelope.json
+          retention-days: 7
+          if-no-files-found: error
+      - name: Remove plaintext state
         if: always()
         run: |
           python - <<'PY'
           import os, shutil
           from pathlib import Path
-          root = Path(os.environ['GITHUB_WORKSPACE']).resolve()
-          for relative in ('.atlas-private', 'fixtures/source-certification'):
-              target = root / relative
-              if target.exists():
-                  if target.is_symlink() or not target.resolve().is_relative_to(root) or target.resolve() == root:
-                      raise SystemExit('unsafe private cleanup target')
-                  shutil.rmtree(target)
+          root=Path(os.environ['GITHUB_WORKSPACE']).resolve()
+          target=root/'.atlas-private'
+          if target.exists():
+              if target.is_symlink() or not target.resolve().is_relative_to(root):
+                  raise SystemExit('unsafe state cleanup path')
+              shutil.rmtree(target)
           PY
-
-# No Cloudflare credential, source activation or public approval mutation exists.
-# Successful build evidence is one prerequisite; browser/preview/approval follow.

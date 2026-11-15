@@ -312,7 +312,8 @@ def prepare(atlas: Path, public: Path, now: int, *, production_receipts: dict[st
             os.replace(credit_index, previous_index)
         index_managed = True
         write_credit_tree(public, metadata["release_id"], modes,
-            {release_id: list(qualifications[release_id].credits) if production else [] for release_id in modes})
+            {release_id: list(qualifications[release_id].credits) if production else [] for release_id in modes},
+            logo_root=ROOT / "fixtures/source-certification/logos")
         normalized_timestamps = canonicalize_operational_times(public, metadata["valid_from"])
         hashes = freeze_csp(public)
         verify_software_notices(public)

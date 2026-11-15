@@ -21,7 +21,7 @@ class ProductionQualificationTests(unittest.TestCase):
         catalog = {"sources": [source]}
         (root / "configs/sources.yaml").write_text(json.dumps(catalog), encoding="utf-8")
         (root / "SOURCES_AUDIT.md").write_text("Fixture rights decision", encoding="utf-8")
-        descriptor = {"format_version": 3, "schema_version": 3, "codec": "zstd-1", "mode": "production",
+        descriptor = {"format_version": 3, "schema_version": 4, "codec": "zstd-1", "mode": "production",
             "valid_from": 100, "valid_until": 200,
             "objects": [{"sha256": "a" * 64, "bytes": 128, "kind": 1, "partition": "all"}]}
         manifest, _ = make_manifest(descriptor)
@@ -30,7 +30,7 @@ class ProductionQualificationTests(unittest.TestCase):
         directory = atlas / "releases" / release_id
         directory.mkdir(parents=True)
         (directory / "manifest.json").write_bytes(manifest)
-        record = {"schema_version": 1, "release_scope": "release-scope-v4", "mode": "production",
+        record = {"schema_version": 1, "release_scope": "release-scope-v5", "mode": "production",
             "evaluated_at": 100, "valid_until": 200, "release_id": release_id,
             "release_manifest_sha256": sha256(manifest),
             "source_catalog_sha256": sha256((root / "configs/sources.yaml").read_bytes()),

@@ -76,7 +76,7 @@ func TestIntelligenceMaterializerQualityBoundariesMOASAndDirectedPaths(t *testin
 		if err != nil {
 			t.Fatal(query, err)
 		}
-		if got.Quality == nil || got.Quality.Score == nil || *got.Quality.Score != *want.Score || !slices.Equal(got.Quality.Reasons, intelligence.ReasonNames(want.Reasons)) {
+		if got.Quality == nil || (got.Quality.Score == nil) != (want.Score == nil) || (want.Score != nil && *got.Quality.Score != *want.Score) || !slices.Equal(got.Quality.Reasons, intelligence.ReasonNames(want.Reasons)) {
 			t.Fatalf("quality changed at %s: got=%+v want=%+v", query, got.Quality, want)
 		}
 		for i, actual := range []*float64{got.Quality.Layers.Exact, got.Quality.Layers.Prefix, got.Quality.Layers.ASN, got.Quality.Layers.Neighbors} {
@@ -168,7 +168,7 @@ func TestIntelligenceMaterializerIPv6MappedAndNonlinearPaths(t *testing.T) {
 	}
 	for _, query := range []string{"2001:db8::", "2001:db8::1"} {
 		answer, err := reader.Lookup(context.Background(), query)
-		if err != nil || answer.Quality == nil || answer.Quality.Score != nil {
+		if err != nil || answer.Quality == nil || answer.Quality.Score == nil || answer.Quality.Coverage.Status != "incomplete" || answer.Quality.Layers.Neighbors != nil {
 			t.Fatal("IPv6 quality changed", answer.Quality, err)
 		}
 		if slices.Contains(answer.Quality.Reasons, "proxy") != (query == "2001:db8::") {

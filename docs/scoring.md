@@ -1,11 +1,22 @@
-# Scoring and fusion contract, revision 1
+# Scoring and fusion contract, revision 2 - observed risk
 
-`configs/scoring.yaml` is authoritative. This P0 amendment names previously
-undefined quantities; it preserves every coefficient, half-life, support count
-and 0.15 geo margin. It is an initial executable contract, not a calibration or
-real-source certification. Reference vectors are in
-`fixtures/scoring/contract-v1.json`; `python -m unittest discover -s
+`configs/scoring.yaml` is authoritative. This amendment changes numeric-score
+semantics and separates positive support from assessment coverage. It preserves
+every signal coefficient, half-life, contextual support formula and 0.15 geo
+margin. It is not a calibration or real-source certification. Reference vectors are in
+`fixtures/scoring/observed-risk-v1.json`; `python -m unittest discover -s
 tools/contract_vectors -p "test_*.py"` checks the synthetic vectors.
+
+## Current approved amendment - observed-risk v1, release-scope-v5
+
+Model `via-observed-risk-v1` replaces higher-is-better quality with a 0-100
+**observed risk** index, where higher means more supported adverse evidence.
+VIA3 public schema 4 identifies the changed meaning; schema-3 readers and data
+cannot be mixed with it. This is not a probability, a safety rating or a claim
+that absent evidence establishes safety. The historical scope amendments below
+record earlier decisions; this amendment supersedes their numeric-score rules.
+All signal coefficients, age decay, independence, scope specificity, layer weights
+and contextual caps are unchanged. Source rights and freshness remain mandatory.
 
 ## Release-scope amendment `release-scope-v2` — 2026-11-08
 
@@ -79,45 +90,54 @@ vectors use absolute tolerance `1e-12` before quantization. Go/TS parity must al
 test exact serialized integers and boundary vectors; tolerance never excuses
 different canonical bytes.
 
-## Coverage and numeric quality
+## Observed risk, independent support and assessment coverage
 
-This section controls whether an individual result may publish a number. Under
-`release-scope-v4` (retaining v2), missing complete assessment families do not themselves block
-production release; they leave numeric quality unrated.
+For every IP, preserve the four existing weighted contributions, their presence
+and their unrounded binary64 values:
 
-A layer is `assessed` only when current, admitted, complete evidence covers its
-whole required scope. Exact scope is the queried address; explicit-prefix scope
-is that address against the complete explicit-prefix assessment; ASN scope is
-every currently announced origin; neighbor scope is all 255 other `/24` cells.
-An authoritative complete negative observation yields risk zero with presence.
-Positive-only absence, a missing origin, or mapping coverage never does.
+`Robs = clamp(sum of present contributions, 0, 1)`
 
-For each scope retain the private set of complete independent families. The
-qualifying set is their intersection across all four layers and every MOAS
-origin. At least two families in that intersection and four assessed layers are
-required. Adding a partial-scope family cannot increase confidence. Two families
-give `low`, three `medium`, and four or more `high`; otherwise `unrated`.
+`S = floor(100*Robs + 0.5)` if the unrounded sum is positive, otherwise `null`.
 
-Numeric quality is IPv4-only. IPv6 retains known reasons and layer facts but has
-`quality=null` until a separately versioned IPv6 neighbor model exists. Missing
-layers are never renormalized. Confirmed positive reasons survive every unrated
-case; confidence describes coverage, not probability.
+Missing contributions are null, never authoritative zero. Summing supported
+contributions is a lower-information observed-evidence model, not an estimate
+of total real-world risk. Do not renormalize missing layers, invert the former
+integer quality, or compute the score from rounded serialized contributions.
+Authoritative complete negative observations may produce present zero layers,
+but no positive weighted contribution means no observed-risk number even when
+assessment coverage is complete. A tiny positive number may round to zero;
+the UI displays `<1 / 100` with its positive reasons, never "safe".
 
-`R = clamp(0.55*R_exact + 0.18*R_prefix + 0.15*C_asn*R_asn + 0.12*C24*R24, 0, 1)`
+IPv4 and IPv6 both support observed-risk numbers. IPv6 has no `/24` layer: its
+neighbor contribution remains null/not applicable and the remaining weights
+stay 0.55, 0.18 and 0.15. The absent 0.12 weight is not redistributed.
 
-`Q = floor(100*(1-R) + 0.5)` when eligible, otherwise `null`.
+Confidence describes independent positive support, separately from assessment
+coverage. For each strictly positive contributing layer, one or two current
+independent positive families give low, three give medium, and four or more give
+high. The overall band is the weakest such layer. The ASN layer takes support
+from the origin giving the maximum weighted contribution; tied maxima use the
+weaker support. The neighbor layer uses families retained after self-exclusion.
+A repeated family across layers cannot create extra votes. Zero-contribution
+layers do not affect positive-support confidence; without a positive weighted
+sum confidence is unrated. This is neither calibration nor probability.
 
-Rounding operates on the computed binary64 value, without decimal snapping or
-an epsilon. The boundary corpus includes exact half-up cases and decimal-looking
-inputs whose binary64 result lies immediately below a half. Implementations may
-not replace this with ties-to-even or round the layer terms first.
+Coverage retains the former conservative assessment test. A layer is assessed
+only when a current admitted complete family covers its entire required scope:
+exact address, complete explicit-prefix assessment at that address, every MOAS
+origin for ASN, or all 255 other IPv4 `/24` cells for neighbors. Coverage is
+complete only for IPv4 with a current origin mapping and at least two common
+complete families intersecting all four scopes and all origins. Otherwise it is
+incomplete. Public `observedRisk.coverage` exposes this status and per-layer
+assessed/unassessed/not_applicable states, never family identifiers or counts.
+Coverage does not gate, inflate or erase a supported observed-risk score.
 
-The serialized layer contributions are these four **weighted** terms, not the
-unweighted risks. Do not reconstruct `Q` from their rounded public values. For
-example, an exact malware family with weight 100 and age zero gives
-`R_exact=0.8646647167633873`; with the other three layers authoritatively assessed
-zero, `R=0.475565594219863` and `Q=52`. Without complete coverage it yields the
-same positive reason and an unrated quality, not 52 or 100.
+The exact-malware example with weight 100 and age zero gives
+`R_exact=0.8646647167633873`, weighted exact `0.475565594219863`, and observed
+risk 48 whether other assessment coverage is absent or complete. The reasons
+and unsupported-layer states remain visible. Half-up rounding uses the computed
+binary64 value with no epsilon or intermediate rounding; the golden corpus
+includes half boundaries, tiny positive values and absent evidence.
 
 ## ASN context and MOAS
 
@@ -147,14 +167,13 @@ addresses. Let `P` be the unique addresses whose exact risk is greater than zero
 Both diversity factors in the original equations are intentional: the inner
 factor supports inferred risk mass, and the outer confidence supports contextual
 influence. An explicit ASN indicator without current exact-address support has
-`C_asn=0`, so its reason can be shown but its IP-quality contextual contribution
+`C_asn=0`, so its reason can be shown but its IP observed-risk contextual contribution
 is zero. This consequence is explicit; substituting a different confidence
 formula would require another reviewed model revision.
 
 Current MOAS mapping may associate one observed address with each actual origin;
 it does not choose one origin or divide the host risk. Compute the entire formula
-independently for every origin. If any origin is unassessed, the ASN layer cannot
-qualify quality. Otherwise take `max_origin(0.15*C_asn*R_asn)` for the single
+independently for every origin. An unassessed origin prevents complete assessment coverage, not observed risk. Take `max_origin(0.15*C_asn*R_asn)` for the single
 weighted ASN contribution. Never union origins' counts before computing it.
 All origins remain visible as network facts. The maximum is monotone under added
 independent positive evidence and cannot exceed 0.15.
@@ -190,11 +209,14 @@ density model, never a claim of assessment coverage. One neighbor at risk 0.8
 gives `R24=0.04895707278807204`, `C24=1/48`. Removing the query's own observation
 also removes a family supported only by that observation.
 
-The 256-cell profile retains unknown cells, exact positive reasons and separately
-assessed quality. Its aggregate quality is `null` unless all 256 cells are
-eligible; when all qualify it is the half-up arithmetic mean of their integer
-scores, with no filling of absent cells. Counts/distributions describe observed
-cells only. A tie for dominant ASN is unknown, and MOAS addresses contribute to
+The 256-cell profile retains unknown cells and exact positive reasons. Only
+actually observed cells receive per-cell observed-risk scores. `scoredCount`
+counts their non-null scores and `meanObservedRisk` is the half-up arithmetic
+mean of those integer scores, null when the count is zero. Unknown cells never
+enter the denominator or become zero. `assessedCount` separately counts observed
+cells with complete assessment coverage. Counts/distributions describe observed
+cells only; the mean is labelled with its scored-observed denominator, not as a
+score of all 256 addresses. A tie for dominant ASN is unknown, and MOAS addresses contribute to
 each actual origin's observation count without inventing one primary origin.
 
 ## Geographic fusion
@@ -237,9 +259,8 @@ and network ownership do not break the conflict. Assignment uses canonical publi
 adapter inputs only. Anycast and IPv4 directed broadcast have independent
 presence bits and never imply assignment or malicious activity.
 
-For unchanged eligible coverage, independent additional positive evidence cannot
-improve quality. Duplicate-family replay, source order and same-family mirrors
-cannot affect output. Transitions from unrated to assessed are tested separately.
+Independent additional positive evidence cannot reduce observed risk. Duplicate-family replay, source order and same-family mirrors
+cannot affect output. Assessment coverage and positive-support confidence are tested separately.
 No exact malicious indicator propagates its reason to another host. ASN and
 neighbor influences remain capped at 0.15 and 0.12, including residential/mobile
 bias sentinels. These hypotheses still require held-out calibration and hosted

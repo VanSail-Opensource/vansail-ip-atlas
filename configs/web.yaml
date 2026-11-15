@@ -1,6 +1,6 @@
 # VanSail IP Atlas — frontend, privacy and Cloudflare Pages deployment.
 schema_version: 3
-contract_revision: 2
+contract_revision: 3
 app:
   name: VanSail IP Atlas
   identifier: vansail-ip-atlas
@@ -40,11 +40,12 @@ navigation:
       - isp
     /ip/quality:
       owner_of:
-      - quality_state
-      - quality_score
+      - observed_risk_state
+      - observed_risk_score
       - score_reasons
       - classification_reasons
       - layer_contributions
+      - assessment_coverage
     /ip/class-c:
       owner_of:
       - ipv4_24_heatmap

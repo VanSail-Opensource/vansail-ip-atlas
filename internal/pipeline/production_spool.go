@@ -45,6 +45,7 @@ type bulkSpool struct {
 	relations    *intelligence.RelationshipIndex
 	hasExact     bool
 	hasASNDirect bool
+	usage        asnUsageIndex
 }
 
 func (s *bulkSpool) refresh() error {
@@ -103,6 +104,26 @@ func (s *bulkSpool) collect(ctx context.Context, b *bulkBucket, withCoverage boo
 	}
 	if err := s.walk(ctx, b.parts, add); err != nil {
 		return intelligence.BuildState{}, err
+	}
+	if !b.asn && len(s.usage) > 0 {
+		origins := map[netip.Prefix][]uint32{}
+		for _, r := range source.Records {
+			if r.Origins != nil {
+				origins[r.Origins.Prefix] = append(origins[r.Origins.Prefix], r.Origins.Origins...)
+			}
+		}
+		keys := make([]netip.Prefix, 0, len(origins))
+		for p := range origins {
+			keys = append(keys, p)
+		}
+		sortPrefixes(keys)
+		for _, p := range keys {
+			v := origins[p]
+			sort.Slice(v, func(i, j int) bool { return v[i] < v[j] })
+			if err := add(s.usage.joined(p, compact(v))); err != nil {
+				return intelligence.BuildState{}, err
+			}
+		}
 	}
 	if withCoverage {
 		if err := s.walk(ctx, s.coverage, func(record intelligence.NormalizedRecord) error {
@@ -344,12 +365,17 @@ func (s *bulkSpool) seed(ctx context.Context, workspace string, state intelligen
 	for _, writer := range writers {
 		defer writer.Abort()
 	}
+	s.usage = asnUsageIndex{}
 	for _, source := range state.Sources {
 		if err := intelligence.WalkStoredSource(ctx, workspace, source, func(record intelligence.NormalizedRecord) error {
 			if err := boundedNormalizedRecord(record); err != nil {
 				return err
 			}
 			switch record.Kind {
+			case intelligence.RecordUsage:
+				if record.Usage.ASN != 0 {
+					return s.usage.add(record.Usage)
+				}
 			case intelligence.RecordASNIdentity:
 				if err := s.addASN(record.ASNIdentity.ASN); err != nil {
 					return err

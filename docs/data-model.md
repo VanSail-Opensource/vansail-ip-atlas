@@ -1,4 +1,4 @@
-# Data model — schema 3, contract revision 1
+# Data model - public schema 4, contract revision 2
 
 `docs/binary-format-via3.md` fixes serialized widths; this document fixes their
 meaning. The initial unimplemented schema is frozen here without pretending
@@ -65,12 +65,12 @@ validates that a kind sets only applicable presence bits.
 | 6 | assignment mode | usage |
 | 7 | anycast boolean | usage |
 | 8 | IPv4 directed-broadcast boolean | usage |
-| 9 | numeric quality score | quality |
-| 10 | exact weighted risk contribution | quality |
-| 11 | explicit-prefix weighted contribution | quality |
-| 12 | ASN weighted contribution | quality |
-| 13 | neighbor weighted contribution | quality |
-| 14 | reason flags | quality, ASN |
+| 9 | observed-risk score | observed risk |
+| 10 | exact weighted risk contribution | observed risk |
+| 11 | explicit-prefix weighted contribution | observed risk |
+| 12 | ASN weighted contribution | observed risk |
+| 13 | neighbor weighted contribution | observed risk |
+| 14 | reason flags | observed risk, ASN |
 | 15 | network identity record | network |
 | 16 | network/ASN name | network, ASN |
 | 17 | organization | network, ASN |
@@ -78,7 +78,7 @@ validates that a kind sets only applicable presence bits.
 | 19 | complete current MOAS origin list | network, BGP origins |
 | 20 | RPKI result | RPKI |
 | 21 | observed `/24` profile | IPv4 `/24` |
-| 22 | observed aggregate quality | IPv4 `/24` |
+| 22 | mean risk among scored observed cells | IPv4 `/24` |
 | 23 | contextual ASN risk/band | ASN |
 | 24 | bounded ASN prefix-page directory | ASN |
 | 25 | customer cone | ASN |
@@ -106,29 +106,35 @@ city are sanitized dictionary strings, subordinate to the chosen physical
 country. Registration country is a separate fact and never substitutes for a
 physical location.
 
-## Quality and reasons
+## Observed risk, assessment coverage and reasons
 
-The approved `release-scope-v2` amendment (2026-11-08) makes numeric quality
-optional for production release. A production snapshot may contain no numeric
-scores while retaining supported positive reasons and observed contributions.
-That state is explicitly unrated; it is not a clean assessment. This amendment
-uses the existing null/presence representation and changes no VIA3 schema or
-scoring-model revision. Current `release-scope-v4` retains this rule and v3's
-global dataset-credit exception, and adds the compiled-data license defined below.
+The approved `release-scope-v5` scoring amendment publishes `observedRisk` in
+canonical lookup answers, replacing the former higher-is-better `quality`.
+The exact model is `via-observed-risk-v1` in `configs/scoring.yaml`. IPv4 and IPv6
+scores are half-up `100 * sum(present weighted positive contributions)` and are
+null when that unrounded sum is zero. Missing evidence never becomes a safe zero.
+Tiny supported values rounded to zero display `<1 / 100`. A null object means no
+observed-risk record and no known assessment coverage.
 
-Numeric quality is IPv4-only in this version. Publishing a non-null score
-requires complete coverage and all four layers exactly as
-`configs/scoring.yaml`/`docs/scoring.md` specify.
-`quality_status=unrated` means `quality=null`, never 0 or 100. An assessed score
-has presence bit 9; status assessed without that bit, or unrated with it, is
-invalid. Confidence 0 is unrated,1 low,2 medium,3 high. Missing coverage does not
-erase a positive reason or a positively observed layer contribution.
+`confidence` describes the weakest positive contributing layer's independent
+support: one or two families low, three medium, at least four high. It is not
+coverage or probability. The separate `coverage` object has `status` complete or
+incomplete and four `layers` states assessed/unassessed/not_applicable. Complete
+assessment retains the old two-common-family intersection across all four scopes
+and every MOAS origin; IPv6's neighbor layer is not applicable and its overall
+assessment remains incomplete. No support IDs or source counts are public.
 
-Four contributions encode the weighted terms of total risk, not a reweighted
-distribution that sums to 100%. Store integer millionths, rounding half-up once
-after full-precision calculation. The integer score is calculated independently
-from the unrounded formula. Layers that remain unknown are null with unset bits.
-No source counts, support IDs, raw evidence or probability claim is public.
+Four contributions encode the unchanged weighted terms, not a distribution
+rescaled to 100%. Store integer millionths, half-up once after the full-precision
+calculation. The score uses the unrounded formula independently. Unknown layers
+are null with unset presence bits. Public schema 4 must be decoded atomically
+with its same-version manifest and reader; old schema 3 is rejected and cached
+objects use a separate namespace.
+
+The `/24` answer has `scoredCount` and nullable `meanObservedRisk` over non-null
+scores of actually observed cells. Cells use `observedRiskScore` and independent
+complete/incomplete assessment coverage. `assessedCount` is not a scored count.
+Unknown cells stay unknown and never enter the observed-only mean.
 
 Reason bits in order are:
 
@@ -230,7 +236,8 @@ when full notices are collapsed.
 
 ## Typed compilation boundary
 
-`internal/via3.PublicRecord` is a schema-3 tagged union of the twelve public fact
+`internal/via3.PublicRecord` retains private input union version 3 while its output
+uses public schema 4. It is a tagged union of the twelve public fact
 kinds. `CompilePartition` derives dictionaries/pages; `Build` derives the router
 and immutable manifest. It accepts at most 32768 records and 32 MiB estimated
 input per partition, then enforces the deployed object profile. A production

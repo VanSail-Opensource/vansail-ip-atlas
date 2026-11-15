@@ -25,5 +25,9 @@ fixtures/source-certification/*
 !fixtures/source-certification/observed-ipapi-city-ipv4.csv
 !fixtures/source-certification/observed-ipapi-city-ipv6.csv
 !fixtures/source-certification/observed-x4b-vpn-ipv4.txt
+!fixtures/source-certification/observed-tor-exit-addresses.txt
+!fixtures/source-certification/observed-ipverse-asn-usage.json
+!fixtures/source-certification/logos/
+!fixtures/source-certification/logos/*.png
 !fixtures/source-certification/notices/
 !fixtures/source-certification/notices/*.txt

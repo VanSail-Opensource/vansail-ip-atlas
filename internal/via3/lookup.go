@@ -48,11 +48,39 @@ type LayerAnswer struct {
 	Neighbors *float64 `json:"neighbors"`
 }
 type QualityAnswer struct {
-	Score      *uint8      `json:"score"`
-	Confidence string      `json:"confidence"`
-	Reasons    []string    `json:"reasons"`
-	Layers     LayerAnswer `json:"layers"`
+	Score      *uint8         `json:"score"`
+	Confidence string         `json:"confidence"`
+	Reasons    []string       `json:"reasons"`
+	Layers     LayerAnswer    `json:"layers"`
+	Coverage   CoverageAnswer `json:"coverage"`
 }
+type CoverageLayers struct {
+	Exact     string `json:"exact"`
+	Prefix    string `json:"prefix"`
+	ASN       string `json:"asn"`
+	Neighbors string `json:"neighbors"`
+}
+type CoverageAnswer struct {
+	Status string         `json:"status"`
+	Layers CoverageLayers `json:"layers"`
+}
+
+func coverageAnswer(flags byte, ipv6 bool) CoverageAnswer {
+	value := CoverageAnswer{Status: "incomplete", Layers: CoverageLayers{"unassessed", "unassessed", "unassessed", "unassessed"}}
+	for i, target := range []*string{&value.Layers.Exact, &value.Layers.Prefix, &value.Layers.ASN, &value.Layers.Neighbors} {
+		if flags&(1<<i) != 0 {
+			*target = "assessed"
+		}
+	}
+	if flags&16 != 0 {
+		value.Status = "complete"
+	}
+	if ipv6 {
+		value.Layers.Neighbors = "not_applicable"
+	}
+	return value
+}
+
 type ASNAnswer struct {
 	ASN           uint32   `json:"asn"`
 	Name          *string  `json:"name"`
@@ -111,15 +139,16 @@ type LookupAnswer struct {
 	Geo        *GeoAnswer     `json:"geo"`
 	Network    *NetworkAnswer `json:"network"`
 	Usage      *UsageAnswer   `json:"usage"`
-	Quality    *QualityAnswer `json:"quality"`
+	Quality    *QualityAnswer `json:"observedRisk"`
 	ASNs       []ASNAnswer    `json:"asns"`
 	BGP        BGPAnswer      `json:"bgp"`
 }
 type CellAnswer struct {
 	IP         string   `json:"ip"`
 	Observed   bool     `json:"observed"`
-	Score      *uint8   `json:"score"`
+	Score      *uint8   `json:"observedRiskScore"`
 	Confidence string   `json:"confidence"`
+	Coverage   string   `json:"coverage"`
 	Reasons    []string `json:"reasons"`
 	Usage      string   `json:"usage"`
 	Origins    []uint32 `json:"origins"`
@@ -130,7 +159,8 @@ type ClassCAnswer struct {
 	ObservedCount  int          `json:"observedCount"`
 	AssessedCount  int          `json:"assessedCount"`
 	PositiveCount  int          `json:"positiveCount"`
-	AggregateScore *uint8       `json:"aggregateScore"`
+	ScoredCount    int          `json:"scoredCount"`
+	AggregateScore *uint8       `json:"meanObservedRisk"`
 }
 type ASNPrefixPage struct {
 	ASN        uint32   `json:"asn"`
@@ -342,10 +372,10 @@ func NewRelease(pointerBytes, manifestBytes []byte, load func(string) ([]byte, e
 	if strictJSON(pointerBytes, &pointer) != nil || strictJSON(manifestBytes, &manifest) != nil {
 		return nil, fail("manifest")
 	}
-	if len(pointerBytes) > 4096 || len(manifestBytes) > 4<<20 || !validHash(pointer.ReleaseID) || !validHash(pointer.ManifestSHA256) || pointer.FormatVersion != 3 || manifest.FormatVersion != 3 || manifest.SchemaVersion != 3 || manifest.Codec != "zstd-1" || (manifest.Mode != "synthetic" && manifest.Mode != "production") || len(manifest.Objects) == 0 || len(manifest.Objects) >= 18500 || pointer.ManifestPath != "/_atlas/releases/"+manifest.ReleaseID+"/manifest.json" || pointer.ReleaseID != manifest.ReleaseID || Hash(manifestBytes) != pointer.ManifestSHA256 || manifest.ValidFrom < 0 || manifest.ValidUntil <= manifest.ValidFrom || manifest.ValidUntil-manifest.ValidFrom > 720*3600 || manifest.ValidUntil > 9007199254740991 {
+	if len(pointerBytes) > 4096 || len(manifestBytes) > 4<<20 || !validHash(pointer.ReleaseID) || !validHash(pointer.ManifestSHA256) || pointer.FormatVersion != 3 || manifest.FormatVersion != 3 || manifest.SchemaVersion != 4 || manifest.Codec != "zstd-1" || (manifest.Mode != "synthetic" && manifest.Mode != "production") || len(manifest.Objects) == 0 || len(manifest.Objects) >= 18500 || pointer.ManifestPath != "/_atlas/releases/"+manifest.ReleaseID+"/manifest.json" || pointer.ReleaseID != manifest.ReleaseID || Hash(manifestBytes) != pointer.ManifestSHA256 || manifest.ValidFrom < 0 || manifest.ValidUntil <= manifest.ValidFrom || manifest.ValidUntil-manifest.ValidFrom > 720*3600 || manifest.ValidUntil > 9007199254740991 {
 		return nil, fail("manifest")
 	}
-	desc := Descriptor{Codec: manifest.Codec, FormatVersion: 3, Mode: manifest.Mode, Objects: manifest.Objects, SchemaVersion: 3, ValidFrom: manifest.ValidFrom, ValidUntil: manifest.ValidUntil}
+	desc := Descriptor{Codec: manifest.Codec, FormatVersion: 3, Mode: manifest.Mode, Objects: manifest.Objects, SchemaVersion: 4, ValidFrom: manifest.ValidFrom, ValidUntil: manifest.ValidUntil}
 	if Hash(canonical(desc)) != manifest.ReleaseID {
 		return nil, fail("manifest")
 	}
@@ -813,7 +843,7 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 			if row, _, ok := s.findPrefix(addr); ok {
 				values := &qualityLookupValues{}
 				q := &values.answer
-				*q = QualityAnswer{Confidence: confidence(row[10]), Reasons: reasons(u32(row, 4)), Layers: LayerAnswer{Exact: riskValue(row, 12, 10, &values.exact), Prefix: riskValue(row, 16, 11, &values.prefix), ASN: riskValue(row, 20, 12, &values.asn), Neighbors: riskValue(row, 24, 13, &values.neighbors)}}
+				*q = QualityAnswer{Coverage: coverageAnswer(row[11], addr.Is6()), Confidence: confidence(row[10]), Reasons: reasons(u32(row, 4)), Layers: LayerAnswer{Exact: riskValue(row, 12, 10, &values.exact), Prefix: riskValue(row, 16, 11, &values.prefix), ASN: riskValue(row, 20, 12, &values.asn), Neighbors: riskValue(row, 24, 13, &values.neighbors)}}
 				if present(row, 9) {
 					values.score = row[9]
 					q.Score = &values.score
@@ -1052,7 +1082,7 @@ func (r *Release) classC(ctx context.Context, q string) (*ClassCAnswer, error) {
 	if !ok {
 		return nil, nil
 	}
-	answer := &ClassCAnswer{Prefix: prefix, Cells: make([]CellAnswer, 256), ObservedCount: int(u16(row, 8)), AssessedCount: int(u16(row, 10)), PositiveCount: int(u16(row, 12))}
+	answer := &ClassCAnswer{Prefix: prefix, Cells: make([]CellAnswer, 256), ObservedCount: int(u16(row, 8)), AssessedCount: int(u16(row, 10)), PositiveCount: int(u16(row, 12)), ScoredCount: int(u16(row, 14))}
 	if present(row, 22) {
 		v := row[20]
 		answer.AggregateScore = &v
@@ -1061,7 +1091,7 @@ func (r *Release) classC(ctx context.Context, q string) (*ClassCAnswer, error) {
 	a[3] = 0
 	for suffix := 0; suffix < 256; suffix++ {
 		a[3] = byte(suffix)
-		answer.Cells[suffix] = CellAnswer{IP: netip.AddrFrom4(a).String(), Confidence: "unrated", Reasons: []string{}, Usage: "unknown", Origins: []uint32{}}
+		answer.Cells[suffix] = CellAnswer{IP: netip.AddrFrom4(a).String(), Confidence: "unrated", Coverage: "incomplete", Reasons: []string{}, Usage: "unknown", Origins: []uint32{}}
 	}
 	cells, _ := s.Rows(10)
 	for j := u32(row, 4); j < u32(row, 4)+uint32(u16(row, 8)); j++ {
@@ -1069,6 +1099,9 @@ func (r *Release) classC(ctx context.Context, q string) (*ClassCAnswer, error) {
 		c := &answer.Cells[cell[0]]
 		c.Observed = true
 		c.Confidence = confidence(cell[9])
+		if cell[10] == 1 {
+			c.Coverage = "complete"
+		}
 		c.Reasons = reasons(u32(cell, 4))
 		c.Usage = usageName(cell[2])
 		if cell[1]&8 != 0 {

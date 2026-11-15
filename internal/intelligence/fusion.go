@@ -306,6 +306,8 @@ type UsageEvidence struct {
 	Family, Type, Assignment   string
 	Anycast, DirectedBroadcast *bool
 	Current                    bool
+	Contextual                 bool  `json:",omitempty"`
+	ContextPrefixBits          uint8 `json:",omitempty"`
 }
 type UsageResult struct {
 	Type, Assignment           string
@@ -315,13 +317,29 @@ type UsageResult struct {
 func FuseUsage(records []UsageEvidence) UsageResult {
 	types, assignments := map[string]struct{}{}, map[string]struct{}{}
 	anycasts, broadcasts := map[bool]struct{}{}, map[bool]struct{}{}
+	directType, contextualBits := false, -1
 	for _, v := range records {
 		if !v.Current || v.Family == "" {
 			continue
 		}
-		switch v.Type {
+		if !v.Contextual && v.Type != "" {
+			directType = true
+		}
+		if v.Contextual && int(v.ContextPrefixBits) > contextualBits {
+			contextualBits = int(v.ContextPrefixBits)
+		}
+	}
+	for _, v := range records {
+		if !v.Current || v.Family == "" {
+			continue
+		}
+		typeValue := v.Type
+		if v.Contextual && (directType || int(v.ContextPrefixBits) != contextualBits) {
+			typeValue = ""
+		}
+		switch typeValue {
 		case "residential", "business", "mobile", "datacenter", "hosting", "education", "government":
-			types[v.Type] = struct{}{}
+			types[typeValue] = struct{}{}
 		}
 		switch v.Assignment {
 		case "native", "broadcast_or_routed":
@@ -370,6 +388,7 @@ type Profile24 struct {
 	Prefix                       netip.Prefix
 	Cells                        []Cell
 	PositiveCount, AssessedCount uint16
+	ScoredCount                  uint16
 	AggregateScore               *uint8
 	DominantASN                  *uint32
 }
@@ -403,8 +422,11 @@ func (e *Engine) Profile24(addr netip.Addr) (Profile24, error) {
 			out.PositiveCount++
 		}
 		if quality.Score != nil {
-			out.AssessedCount++
+			out.ScoredCount++
 			sum += int(*quality.Score)
+		}
+		if quality.CoverageComplete {
+			out.AssessedCount++
 		}
 		if len(origins) > 1 {
 			ambiguous = true
@@ -413,8 +435,8 @@ func (e *Engine) Profile24(addr netip.Addr) (Profile24, error) {
 			counts[origins[0]]++
 		}
 	}
-	if out.AssessedCount == 256 {
-		score := uint8(math.Floor(float64(sum)/256 + .5))
+	if out.ScoredCount > 0 {
+		score := uint8(math.Floor(float64(sum)/float64(out.ScoredCount) + .5))
 		out.AggregateScore = &score
 	}
 	best, tie := 0, false

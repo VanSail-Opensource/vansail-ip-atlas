@@ -124,7 +124,7 @@ try {
         assert.equal(createHash('sha256').update(bytes).digest('hex'), entry.credits_sha256)
         const credit = JSON.parse(bytes)
         assert.deepEqual(Object.keys(credit).sort(), ['entries', 'format_version', 'mode', 'release_id'])
-        assert.equal(credit.format_version, 1)
+        assert.equal(credit.format_version, 2)
         assert.equal(credit.release_id, report.release_id)
         assert.equal(credit.mode, 'synthetic')
         assert.deepEqual(credit.entries, [], 'Candidate datasets are never credited as included synthetic data')
@@ -164,11 +164,14 @@ try {
     const releaseId = createHash('sha256').update(canonical(descriptor)).digest('hex')
     const manifest = Buffer.from(canonical({ ...descriptor, release_id: releaseId }))
     const mockPointer = canonical({ format_version: 3, release_id: releaseId, manifest_path: `/_atlas/releases/${releaseId}/manifest.json`, manifest_sha256: createHash('sha256').update(manifest).digest('hex') })
-    const entry = { name: 'Legal placement fixture', text: 'Isolated placement check, never included in candidate data.', url: 'https://publisher.example/credit' }
-    const document = Buffer.from(canonical({ format_version: 1, release_id: releaseId, mode: 'production', entries: [entry] }))
+    const logoFixture = JSON.parse(await readFile(new URL('../../fixtures/contracts/dataset-logos-v1.json', import.meta.url), 'utf8')).cases[0]
+    const logo = { path: `/_atlas/legal/${logoFixture.sha256}.png`, sha256: logoFixture.sha256, alt: 'Synthetic publisher logo' }
+    const entry = { logo, name: 'Legal placement fixture', text: 'Isolated placement check, never included in candidate data.', url: 'https://publisher.example/credit' }
+    const document = Buffer.from(canonical({ format_version: 2, release_id: releaseId, mode: 'production', entries: [entry] }))
     const hash = createHash('sha256').update(document).digest('hex'), creditPath = `/_atlas/credits/${hash}.json`
     const index = canonical({ format_version: 1, current_release_id: releaseId, releases: [{ release_id: releaseId, credits_path: creditPath, credits_sha256: hash }] })
-    for (const corrupt of [false, true]) {
+    for (const [view, corruption] of [['quality', 'none'], ['quality', 'document'], ['class-c', 'logo'], ['class-c', 'none']]) {
+      const selector = view === 'quality' ? '.quality-layout' : '.class-layout'
       const isolated = await browser.newContext({ serviceWorkers: 'block' })
       let releaseCredit, requested
       const delay = new Promise(resolve => { releaseCredit = resolve }), started = new Promise(resolve => { requested = resolve })
@@ -176,21 +179,24 @@ try {
         await isolated.route('**/_atlas/current.json', route => route.fulfill({ contentType: 'application/json', body: mockPointer }))
         await isolated.route(`**/_atlas/releases/${releaseId}/manifest.json`, route => route.fulfill({ contentType: 'application/json', body: manifest }))
         await isolated.route('**/dataset-credits.json', route => route.fulfill({ contentType: 'application/json', body: index }))
-        await isolated.route(`**${creditPath}`, async route => { requested(); await delay; await route.fulfill({ contentType: 'application/json', body: corrupt ? '{}' : document }) })
+        await isolated.route(`**${creditPath}`, async route => { requested(); await delay; await route.fulfill({ contentType: 'application/json', body: corruption === 'document' ? '{}' : document }) })
+        await isolated.route(`**${logo.path}`, route => route.fulfill({ contentType: 'image/png', body: corruption === 'logo' ? Buffer.from('invalid') : Buffer.from(logoFixture.base64, 'base64') }))
         const creditPage = await isolated.newPage()
-        await creditPage.goto(`${base}/ip/quality/?q=203.0.113.1`)
+        await creditPage.goto(`${base}/ip/${view}/?q=203.0.113.1`)
         await Promise.race([started, new Promise((_, reject) => setTimeout(() => reject(new Error('Credit verification did not start')), 20000))])
         assert(await creditPage.getByRole('status').isVisible())
-        assert.equal(await creditPage.locator('.quality-layout').count(), 0, 'Production facts must wait for credit integrity')
+        assert.equal(await creditPage.locator(selector).count(), 0, 'Production facts must wait for credit integrity')
         releaseCredit()
-        if (corrupt) {
+        if (corruption !== 'none') {
           await creditPage.getByRole('alert').waitFor()
-          assert.equal(await creditPage.locator('.quality-layout').count(), 0, 'Unverified legal metadata cannot leave production facts visible')
+          assert.equal(await creditPage.locator(selector).count(), 0, 'Unverified legal metadata cannot leave production facts visible')
         } else {
-          await creditPage.locator('.quality-layout').waitFor()
+          await creditPage.locator(selector).waitFor()
           const visible = creditPage.getByTestId('visible-dataset-credits')
           assert(await visible.isVisible())
           assert.equal(await visible.locator('a').getAttribute('href'), entry.url)
+          assert.equal(await visible.locator('img').getAttribute('src'), 'data:image/png;base64,' + logoFixture.base64)
+          assert.equal(await visible.locator('img').getAttribute('alt'), logo.alt)
           const details = creditPage.getByTestId('dataset-credits')
           assert(await details.evaluate(node => node.open), 'Required full notices open when production data first appears')
           await details.locator('summary').click()
@@ -199,7 +205,7 @@ try {
         }
       } finally { releaseCredit(); await isolated.close() }
     }
-    report.production_credit_fixture = { scope: 'isolated-intercept-only-not-candidate-data', delayed_facts: true, corrupted_document_rejected: true, visible_collapsed_credit: true }
+    report.production_credit_fixture = { scope: 'isolated-intercept-only-not-candidate-data', delayed_facts: true, corrupted_document_rejected: true, corrupted_logo_rejected: true, class_c_waits_for_credits: true, visible_collapsed_credit: true }
   })
   await test('global credit renderer escapes notices and exposes safe keyboard-accessible links', async () => {
     // An isolated HTTP mock exercises a nonempty legal display. It is never
@@ -209,7 +215,7 @@ try {
       : value && typeof value === 'object' ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}` : JSON.stringify(value)
     const entry = { name: 'Legal display fixture', text: 'Synthetic notice: <strong>plain text</strong>.',
       url: 'https://publisher.example/credit', license_url: 'https://publisher.example/license' }
-    const body = Buffer.from(canonical({ format_version: 1, release_id: report.release_id, mode: 'production', entries: [entry] }))
+    const body = Buffer.from(canonical({ format_version: 2, release_id: report.release_id, mode: 'production', entries: [entry] }))
     const hash = createHash('sha256').update(body).digest('hex'), path = `/_atlas/credits/${hash}.json`
     const index = canonical({ format_version: 1, current_release_id: report.release_id,
       releases: [{ release_id: report.release_id, credits_path: path, credits_sha256: hash }] })

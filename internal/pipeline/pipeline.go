@@ -59,6 +59,7 @@ type Options struct {
 	Limits                  Limits
 	ProductionGate          func(context.Context) error
 	ObserveStage            func(context.Context, Stage) func(bool)
+	ObserveCounters         func(context.Context, Stage, Counters)
 	// InputGate binds source/config/state inputs throughout a build in either
 	// mode. It is independent of the mandatory production capability gate.
 	InputGate            func(context.Context) error
@@ -242,25 +243,25 @@ func Build(ctx context.Context, options Options, produce Producer) (Candidate, e
 		return result, c.cause(err)
 	}
 	if !reused {
-		finishSort := observeStage(workCtx, options, StageSort)
+		finishSort := c.observeBuildStage(StageSort)
 		runs, err := c.sort(produce)
 		finishSort(err == nil)
 		if err != nil {
 			return result, c.cause(err)
 		}
-		finishMerge := observeStage(workCtx, options, StageMerge)
+		finishMerge := c.observeBuildStage(StageMerge)
 		merged, err := c.merge(runs)
 		finishMerge(err == nil)
 		if err != nil {
 			return result, c.cause(err)
 		}
-		finishClassify := observeStage(workCtx, options, StageClassify)
+		finishClassify := c.observeBuildStage(StageClassify)
 		groups, err := c.classify(merged)
 		finishClassify(err == nil)
 		if err != nil {
 			return result, c.cause(err)
 		}
-		finishPartition := observeStage(workCtx, options, StagePartition)
+		finishPartition := c.observeBuildStage(StagePartition)
 		for i, path := range groups {
 			if path == "" {
 				continue
@@ -289,7 +290,7 @@ func Build(ctx context.Context, options Options, produce Producer) (Candidate, e
 		}
 		finishPartition(true)
 	}
-	finishPublish := observeStage(workCtx, options, StagePublish)
+	finishPublish := c.observeBuildStage(StagePublish)
 	published := false
 	defer func() { finishPublish(published) }()
 	infos := make([]via3.ObjectInfo, 0, len(c.objects))

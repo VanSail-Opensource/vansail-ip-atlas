@@ -91,7 +91,7 @@ func compileProduction(ctx context.Context, args []string) (returnErr error) {
 	// binding at both boundaries. Installing it again as InputGate would repeat
 	// the same full source scan without adding an independent predicate.
 	buildPhase := beginCompilePhase(ctx, phaseBuild)
-	candidate, err := pipeline.BuildProductionIntelligence(ctx, pipeline.Options{Workspace: root, Output: output, Mode: "production", Clock: *clock, ValidUntil: validUntil.Unix(), Limits: pipeline.DefaultLimits(), ProductionGate: gate, ObserveStage: beginPipelinePhase}, state, policy, pipeline.ProductionInputs{Qualification: q, Tier1: tier1})
+	candidate, err := pipeline.BuildProductionIntelligence(ctx, pipeline.Options{Workspace: root, Output: output, Mode: "production", Clock: *clock, ValidUntil: validUntil.Unix(), Limits: pipeline.DefaultLimits(), ProductionGate: gate, ObserveStage: beginPipelinePhase, ObserveCounters: reportPipelineCounters}, state, policy, pipeline.ProductionInputs{Qualification: q, Tier1: tier1})
 	buildPhase(err == nil)
 	if err != nil {
 		return err

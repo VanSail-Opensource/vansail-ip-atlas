@@ -57,6 +57,50 @@ COMPILE_PHASES=frozenset({'stage','config','qualification','tier1','build','boun
     'materialize-asn-risk','materialize-spatial','materialize-asn','pipeline-sort',
     'pipeline-merge','pipeline-classify','pipeline-partition','pipeline-publish'})
 
+COMPILE_COUNTER_PHASES=frozenset({'pipeline-sort','pipeline-merge','pipeline-classify',
+    'pipeline-partition','pipeline-publish'})
+COMPILE_COUNTER_FIELDS=frozenset({'input_records','unique_records','sort_runs','partitions',
+    'binary_byte_repacks','sort_buffer_peak','partition_buffer_peak','output_bytes','scratch_peak'})
+
+def compile_counter_diagnostics(path, start):
+    """Expose only bounded aggregate counters from this command's complete lines."""
+    def unique_object(pairs):
+        row={}
+        for key,value in pairs:
+            if key in row: raise ValueError('duplicate compiler counter key')
+            row[key]=value
+        return row
+
+    if type(start) is not int or start<0: return []
+    records=[]
+    try:
+        with path.open('rb') as stream:
+            stream.seek(0,2);end=stream.tell()
+            if start>end: return []
+            offset=max(start,end-65536)
+            stream.seek(offset)
+            data=stream.read(65536)
+        if offset>start:
+            # The bounded tail can begin inside an arbitrary private log line.
+            data=data.partition(b'\n')[2]
+        lines=data.split(b'\n')[:-1] # A failed/truncated final write is not evidence.
+        if len(lines)>4096: return []
+        for line in lines:
+            prefix=b'ATLAS_COMPILE_COUNTERS '
+            if not line.startswith(prefix) or len(line)>1024: continue
+            try: row=json.loads(line[len(prefix):],object_pairs_hook=unique_object)
+            except (ValueError,UnicodeDecodeError,RecursionError): continue
+            if (type(row) is not dict or set(row)!=COMPILE_COUNTER_FIELDS|{'phase'}
+                    or type(row['phase']) is not str or row['phase'] not in COMPILE_COUNTER_PHASES
+                    or any(type(row[key]) is not int or not 0<=row[key]<=2**53-1
+                           for key in COMPILE_COUNTER_FIELDS)):
+                continue
+            records.append(row)
+            if len(records)>8: return []
+    except OSError:
+        return []
+    return records
+
 def compile_phase_diagnostics(path, start):
     """Read bounded fixed-schema diagnostics, never arbitrary child output."""
     records=[]
@@ -120,6 +164,8 @@ def run(argv, *, output=None):
             else:
                 print('Production compiler phase ended: '+row['phase']
                     +' elapsed_ms='+str(row['elapsed_ms'])+' ok='+str(row['ok']).lower(),flush=True)
+        for row in compile_counter_diagnostics(private/'stage.log',start):
+            print('Production compiler counters: '+json.dumps(row,sort_keys=True,separators=(',',':')),flush=True)
     if result.returncode:
         print('Production step failed: '+phase,file=sys.stderr,flush=True)
         print('Production failure category: '+failure_category(private/'stage.log',start),file=sys.stderr,flush=True)

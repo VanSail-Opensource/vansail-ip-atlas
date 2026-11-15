@@ -202,6 +202,105 @@ class CompilePhaseDiagnosticsTests(unittest.TestCase):
             self.assertEqual(workflow.compile_phase_diagnostics(path, 0), [])
 
 
+class CompileCounterDiagnosticsTests(unittest.TestCase):
+    def row(self, **changes):
+        return {'phase': 'pipeline-sort', 'input_records': 123, 'unique_records': 100,
+                'sort_runs': 17, 'partitions': 2, 'binary_byte_repacks': 3,
+                'sort_buffer_peak': 4096, 'partition_buffer_peak': 1024,
+                'output_bytes': 2048, 'scratch_peak': 8192, **changes}
+
+    def encode(self, row):
+        return b'ATLAS_COMPILE_COUNTERS ' + json.dumps(row).encode() + b'\n'
+
+    def test_exact_counter_schema_and_safe_integer_endpoints(self):
+        rows = [self.row(phase=phase) for phase in sorted(workflow.COMPILE_COUNTER_PHASES)]
+        for endpoint in (0, 2**53 - 1):
+            rows.append(self.row(**dict.fromkeys(workflow.COMPILE_COUNTER_FIELDS, endpoint)))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'stage.log'
+            path.write_bytes(b''.join(map(self.encode, rows)))
+            self.assertEqual(workflow.compile_counter_diagnostics(path, 0), rows)
+
+    def test_invalid_types_ranges_schema_and_private_fields_are_omitted(self):
+        invalid = [[], None, True, 1, 'PRIVATE_SOURCE', {},
+                   self.row(source='PRIVATE_SOURCE'), self.row(phase='PRIVATE_SOURCE'),
+                   self.row(phase=[]), self.row(phase=True)]
+        for field in workflow.COMPILE_COUNTER_FIELDS:
+            invalid.append({key: value for key, value in self.row().items() if key != field})
+            for value in (-1, 2**53, True, False, 1.0, 'PRIVATE_SOURCE', None, [], {}, float('nan'), float('inf')):
+                invalid.append(self.row(**{field: value}))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'stage.log'
+            for row in invalid:
+                with self.subTest(row=row):
+                    path.write_bytes(self.encode(row) + self.encode(self.row()))
+                    self.assertEqual(workflow.compile_counter_diagnostics(path, 0), [self.row()])
+
+    def test_duplicate_keys_trailing_data_and_malformed_frames_are_omitted(self):
+        encoded = json.dumps(self.row()).encode()
+        malformed = [b'{"phase":"PRIVATE_SOURCE",' + encoded[1:],
+                     b'{"sort_runs":0,' + encoded[1:], encoded + b' {}', encoded + b' PRIVATE_SOURCE',
+                     encoded.replace(b'"phase"', b'"\xffphase"'), b'{', b'[' * 1000,
+                     b' ' * 1024 + encoded]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'stage.log'
+            for payload in malformed:
+                with self.subTest(payload=payload[:80]):
+                    path.write_bytes(b'ATLAS_COMPILE_COUNTERS ' + payload + b'\n')
+                    self.assertEqual(workflow.compile_counter_diagnostics(path, 0), [])
+            path.write_bytes(b'PRIVATE_SOURCE ' + self.encode(self.row()))
+            self.assertEqual(workflow.compile_counter_diagnostics(path, 0), [])
+            path.write_bytes(self.encode(self.row())[:-1])
+            self.assertEqual(workflow.compile_counter_diagnostics(path, 0), [])
+
+    def test_current_command_tail_and_record_limits(self):
+        old = self.encode(self.row(phase='pipeline-publish'))
+        current = self.encode(self.row())
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'stage.log'
+            path.write_bytes(old + current)
+            self.assertEqual(workflow.compile_counter_diagnostics(path, len(old)), [self.row()])
+            for start in (-1, True, 1.0, len(old + current) + 1):
+                self.assertEqual(workflow.compile_counter_diagnostics(path, start), [])
+            path.write_bytes(old + b'x' * 70000 + b'\n' + current)
+            self.assertEqual(workflow.compile_counter_diagnostics(path, 0), [self.row()])
+            # A tail beginning inside a long private line must not invent a marker.
+            path.write_bytes(b'private-prefix' + current + b'x' * (65536 - len(current)))
+            self.assertEqual(workflow.compile_counter_diagnostics(path, 0), [])
+            path.write_bytes(current * 8)
+            self.assertEqual(workflow.compile_counter_diagnostics(path, 0), [self.row()] * 8)
+            path.write_bytes(current * 9)
+            self.assertEqual(workflow.compile_counter_diagnostics(path, 0), [])
+            path.write_bytes(b'\n' * 4096 + current)
+            self.assertEqual(workflow.compile_counter_diagnostics(path, 0), [])
+            path.unlink()
+            self.assertEqual(workflow.compile_counter_diagnostics(path, 0), [])
+
+    def test_failed_compile_console_exposes_only_sanitized_counters(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            private = root / '.atlas-private'
+            private.mkdir()
+            (private / 'stage.log').write_bytes(self.encode(self.row(phase='pipeline-publish')))
+            public_out, public_err = io.StringIO(), io.StringIO()
+            def execute(argv, **kwargs):
+                kwargs['stderr'].write(b'PRIVATE_SOURCE\n')
+                kwargs['stderr'].write(self.encode(self.row(source='PRIVATE_SOURCE')))
+                kwargs['stderr'].write(self.encode(self.row()))
+                return workflow.subprocess.CompletedProcess(argv, 1)
+            with patch.object(workflow, 'ROOT', root), patch.object(workflow.subprocess, 'run', side_effect=execute), \
+                    contextlib.redirect_stdout(public_out), contextlib.redirect_stderr(public_err), \
+                    self.assertRaises(ContractError):
+                workflow.run(['build-private/atlas', 'compile-production'])
+            output = public_out.getvalue() + public_err.getvalue()
+            self.assertNotIn('PRIVATE_SOURCE', output)
+            self.assertNotIn('pipeline-publish', output)
+            lines = [line for line in output.splitlines() if line.startswith('Production compiler counters: ')]
+            self.assertEqual(len(lines), 1)
+            self.assertEqual(json.loads(lines[0].removeprefix('Production compiler counters: ')), self.row())
+            self.assertIn('PRIVATE_SOURCE', (private / 'stage.log').read_text())
+
+
 if __name__ == '__main__':
     unittest.main()
 

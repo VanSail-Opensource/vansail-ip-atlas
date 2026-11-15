@@ -56,6 +56,7 @@ class ActualLookupGateTests(unittest.TestCase):
                 self.assertEqual(report['compile_runtime_ms'], 2)
                 self.assertIs(type(report['compile_runtime_ms']), int)
                 self.assertEqual(report['observed_input'], {'status': 'unavailable'})
+                self.assertEqual(report['compile_counters'], [])
 
     def test_compile_failure_retains_elapsed_time_and_only_current_phase_diagnostics(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -79,6 +80,36 @@ class ActualLookupGateTests(unittest.TestCase):
             self.assertFalse(report['passed'])
             self.assertEqual(report['compile_runtime_ms'], 2100000)
             self.assertEqual(report['compile_phases'], [row])
+
+    def test_failed_compile_reports_only_current_bounded_counters_and_stops(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            private = root / '.atlas-private'
+            private.mkdir()
+            log = private / 'stage.log'
+            row = {'phase': 'pipeline-partition', 'input_records': 200, 'unique_records': 150,
+                   'sort_runs': 17, 'partitions': 4, 'binary_byte_repacks': 2,
+                   'sort_buffer_peak': 4096, 'partition_buffer_peak': 1024,
+                   'output_bytes': 2048, 'scratch_peak': 8192}
+            encode = lambda value: 'ATLAS_COMPILE_COUNTERS ' + json.dumps(value) + '\n'
+            log.write_text(encode({**row, 'phase': 'pipeline-publish'}))
+            def run(_):
+                with log.open('a') as stream:
+                    stream.write('PRIVATE_SOURCE\n' + encode({**row, 'source': 'PRIVATE_SOURCE'}) + encode(row))
+                raise ContractError('compile failed')
+            with patch.object(check, 'ROOT', root), patch.object(check, 'run', side_effect=run) as execute, \
+                    patch.object(check, 'intake_clock', return_value=1794733697), \
+                    patch.object(check.time, 'monotonic_ns', side_effect=(0, 2100000000000)), \
+                    self.assertRaises(ContractError):
+                check.main()
+            execute.assert_called_once()
+            report_bytes = (root / 'reports/production-data-check.json').read_bytes()
+            report = json.loads(report_bytes)
+            self.assertFalse(report['passed'])
+            self.assertEqual(report['compile_runtime_ms'], 2100000)
+            self.assertEqual(report['compile_counters'], [row])
+            self.assertNotIn(b'PRIVATE_SOURCE', report_bytes)
+            self.assertNotIn('lookup_p95_ns', report)
 
 
 class ObservedInputDiagnosticTests(unittest.TestCase):

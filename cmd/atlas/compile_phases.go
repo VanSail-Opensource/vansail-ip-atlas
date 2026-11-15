@@ -41,9 +41,10 @@ const (
 
 type compilePhaseKey struct{}
 type compilePhases struct {
-	mu      sync.Mutex
-	output  io.Writer
-	records int
+	mu       sync.Mutex
+	output   io.Writer
+	records  int
+	counters int
 }
 type compilePhaseRecord struct {
 	Phase     compilePhase `json:"phase"`

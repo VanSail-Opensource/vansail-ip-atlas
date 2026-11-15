@@ -20,6 +20,24 @@ from tools.release_contract.contracts import ContractError
 from tools.hosted.memory_profile import verify_memory_profile
 from tools.hosted.runner_budget import cgroup, effective, require_descendant, slice_cgroup
 
+# These are the background-only subset of the pinned Playwright Chrome defaults.
+# Keep GPU/rendering, networking, storage, the decoder and every measured case.
+BACKGROUND_FLAGS=(
+    '--disable-component-extensions-with-background-pages','--disable-component-update',
+    '--disable-default-apps','--disable-extensions','--disable-sync','--disable-breakpad',
+    '--metrics-recording-only','--no-service-autorun','--disable-updater-scheduler',
+    '--disable-search-engine-choice-screen','--password-store=basic','--use-mock-keychain',
+    '--disable-features=MediaRouter,OptimizationHints,NetworkTimeServiceQuerying,AimEnabled,PreconnectToSearch',
+    '--enable-features=SkipListAccountsWithoutGaiaCookies',
+)
+
+def memory_snapshot(root: Path) -> dict:
+    allowed={'anon','file','kernel','shmem','file_mapped','pagetables','sock','slab'}
+    counters={name:int(value) for name,value in
+              (line.split() for line in (root/'memory.stat').read_text().splitlines()) if name in allowed}
+    return {'current_bytes':int((root/'memory.current').read_text()),
+            'peak_bytes':int((root/'memory.peak').read_text()),'stat_bytes':counters}
+
 def safe_progress(path: Path) -> dict | None:
     """Only fixed synthetic phase names cross into public failure evidence."""
     try:
@@ -44,6 +62,7 @@ def main():
         'includes_worker_children':True,'accounting_scope':'entire-Chrome-tree-from-process-birth',
         'peak_bytes':None,'errors':[],'phase':'environment'}
     process=None;unit='atlas-worker-memory-'+uuid.uuid4().hex
+    group_root=None
     case_report=ROOT/'.atlas-private/worker-memory-cases.json'
     try:
         case_report.unlink(missing_ok=True)
@@ -79,6 +98,7 @@ def main():
                 'runuser','--user',user,'--preserve-environment','--',
                 '/opt/google/chrome/chrome','--headless=new','--no-sandbox','--disable-dev-shm-usage',
                 '--disable-background-networking','--no-first-run','--no-default-browser-check',
+                *BACKGROUND_FLAGS,
                 '--remote-debugging-address=127.0.0.1',f'--remote-debugging-port={port}',
                 '--user-data-dir='+temporary,'about:blank']
             process=subprocess.Popen(argv,stdout=log,stderr=log)
@@ -97,6 +117,7 @@ def main():
             require_descendant(group_root,budget_group)
             if (group_root/'memory.max').read_text().strip()!=str(384*1024**2):
                 raise ContractError('Chrome memory limit unavailable')
+            report['baseline_memory']=memory_snapshot(group_root)
             environment={**os.environ,'ATLAS_MEMORY_CDP':endpoint,'ATLAS_MEMORY_PUBLIC':str(args.public.resolve()),
                          'ATLAS_MEMORY_PROFILE':str(profile),'ATLAS_MEMORY_CASE_REPORT':str(case_report)}
             report['phase']='workload'
@@ -116,6 +137,9 @@ def main():
     except (ContractError,OSError,RuntimeError,ValueError,KeyError,subprocess.SubprocessError):
         report['errors'].append('worst-case-worker-memory-proof-failed')
     finally:
+        if group_root is not None:
+            try:report['final_memory']=memory_snapshot(group_root)
+            except (OSError,ValueError):pass
         progress=safe_progress(case_report)
         if progress is not None:report['workload_progress']=progress
         if process is not None:

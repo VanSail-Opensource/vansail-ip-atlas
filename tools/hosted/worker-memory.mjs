@@ -12,6 +12,7 @@ const workers=(await readdir(join(publicRoot,'_nuxt'))).filter(name=>/^atlas-[A-
 if(workers.length!==1)throw new Error('One exact emitted atlas worker is required')
 const workerPath='/_nuxt/'+workers[0]
 const workerBytes=await readFile(join(publicRoot,workerPath))
+const byteCounterModule=await readFile(new URL('./memory-json-bytes.mjs',import.meta.url))
 const report={browser:null,worker_sha256:createHash('sha256').update(workerBytes).digest('hex'),completed_cases:0,cases:[],object_hashes:[],retained_answer_bytes:[],errors:[],
   progress:{phase:'connecting',case_name:null,completed_cases:0}}
 const caseNames=new Set(['maximum-materialized-answer','maximum-live-decoded','live-limit-rejection'])
@@ -29,6 +30,7 @@ const server=createServer(async(req,res)=>{
   try{
     const path=new URL(req.url,'http://localhost').pathname
     if(path==='/'){res.writeHead(200,{'Content-Type':'text/html'});res.end('<!doctype html><title>Atlas memory acceptance</title>');return}
+    if(path==='/_memory/json-bytes.mjs'){res.writeHead(200,{'Content-Type':'text/javascript','Cache-Control':'no-store'});res.end(byteCounterModule);return}
     const base=path.startsWith('/_atlas/')?fixtureRoot:publicRoot
     const file=resolve(base,path.startsWith('/_atlas/')?path.slice(8):'.'+path)
     if(!file.startsWith(base+sep))throw new Error('path')
@@ -56,6 +58,8 @@ try{
   await page.goto(origin)
   await progress({phase:'ready',case_name:null,completed_cases:0})
   const measured=await page.evaluate(async({workerPath,cases})=>{
+    const {createJSONByteCounter}=await import('/_memory/json-bytes.mjs')
+    const answerSize=createJSONByteCounter()
     const worker=new Worker(workerPath,{type:'module'})
     let id=0;const completed=[],retained=[]
     const invoke=test=>new Promise((resolve,reject)=>{
@@ -70,14 +74,14 @@ try{
       await window.__atlasMemoryProgress({phase:'first-lookup',case_name:test.name,completed_cases:completed.length})
       const answer=await invoke(test)
       if(!test.expected_error&&(answer===undefined||answer===null))throw new Error('memory case did not materialize answer')
-      const answerBytes=answer===undefined?0:new TextEncoder().encode(JSON.stringify(answer)).length
+      const answerBytes=answerSize(answer)
       if(test.answer_bytes!==undefined&&answerBytes!==test.answer_bytes)throw new Error('materialized answer boundary differs')
       await window.__atlasMemoryProgress({phase:'first-answer',case_name:test.name,completed_cases:completed.length})
       if(test.retain_answer)retained.push(answer)
       // Hold the structured clone while repeating the real lookup/IDB path.
       await window.__atlasMemoryProgress({phase:'repeat-lookup',case_name:test.name,completed_cases:completed.length})
       const repeated=await invoke(test)
-      const repeatedBytes=repeated===undefined?0:new TextEncoder().encode(JSON.stringify(repeated)).length
+      const repeatedBytes=answerSize(repeated)
       if(repeatedBytes!==answerBytes)throw new Error('repeat lookup changed materialized answer size')
       completed.push({name:test.name,answer_bytes:answerBytes,repeat_answer_bytes:repeatedBytes,retained_answers:retained.length})
       await window.__atlasMemoryProgress({phase:'repeat-answer',case_name:test.name,completed_cases:completed.length})
@@ -85,7 +89,7 @@ try{
     // Read every retained object after the resident-limit cases. Merely retaining
     // an array length would not prove the earlier structured clone remained live.
     await window.__atlasMemoryProgress({phase:'retained-answers',case_name:null,completed_cases:completed.length})
-    const retainedAnswerBytes=retained.map(answer=>new TextEncoder().encode(JSON.stringify(answer)).length)
+    const retainedAnswerBytes=retained.map(answer=>answerSize(answer))
     worker.terminate();return {cases:completed,retained_answer_bytes:retainedAnswerBytes}
   },{workerPath,cases:profile.cases})
   report.cases=measured.cases;report.completed_cases=measured.cases.length;report.retained_answer_bytes=measured.retained_answer_bytes;report.object_hashes=[...requestedObjects].sort()

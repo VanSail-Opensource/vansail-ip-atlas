@@ -266,6 +266,18 @@ are unchanged from the previously verified v6 build. The next exact-head hosted
 actual-data measurement remains required before merge. The production website
 is still unreleased.
 
+Downstream preflight found a deterministic accessibility-report mismatch before
+the full production browser run: component rows omitted the axe engine identity
+required by acceptance. The shared browser audit now retains the actual axe
+result's engine/version for both populations, with unchanged WCAG checks and
+finding counts. A regression executes the same browser callback and passes its
+output into all eight Python accessibility gates; missing identity, violations
+and incomplete audits still block. All 220 Node tests, eleven focused acceptance
+tests and actionlint pass. The harness-only repair changes no product assets or
+internal Go bytes and does not require a new parser certification. It supersedes
+the in-progress checks for `9d3692149a6d5571a67ac19f955236f47941dea4`;
+the final exact-head workflow must complete before merge.
+
 ## Resume next
 
 1. Verify the branch and clean checkout. Run strict schemas, Go tests/vet, Python

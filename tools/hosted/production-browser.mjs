@@ -9,6 +9,7 @@ import { isIP } from 'node:net'
 import { cpus, totalmem } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import { graphVisibleNodeCount } from './performance-gates.mjs'
+import { auditAccessibility } from './browser-accessibility.mjs'
 import { parseInput } from '../../web/app/lib/query.ts'
 
 const root = new URL('../../', import.meta.url)
@@ -188,9 +189,7 @@ async function graphPhase(page,name,action) {
   return {action:name,actions,duration_ms,complete_second_fps,frame_intervals_ms:result.times.slice(1).map((t,i)=>t-result.times[i]),population_checkpoints}
 }
 async function accessible(page) {
-  await page.evaluate(axeSource)
-  const value=await page.evaluate(async()=>{const r=await window.axe.run(document,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}});return {violations:r.violations.map(x=>({id:x.id,impact:x.impact,nodes:x.nodes.length})),incomplete:r.incomplete.map(x=>({id:x.id,nodes:x.nodes.length}))}})
-  return value
+  return auditAccessibility(page,axeSource)
 }
 async function owner(page,name,ready) {
   await page.getByRole('navigation',{name:'Atlas views'}).getByRole('link',{name,exact:true}).click()
@@ -310,7 +309,7 @@ try {
       row.interaction_cls=metric.cls_supported?metric.cls:null;row.event_timing_supported=metric.event_supported
       row.interaction_durations_ms=metric.event_supported&&metric.trusted_inputs>0?[16,...Object.values(metric.interactions)]:[]
       row.trusted_input_events=metric.trusted_inputs;row.complete_interaction_script=true
-      row.accessibility={engine:'axe-core',version:'4.14.0',violations:checks.flatMap(x=>x.violations),incomplete:checks.flatMap(x=>x.incomplete)}
+      row.accessibility={engine:checks[0].engine,version:checks[0].version,violations:checks.flatMap(x=>x.violations),incomplete:checks.flatMap(x=>x.incomplete)}
     } finally {report.populations.push(row);await s.context.close()}
     await componentPopulation(width,theme,index)
     console.log(`Production browser population ${width}/${theme} ${index}/30`)

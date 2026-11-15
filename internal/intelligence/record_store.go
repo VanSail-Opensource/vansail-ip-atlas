@@ -28,6 +28,73 @@ type RecordPartition struct {
 	Codec        string `json:",omitempty"`
 	DecodedBytes int64  `json:",omitempty"`
 }
+
+// CanonicalPartition is a process-local capability for the exact canonical
+// records emitted by a successful RecordWriter. It conveys no source approval
+// or freshness, and cannot be reconstructed from a persisted descriptor.
+type CanonicalPartition struct {
+	root string
+	part RecordPartition
+}
+
+// Descriptor returns an independent copy of the immutable object identity.
+func (p CanonicalPartition) Descriptor() RecordPartition { return p.part }
+
+// Walk retains the normal byte, framing, decoding and semantic checks. Only the
+// canonical writer provenance permits reusing the encoded length and digest.
+func (p CanonicalPartition) Walk(ctx context.Context, emit func(CanonicalRecordFrame) error) error {
+	if p.root == "" || !validPartition(p.part) || emit == nil {
+		return errors.New("canonical partition capability invalid")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	root, err := recordDirectory(filepath.Dir(filepath.Dir(p.root)), false)
+	if err != nil {
+		return err
+	}
+	if root != p.root {
+		return errors.New("canonical partition root changed")
+	}
+	return walkPartitionFrames(ctx, root, p.part, func(record NormalizedRecord, data []byte) error {
+		return emit(CanonicalRecordFrame{record: record, data: data})
+	})
+}
+
+// CanonicalRecordFrame owns one strictly decoded canonical frame. Its encoded
+// bytes are private and never alias the mutable decoded record returned below.
+type CanonicalRecordFrame struct {
+	record NormalizedRecord
+	data   []byte
+}
+
+// Record transfers the decoded value to the caller. Mutating its payload does
+// not change the encoded frame used by Digest or AppendTo.
+func (f CanonicalRecordFrame) Record() (NormalizedRecord, error) {
+	if len(f.data) == 0 {
+		return NormalizedRecord{}, errors.New("canonical record frame invalid")
+	}
+	return f.record, nil
+}
+
+func (f CanonicalRecordFrame) EncodedBytes() int { return len(f.data) }
+func (f CanonicalRecordFrame) Digest() [32]byte {
+	if len(f.data) == 0 {
+		return [32]byte{}
+	}
+	return sha256.Sum256(f.data)
+}
+
+// AppendTo copies the original canonical bytes through the destination's usual
+// count, logical-byte, physical-byte and cancellation limits. It deliberately
+// ignores mutations to the independently decoded record.
+func (f CanonicalRecordFrame) AppendTo(w *RecordWriter) error {
+	if len(f.data) == 0 || w == nil || w.store == nil || w.ctx == nil {
+		return errors.New("canonical record frame or writer invalid")
+	}
+	return w.appendEncoded(f.data)
+}
+
 type RecordStoreLimits struct {
 	PartitionBytes   int64
 	PartitionRecords uint64
@@ -202,16 +269,26 @@ func (w *RecordWriter) Append(record NormalizedRecord) error {
 	if err != nil {
 		return err
 	}
+	return w.appendEncoded(data)
+}
+
+func (w *RecordWriter) appendEncoded(data []byte) error {
+	if err := w.ctx.Err(); err != nil {
+		return err
+	}
+	if w.closed {
+		return errors.New("record writer closed")
+	}
 	if len(data) > w.store.limits.RecordBytes || int64(len(data)+4+len(recordHeader)) > w.store.limits.PartitionBytes {
 		return errors.New("private record byte budget exceeded")
 	}
 	if w.file != nil && (w.count >= w.store.limits.PartitionRecords || int64(len(data)+4) > w.store.limits.PartitionBytes-w.decoded) {
-		if err = w.finishPartition(); err != nil {
+		if err := w.finishPartition(); err != nil {
 			return err
 		}
 	}
 	if w.file == nil {
-		if err = w.start(); err != nil {
+		if err := w.start(); err != nil {
 			return err
 		}
 	}
@@ -219,10 +296,10 @@ func (w *RecordWriter) Append(record NormalizedRecord) error {
 	w.decoded += n
 	var frame [4]byte
 	binary.LittleEndian.PutUint32(frame[:], uint32(len(data)))
-	if _, err = w.buffer.Write(frame[:]); err != nil {
+	if _, err := w.buffer.Write(frame[:]); err != nil {
 		return err
 	}
-	if _, err = w.buffer.Write(data); err != nil {
+	if _, err := w.buffer.Write(data); err != nil {
 		return err
 	}
 	w.count++
@@ -300,6 +377,23 @@ func (w *RecordWriter) Finish() ([]RecordPartition, error) {
 	w.closed = true
 	return append([]RecordPartition(nil), w.parts...), nil
 }
+
+// FinishCanonical mints capabilities only for the exact objects successfully
+// finished by this writer. Opening an existing store never adopts its objects.
+func (w *RecordWriter) FinishCanonical() ([]CanonicalPartition, error) {
+	if w == nil || w.store == nil || w.ctx == nil {
+		return nil, errors.New("canonical record writer invalid")
+	}
+	parts, err := w.Finish()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]CanonicalPartition, len(parts))
+	for i, part := range parts {
+		out[i] = CanonicalPartition{root: w.store.root, part: part}
+	}
+	return out, nil
+}
 func (w *RecordWriter) Abort() error {
 	w.closed = true
 	if w.encoder != nil {
@@ -320,6 +414,14 @@ func (w *RecordWriter) Abort() error {
 }
 
 func walkPartition(ctx context.Context, root string, part RecordPartition, emit func(NormalizedRecord) error) error {
+	var frames func(NormalizedRecord, []byte) error
+	if emit != nil {
+		frames = func(record NormalizedRecord, _ []byte) error { return emit(record) }
+	}
+	return walkPartitionFrames(ctx, root, part, frames)
+}
+
+func walkPartitionFrames(ctx context.Context, root string, part RecordPartition, emit func(NormalizedRecord, []byte) error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -419,7 +521,7 @@ func walkPartition(ctx context.Context, root string, part RecordPartition, emit 
 		if err = record.Validate(); err != nil {
 			return err
 		}
-		if err = emit(record); err != nil {
+		if err = emit(record, data); err != nil {
 			return err
 		}
 		count++

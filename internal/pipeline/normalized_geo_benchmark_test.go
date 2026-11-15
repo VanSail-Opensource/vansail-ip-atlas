@@ -88,6 +88,7 @@ func BenchmarkNormalizedGeoMaterialization(b *testing.B) {
 								b.Fatal(err)
 							}
 							b.StopTimer()
+							b.Logf("public release %s manifest %s", result.Pointer.ReleaseID, result.Pointer.ManifestSHA256)
 							b.ReportMetric(float64(count+(count+1999)/2000), "normalized-records")
 							b.ReportMetric(float64(result.Stats.InputRecords), "public-input-records")
 							b.ReportMetric(float64(result.Stats.UniqueRecords), "public-unique-records")

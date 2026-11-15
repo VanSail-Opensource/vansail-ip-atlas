@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/netip"
 	"sort"
@@ -44,7 +43,16 @@ func BuildMappings(ctx context.Context, options Options, state intelligence.Buil
 // Empty rows and explicit coordinate tombstones prevent unknown/conflicting
 // child facts from falling through to stale affirmative parent values.
 func MappingProducer(state intelligence.BuildState, policy intelligence.Policy, clock time.Time) Producer {
+	return mappingProducer(state, policy, clock, nil)
+}
+
+// mappingProducer accepts lengths only from IntelligenceProducer's owned,
+// already bounded mapping subset. Exported entry points always encode inputs.
+func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, clock time.Time, encodedLengths []int) Producer {
 	return func(ctx context.Context, emit func(via3.PublicRecord) error) error {
+		if err := checkOwnedRecordLengths(state, encodedLengths); err != nil {
+			return err
+		}
 		state, joinErr := joinASNUsage(ctx, state)
 		if joinErr != nil {
 			return joinErr
@@ -98,11 +106,11 @@ func MappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 				if record.Origins != nil && len(record.Origins.Origins) > via3.PublicOrigins {
 					return errors.New("mapping origin count exceeded")
 				}
-				encoded, err := json.Marshal(record)
+				size, err := normalizedRecordBytes(record, encodedLengths, count)
 				if err != nil {
 					return err
 				}
-				bytes += len(encoded) + 512
+				bytes += size + 512
 				count++
 				if bytes > 96<<20 || count > 200000 {
 					return errors.New("bounded mapping materialization partition exceeded")

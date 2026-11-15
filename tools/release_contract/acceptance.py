@@ -250,7 +250,7 @@ def allocation_gate(row: dict) -> str:
 
 
 def build_gates(report: dict) -> dict[str, str]:
-    if (report.get("scope") != "hosted-production-build-v1" or report.get("mode") != "production"
+    if (report.get("scope") not in ("hosted-production-build-v1", "hosted-production-build-v2") or report.get("mode") != "production"
             or report.get("errors") != []):
         raise ContractError("production build evidence has wrong scope or errors")
     envelope = report.get('execution_envelope', {})
@@ -258,7 +258,32 @@ def build_gates(report: dict) -> dict[str, str]:
         and envelope.get('cpu_quota_us')==200000 and envelope.get('cpu_period_us')==100000
         and envelope.get('memory_max_bytes')==8*1024**3 and envelope.get('swap_max_bytes')==0
         and envelope.get('workspace_limit_bytes')==14*1024**3 else 'unmeasured'}
+    if report['scope'] == 'hosted-production-build-v2':
+        # Every independently measured case needs its finalized outer cgroup
+        # report; one good runner profile cannot cover the other fourteen jobs.
+        from tools.hosted.production_benchmarks import validate_budget
+        envelopes = report.get('execution_envelopes')
+        expected = {(name, sample) for name in BUILD_SCENARIOS for sample in (1, 2, 3)}
+        observed = set()
+        valid = type(envelopes) is list and len(envelopes) == 15
+        if valid:
+            for row in envelopes:
+                if (type(row) is not dict or set(row) != {'scenario', 'sample', 'budget_report'}
+                        or type(row['sample']) is not int or type(row['scenario']) is not str
+                        or (row['scenario'], row['sample']) not in expected
+                        or (row['scenario'], row['sample']) in observed):
+                    valid = False
+                    break
+                observed.add((row['scenario'], row['sample']))
+                try:
+                    validate_budget(row['budget_report'])
+                except ContractError:
+                    valid = False
+                    break
+        result['standard_runner'] = 'passed' if valid and observed == expected else 'unmeasured'
     scenarios = report.get("scenarios", [])
+    if report['scope'] == 'hosted-production-build-v2' and (type(scenarios) is not list or len(scenarios) != 15):
+        raise ContractError('exactly fifteen production benchmark cases required')
     for name in BUILD_SCENARIOS:
         rows = [row for row in scenarios if isinstance(row, dict) and row.get("scenario") == name]
         identities = [row.get("sample") for row in rows]

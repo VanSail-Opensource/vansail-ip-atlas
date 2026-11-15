@@ -288,7 +288,7 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 						return nil
 					})
 				}
-				return IntelligenceProducer(part, policy, clock, MaterializationInputs{scope: bucket.prefix, prepare: prepare, prepareOnly: true})(ctx, func(via3.PublicRecord) error { return nil })
+				return IntelligenceProducer(part, policy, clock, MaterializationInputs{scope: bucket.prefix, prepare: prepare, prepareOnly: true, encodedLengths: bucket.recordBytes})(ctx, func(via3.PublicRecord) error { return nil })
 			})
 		}
 		if err != nil {
@@ -297,7 +297,7 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 		}
 		asnLeaves := []*bulkBucket{asnRoot}
 		if spool.hasASNDirect {
-			asnLeaves, err = spool.leaves(ctx, asnLeaves, false, func(_ *bulkBucket, part intelligence.BuildState) error {
+			asnLeaves, err = spool.leaves(ctx, asnLeaves, false, func(bucket *bulkBucket, part intelligence.BuildState) error {
 				prepare := func(engine *intelligence.Engine) error {
 					for _, source := range part.Sources {
 						for _, record := range source.Records {
@@ -321,7 +321,7 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 					}
 					return nil
 				}
-				return IntelligenceProducer(part, policy, clock, MaterializationInputs{prepare: prepare, prepareOnly: true})(ctx, func(via3.PublicRecord) error { return nil })
+				return IntelligenceProducer(part, policy, clock, MaterializationInputs{prepare: prepare, prepareOnly: true, encodedLengths: bucket.recordBytes})(ctx, func(via3.PublicRecord) error { return nil })
 			})
 		}
 		if err != nil {
@@ -340,7 +340,7 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 		spatialPhase := spool.stage(ctx, StageSpatial)
 		observedAt, coverageValidUntil, completeVRP := inputs.Qualification.RPKIObservation()
 		spatial, err = spool.leaves(ctx, spatial, true, func(bucket *bulkBucket, part intelligence.BuildState) error {
-			return IntelligenceProducer(part, policy, clock, MaterializationInputs{VRPComplete: completeVRP, RPKIObservedAt: observedAt, RPKICoverageValidUntil: coverageValidUntil, verifiedEmptyVRP: completeVRP, scope: bucket.prefix, contexts: contexts, resolver: relations})(ctx, func(record via3.PublicRecord) error {
+			return IntelligenceProducer(part, policy, clock, MaterializationInputs{VRPComplete: completeVRP, RPKIObservedAt: observedAt, RPKICoverageValidUntil: coverageValidUntil, verifiedEmptyVRP: completeVRP, scope: bucket.prefix, contexts: contexts, resolver: relations, encodedLengths: bucket.recordBytes})(ctx, func(record via3.PublicRecord) error {
 				if record.Kind >= 8 && record.Kind != 9 {
 					return nil
 				}
@@ -361,7 +361,7 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 		defer func() { asnPhase(returnErr == nil) }()
 		emitted := map[uint32]bool{}
 		_, err = spool.leaves(ctx, asnLeaves, false, func(bucket *bulkBucket, part intelligence.BuildState) error {
-			return IntelligenceProducer(part, policy, clock, MaterializationInputs{contexts: contexts, resolver: relations})(ctx, func(record via3.PublicRecord) error {
+			return IntelligenceProducer(part, policy, clock, MaterializationInputs{contexts: contexts, resolver: relations, encodedLengths: bucket.recordBytes})(ctx, func(record via3.PublicRecord) error {
 				switch record.Kind {
 				case 8:
 					if record.ASN < bucket.first || record.ASN > bucket.last {

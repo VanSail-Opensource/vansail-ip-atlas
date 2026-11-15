@@ -22,7 +22,9 @@ a completed production release; the historical evidence below remains historical
 
 - Public schema 4, observed-risk arithmetic, confidence/coverage, IPv6 behavior,
   /24 scored-cell mean/denominator, Go/TypeScript parity and UI labels.
-- Four production stages: authenticated intake, candidate, preview, promotion;
+- Production stages: authenticated intake, frozen candidate, fifteen parallel benchmark
+  cases, completed benchmark join, preview and promotion; a checked dispatch relay
+  resets GitHub’s three-level workflow-run chain;
   official Ubuntu runners, encrypted age checkpoints, trusted exact-head checks,
   measured resource envelopes, automatic authorization and eligible-only rollback.
 - Release catalog contains ten statically admitted entries, including dated Tor
@@ -332,6 +334,53 @@ mapping qualification. Neither is activated: source rights/notices, item clocks,
 actual acquisition and faithful mapping-versus-announcement semantics require
 separate proof. Research captures remain ignored and private. Do not contact
 publishers or count mirrors as independent routing evidence.
+
+## Current actual-data result and parallel replacement integration
+
+Official integration run `43715534541` at
+`add8fb613b569b89d90b74c59dfec76164eb0f35` passed contracts, codec,
+synthetic browser and complete intake for all ten sources. It failed the
+unchanged 35-minute compiler deadline at the beginning of public merge.
+Spatial materialization took 1,710,873 ms, seeding 135,920 ms, Tier-1 setup
+151,616 ms and qualification 79,318 ms. The 22,176,484-record input is unchanged
+in size. Compression repaired the earlier resource failure: peak workspace was
+2,432,974,848 bytes, the runner cgroup peaked at 713,973,760 bytes, and all
+memory-limit/OOM event counts were zero. This does not establish compiler RSS.
+Source-free artifact `14163712287` was independently verified against SHA-256
+`515d3c4c1c77e5b5c0cee71518fa1623a5e676d1759ed62123d4b4122f708fc7`.
+No actual corpus/native lookup or production acceptance was reached. PR #3
+remains unmerged and the production website remains unreleased.
+
+The user subsequently authorized educational source use despite redistribution
+compatibility limits. This supersedes the older compatible-redistribution-only
+restriction below. Record the exact per-source educational-use decision and
+actual upstream terms; do not invent a publisher grant or omit notices. It does
+not authorize bypassing authentication, changing facts or removing resource gates.
+The user also explicitly accepted expired RPKI authorizations remaining visible.
+Retain their authentic snapshot observation and authorization-expiry clocks and
+label them as snapshot results. Do not revert to hiding expired results or using
+one imminent authorization expiry to disable the whole website. Other source
+publication/item freshness controls remain unchanged.
+
+Parallel integration lives in `/tmp/vansail-educational-sources`, branch
+`codex/educational-source-qualification`, separately from this frozen release
+repair. It includes educational decisions/notices, original publisher PNG logos,
+unsupported MRT-origin boundaries, a strict FFraud adapter, complete historical
+RPKI proof version 2, public schema 5 with per-result clocks, and the website's
+snapshot display. Its explicit observed RPKI excerpt never grants runtime
+completeness; original full metadata counts and row values are preserved.
+The schema-5 website passed 231 Node tests, typecheck/generate, 22 emitted-browser
+scenarios, and eight viewport/theme accessibility checks locally. These are not
+hosted production acceptance. CAIDA monthly discovery/embedded topology dates and
+WIDE/RRC18 complete-RIB rotation are being integrated independently. All new
+sources still need final exact-code certification, actual intake and production
+capacity gates before inclusion. No publisher contact occurred.
+
+Cold compiler optimization continues in `/tmp/vansail-private-frame` and
+`/tmp/vansail-spatial-performance`. A separate completed-run benchmark matrix is
+being implemented to execute all fifteen original build scenarios in parallel
+without weakening timers, budgets, independent run/artifact binding or promotion
+checks. Do not confuse that orchestration repair with a measured runtime pass.
 
 ## Resume next
 

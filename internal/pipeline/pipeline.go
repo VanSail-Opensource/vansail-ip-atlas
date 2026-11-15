@@ -423,6 +423,7 @@ type encoded struct {
 	data         []byte
 	logicalBytes int64
 	sparse       bool
+	compact      bool
 }
 
 func normalize(record via3.PublicRecord) (via3.PublicRecord, error) {
@@ -535,7 +536,7 @@ func (c *compiler) sort(produce Producer) ([]string, error) {
 		if err != nil {
 			return err
 		}
-		row, err := encodeRunRecord(r, true)
+		row, err := encodeCompactRunRecord(r)
 		if err != nil {
 			return err
 		}
@@ -1059,7 +1060,7 @@ func (c *compiler) split(path string, children *[2]scope) ([2]string, error) {
 			// changes the record and needs encoding again.
 			row := r.row
 			if copy.Inherited != record.Inherited {
-				row, err = encodeRunRecord(copy, r.row.sparse)
+				row, err = reencodeRunRecord(copy, r.row)
 				if err != nil {
 					return paths, err
 				}

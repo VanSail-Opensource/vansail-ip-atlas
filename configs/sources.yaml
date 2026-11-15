@@ -109,7 +109,7 @@ build:
     use_inherited_prefix_overlay: true
     content_addressed: true
     publish_backend: cloudflare-pages-direct-upload
-    publish_only_license_allow: true
+    publish_only_reviewed_distribution_decisions: true
     keep_previous_releases: 2
     public_asset_prefix: /_atlas/objects/
     max_single_asset_mib: 24
@@ -236,7 +236,7 @@ build:
     pages_build_work: none-ci-prebuild-only
     publish_no_source_provenance: true
     public_provenance: false
-    public_source_rights_policy: reviewed-redistribution-with-required-global-dataset-credits
+    public_source_rights_policy: reviewed-distribution-decision-with-required-global-dataset-credits
     maximum_snapshot_age_hours: 720
     hosted_regression_required: true
     hosted_performance_required: true
@@ -380,7 +380,7 @@ build:
     subscription_evidence_family: public-subscription-aggregators
     active_requires_fixture: true
     active_requires_publication_proof: true
-    active_requires_public_redistribution: true
+    active_requires_reviewed_distribution_decision: true
     active_forbidden_if_attribution_required: false
     active_requires_reviewed_attribution_when_required: true
     unknown_independence_defaults_to_one_family: true
@@ -388,7 +388,7 @@ build:
     authoritative_publication_headers: []
     certification_root: fixtures/source-certification/
 source_defaults:
-  requires_redistribution_approval: true
+  requires_reviewed_distribution_decision: true
   on_failure: recompute-with-only-verified-current-sources
   validate_schema_before_ingestion: true
   dedupe_by_correlation_group: false
@@ -1062,4 +1062,4 @@ sources:
   field_mappings:
     metadata.category: usage_type
   signals: []
-contract_revision: 4
+contract_revision: 5

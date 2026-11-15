@@ -221,12 +221,14 @@ contract owns inventory, cache identity and exact approval binding.
 
 ## Compiled database license — `release-scope-v4`, 2026-11-09
 
-Compiled database material is distributed under the owner-approved CC BY-SA 4.0
-license. The exact static data-license notice and reviewed credits for included
+Original compilation contributions are offered under the owner-approved CC BY-SA
+4.0 license; third-party material retains its upstream terms. The exact static data-license notice and reviewed credits for included
 datasets are bound into the frozen inventory and approval digest. Source code and
 software dependencies retain their separate licensing terms. Each contributing
-source still needs compatible redistribution and derivative-use rights; selecting
-this product license does not certify a source or waive its conditions.
+source needs reviewed terms and an explicit distribution decision. The owner
+amendment of 2026-11-15 permits `user_authorized_educational_use` despite unresolved
+compatibility; it is not a verified publisher grant. Selecting this product license
+does not certify a source or waive its conditions.
 
 The license notice and global credits are separate legal assets. They add no
 VIA3 section, per-query provenance, lookup-answer field or scoring input and do

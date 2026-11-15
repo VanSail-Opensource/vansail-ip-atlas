@@ -7,12 +7,13 @@ with explicit incomplete coverage. All categories and product views remain
 supported. Production requires verified positive observations, not a feed for
 every category; missing categories and unlisted addresses remain unknown.
 Complete negative assessment is never inferred. Prior v2 optional numeric-quality
-rules are superseded by this versioned model; v3 global credits and v4 CC BY-SA
-4.0 compiled-data redistribution remain in force.
+rules are superseded by this versioned model. Global credits remain required;
+the educational source-use amendment below supersedes blanket compiled-data
+license compatibility as an admission prerequisite.
 
-Each dataset still needs reviewed redistribution and derivative-license
-compatibility, actual publication proof and an observed parser fixture. The
-product license does not approve a source. V5 additionally permits required
+Each dataset needs an explicit reviewed source-use decision, actual publication
+proof and an observed parser fixture. The product license does not approve a
+source or replace upstream terms. V5 additionally permits required
 publisher logos in the single global credit display, with no per-IP attribution.
 The source config is schema3/contract revision4, public VIA3 schema4, private
 normalized records schema3. Credit documents use format2 and their index format1.
@@ -22,7 +23,7 @@ The private capability report remains schema3 with release-scope-v6.
 
 - `candidate`: cataloged but not fixture-tested.
 - `fixture_tested`: observed payload and parser fixture passed.
-- `rights_approved`: a recorded redistribution decision permits the proposed derived product. This peer milestone alone does not establish attribution compliance or fixture certification.
+- `rights_approved`: a recorded source-use decision permits project admission under this policy. This milestone does not assert a publisher grant, attribution compliance or fixture certification.
 - `active`: fixture-tested and rights-approved, with controls permitting attempted intake; current build eligibility still requires actual runtime proof.
 - `retired`: withdrawn or legally excluded.
 
@@ -45,10 +46,10 @@ Every entry declares:
 - publication proof;
 - coverage kind and evidence scope;
 - canonical public fields;
-- redistribution decision and rights evidence;
+- explicit distribution decision, reviewed terms evidence and review basis;
 - dependency list.
 
-Unknown fields are rejected. A source cannot be active without a validated fixture, current publication proof, and redistribution permission.
+Unknown fields are rejected. A source cannot be active without a validated fixture, current publication proof and a permitted reviewed source-use decision.
 
 ## Contract revision 1: executable admission
 
@@ -58,7 +59,7 @@ Unknown fields are rejected. A source cannot be active without a validated fixtu
 
 Source scopes are exactly `exact_ip`, `prefix`, `asn`, `asn_edge`, `path`. Historical `exact`, `exact-ip` and `asn-edge` spellings are rejected after this explicit catalog normalization. Public relationship classes are exactly `transit_upstream`, `peer`, `customer`, `sibling`, `unknown`; `provider_transit` is rejected. Internal `c2`, `scanner`, and `cloudflare_proxyip` signals map to `command_control`, `scanning`, and `proxy` reason bits, respectively. Assignment is `assignment_mode`; it is independent of anycast and `ipv4_directed_broadcast`.
 
-An active source requires all of: nonempty parser ID/schema/version, an observed real fixture under `fixtures/source-certification/`, matching parser/schema and SHA-256, UTC test time, explicit field mappings, exact asset/discovery, explicit evidence family/coverage, and reviewed distribution permission. Attribution must be explicitly resolved: `attribution_required: false` records that no public credit is required; `true` requires valid reviewed `license.attribution` metadata and a global display that satisfies its obligations; `null` remains unresolved and blocks admission. A `missing` fixture cannot carry a hash, observation claim or test date. Synthetic contract fixtures and `fixtures/source-samples/` never certify a source. This scope amendment promotes no admission state. Rights/fixture milestones are peers and are independently checked on activation.
+An active source requires all of: nonempty parser ID/schema/version, an observed real fixture under `fixtures/source-certification/`, matching parser/schema and SHA-256, UTC test time, explicit field mappings, exact asset/discovery, explicit evidence family/coverage, and a permitted reviewed source-use decision. Attribution must be explicitly resolved: `attribution_required: false` records that no public credit is required; `true` requires valid reviewed `license.attribution` metadata and a global display that satisfies its obligations; `null` remains unresolved and blocks admission. A `missing` fixture cannot carry a hash, observation claim or test date. Synthetic contract fixtures and `fixtures/source-samples/` never certify a source. This scope amendment promotes no admission state. Rights/fixture milestones are peers and are independently checked on activation.
 
 Source contract revision 2 adds the closed `license.attribution` object with
 required `name`, `text`, `url` and optional `license_url`. Name is 1–128 characters,
@@ -69,7 +70,7 @@ without controls, formatting controls or invalid surrogates. Subscription URIs,
 private-key headers and credential-token markers remain forbidden in all fields.
 HTML-looking literal text is escaped for display and never interpreted as markup.
 Metadata requires a
-reviewed allowed license, rights evidence URL and recorded review basis. Terms
+permitted reviewed distribution decision, terms evidence URL and recorded review basis. Terms
 requiring more notice/link obligations than this display can satisfy remain
 ineligible until a reviewed compatible representation exists. Exact credit bytes
 participate in private policy/source fingerprints and candidate approval; a changed
@@ -162,13 +163,43 @@ Only literal public IPs are accepted. Credentials, ports, protocols, transports,
 
 ## Rights
 
-Public hosting of a derived database can constitute redistribution. Sources
-prohibiting the proposed redistribution remain excluded. Under `release-scope-v6`,
-public attribution is permitted through the reviewed global dataset credits when
-that placement and content satisfy the actual license and upstream obligations.
-Compiled database material uses the owner-approved CC BY-SA 4.0 license; each
-included source must permit that distribution. Attribution does not waive
-redistribution, share-alike or other applicable terms.
+### User-approved educational source-use amendment — 2026-11-15
+
+The user explicitly authorized educational project use without requiring compatible
+publisher redistribution permission. `license.distribution` records the exact
+decision: `allow` preserves the existing reviewed permission path;
+`user_authorized_educational_use` is a distinct user-authorized project decision.
+It does not assert that educational purpose grants legal permission, that the
+publisher agreed, or that upstream material can be relicensed under CC BY-SA.
+`deny`, pending `review`, `unknown` and every unrecognized value still block admission. No global
+boolean enables sources, and this amendment activates no catalog entry.
+
+Both permitted decisions require `status: reviewed`, a public HTTPS `evidence_url`
+for the reviewed terms, a nonblank `review_basis`, an explicit boolean
+`attribution_required`, and valid exact notices whenever required. Retain the
+publisher's identifier, terms and obligations as evidence; never replace them
+with a fabricated permission or mark unresolved attribution as unnecessary.
+For an educational decision, the review basis records the user's project-use
+authorization separately from what the publisher terms establish.
+
+The global contracts name the policy accurately:
+`publish_only_reviewed_distribution_decisions`,
+`active_requires_reviewed_distribution_decision`, and
+`requires_reviewed_distribution_decision` remain true. The public source-rights
+policy is `reviewed-distribution-decision-with-required-global-dataset-credits`.
+Source schema3 and `release-scope-v6` remain unchanged because no normalized or
+public record shape changes. Config/catalog/policy hashes bind the new decisions;
+rights digests independently include distribution, terms evidence, review basis
+and exact credit bytes. A changed decision or notice invalidates prior
+qualification. Withdrawal, expiry or missing required credits retracts data.
+
+Public hosting can constitute redistribution. This amendment changes the
+project's admission decision, not upstream obligations. Original compilation
+contributions retain their stated license; upstream material retains its own
+terms. The frozen data-terms notice and reviewed global credits preserve that
+distinction. Attribution does not waive redistribution, share-alike or other
+applicable terms. Freshness, certification, parser safety, source independence,
+performance and exact-candidate publishing gates remain unchanged.
 The renderer escapes plain text and renders only reviewed safe links; it executes
 no downloaded HTML or script. Credits make no per-IP provenance assertion and
 cause no automatic request to a publisher. OpenStreetMap tile attribution remains
@@ -228,3 +259,7 @@ Direct IP/prefix usage wins; more-specific origin boundaries apply and mixed or
 missing MOAS classification stays unknown. networkRole never establishes Tier-1.
 File-specific commit proof downloads the complete immutable payload and matches
 its SHA-256 and size; a fresh wrapper cannot renew an old category observation.
+
+Source contract revision 5 records the educational-use decision and explicit
+reviewed-distribution policy names. Normalized schema, VIA3 and public schema
+versions are unchanged; exact configuration hashes invalidate older qualification.

@@ -4,9 +4,9 @@ This contract freezes C07/C08; its executable vectors are
 `tools/release_contract/test_contracts.py`. Passing these vectors does not certify
 a real dataset, a complete binary scanner, a hosted preview or a production release.
 
-Current `release-scope-v6` preserves CC BY-SA 4.0 compiled-data licensing while
+Current `release-scope-v6` licenses original compilation contributions under CC BY-SA 4.0 while
 adding public schema 4 observed risk, verified global publisher logos, encrypted
-private-state transport and automatic promotion under reviewed policy. Source rights
+private-state transport and automatic promotion under reviewed policy. Source terms and explicit distribution decisions
 remain individually reviewed and current; no license or policy revision activates
 a source. Source code and dependency licenses stay separate.
 
@@ -156,7 +156,10 @@ The compiled-data grant does not change public-domain inputs' status, relicense
 software dependencies, approve an unreviewed dataset, or override upstream
 copyright/notice, derivative-license, placement or other conditions. Retain each
 included dataset's applicable reviewed obligations. Unresolved or incompatible
-conditions exclude that source. Neither the notice nor credits may associate a
+conditions remain documented. Under the 2026-11-15 owner amendment, an explicit
+`user_authorized_educational_use` decision may admit a technically qualified source
+without claiming compatible redistribution rights. The notice grants only rights
+held by the project and preserves upstream terms. Neither the notice nor credits may associate a
 publisher with a queried IP, ASN, field or reason. Source-rich qualification and
 included-source receipts stay private.
 

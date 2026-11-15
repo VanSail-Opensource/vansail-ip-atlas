@@ -225,7 +225,7 @@ func validMRTControls(source Source) bool {
 	return supported && adapter == mrtRIB && source.Admission == "active" && identity(source.ID) && identity(source.Family) &&
 		source.MaxAge > 0 && source.MaxAge <= 720*time.Hour && !math.IsNaN(source.Weight) && !math.IsInf(source.Weight, 0) && source.Weight >= 0 && source.Weight <= 100 && source.MaxCompressedBytes > 0 && source.MaxCompressedBytes <= 1<<30 &&
 		safeHTTPS(source.URL) && source.Publication.Kind == "embedded" && source.Publication.Locator == source.URL && source.Publication.Field == "mrt_frame_capture_timestamp" &&
-		source.Rights.Status == "reviewed" && source.Rights.Distribution == "allow" && source.Rights.AttributionRequired != nil && safeHTTPS(source.Rights.EvidenceURL) && strings.TrimSpace(source.Rights.ReviewBasis) != "" &&
+		source.Rights.Status == "reviewed" && permittedDistributionDecision(source.Rights.Distribution) && source.Rights.AttributionRequired != nil && safeHTTPS(source.Rights.EvidenceURL) && strings.TrimSpace(source.Rights.ReviewBasis) != "" &&
 		(!*source.Rights.AttributionRequired || source.Rights.Attribution != nil) && (source.Rights.Attribution == nil || source.Rights.Attribution.Validate() == nil)
 }
 

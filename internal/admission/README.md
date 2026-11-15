@@ -13,13 +13,17 @@ must pass all policies and successful snapshots to `intelligence.Reconcile`,
 including when no payload changed. That step resolves dependencies and retracts
 sources that are retired, stale, unavailable or no longer reviewed.
 
-Before network IO, intake requires an active milestone, explicit reviewed
-redistribution rights and any required global credits, an implemented parser/schema/version, exact public-field
+Before network IO, intake requires an active milestone, an explicit reviewed
+source-use decision (`allow` or `user_authorized_educational_use`) and any required
+global credits, an implemented parser/schema/version, exact public-field
 mapping, the observed real-fixture controls, and the matching reviewed ledger
 entry. It verifies fixture bytes and the current sorted internal Go code hash,
 then reruns that exact fixture through the current parser. This module cannot
 create reviews or certifications. The checked-in ledger binds reviewed observed
 fixtures; active catalog entries still need fresh, hash-bound intake receipts.
+The educational decision records the user's project authorization; it neither
+grants publisher permission nor changes upstream terms. Unknown or denied
+decisions, missing terms evidence and unresolved attribution still fail closed.
 The catalog regression performs no fetch and cannot qualify production by itself.
 `CertificationFingerprint(ctx, workspace, sources)` binds the ledger, current
 internal Go bytes and active fixture bytes with a 64 MiB aggregate read cap.

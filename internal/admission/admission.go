@@ -170,7 +170,7 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 	if !identity(source.ID) || !identity(source.Family) || source.MaxAge <= 0 || source.MaxAge > 720*time.Hour || math.IsNaN(source.Weight) || math.IsInf(source.Weight, 0) || source.Weight < 0 || source.Weight > 100 || source.MaxCompressedBytes <= 0 || source.MaxCompressedBytes > 1<<30 {
 		return deny("quarantined", "invalid_source_controls")
 	}
-	if source.Rights.Status != "reviewed" || source.Rights.Distribution != "allow" || source.Rights.AttributionRequired == nil || !safeHTTPS(source.Rights.EvidenceURL) || strings.TrimSpace(source.Rights.ReviewBasis) == "" {
+	if source.Rights.Status != "reviewed" || !permittedDistributionDecision(source.Rights.Distribution) || source.Rights.AttributionRequired == nil || !safeHTTPS(source.Rights.EvidenceURL) || strings.TrimSpace(source.Rights.ReviewBasis) == "" {
 		return deny("quarantined", "reviewed_redistribution_rights_required")
 	}
 	if *source.Rights.AttributionRequired && source.Rights.Attribution == nil || source.Rights.Attribution != nil && source.Rights.Attribution.Validate() != nil {

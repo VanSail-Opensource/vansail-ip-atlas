@@ -147,10 +147,11 @@ def validate_sources(config):
             values = value if isinstance(value, list) else [] if value is None else [value]
             if any(target not in source["public_fields"] or target not in FIELD_TARGETS.get(key, set()) for target in values):
                 raise ContractError(f"{sid}: mapping bypasses field-specific normalization")
-        if source["admission"] == "rights_approved" and (
-            source["license"]["status"] != "reviewed" or source["license"]["distribution"] != "allow"
-        ):
-            raise ContractError(f"{sid}: invalid rights milestone")
+        if source["admission"] == "rights_approved":
+            from .policy import reviewed_distribution_decision
+            if (not reviewed_distribution_decision(source["license"])
+                    or type(source["license"].get("attribution_required")) is not bool):
+                raise ContractError(f"{sid}: invalid rights milestone")
         if "attribution" in source["license"]:
             from .policy import attribution_issues
             if attribution_issues(source["license"]["attribution"]):

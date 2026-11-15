@@ -8,10 +8,10 @@ from tools.release_contract.production import qualify
 
 
 class ProductionQualificationTests(unittest.TestCase):
-    def fixture(self, root, *, attributed=True):
+    def fixture(self, root, *, attributed=True, distribution="allow"):
         (root / "configs").mkdir()
         credit = {"name": "Example mapping", "text": "Example mapping contributors", "url": "https://example.org/"}
-        rights = {"status": "reviewed", "distribution": "allow", "attribution_required": attributed,
+        rights = {"status": "reviewed", "distribution": distribution, "attribution_required": attributed,
                   "evidence_url": "https://example.org/license", "review_basis": "observed license"}
         if attributed:
             rights["attribution"] = credit
@@ -115,6 +115,53 @@ class ProductionQualificationTests(unittest.TestCase):
             path.write_bytes(canonical_bytes(record))
             with self.assertRaises(ContractError):
                 qualify(path, atlas, 150, workspace=root, verifier=lambda *args: None)
+
+    def test_educational_decision_binds_rights_and_reopens_current_store(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            atlas, path, record, credit = self.fixture(root, distribution="user_authorized_educational_use")
+            calls = []
+            result = qualify(path, atlas, 150, workspace=root, verifier=lambda *args: calls.append(args))
+            self.assertEqual(result.credits, (credit,))
+            self.assertEqual(calls, [(root, path, atlas, 150)])
+            catalog_path = root / "configs/sources.yaml"
+            catalog = json.loads(catalog_path.read_text())
+            catalog["sources"][0]["license"]["distribution"] = "allow"
+            catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+            record["source_catalog_sha256"] = sha256(catalog_path.read_bytes())
+            # A valid alternative decision still needs a newly bound receipt.
+            path.write_bytes(canonical_bytes(record))
+            with self.assertRaises(ContractError):
+                qualify(path, atlas, 150, workspace=root, verifier=lambda *args: None)
+
+    def test_fully_rehashed_educational_receipt_cannot_skip_review_or_credit_gates(self):
+        mutations = {
+            "deny": lambda r: r.update(distribution="deny"),
+            "unknown": lambda r: r.update(distribution="educational"),
+            "unreviewed": lambda r: r.update(status="needs-review"),
+            "empty_basis": lambda r: r.update(review_basis=" \t\n"),
+            "missing_terms": lambda r: r.pop("evidence_url"),
+            "private_terms": lambda r: r.update(evidence_url="https://127.0.0.1/terms"),
+            "missing_attribution_decision": lambda r: r.update(attribution_required=None),
+            "missing_credit": lambda r: r.pop("attribution"),
+            "changed_credit": lambda r: r["attribution"].update(text="Changed upstream notice"),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                atlas, path, record, _ = self.fixture(root, distribution="user_authorized_educational_use")
+                catalog_path = root / "configs/sources.yaml"
+                catalog = json.loads(catalog_path.read_text())
+                rights = catalog["sources"][0]["license"]
+                mutate(rights)
+                catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+                record["source_catalog_sha256"] = sha256(catalog_path.read_bytes())
+                record["included_sources"][0]["rights_sha256"] = sha256(canonical_bytes(rights))
+                path.write_bytes(canonical_bytes(record))
+                calls = []
+                with self.assertRaises(ContractError):
+                    qualify(path, atlas, 150, workspace=root, verifier=lambda *args: calls.append(args))
+                self.assertEqual(calls, [])
 
 
 if __name__ == "__main__":

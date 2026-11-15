@@ -8,9 +8,14 @@ and authorizes automatic gated publishing from the existing public repository on
 official GitHub runners. `AGENTS.md` is normative. Earlier dated reports remain
 historical evidence, not proof of current source or production qualification.
 
-Compiled data remains CC BY-SA 4.0. Every included source independently needs
-compatible rights, publication proof, an observed parser fixture and required
-credits. Source code and dependencies retain their separate licenses.
+The explicit educational source-use amendment (2026-11-15) permits the reviewed
+per-source decision `user_authorized_educational_use` alongside `allow`. It records
+the user's project-use authorization without claiming a publisher grant or
+CC BY-SA compatibility. Original compilation contributions retain their stated
+license; upstream material retains its own recorded terms. Every included source
+still needs terms evidence, a nonblank review basis, an explicit attribution
+decision, publication proof, an observed parser fixture and required credits.
+Source code and dependencies retain their separate licenses.
 
 ## Implementation contracts
 
@@ -38,7 +43,9 @@ lists are removed from the production catalog; useful parser regressions remain.
 
 Any future MRT path families, directed relationships and complete RPKI snapshot
 still require full qualification. A software license does not approve an upstream
-dataset. Unknown redistribution obligations block admission. Missing routing
+dataset. `deny`, pending `review`, `unknown` and unrecognized distribution decisions block admission;
+an educational exception must be explicit and retain the reviewed upstream terms.
+Missing routing
 coverage is explicitly unknown under v6; synthetic data or an allowlist cannot
 replace it or produce real routing claims. Keep all twelve detection categories implemented, but require
 available verified observations rather than twelve simultaneously active feeds.

@@ -354,7 +354,7 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 		if _, ok := stored[v.ID]; ok {
 			return report, nil, errors.New("duplicate production source receipt")
 		}
-		if s.Rights.Status != "reviewed" || s.Rights.Distribution != "allow" || s.Rights.AttributionRequired == nil || !safeHTTPS(s.Rights.EvidenceURL) || strings.TrimSpace(s.Rights.ReviewBasis) == "" || *s.Rights.AttributionRequired && s.Rights.Attribution == nil || s.Rights.Attribution != nil && s.Rights.Attribution.Validate() != nil {
+		if s.Rights.Status != "reviewed" || !permittedDistributionDecision(s.Rights.Distribution) || s.Rights.AttributionRequired == nil || !safeHTTPS(s.Rights.EvidenceURL) || strings.TrimSpace(s.Rights.ReviewBasis) == "" || *s.Rights.AttributionRequired && s.Rights.Attribution == nil || s.Rights.Attribution != nil && s.Rights.Attribution.Validate() != nil {
 			return report, nil, errors.New("production source rights or credits incomplete")
 		}
 		if s.Rights.Attribution != nil && intelligence.ValidateDatasetLogoFile(root, s.Rights.Attribution.Logo) != nil {

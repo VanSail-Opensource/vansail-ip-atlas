@@ -99,6 +99,7 @@ type compiler struct {
 	partitionSizes        map[string]partitionSize
 	routes                []route
 	routerBytes           uint64
+	encoder               via3.PublicEncoder
 }
 
 type partitionSize struct {
@@ -191,6 +192,7 @@ func Build(ctx context.Context, options Options, produce Producer) (Candidate, e
 	workCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	c := &compiler{ctx: workCtx, options: options, root: root, scratch: scratch, output: filepath.Join(scratch, "candidate"), objects: map[string]via3.ObjectInfo{}}
+	defer c.encoder.Close()
 	if err := os.MkdirAll(filepath.Join(c.output, "objects"), 0700); err != nil {
 		return result, err
 	}
@@ -895,7 +897,7 @@ func (c *compiler) partition(path string, s scope) error {
 	}
 	var compiled via3.CompiledPartition
 	if !overflow {
-		compiled, err = via3.CompilePartition(c.ctx, via3.PartitionInput{Partition: s.name(), Records: records, PrefixProvider: c.options.prefixProvider})
+		compiled, err = c.encoder.CompilePartition(c.ctx, via3.PartitionInput{Partition: s.name(), Records: records, PrefixProvider: c.options.prefixProvider})
 		if err != nil {
 			code := via3.ErrorCode(err)
 			if code == "partition_budget" || code == "resource_limit" || code == "length" {
@@ -1270,7 +1272,7 @@ func (c *compiler) router() error {
 	if err := via3.ValidatePublicProfile(shard); err != nil {
 		return err
 	}
-	data, err := via3.Write(c.ctx, shard)
+	data, err := c.encoder.Write(c.ctx, shard)
 	if err != nil {
 		return err
 	}

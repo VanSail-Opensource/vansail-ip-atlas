@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"sync"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -147,15 +148,62 @@ func (s *Shard) Record(index uint32) []byte {
 	return b[int(end)-w : int(end)]
 }
 
+// PublicEncoder owns a bounded compression workspace for one compilation. Each
+// Write still emits independent frames using the frozen options. It must not be
+// copied after use; Close releases its workspace and permanently closes it.
+// The zero value is ready for use. Nothing is pooled across builds.
+type PublicEncoder struct {
+	mu      sync.Mutex
+	encoder *zstd.Encoder
+	closed  bool
+}
+
+func (e *PublicEncoder) checkOpen() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return errors.New("public encoder closed")
+	}
+	return nil
+}
+
+func (e *PublicEncoder) Close() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return nil
+	}
+	e.closed = true
+	if e.encoder == nil {
+		return nil
+	}
+	err := e.encoder.Close()
+	e.encoder = nil
+	return err
+}
+
 func Write(ctx context.Context, shard Shard) ([]byte, error) {
+	var encoder PublicEncoder
+	defer encoder.Close()
+	return encoder.Write(ctx, shard)
+}
+
+func (e *PublicEncoder) Write(ctx context.Context, shard Shard) ([]byte, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return nil, errors.New("public encoder closed")
+	}
 	if err := Validate(shard); err != nil {
 		return nil, err
 	}
-	encoder, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.EncoderLevelFromZstd(3)), zstd.WithEncoderConcurrency(1), zstd.WithWindowSize(MaxWindow), zstd.WithEncoderCRC(true), zstd.WithSingleSegment(true))
-	if err != nil {
-		return nil, err
+	if e.encoder == nil {
+		var err error
+		e.encoder, err = zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.EncoderLevelFromZstd(3)), zstd.WithEncoderConcurrency(1), zstd.WithWindowSize(MaxWindow), zstd.WithEncoderCRC(true), zstd.WithSingleSegment(true))
+		if err != nil {
+			return nil, err
+		}
 	}
-	defer encoder.Close()
 	count := len(shard.Sections)
 	offset := 64 + count*64
 	b := make([]byte, offset)
@@ -174,7 +222,7 @@ func Write(ctx context.Context, shard Shard) ([]byte, error) {
 		}
 		var frame []byte
 		if len(section.Data) <= MaxWindow {
-			frame = encoder.EncodeAll(section.Data, nil)
+			frame = e.encoder.EncodeAll(section.Data, nil)
 		} else {
 			large, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.EncoderLevelFromZstd(3)), zstd.WithEncoderConcurrency(1), zstd.WithWindowSize(MaxWindow), zstd.WithEncoderCRC(true), zstd.WithSingleSegment(false))
 			if err != nil {

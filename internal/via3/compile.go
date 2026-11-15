@@ -244,7 +244,18 @@ func recordUnionValid(r PublicRecord) bool {
 }
 
 func CompilePartition(ctx context.Context, input PartitionInput) (CompiledPartition, error) {
+	var encoder PublicEncoder
+	defer encoder.Close()
+	return encoder.CompilePartition(ctx, input)
+}
+
+// CompilePartition retains every original validation and output bound while
+// sharing only the encoder workspace owned by this build.
+func (encoder *PublicEncoder) CompilePartition(ctx context.Context, input PartitionInput) (CompiledPartition, error) {
 	out := CompiledPartition{Objects: []BuiltObject{}, Destinations: make(map[uint16]BuiltObject)}
+	if err := encoder.checkOpen(); err != nil {
+		return out, err
+	}
 	if !validPartition(input.Partition) || len(input.Records) > 32768 {
 		return out, fail("partition_budget")
 	}
@@ -325,7 +336,7 @@ func CompilePartition(ctx context.Context, input PartitionInput) (CompiledPartit
 		if err := ValidatePublicProfile(shard); err != nil {
 			return BuiltObject{}, err
 		}
-		bytes, err := Write(ctx, shard)
+		bytes, err := encoder.Write(ctx, shard)
 		if err != nil {
 			return BuiltObject{}, err
 		}
@@ -1038,8 +1049,10 @@ func Build(ctx context.Context, input CompileInput) (BuiltRelease, error) {
 	}
 	var objects []BuiltObject
 	var compiled []CompiledPartition
+	var encoder PublicEncoder
+	defer encoder.Close()
 	for _, partition := range input.Partitions {
-		c, err := CompilePartition(ctx, partition)
+		c, err := encoder.CompilePartition(ctx, partition)
 		if err != nil {
 			return BuiltRelease{}, err
 		}
@@ -1144,7 +1157,7 @@ func Build(ctx context.Context, input CompileInput) (BuiltRelease, error) {
 	router.set(2, Vector(8, asns...))
 	router.set(3, Vector(16, rows...))
 	router.set(4, Vector(4, integers...))
-	bytes, err := Write(ctx, router)
+	bytes, err := encoder.Write(ctx, router)
 	if err != nil {
 		return BuiltRelease{}, err
 	}

@@ -486,45 +486,42 @@ func walkPartitionFrames(ctx context.Context, root string, part RecordPartition,
 	}
 	remaining := decodedBytes - int64(len(header))
 	var count uint64
-	for remaining > 0 {
-		if err = ctx.Err(); err != nil {
+	if part.Records > recordDecodeBatchFrames {
+		count, err = walkRecordDecodeBatches(ctx, buffer, remaining, part.Records, emit)
+		if err != nil {
 			return err
 		}
-		var frame [4]byte
-		if remaining < 4 {
-			return errors.New("private record frame truncated")
+	} else {
+		for remaining > 0 {
+			if err = ctx.Err(); err != nil {
+				return err
+			}
+			var frame [4]byte
+			if remaining < 4 {
+				return errors.New("private record frame truncated")
+			}
+			if _, err = io.ReadFull(buffer, frame[:]); err != nil {
+				return err
+			}
+			remaining -= 4
+			n := binary.LittleEndian.Uint32(frame[:])
+			if n == 0 || n > 1<<20 || int64(n) > remaining || count >= part.Records {
+				return errors.New("private record frame invalid")
+			}
+			data := make([]byte, int(n))
+			if _, err = io.ReadFull(buffer, data); err != nil {
+				return err
+			}
+			remaining -= int64(n)
+			record, err := decodeRecordFrame(data)
+			if err != nil {
+				return err
+			}
+			if err = emit(record, data); err != nil {
+				return err
+			}
+			count++
 		}
-		if _, err = io.ReadFull(buffer, frame[:]); err != nil {
-			return err
-		}
-		remaining -= 4
-		n := binary.LittleEndian.Uint32(frame[:])
-		if n == 0 || n > 1<<20 || int64(n) > remaining || count >= part.Records {
-			return errors.New("private record frame invalid")
-		}
-		data := make([]byte, int(n))
-		if _, err = io.ReadFull(buffer, data); err != nil {
-			return err
-		}
-		remaining -= int64(n)
-		if !utf8.Valid(data) {
-			return errors.New("private record UTF-8 invalid")
-		}
-		var record NormalizedRecord
-		// This complete frame is already owned and byte bounded. Decode directly
-		// without a second streaming input buffer, retaining v1 member matching
-		// and duplicate semantics while rejecting unknown members and trailing
-		// JSON. The explicit UTF-8 guard above remains stricter than v1 defaults.
-		if err = jsonv2.Unmarshal(data, &record, json.DefaultOptionsV1(), jsonv2.RejectUnknownMembers(true)); err != nil {
-			return err
-		}
-		if err = record.Validate(); err != nil {
-			return err
-		}
-		if err = emit(record, data); err != nil {
-			return err
-		}
-		count++
 	}
 	if count != part.Records {
 		return errors.New("private record count invalid")
@@ -538,6 +535,179 @@ func walkPartitionFrames(ctx context.Context, root string, part RecordPartition,
 		return errors.New("private partition changed while reading")
 	}
 	return ctx.Err()
+}
+
+// Decode only independently owned, complete frames. Both scheduling paths keep
+// the existing UTF-8, v1 member/duplicate semantics, trailing-data, unknown-field
+// and typed-union checks; concurrency conveys no source or schema approval.
+func decodeRecordFrame(data []byte) (NormalizedRecord, error) {
+	var record NormalizedRecord
+	if !utf8.Valid(data) {
+		return record, errors.New("private record UTF-8 invalid")
+	}
+	if err := jsonv2.Unmarshal(data, &record, json.DefaultOptionsV1(), jsonv2.RejectUnknownMembers(true)); err != nil {
+		return record, err
+	}
+	return record, record.Validate()
+}
+
+const recordDecodeBatchFrames = 64
+const recordDecodeBatchBytes = 1 << 20
+
+type recordDecodeBatch struct {
+	frames                [recordDecodeBatchFrames][]byte
+	records               [recordDecodeBatchFrames]NormalizedRecord
+	count, bytes, decoded int
+	readErr, decodeErr    error
+}
+
+// The caller exclusively owns framing and all underlying reader state. A
+// length that would exceed this batch's byte limit is retained without reading
+// its payload; even a single one-MiB frame fits without a third live buffer.
+type recordBatchReader struct {
+	ctx             context.Context
+	reader          io.Reader
+	remaining       int64
+	expected, count uint64
+	pending         uint32
+}
+
+func (r *recordBatchReader) fill(b *recordDecodeBatch) {
+	for b.count < recordDecodeBatchFrames && r.remaining > 0 {
+		if err := r.ctx.Err(); err != nil {
+			b.readErr = err
+			return
+		}
+		if r.pending == 0 {
+			var frame [4]byte
+			if r.remaining < 4 {
+				b.readErr = errors.New("private record frame truncated")
+				return
+			}
+			if _, err := io.ReadFull(r.reader, frame[:]); err != nil {
+				b.readErr = err
+				return
+			}
+			r.remaining -= 4
+			n := binary.LittleEndian.Uint32(frame[:])
+			if n == 0 || n > 1<<20 || int64(n) > r.remaining || r.count >= r.expected {
+				b.readErr = errors.New("private record frame invalid")
+				return
+			}
+			r.pending = n
+		}
+		if int(r.pending) > recordDecodeBatchBytes-b.bytes {
+			return
+		}
+		data := make([]byte, int(r.pending))
+		if _, err := io.ReadFull(r.reader, data); err != nil {
+			b.readErr = err
+			return
+		}
+		r.remaining -= int64(r.pending)
+		r.pending = 0
+		r.count++
+		b.frames[b.count] = data
+		b.count++
+		b.bytes += len(data)
+	}
+}
+
+func runRecordDecodeWorker(ctx context.Context, jobs <-chan *recordDecodeBatch, done chan<- *recordDecodeBatch, workers *sync.WaitGroup) {
+	defer workers.Done()
+	for b := range jobs {
+		for i := 0; i < b.count; i++ {
+			if err := ctx.Err(); err != nil {
+				b.decodeErr = err
+				break
+			}
+			record, err := decodeRecordFrame(b.frames[i])
+			if err != nil {
+				b.decodeErr = err
+				break
+			}
+			b.records[i] = record
+			b.decoded++
+		}
+		done <- b
+	}
+}
+
+// At most two slots are live: each has <=64 owned frames and <=one MiB of
+// encoded bytes. Only workers decode; the caller emits every callback in FIFO
+// order. An earlier callback failure wins over later non-context read/decode
+// failures. Once cancellation is observed, scheduling and callbacks stop; read
+// ahead intentionally does not reproduce a serial reader's wall-clock ordering
+// of cancellation side effects.
+// The worker pair is joined before returning, hence before the caller closes
+// its decoder or file. Frames are never pooled/recycled: canonical callers may
+// retain their immutable bytes beyond a callback or this entire walk.
+func walkRecordDecodeBatches(ctx context.Context, reader io.Reader, remaining int64, expected uint64, emit func(NormalizedRecord, []byte) error) (uint64, error) {
+	var slots [2]recordDecodeBatch
+	var jobs [2]chan *recordDecodeBatch
+	var done [2]chan *recordDecodeBatch
+	var workers sync.WaitGroup
+	for i := range jobs {
+		jobs[i], done[i] = make(chan *recordDecodeBatch), make(chan *recordDecodeBatch, 1)
+		workers.Add(1)
+		go runRecordDecodeWorker(ctx, jobs[i], done[i], &workers)
+	}
+	defer func() {
+		for _, ch := range jobs {
+			close(ch)
+		}
+		workers.Wait()
+	}()
+	input := recordBatchReader{ctx: ctx, reader: reader, remaining: remaining, expected: expected}
+	submitted, consumed := 0, 0
+	ended := false
+	fill := func(slot int) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		b := &slots[slot]
+		*b = recordDecodeBatch{}
+		input.fill(b)
+		ended = b.readErr != nil || input.remaining == 0
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		jobs[slot] <- b
+		submitted++
+		return nil
+	}
+	for submitted < 2 && !ended {
+		if err := fill(submitted); err != nil {
+			return input.count, err
+		}
+	}
+	for consumed < submitted {
+		slot := consumed % 2
+		b := <-done[slot]
+		for i := 0; i < b.decoded; i++ {
+			if err := ctx.Err(); err != nil {
+				return input.count, err
+			}
+			if err := emit(b.records[i], b.frames[i]); err != nil {
+				return input.count, err
+			}
+		}
+		if b.decodeErr != nil {
+			return input.count, b.decodeErr
+		}
+		if b.readErr != nil {
+			return input.count, b.readErr
+		}
+		consumed++
+		if !ended {
+			if err := fill(slot); err != nil {
+				return input.count, err
+			}
+		} else {
+			*b = recordDecodeBatch{}
+		}
+	}
+	return input.count, ctx.Err()
 }
 
 type recordContextReader struct {

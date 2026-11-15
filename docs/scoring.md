@@ -21,7 +21,7 @@ numeric quality is unavailable throughout a production snapshot.
 
 ## Dataset-credit amendment `release-scope-v3` — 2026-11-08
 
-The current release scope retains v2's optional numeric quality and permits
+The v3 amendment retains v2's optional numeric quality and permits
 reviewed legally required dataset credits in a separate global frontend display.
 Credits describe included real datasets only. They are neither risk evidence nor
 a per-IP provenance claim and never enter VIA3 records or lookup answers. An
@@ -30,6 +30,15 @@ credits satisfy the actual terms; every other source/coverage test still applies
 Source counts, brand names and credit entries cannot create independent evidence
 votes, confidence or numeric quality. Model revision 1 and all formulas remain
 unchanged.
+
+## Compiled-data license amendment `release-scope-v4` — 2026-11-09
+
+Current release scope adds the owner-approved CC BY-SA 4.0 license for compiled
+database material, with the exact data-license notice and included-dataset credits
+bound into the immutable candidate. It retains the v2 and v3 rules above. The
+product data license grants no rights to an unreviewed source and changes no
+scoring coefficient, coverage threshold, evidence family or public fact field.
+Source code and software dependencies retain their separate licensing terms.
 
 ## Observation, scope and independence
 
@@ -73,7 +82,7 @@ different canonical bytes.
 ## Coverage and numeric quality
 
 This section controls whether an individual result may publish a number. Under
-`release-scope-v3` (retaining v2), missing complete assessment families do not themselves block
+`release-scope-v4` (retaining v2), missing complete assessment families do not themselves block
 production release; they leave numeric quality unrated.
 
 A layer is `assessed` only when current, admitted, complete evidence covers its

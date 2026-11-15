@@ -11,12 +11,13 @@ func TestPublicProfileRejectsDeclaredDecodeBeforeAllocation(t *testing.T) {
 	data, _ := base64.StdEncoding.DecodeString(g.Objects[0].Base64)
 	p64(data, 36, PublicObjectDecoded+1)
 	hash := Hash(data)
-	r := &Release{Manifest: Manifest{ValidFrom: g.Clock, ValidUntil: g.Clock + 3600}, objects: map[string]ObjectInfo{hash: {Bytes: len(data), Kind: u16(data, 10), SHA256: hash, Partition: "all"}}, load: func(string) ([]byte, error) { return data, nil }, cache: make(map[string]*Shard), Clock: func() int64 { return g.Clock }}
+	reference := &objectReference{info: ObjectInfo{Bytes: len(data), Kind: u16(data, 10), SHA256: hash, Partition: "all"}}
+	r := &Release{Manifest: Manifest{ValidFrom: g.Clock, ValidUntil: g.Clock + 3600}, references: map[string]*objectReference{hash: reference}, load: func(string) ([]byte, error) { return data, nil }, Clock: func() int64 { return g.Clock }}
 	r.beginQuery()
 	if _, err := r.object(context.Background(), hash); ErrorCode(err) != "resource_limit" {
 		t.Fatalf("declared oversized decode reached parser: %v", err)
 	}
-	if r.cacheBytes != 0 || len(r.activeObjects) != 0 {
+	if r.cacheBytes != 0 || reference.shard != nil || reference.query {
 		t.Fatal("failed object retained decoded allocations")
 	}
 }
@@ -57,32 +58,33 @@ func TestPublicProfileOriginAndAnswerLimits(t *testing.T) {
 	}
 }
 func TestPublicLiveArenaIncludesPinnedAndCache(t *testing.T) {
-	r := &Release{cache: make(map[string]*Shard)}
+	r := &Release{}
+	router, a, b, c := &objectReference{}, &objectReference{}, &objectReference{}, &objectReference{}
 	r.beginQuery()
-	if err := r.admit("router", PublicObjectDecoded); err != nil {
+	if err := r.admitReference(router, PublicObjectDecoded); err != nil {
 		t.Fatal(err)
 	}
-	r.residents["router"].router = true
-	r.residents["router"].cache = true
+	router.router = true
+	r.cacheReference(router)
 	r.endQuery()
 	r.beginQuery()
-	if err := r.admit("a", PublicObjectDecoded); err != nil {
+	if err := r.admitReference(a, PublicObjectDecoded); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.admit("b", PublicObjectDecoded); err != nil {
+	if err := r.admitReference(b, PublicObjectDecoded); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.admit("b", PublicObjectDecoded); err != nil {
+	if err := r.admitReference(b, PublicObjectDecoded); err != nil {
 		t.Fatal("shared router/cache backing charged more than once", err)
 	}
-	if ErrorCode(r.admit("c", 1)) != "resource_limit" {
+	if ErrorCode(r.admitReference(c, 1)) != "resource_limit" {
 		t.Fatal("pinned router excluded from live query cap")
 	}
-	if err := r.admit("b", PublicObjectDecoded); err != nil {
+	if err := r.admitReference(b, PublicObjectDecoded); err != nil {
 		t.Fatal("same active object charged twice", err)
 	}
 	r.endQuery()
-	if r.residentBytes != PublicObjectDecoded || len(r.activeObjects) != 0 {
+	if r.residentBytes != PublicObjectDecoded || len(r.usedReferences) != 0 || a.size != 0 || b.size != 0 {
 		t.Fatal("query-only resident buffers retained after completion")
 	}
 }
@@ -92,10 +94,10 @@ func TestPublicQueriesReleasePinsOnEveryExit(t *testing.T) {
 	r := memoryRelease(t, g, func() int64 { return now })
 	assertReleased := func() {
 		t.Helper()
-		if len(r.active) != 0 || len(r.activeObjects) != 0 || r.activeBytes != 0 {
+		if len(r.usedReferences) != 0 || r.activeBytes != 0 {
 			t.Fatal("query retained decoded pins")
 		}
-		for _, entry := range r.residents {
+		for _, entry := range r.references {
 			if entry.query {
 				t.Fatal("resident query flag survived")
 			}

@@ -113,8 +113,8 @@ optional for production release. A production snapshot may contain no numeric
 scores while retaining supported positive reasons and observed contributions.
 That state is explicitly unrated; it is not a clean assessment. This amendment
 uses the existing null/presence representation and changes no VIA3 schema or
-scoring-model revision. The current `release-scope-v3` amendment retains this rule
-and separately permits global dataset credits as defined below.
+scoring-model revision. Current `release-scope-v4` retains this rule and v3's
+global dataset-credit exception, and adds the compiled-data license defined below.
 
 Numeric quality is IPv4-only in this version. Publishing a non-null score
 requires complete coverage and all four layers exactly as
@@ -212,6 +212,21 @@ schema/version or canonical lookup answer. Credit content is bound to the frozen
 candidate and reviewed rights metadata, and must not include unused/candidate
 datasets or claim real dataset inclusion in a synthetic preview. The release
 contract owns inventory, cache identity and exact approval binding.
+
+## Compiled database license — `release-scope-v4`, 2026-11-09
+
+Compiled database material is distributed under the owner-approved CC BY-SA 4.0
+license. The exact static data-license notice and reviewed credits for included
+datasets are bound into the frozen inventory and approval digest. Source code and
+software dependencies retain their separate licensing terms. Each contributing
+source still needs compatible redistribution and derivative-use rights; selecting
+this product license does not certify a source or waive its conditions.
+
+The license notice and global credits are separate legal assets. They add no
+VIA3 section, per-query provenance, lookup-answer field or scoring input and do
+not change the public binary schema. Production facts are withheld until the
+corresponding credit document verifies; required publisher links stay visible
+when full notices are collapsed.
 
 ## Typed compilation boundary
 

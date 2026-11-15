@@ -7,21 +7,23 @@ from urllib.parse import urlsplit
 
 from tools.hosted.candidate import check_candidate, check_preview_origin, verify_preview
 from tools.release_contract.contracts import ContractError, canonical_bytes, make_manifest, parse_canonical, sha256, tree_inventory
+from tools.release_contract.data_license import NOTICE
 
 
 class CandidateTests(unittest.TestCase):
-    def fixture(self, root):
+    def fixture(self, root, mode="synthetic"):
         obj = b"VIA3" + bytes(124)
         digest = sha256(obj)
         manifest, pointer = make_manifest({"format_version": 3, "schema_version": 3,
-            "codec": "zstd-1", "mode": "synthetic", "valid_from": 100, "valid_until": 200,
+            "codec": "zstd-1", "mode": mode, "valid_from": 100, "valid_until": 200,
             "objects": [{"sha256": digest, "bytes": len(obj), "kind": 1, "partition": "all"}]})
         release = parse_canonical(pointer)["release_id"]
-        credits = canonical_bytes({"format_version": 1, "release_id": release, "mode": "synthetic", "entries": []})
+        credits = canonical_bytes({"format_version": 1, "release_id": release, "mode": mode, "entries": []})
         credit_hash = sha256(credits)
         credit_index = canonical_bytes({"format_version": 1, "current_release_id": release, "releases": [
             {"release_id": release, "credits_path": f"/_atlas/credits/{credit_hash}.json", "credits_sha256": credit_hash}]})
         files = {"_atlas/current.json": pointer,
+            "data-license.txt": NOTICE,
             f"_atlas/releases/{release}/manifest.json": manifest,
             f"_atlas/objects/{digest}.via3": obj,
             f"_atlas/credits/{credit_hash}.json": credits,
@@ -36,9 +38,10 @@ class CandidateTests(unittest.TestCase):
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(data)
         entries, tree_hash = tree_inventory(root)
-        report = {"status": "passed", "mode": "synthetic", "production_eligible": False,
+        report = {"status": "passed", "mode": mode, "production_eligible": False,
             "candidate_bundle_sha256": tree_hash, "release_id": release,
-            "files": len(entries), "bytes": sum(e[1] for e in entries)}
+            "files": len(entries), "bytes": sum(e[1] for e in entries),
+            **({"qualification_receipt_sha256": "e" * 64} if mode == "production" else {})}
         return files, report
 
     def test_frozen_candidate_requires_exact_tree_and_current_manifest(self):
@@ -71,6 +74,16 @@ class CandidateTests(unittest.TestCase):
             index_path.write_bytes(canonical_bytes(index))
             entries, digest = tree_inventory(root)
             report = {**report, "candidate_bundle_sha256": digest, "files": len(entries), "bytes": sum(row[1] for row in entries)}
+            with self.assertRaises(ContractError):
+                check_candidate(root, report, 150)
+
+    def test_production_identity_stays_separate_from_source_and_promotion_approval(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, report = self.fixture(root, "production")
+            self.assertEqual(check_candidate(root, report, 150)["release_id"], report["release_id"])
+            self.assertFalse(report["production_eligible"])
+            del report["qualification_receipt_sha256"]
             with self.assertRaises(ContractError):
                 check_candidate(root, report, 150)
 

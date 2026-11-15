@@ -326,6 +326,7 @@ type Engine struct {
 	exact                   map[netip.Addr]exactFact
 	prefix                  map[netip.Prefix][]Evidence
 	asn                     map[uint32]ASNContext
+	globalASN               map[uint32]ASNContext
 	origins                 map[netip.Prefix][]uint32
 	coverage                [4]map[netip.Prefix]map[string]struct{}
 	asnCoverage             map[uint32]map[string]struct{}
@@ -394,7 +395,7 @@ func NewEngine(p Policy, evidence []Evidence, coverage []Coverage, mapping []Ori
 		if v.SourcePublishedAt.After(now.Add(p.FutureTolerance)) || v.ItemPublishedAt.After(now.Add(p.FutureTolerance)) {
 			return nil, errors.New("future publication quarantined")
 		}
-		expiry := v.SourcePublishedAt.Add(p.MaxAge)
+		expiry := clock.Add(p.MaxAge)
 		if v.SubscriptionLiteral {
 			sub := clock.Add(p.SubscriptionAge)
 			if sub.Before(expiry) {
@@ -481,10 +482,7 @@ func NewEngine(p Policy, evidence []Evidence, coverage []Coverage, mapping []Ori
 		if err != nil {
 			return nil, err
 		}
-		diversity := math.Min(1, float64(len(a.families))/3)
-		confidence := diversity * math.Min(1, float64(a.count)/64)
-		risk := math.Max(explicit.Risk, (1-math.Exp(-a.mass/256))*diversity)
-		e.asn[asn] = ASNContext{risk, confidence, p.Weights[2] * confidence * risk, true}
+		e.asn[asn] = p.AggregateASNContext(a.mass, uint64(a.count), len(a.families), explicit.Risk)
 	}
 	for _, v := range coverage {
 		if !v.Current || !v.Complete {
@@ -721,7 +719,12 @@ func (e *Engine) NeighborContext(addr netip.Addr) ASNContext {
 	confidence := math.Min(1, float64(count)/16) * math.Min(1, float64(len(families))/3)
 	return ASNContext{risk, confidence, e.policy.Weights[3] * confidence * risk, count > 0}
 }
-func (e *Engine) ASNContext(asn uint32) ASNContext { return e.asn[asn] }
+func (e *Engine) ASNContext(asn uint32) ASNContext {
+	if e.globalASN != nil {
+		return e.globalASN[asn]
+	}
+	return e.asn[asn]
+}
 
 func (e *Engine) Lookup(addr netip.Addr) (QualityResult, error) {
 	if addr.Zone() != "" {
@@ -759,7 +762,7 @@ func (e *Engine) Lookup(addr netip.Addr) (QualityResult, error) {
 	maxContribution := 0.0
 	asnPresent := false
 	for _, asn := range origins {
-		context := e.asn[asn]
+		context := e.ASNContext(asn)
 		maxContribution = math.Max(maxContribution, context.Contribution)
 		asnPresent = asnPresent || context.Present
 		asnSets = append(asnSets, e.asnCoverage[asn])

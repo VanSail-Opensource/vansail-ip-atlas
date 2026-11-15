@@ -74,96 +74,85 @@ func answerFits(value any) error {
 
 func (r *Release) beginQuery() {
 	r.endQuery()
-	if r.active == nil {
-		r.active = make(map[string]bool)
-	}
-	if r.activeObjects == nil {
-		r.activeObjects = make(map[string]*Shard)
-	}
-	r.activeBytes = 0
 }
 
-type resident struct {
-	size                 int
-	query, cache, router bool
-}
-
-func (r *Release) releaseResident(hash string) {
-	entry := r.residents[hash]
-	if entry != nil && !entry.query && !entry.cache && !entry.router {
-		r.residentBytes -= entry.size
-		delete(r.residents, hash)
+func (r *Release) releaseReference(reference *objectReference) {
+	if !reference.query && !reference.cache && !reference.router {
+		r.residentBytes -= reference.size
+		reference.size = 0
+		reference.shard = nil
 	}
 }
 func (r *Release) endQuery() {
-	for hash := range r.active {
-		if entry := r.residents[hash]; entry != nil {
-			entry.query = false
-			r.releaseResident(hash)
-		}
-	}
-	clear(r.active)
-	clear(r.activeObjects)
 	for _, reference := range r.usedReferences {
-		reference.active = nil
+		reference.query = false
+		r.releaseReference(reference)
 	}
+	// The backing array must not retain an evicted shard indirectly through a
+	// slot added only for this query. Slots retain no decoded pointer unpinned.
+	clear(r.usedReferences)
 	r.usedReferences = r.usedReferences[:0]
 	r.activeBytes = 0
 }
-func (r *Release) evictCache(hash string) {
-	if object := r.cache[hash]; object != nil {
-		r.cacheBytes -= decodedSize(object)
-		delete(r.cache, hash)
+func (r *Release) evictReference(reference *objectReference) {
+	if !reference.cache {
+		return
 	}
-	if entry := r.residents[hash]; entry != nil {
-		entry.cache = false
-		r.releaseResident(hash)
+	if reference.previous == nil {
+		r.cacheHead = reference.next
+	} else {
+		reference.previous.next = reference.next
 	}
+	if reference.next == nil {
+		r.cacheTail = reference.previous
+	} else {
+		reference.next.previous = reference.previous
+	}
+	reference.previous, reference.next = nil, nil
+	r.cacheBytes -= reference.size
+	reference.cache = false
+	r.releaseReference(reference)
 }
-func (r *Release) admit(hash string, size int) error {
-	if r.active[hash] {
-		return nil
-	}
-	if size > PublicObjectDecoded {
+func (r *Release) admitReference(reference *objectReference, size int) error {
+	if size < 0 || size > PublicObjectDecoded {
 		return fail("resource_limit")
 	}
-	if r.residents == nil {
-		r.residents = make(map[string]*resident)
-	}
-	entry := r.residents[hash]
-	if entry != nil && entry.size != size {
+	resident := reference.query || reference.cache || reference.router
+	if resident && reference.size != size {
 		return fail("record")
 	}
-	for entry == nil && size > PublicLiveDecoded-r.residentBytes && len(r.cacheOrder) > 0 {
-		old := r.cacheOrder[0]
-		r.cacheOrder = r.cacheOrder[1:]
-		r.evictCache(old)
+	if reference.query {
+		return nil
 	}
-	if entry == nil && size > PublicLiveDecoded-r.residentBytes {
+	for !resident && size > PublicLiveDecoded-r.residentBytes && r.cacheHead != nil {
+		r.evictReference(r.cacheHead)
+	}
+	if !resident && size > PublicLiveDecoded-r.residentBytes {
 		return fail("resource_limit")
 	}
-	if entry == nil {
-		entry = &resident{size: size}
-		r.residents[hash] = entry
+	if !resident {
+		reference.size = size
 		r.residentBytes += size
 	}
-	entry.query = true
-	if r.active == nil {
-		r.active = make(map[string]bool)
-	}
-	r.active[hash] = true
+	reference.query = true
+	r.usedReferences = append(r.usedReferences, reference)
 	r.activeBytes += size
 	return nil
 }
-func (r *Release) cacheObject(hash string, s *Shard) {
-	size := decodedSize(s)
-	for r.cacheBytes+size > PublicCacheDecoded && len(r.cacheOrder) > 0 {
-		old := r.cacheOrder[0]
-		r.cacheOrder = r.cacheOrder[1:]
-		r.evictCache(old)
+func (r *Release) cacheReference(reference *objectReference) {
+	if reference.cache {
+		return
 	}
-	r.cache[hash] = s
-	r.cacheOrder = append(r.cacheOrder, hash)
-	r.cacheBytes += size
-	r.residents[hash].cache = true
+	for r.cacheBytes+reference.size > PublicCacheDecoded && r.cacheHead != nil {
+		r.evictReference(r.cacheHead)
+	}
+	reference.previous = r.cacheTail
+	if r.cacheTail == nil {
+		r.cacheHead = reference
+	} else {
+		r.cacheTail.next = reference
+	}
+	r.cacheTail = reference
+	reference.cache = true
+	r.cacheBytes += reference.size
 }

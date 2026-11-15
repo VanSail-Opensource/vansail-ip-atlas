@@ -56,6 +56,7 @@ type catalogSource struct {
 	Dependencies []string `yaml:"depends_on"`
 	Rights       struct {
 		Status              string                           `yaml:"status"`
+		Identifier          string                           `yaml:"identifier"`
 		Distribution        string                           `yaml:"distribution"`
 		EvidenceURL         string                           `yaml:"evidence_url"`
 		ReviewBasis         string                           `yaml:"review_basis"`
@@ -67,17 +68,9 @@ type catalogSource struct {
 		Schema  string `yaml:"schema"`
 		Version uint32 `yaml:"version"`
 	} `yaml:"parser"`
-	Fixture struct {
-		Status    string `yaml:"status"`
-		Path      string `yaml:"path"`
-		SHA256    string `yaml:"sha256"`
-		Parser    string `yaml:"parser"`
-		Schema    string `yaml:"schema"`
-		TestedAt  string `yaml:"tested_at"`
-		Observed  bool   `yaml:"schema_observed"`
-		Synthetic *bool  `yaml:"synthetic"`
-	} `yaml:"fixture"`
-	Publication struct {
+	Fixture           catalogFixture  `yaml:"fixture"`
+	MRTUpdatesFixture *catalogFixture `yaml:"mrt_updates_fixture"`
+	Publication       struct {
 		Kind    string `yaml:"kind"`
 		Locator string `yaml:"locator"`
 		Field   string `yaml:"field"`
@@ -87,8 +80,22 @@ type catalogSource struct {
 		Scope string `yaml:"scope"`
 	} `yaml:"coverage"`
 	PublicFields  []string                `yaml:"public_fields"`
+	Signals       []string                `yaml:"signals"`
 	Fields        []string                `yaml:"fields"`
 	FieldMappings map[string]fieldTargets `yaml:"field_mappings"`
+}
+
+type catalogFixture struct {
+	Status          string `yaml:"status"`
+	Path            string `yaml:"path"`
+	SHA256          string `yaml:"sha256"`
+	Parser          string `yaml:"parser"`
+	Schema          string `yaml:"schema"`
+	TestedAt        string `yaml:"tested_at"`
+	Observed        bool   `yaml:"schema_observed"`
+	Synthetic       *bool  `yaml:"synthetic"`
+	ContentEncoding string `yaml:"content_encoding"`
+	PayloadFormat   string `yaml:"payload_format"`
 }
 
 // DecodeCatalog projects the already closed-schema-validated sources.yaml into
@@ -134,13 +141,26 @@ func DecodeCatalog(reader io.Reader) ([]Source, error) {
 				mappings[input] = append([]string(nil), outputs...)
 			}
 		}
-		output = append(output, Source{ID: raw.ID, Family: raw.Family, Category: raw.Category, Admission: raw.State, URL: raw.Download.URL, Format: raw.Download.Format, MaxCompressedBytes: raw.Download.Maximum << 20,
+		output = append(output, Source{ID: raw.ID, Family: raw.Family, Category: raw.Category, Admission: raw.State, URL: raw.Download.URL, Format: raw.Download.Format, MaxCompressedBytes: raw.Download.Maximum << 20, Signals: append([]string(nil), raw.Signals...),
 			MaxAge: age, Weight: raw.Trust.Weight, Dependencies: append([]string(nil), raw.Dependencies...),
-			Rights:      Rights{Status: raw.Rights.Status, Distribution: raw.Rights.Distribution, EvidenceURL: raw.Rights.EvidenceURL, ReviewBasis: raw.Rights.ReviewBasis, AttributionRequired: raw.Rights.AttributionRequired, Attribution: raw.Rights.Attribution},
+			Rights:      Rights{Status: raw.Rights.Status, Distribution: raw.Rights.Distribution, Identifier: raw.Rights.Identifier, EvidenceURL: raw.Rights.EvidenceURL, ReviewBasis: raw.Rights.ReviewBasis, AttributionRequired: raw.Rights.AttributionRequired, Attribution: raw.Rights.Attribution},
 			Parser:      Parser{raw.Parser.ID, raw.Parser.Schema, raw.Parser.Version},
-			Fixture:     Fixture{raw.Fixture.Status, raw.Fixture.Path, raw.Fixture.SHA256, raw.Fixture.Parser, raw.Fixture.Schema, raw.Fixture.TestedAt, raw.Fixture.Observed, raw.Fixture.Synthetic},
+			Fixture:     Fixture{raw.Fixture.Status, raw.Fixture.Path, raw.Fixture.SHA256, raw.Fixture.Parser, raw.Fixture.Schema, raw.Fixture.TestedAt, raw.Fixture.Observed, raw.Fixture.Synthetic, raw.Fixture.ContentEncoding, raw.Fixture.PayloadFormat},
 			Publication: Publication{raw.Publication.Kind, raw.Publication.Locator, raw.Publication.Field}, Coverage: raw.Coverage.Kind, Scope: raw.Scope, PublicFields: append([]string(nil), raw.PublicFields...), Fields: append([]string(nil), raw.Fields...), FieldMappings: mappings})
 		ids[raw.ID] = len(output) - 1
+		if f := raw.MRTUpdatesFixture; f != nil {
+			if raw.Category != "bgp" || raw.Scope != "path" || len(raw.ID) > 120 || f.Status == "missing" && (f.SHA256 != "" || f.Observed || f.TestedAt != "") {
+				return nil, errors.New("MRT UPDATE fixture controls invalid")
+			}
+			output[len(output)-1].MRTUpdatesFixture = &Fixture{f.Status, f.Path, f.SHA256, f.Parser, f.Schema, f.TestedAt, f.Observed, f.Synthetic, f.ContentEncoding, f.PayloadFormat}
+		}
+	}
+	for _, source := range output {
+		if source.MRTUpdatesFixture != nil {
+			if _, exists := ids[source.ID+"-updates"]; exists {
+				return nil, errors.New("MRT UPDATE companion identity collides with source")
+			}
+		}
 	}
 	state := make([]uint8, len(output))
 	var visit func(int) error

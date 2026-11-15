@@ -1,0 +1,10 @@
+VanSail IP Atlas compiled database
+
+The compiled database and its licensable derived database material are offered
+under Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0).
+https://creativecommons.org/licenses/by-sa/4.0/
+
+Include the applicable dataset notices when redistributing the database. Those
+notices accompany each immutable release in its global dataset-credit document.
+Public-domain material retains its public-domain status. This license applies
+to compiled database material; software notices have their own terms.

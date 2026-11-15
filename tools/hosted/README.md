@@ -103,3 +103,14 @@ These engineering workflows do not satisfy full real-source coverage, hosted
 capacity/accessibility/performance, legal approval or protected production
 promotion. `evidence-status.py` preserves those pending gates. Adding a workflow
 does not claim that it has run; consult the exact revision's actual Actions result.
+
+## Qualified production harness
+
+The separate `production-build.py`, `lookupbench`, and
+`production-browser.mjs` consume real privately provisioned inputs. They do not
+activate sources or reuse synthetic reports as acceptance. See
+[`docs/production-evidence.md`](../../docs/production-evidence.md) for the closed
+private corpus/scenario/receipt and source-free evidence contracts. Production
+workflows are manual, require current Go source-store revalidation and preserve
+the exact preview artifact through promotion. Worker worst-case memory proof is
+still explicitly unmeasured by the process-tree RSS diagnostic.

@@ -2,25 +2,19 @@
 
 ## Status, authority and production gate
 
-Local implementation is now in progress (2026-11-08). The current executable work, user-approved bundled-Zstandard amendment, commands, measured results and remaining integration/production gates are recorded in `docs/implementation-status.md` and `VALIDATION_REPORT.md`. The catalog/reconnaissance snapshot and gap register below describe the starting state; they do not override those dated execution results. No phase or production release is declared complete by this checkpoint.
+Implementation and source qualification are in progress (2026-11-09). Dated synthetic execution results remain in `docs/implementation-status.md` and `VALIDATION_REPORT.md`; the authenticated production path and measured-evidence requirements are described in `docs/production-qualification.md` and `docs/production-evidence.md`. Source-specific review is advancing, so historical zero-active counts are not the current admission state. Current eligibility must be derived from the exact catalog, certification bytes and revalidated private intake. No phase or production release is declared complete by this checkpoint.
 
 **Approved product-scope amendment `release-scope-v2` — 2026-11-08:** numeric quality is optional for production release. The user removed the prerequisite to obtain two complete risk-assessment families before releasing. Production may publish `quality=null`, unrated confidence and supported positive reason flags while numeric coverage is inadequate. The existing requirements for publishing a non-null score remain unchanged: two independent current complete families covering all four required IPv4 layers. This amendment changes release gating only; it changes no scoring coefficient, confidence threshold, coverage meaning, source-admission rule or VIA3 field. All other required capabilities and hosted quality gates remain mandatory.
 
-**Current approved product-scope amendment `release-scope-v3` — 2026-11-08:** the user approved dataset credit display. Reviewed legally required credits may appear in one global shared frontend display and its dedicated static artifact, solely for real datasets included in the immutable release. Source admission may accept `attribution_required: true` with reviewed credit metadata and proof that the global display satisfies the actual obligations. Unresolved attribution and prohibited redistribution remain blocking. This replaces the blanket no-credit prohibition, retains v2's optional numeric quality, and leaves source IDs/per-IP provenance and source metadata in VIA3/lookup answers forbidden. The private capability report now identifies `release-scope-v3`; numeric qualification rules remain unchanged.
+**Approved prior product-scope amendment `release-scope-v3` — 2026-11-08:** the user approved dataset credit display. Reviewed legally required credits may appear in one global shared frontend display and its dedicated static artifact, solely for real datasets included in the immutable release. Source admission may accept `attribution_required: true` with reviewed credit metadata and proof that the global display satisfies the actual obligations. Unresolved attribution and prohibited redistribution remain blocking. This replaced the blanket no-credit prohibition, retained v2's optional numeric quality, and left source IDs/per-IP provenance and source metadata in VIA3/lookup answers forbidden.
+
+**Current approved product-scope amendment `release-scope-v4` — 2026-11-09:** the user approved **CC BY-SA 4.0 for compiled database material**. `DATA_LICENSE.md`, the exact public data-license notice and the included release's reviewed global credits define that distribution. Source code and dependency licenses remain separate. Each source still requires its own compatible rights, attribution, exact publication proof and current parser certification; this is not approval to enable the entire catalog. The private production receipt and capability report identify v4. Complete negative risk feeds remain optional for release, unknown quality stays null, and all non-null scoring rules and other mandatory capabilities remain unchanged.
 
 This document is the implementation plan; it is not a release claim. `AGENTS.md` remains the normative engineering contract. If this plan conflicts with `AGENTS.md`, `AGENTS.md` wins. The documents listed under **Authoritative contracts** define the executable details that this plan schedules and gates.
 
-Workspace review: **2026-11-08**. The source catalog and format-sample inventory have been reconciled after unavailable entries were removed. Observations below were checked against local files; no upstream freshness, rights, parser certification, hosted regression or deployment was revalidated.
+The starting workspace/capture review was **2026-11-08**. Its counts and unresolved fixtures describe that historical baseline, not the later source-by-source qualification work. Use the closed-schema catalog audit for static admission and authenticated intake for runtime `current` status; neither an old count nor an `active` label proves a presently eligible dataset. Source-only capability qualification is separate from the subsequent Pages release gate. Full current production measurements and exact-artifact approval remain required.
 
-The current source-admission snapshot is:
-
-- 91 source entries: 82 `candidate`, 7 `rights_approved`, 2 `retired`, 0 `fixture_tested`, 0 `active`.
-- All 91 entries have `fixture.status: missing`.
-- Publication proof is `unavailable` for 65 entries. The remaining entries use GitHub release or commit metadata, which still has to be tied to the exact payload and verified at build time.
-- No source declares `complete` coverage: 39 declare `mapping` and 52 declare `positive_only`. Numeric quality therefore remains unrated in the current catalog; under `release-scope-v2`, that absence does not itself block production release.
-- The seven rights-approved entries have `distribution: allow`, but none records a resolved attribution decision. Activation still requires an explicit no-credit decision or reviewed required credit metadata compliant with `release-scope-v3`.
-- All 21 proxy-subscription repositories use `evidence_family: public-subscription-aggregators`.
-- BGP MRT ingestion is disabled, and no required BGP/Tier-1 capability is currently qualified.
+All 21 proxy-subscription repositories remain one `public-subscription-aggregators` evidence family. No complete negative risk-assessment family is required to release null quality with supported positive reasons. Missing complete assessment coverage still prevents a non-null score. MRT, RPKI, city, usage and the required reason types must each pass their own source and completeness rules; qualifying some feeds does not qualify the remaining capabilities.
 
 The workspace also contains format reconnaissance, which is separate from admission:
 
@@ -32,8 +26,8 @@ The workspace also contains format reconnaissance, which is separate from admiss
 Consequences:
 
 1. Production is hard-blocked until every required capability in the capability matrix has approved, current, fixture-tested real-source coverage. Numeric quality is the explicit optional exception under `release-scope-v2`.
-2. Rights approval alone does not qualify a source. The seven `rights_approved` entries still lack observed fixtures and a resolved, compliant attribution decision, so they cannot be active.
-3. Synthetic fixtures may validate engineering behavior in previews. They must never satisfy a production gate or be described as real coverage.
+2. Rights approval alone does not qualify a source. Every included feed needs its own matching observed fixture, current code/ledger binding, compatible rights and credit decision, exact payload-bound publication proof and current runtime result.
+3. Synthetic fixtures may validate engineering behavior in previews. They must never satisfy a production gate or be described as real coverage. Known-real `compile-state` output is private `engineering` material and is rejected by the public candidate packager.
 4. No required feature may be silently dropped, replaced by an allowlist, or filled with a placeholder to bypass the block. The optional numeric-quality scope change is explicit; an unrated result must not be presented as a numeric assessment.
 
 ## Product contract
@@ -55,7 +49,7 @@ Non-negotiable constraints:
 - The complete immutable release is bundled into Pages; there is no R2, API or network fallback.
 - Fewer than 18,500 files and less than 24 MiB per asset.
 - Freshness is at most 720 hours from a verifiable upstream content-publication clock.
-- Public output contains no source name, source ID, source URL, per-source record, credential, proxy URI, domain, protocol, port, collector identity, latency, timezone, postal code or continent.
+- VIA3, lookup answers and ordinary frontend data contain no source name, source ID, source URL, per-source record, credential, proxy URI, domain, protocol, port, collector identity, latency, timezone, postal code or continent. The dedicated global credit artifact/display is the sole source-credit exception; the separate CC BY-SA 4.0 data notice is a legal asset, not an IP fact.
 - Latest stable Chrome only; no polyfills or alternate codec.
 - Missing, stale, corrupt or incomplete input fails closed.
 
@@ -88,7 +82,7 @@ Any semantic change to a public field, risk weight, T1 threshold, prefix overlay
 
 ### Static admission
 
-`admission` records a certification milestone; it is not a substitute for evaluating each gate. `fixture_tested` and `rights_approved` are peer milestones, not a linear ladder. A source can be rights-approved while its fixture is still missing, as seven catalog entries currently are. When both milestones pass but activation has not occurred, the label may retain the most recently reviewed milestone; qualification is always derived from the individual fixture, rights, proof and runtime fields, never from the label alone.
+`admission` records a certification milestone; it is not a substitute for evaluating each gate. `fixture_tested` and `rights_approved` are peer milestones, not a linear ladder. A source can be rights-approved while its fixture is still missing. When both milestones pass but activation has not occurred, the label may retain the most recently reviewed milestone; qualification is always derived from the individual fixture, rights, proof and runtime fields, never from the label alone.
 
 - `candidate`: cataloged; must not be fetched for publication, used for scoring or admitted to a release. Bounded build-private reconnaissance and parser certification may inspect candidates without enabling them; their artifacts never enter the production input cache or public tree.
 - `fixture_tested`: the parser ran against a pinned observed payload, the expected schema matched and the fixture SHA-256 is recorded. This state alone does not grant use.
@@ -102,7 +96,7 @@ An entry may be changed to `active` only when all of the following are true:
 2. Parser and expected schema are recorded.
 3. `fixture.status` is a passing state, `schema_observed` is true, the fixture has a valid SHA-256 and the tested fixture identifies the same parser/schema.
 4. `publication_proof` is not `unavailable` and is bound to the exact payload.
-5. Redistribution is allowed and the rights review is recorded. `attribution_required` is explicitly `false`, or explicitly `true` with reviewed `license.attribution` metadata whose obligations are satisfied by the global shared credits. An unresolved/null decision remains ineligible.
+5. Redistribution under the approved CC BY-SA 4.0 compiled-data contract is allowed and the rights review is recorded, including retained upstream notices and compatible derivative-license conditions. `attribution_required` is explicitly `false`, or explicitly `true` with reviewed `license.attribution` metadata whose obligations are satisfied by the global shared credits. An unresolved/null decision remains ineligible.
 6. `evidence_family`, `coverage`, `scope`, public-field allowlist and dependencies are explicit.
 7. The source is current under the 720-hour clock at fetch time.
 8. The admission and runtime state machines accept the transition.
@@ -119,7 +113,7 @@ An `active` entry is still rechecked on every build. The static label does not o
 
 Only `current` sources contribute records. When a source leaves `current`, delete its eligible internal snapshot, remove all its contributions and rebuild every dependent exact, prefix, ASN, `/24`, routing and graph partition. Build-private audit may retain permitted hashes and decisions, never subscription secrets. A cache hit must never mask withdrawal or staleness. Missing required coverage blocks the new release even when recomputation succeeds.
 
-The 720-hour limit is a ceiling, not an extension of a stricter policy. `build.proxy_subscription.expiry_hours` is currently 168; P0 must freeze its event clock and interaction with source and item publication times. An old item does not become new because its containing snapshot was republished. Every incremental build, including a no-change build, reevaluates time-based expiry and policy/rights withdrawal before declaring a cache hit.
+The 720-hour limit is a ceiling, not an extension of a stricter policy. Subscription items have a 168-hour ceiling. For every dated observation, retain its verified item clock and use the earlier source/item deadline; a fresh wrapper cannot renew an older IOC. Content-validity bounds, including the earliest surviving RPKI authorization expiry, further clamp the source and release deadline. Every incremental build, including a no-change build, reevaluates time-based expiry and policy/rights withdrawal before declaring a cache hit.
 
 ### Publication proof
 
@@ -147,23 +141,23 @@ A parser must not infer coverage from a source's name. Coverage is a reviewed pr
 
 ## Capability gate
 
-The release tooling must derive this matrix mechanically from the catalog, fixtures, rights decisions and current snapshots. The table is the plan's starting state, not a manually maintained release override. All rows except numeric quality are required; one failed required row blocks production. Under current `release-scope-v3` (retaining v2), the private capability report identifies numeric quality as `required: false` and reports `unrated` when unqualified. A qualified optional row permits numeric publication only under the unchanged scoring rules.
+The release tooling must derive qualification mechanically from the exact catalog, fixtures, rights decisions and current sealed snapshots. Do not freeze starting-state counts or mark every row blocked after some sources qualify. Under `release-scope-v4`, numeric quality is optional and inadequate coverage remains unrated. The source-only production report evaluates the required source capabilities; Pages acceptance is a subsequent independent gate, so it cannot form a circular prerequisite for source qualification. Neither a static active label nor a manually edited report qualifies a row.
 
-| Capability | Required approved current evidence | Snapshot status | Gate |
-|---|---|---|---|
-| Country | At least one current mapping family | Three country entries are rights-approved but have no fixture | Blocked |
-| Region/city | Two independent current mapping families with deterministic fusion | Candidates only; no fixture-qualified pair | Blocked |
-| Coordinates | Two independent city-capable families; coordinates copied from the winning city, never averaged | No fixture-qualified city pair | Blocked |
-| ASN/prefix mapping | Current origin/prefix mapping with all MOAS origins preserved | Two ASN entries are rights-approved but fixture-missing | Blocked |
-| Usage | Current direct classification evidence with conflict handling | Candidates only | Blocked |
-| Proxy/risk reasons | Current approved evidence for each published reason | 21 subscription aggregators are one family and none is fixture-qualified | Blocked |
-| Numeric quality (optional) | For a non-null score only: two independent current complete-coverage risk families; all contributing layers assessed | No source declares complete coverage; publish null score and unrated confidence with supported positive reasons | Unrated; does not block release |
-| `/24` context | Current exact-address observations; no prefix imputation | No active exact-observation family | Blocked |
-| RPKI | Current VRP data | Candidate only | Blocked |
-| BGP origins/paths | Approved current MRT snapshots from at least two independent path families | MRT disabled; candidate sources only | Blocked |
-| Relationships | Current directed relationship snapshot | Candidate only | Blocked |
-| Tier-1 | Current relationships plus at least two independent current path observations | No qualified inputs | Blocked |
-| Pages release | Complete manifest, hosted gates and exact-hash approval | No approved release | Blocked |
+| Capability | Required approved current evidence | Qualification boundary |
+|---|---|---|
+| Country | At least one current mapping family | Derive from surviving authenticated records |
+| Region/city | Two independent current mapping families with deterministic fusion | A country-only feed cannot supply city support |
+| Coordinates | Two independent city-capable families; coordinates copied from the winning city, never averaged | Preserve the publisher's accuracy limits and suppress false precision |
+| ASN/prefix mapping | Current origin/prefix mapping with all MOAS origins preserved | ASN identity alone is not an announcement mapping |
+| Usage | Current direct classification evidence with conflict handling | A VPN/datacenter union cannot manufacture exclusive hosting usage |
+| Proxy/risk reasons | Genuine current positive evidence for the required reason categories | Missing categories remain missing; aggregator counts and names cannot create categories or families |
+| Numeric quality (optional) | For a non-null score only: two independent current complete-coverage risk families; all contributing layers assessed | Otherwise publish null quality and supported positive reasons; this does not block release |
+| `/24` context | Current exact-address observations; no prefix imputation | Unobserved cells remain unknown |
+| RPKI | Current complete payload-bound VRP snapshot with its authorization-expiry bounds | A positive VRP subset does not establish global `not_found`; validate every MOAS origin independently |
+| BGP origins/paths | Current origins and approved MRT paths from at least two independent path families | Replayed archives require exact base/session/interval proof and retain the earliest content clock |
+| Relationships | Current directed relationship snapshot | Missing/conflicting relations remain unknown, never default peer |
+| Tier-1 | Current relationships plus two independent current path families and valid source-derived history | First observations remain pending; do not skip an intervening observation to borrow older stability |
+| Pages release | Complete immutable manifest, legal assets, inventory, hosted gates and exact-artifact approval | Check after source qualification; a passing source report alone cannot authorize publication |
 
 Synthetic data may satisfy test-fixture rows only. It never qualifies real-source coverage for a capability row. Optional numeric quality is not marked qualified merely because a synthetic score fixture passes.
 
@@ -178,7 +172,7 @@ The following register records concrete gaps found in the current files. Each ro
 | C01 | VIA3 lacks section record layouts, section IDs/flags, dictionary references, address encoding, router entries, inherited overlays, presence/reason bit numbers, quantization and overflow rules. Define required/optional sections and deterministic IDs without serializing Go structs. | `docs/binary-format-via3.md`, `docs/data-model.md`: byte tables for every shard kind, IPv4/IPv6 and corruption vectors, schema migration behavior. |
 | C02 | Strict schemas do not exist. Scope spellings include `exact`, `exact-ip`, `exact_ip` and `asn-edge`; BGP config uses `provider_transit` while public contracts use `transit_upstream`; assignment field aliases also differ. Separate source-schema fields from the public allowlist and define explicit normalization. | All five configs, `docs/source-policy.md`, validator: reject unknown/duplicate keys, invalid unions, duplicate IDs, bad hashes, invalid state combinations and unresolved aliases. No guessed parser or `unknown` format may become active. |
 | C03 | Scoring YAML uses undefined `u_asn` and `C_asn_diversity`; `docs/scoring.md` substitutes `C_asn` for the latter. Define the quantities, scope/family dedupe, MOAS combination, coverage counting and rounding without changing coefficients by implication. Freeze weighted geo-vote denominators, hierarchy, winning-city selection and coordinate precision too. | `configs/scoring.yaml`, `docs/scoring.md`, `docs/data-model.md`: worked numeric vectors, order/idempotence/monotonicity cases and conflicting-country/city fixtures. Formula changes require an explicit versioned amendment. |
-| C04 | Existing validation reads the obsolete `enabled` field and does not enforce admission, proof, rights or typed schemas. Rights-approved entries lack resolved attribution decisions. Freeze runtime failure classification, including future timestamps described as invalid in scoring docs and quarantined here. | `tools/validate_blueprint.py`, `configs/sources.yaml`, `docs/source-policy.md`: negative activation tests and a derived report with zero active sources. The old structural PASS is not this gate. `release-scope-v3` additionally permits reviewed compliant global credits. |
+| C04 | The starting validator used the obsolete `enabled` field and lacked complete admission/proof/rights checks. Freeze runtime failure classification and explicit attribution decisions. | `tools/validate_blueprint.py`, `configs/sources.yaml`, `docs/source-policy.md`: negative activation tests and a derived report that matches the actual reviewed source state. Neither a historical zero-active baseline nor a label is an override. `release-scope-v4` retains compliant global credits and adds the approved compiled-data license. |
 | C05 | The executable CAIDA URL is dated; MRT is disabled, `max_mrt_sources_per_run` is 1, but path qualification requires two independent families. Two collectors from one family do not satisfy it. | `configs/sources.yaml`, `configs/tier1.yaml`: payload-bound discovery and a cold-build acquisition plan covering both families within existing budgets. Keep production MRT off while certifying its parser in isolation. |
 | C06 | Header/decoded limits need strict boundary parity with Pages; native browser Zstandard support is assumed rather than demonstrated. | Binary/performance contracts and toolchain locks: reject assets at or above 24 MiB, prove bounded Zstandard decoding on the selected stable Chrome, and freeze browser worker/cache memory limits. No alternate codec or legacy fallback. |
 | C07 | Session pinning and immutable caching do not define how an aging static release stops being current. Subscription expiry is shorter than 720 hours, and rollback can reintroduce withdrawn data. | Source/release/data contracts: aggregate release expiry, scheduling, client expiry checks, rollback eligibility and bounded private-cache/quarantine retention, with clock-advance fixtures. No source metadata is added to VIA3/lookup facts; v3 global credits are separate. |
@@ -190,9 +184,9 @@ The following register records concrete gaps found in the current files. Each ro
 
 Pin the Go, Node/pnpm, Nuxt/UI, Motion, Leaflet and compression toolchains as P0 artifacts. Select a supported stable Go when implementation starts; a `go.mod` directive alone does not prove runner/toolchain support. Lock the compressor version and settings. Verify Chrome/codec behavior in hosted CI and record the actual browser build; do not infer it from the target label.
 
-Create a minimal synthetic corpus for public records, all VIA3 sections, decoder syntax and URL semantics. Keep real source certification fixtures separate and build-private. Record the IPv4-only numeric-quality restriction, origin deep links, reviewed attribution obligations and release-expiry semantics in their owning contracts before readers or UI depend on them. Synthetic credit artifacts are empty and cannot certify real data inclusion.
+Create a minimal synthetic corpus for public records, all VIA3 sections, decoder syntax and URL semantics. Keep full real captures and source-rich certification evidence private. Small reviewed redistributable observed parser excerpts may be checked in outside the deploy tree with their actual notices; they do not certify freshness or complete dataset capacity. Record the IPv4-only numeric-quality restriction, origin deep links, reviewed attribution obligations and release-expiry semantics in their owning contracts before readers or UI depend on them. Synthetic credit artifacts are empty and cannot certify real data inclusion. Known-real engineering state is not relabeled synthetic to enter a public preview.
 
-Exit criterion: C01-C12 have resolved contracts and their required checks have run; unknown config fields fail; all public layouts are frozen; source states are unambiguous; the CAIDA/MRT contradictions are resolved; a derived capability report correctly reports every required production row blocked on current data and optional numeric quality as unrated. Source qualification may continue later without blocking synthetic engineering work.
+Exit criterion: C01-C12 have resolved contracts and their required checks have run; unknown config fields fail; all public layouts are frozen; source states are unambiguous; the CAIDA/MRT contradictions are resolved; a derived capability report truthfully distinguishes qualified and missing real-source capabilities, while inadequate numeric quality remains unrated. Source qualification may continue later without blocking synthetic engineering work.
 
 ## Public data and VIA3
 
@@ -365,7 +359,7 @@ No phase is complete until its exit gate has actually run in the repository. Sta
 
 | Phase | Depends on | Reviewable work product | Exit gate |
 |---|---|---|---|
-| P0 | Repository contracts | C01-C12 amendments, strict schemas/validator, synthetic corpus, toolchain locks, hosted harness and capability report | Register resolved; unknown fields and impossible states fail; zero active sources and every required production capability blocked on the current catalog; optional numeric quality remains unrated |
+| P0 | Repository contracts | C01-C12 amendments, strict schemas/validator, synthetic corpus, toolchain locks, hosted harness and capability report | Register resolved; unknown fields and impossible states fail; source admission and missing capabilities are derived accurately; optional numeric quality remains unrated when coverage is inadequate |
 | P1 | P0 | Synthetic end-to-end release: typed records, writer, Go/TS readers, indexed router, worker, minimal static `/ip` and `/ip/overview`, manifest/inventory | Deterministic bytes and canonical answers; corruption/migration fixtures fail closed; hosted preview serves every synthetic object and is visibly synthetic |
 | P2 | P0-P1 | Secure fetch, proof, archive handling, private lineage, source state machine, subscription decoders and source-certification reports | Initial/private redirect, size/bomb, cancellation, stale/304, withdrawal, decoder and family-dedupe regressions pass; candidate certification never enables publication implicitly |
 | P3 | P1-P2 | Geo/network/usage fusion, inherited overlays, MOAS, coordinate ownership and sparse `/24` records | LPM/shard-boundary, conflict, presence, retraction and deterministic cold/warm resource checks pass |
@@ -374,7 +368,7 @@ No phase is complete until its exit gate has actually run in the repository. Sta
 | P6 | P1 shell, then P3-P5 | All canonical routes/deep links, lazy map/SVG graph, themes, accessibility, CSP/privacy and cache/error states | Hosted stable-Chrome route/network/responsive/keyboard/reduced-motion tests pass; no duplicate owner facts; obsolete query work cannot render |
 | P7 | P0-P6 and qualified real sources | Immutable full candidate, fresh capability report, complete Pages preview, hosted quality/performance reports and exact-hash approval | Every mandatory gate and full inventory passes; approval/artifact/manifest hashes match; candidate remains eligible at promotion; rollback is still eligible |
 
-The synthetic vertical slice may be demonstrated before real-source qualification. It is clearly labelled synthetic and cannot be used for production approval.
+The synthetic vertical slice may be demonstrated before real-source qualification. It contains synthetic data, is clearly labelled and cannot be used for production approval. `compile-state` materializes admitted real records only into private `engineering` artifacts; the public packager rejects that mode. Real publication uses authenticated `compile-production`, exact included-dataset credits and the separate mandatory hosted/approval gates.
 
 Source rights, exact-asset discovery and coverage certification form a continuing workstream from P0/P2 through P7. They need not block synthetic parser/UI development, but no phase test may relabel a synthetic capability as approved real-source coverage. Finding a valid complete-coverage pair remains a dependency for non-null numeric quality; `release-scope-v2` removes it as a production-release prerequisite. Required reason coverage and the other mandatory capabilities still need qualified real sources.
 
@@ -470,7 +464,7 @@ C11 freezes the measurement protocol before collecting the baseline:
 - Fix the benchmark query corpus across IPv4/IPv6, exact/LPM/MOAS, sparse/large ASN and worst-case overlays. For the typical-IP payload gate, account for pointer, manifest, router, dictionaries and every initially needed object; report worst-case payload separately. Initial JS includes executed entry/worker dependencies, with lazy map/BGP costs reported separately.
 - Specify hosted mobile emulation, network/CPU conditions and scripted search, map, Class C and graph interactions. Report observed LCP/CLS and interaction timings with their sample method; distinguish lab INP estimates from field evidence. An idle page or an absent metric is not a pass. Measure graph responsiveness during pan/zoom/path selection at the 24-node limit.
 
-No budget is raised by this review. Browser decoded-memory/cache caps and sample counts still need to be frozen in P0; they must not be selected after observing a failing run.
+No budget is raised by this checkpoint. Browser decoded-memory/cache caps and sample counts are defined in the versioned configs and owning performance contract; they must not be changed after observing a failing run to force a pass.
 
 ## Release contract and approval binding
 
@@ -479,6 +473,8 @@ The static release layout is:
 - `/_atlas/current.json`: revalidated pointer with `format_version`, `release_id`, `manifest_path` and `manifest_sha256`.
 - `/_atlas/releases/<release_id>/manifest.json`: immutable release manifest identifying every object, byte size, SHA-256, shard kind and partition coverage.
 - `/_atlas/objects/<sha256>.via3`: immutable content-addressed objects.
+- `/dataset-credits.json` and `/_atlas/credits/<sha256>.json`: revalidated index and immutable reviewed included-dataset notices.
+- `/data-license.txt`: exact approved CC BY-SA 4.0 compiled-data notice, included in the frozen inventory and approval digest.
 
 The client pins one release for the session, validates pointer structure, verifies the manifest against the pointer and objects against the manifest, and fails closed if anything is missing or corrupt. Hashes establish byte integrity against the pinned same-origin metadata; they are not upstream freshness proof. The client never falls back to another release or mixes objects from two releases.
 
@@ -486,7 +482,7 @@ C08 must freeze an acyclic identity chain: derive the release ID from a canonica
 
 ### Static freshness and withdrawal
 
-C07 must add a source-free aggregate validity bound to the release contract before implementation. It is no later than the earliest applicable expiry among contributing snapshots/items, including the stricter subscription lifetime, and is not `built_at + 720h`. Exact field names/encoding require a reviewed schema amendment. No per-source timestamp, family or expiry list is public.
+The source-free aggregate `valid_until` is no later than the earliest applicable expiry among contributing snapshots/items and content-validity bounds, including the stricter subscription lifetime and VRP authorization expiry; it is not `built_at + 720h`. Its encoding is frozen in the release contract. No per-source timestamp, family or expiry list is public.
 
 Schedule refresh and certification early enough to replace the release before this bound. Reevaluate unchanged inputs and known withdrawals; a failed gate must not renew an old release's validity. The browser checks expiry before exposing cached results and after a suspended tab resumes, and clears rendered data when eligibility is lost. Freeze bounded same-origin pointer revalidation in C07 so known withdrawals can invalidate a pinned session; a replacement starts a new fully verified release-pinned session, never an object-by-object fallback. If a replacement cannot qualify, lookups remain unavailable. Static immutable bytes do not remain eligible merely because they are cached.
 
@@ -510,16 +506,15 @@ Rollback selects a previously verified immutable artifact only after current fre
 
 ## Execution blockers and review disposition
 
-These are execution blockers, not optional backlog items:
+Current execution blockers must be evaluated from actual evidence, not copied from the starting gap register:
 
-- No source is active, and all 91 fixtures are missing. Production cannot start.
-- Region/city/coordinates, usage, abuse/risk, RPKI, MRT paths, directed relationships and Tier-1 lack qualified current coverage.
-- All seven rights-approved entries still need payload fixtures, publication proof, resolved attribution compliance and final rights revalidation. `release-scope-v3` permits required credits but certifies none of these sources.
-- MRT remains disabled until an approved source and parser pass the P5 entry criteria.
-- The hardcoded dated CAIDA URL in the source catalog violates snapshot discovery and must be corrected during P0.
-- VIA3's container framing is specified, but per-section record layouts must be frozen during P0 before implementation can claim parity.
-- C01-C12 remain open until their owning contracts and acceptance evidence exist. This review documents their closure work; it does not assert that the accompanying configs, docs or validator have already been fixed.
-- Browser Zstandard behavior, full-dataset runner capacity, static-release expiry, source-use permissions and a safe two-generation bundle remain unverified. Format samples and historical structural checks do not settle them.
+- Any required source capability still lacking compatible reviewed rights, original publication proof, a matching observed fixture/current-code certification and surviving authenticated records blocks production. Activating a reviewed subset does not waive missing capabilities or authorize the entire catalog.
+- Real two-family MRT, directed relationships, complete current RPKI, usage and required risk reasons need their actual source-specific proof. An implementation, synthetic fixture or generic positive subset cannot replace missing coverage or full-snapshot completeness.
+- Full real-source runner capacity, cold/changed/unchanged/expiry/withdrawal populations, semantic one-percent mutation, lookup distributions, allocation accounting and versioned baseline comparison need measured evidence on the standard private runner.
+- Full real-query hosted browser populations, observed 24-node responsiveness, accessibility/INP/CLS and the separate worst-case whole-worker memory proof remain mandatory. A sampled heap/RSS diagnostic or earlier synthetic preview is not a pass.
+- The exact complete production candidate needs legal assets, decoded public scans, hosted preview identity/performance, current source revalidation, final exact-artifact approval, live postchecks and an eligible rollback. Missing private infrastructure/bootstrap or insufficient source validity also blocks that execution.
+
+VIA3 layouts, browser codec and the earlier P0 issues have owning contracts and engineering evidence; historical wording does not reopen a completed focused check or declare the entire production plan complete. `docs/implementation-status.md`, the production qualification/evidence guides and exact-head reports distinguish implemented mechanisms, local/synthetic evidence and remaining real-release acceptance.
 
 Numeric quality has no current complete-coverage pair and therefore remains unrated. Under the approved `release-scope-v2` amendment, this optional capability is not a release blocker and receives no invented fallback number. The amendment does not waive another required capability. If any other required capability cannot be sourced under the public-output and rights rules, production stays blocked until it is supported or the user explicitly changes that scope.
 
@@ -542,7 +537,8 @@ Numeric quality has no current complete-coverage pair and therefore remains unra
 - [ ] Hosted measurement protocols and sample counts are fixed; whole-process/whole-disk peaks and cold-query payload accounting are reported.
 - [ ] Every required capability matrix row is satisfied by approved current real-source coverage; optional numeric quality is explicitly reported as qualified or unrated, with non-null scores obeying the unchanged coverage rules.
 - [ ] Global credits contain exactly the reviewed obligations of included real datasets, with no source IDs/per-IP provenance; immutable/current credit bytes are included in the frozen candidate, scanner, cache and approval checks.
+- [ ] The exact CC BY-SA 4.0 compiled-data notice is included and verified, upstream obligations are compatible, and private engineering artifacts cannot enter public packaging.
 - [ ] Release approval binds the exact source catalog, rights audit and manifest hashes; deployment verifies the preview and production artifact digest matches.
 - [ ] Rollback release remains available until the new release is verified.
 
-The original refinement was a document review only. Its historical disposition did not claim implementation, activation, builds, tests or deployment. The 2026-11-08 implementation checkpoint and actual local evidence are now recorded in `docs/implementation-status.md` and `VALIDATION_REPORT.md`; hosted and production gates remain pending.
+The original refinement was a document review only. Its historical disposition did not claim implementation, activation, builds, tests or deployment. The later implementation and scope-v4 checkpoint is recorded in `docs/implementation-status.md`; dated measurements remain in `VALIDATION_REPORT.md` and exact-head evidence. Full current production acceptance and deployment are not claimed here.

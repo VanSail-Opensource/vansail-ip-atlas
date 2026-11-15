@@ -1,11 +1,60 @@
-# Local implementation checkpoint — 2026-11-08
+# Implementation checkpoint — 2026-11-09
 
-The synthetic stack is implemented and undergoing hosted regression in the public `VanSail-Opensource/vansail-ip-atlas` repository. **The full P0–P7 plan and production release are not complete.** Source captures stay local and ignored; only engineering fixtures enter Git. Dated hosted delivery evidence is recorded in `VALIDATION_REPORT.md`.
+The synthetic stack and authenticated production engineering path are implemented in `VanSail-Opensource/vansail-ip-atlas`, with source-specific qualification and final integration continuing. **The full P0–P7 production plan and production release are not complete.** Full source captures, seals, provenance-rich receipts and private benchmark inputs stay local/private. Reviewed redistributable parser excerpts may enter Git outside the deploy tree with their notices. Dated execution evidence remains in `VALIDATION_REPORT.md`; the production evidence protocol is in [production-evidence.md](production-evidence.md).
 
-## Current implementation pass
+## Current scope and evidence boundary
+
+The user approved `release-scope-v4`: compiled database material uses CC BY-SA
+4.0, with its exact static data-license notice and required global credits for
+included datasets. This retains optional numeric quality: complete negative risk
+feeds are not a production prerequisite, and insufficient assessment coverage
+remains null with supported positive reasons. Rights, freshness and actual
+capability checks remain source-specific; approving this product license does
+not enable the entire catalog.
+
+Current source counts must come from the exact catalog and current sealed intake,
+not this document's historical zero-active baseline. Static activation and actual
+current payload eligibility are separate. Qualifying a subset does not establish
+the remaining usage, reason, routing, RPKI or other required capabilities.
+
+At the 2026-11-09 qualification checkpoint, eight observed schema fixtures passed
+local Go parsing: three Sapics country feeds, Ipverse ASN identity, DB-IP city,
+IPAPI city IPv4/IPv6 and X4B VPN. Rights and fixture reviews are source-specific;
+final active status depends on the exact current-code ledger and revalidation.
+Full original payload observations/proofs stay private. The local Go HTTPS
+acquirer correctly rejects the environment's nonpublic DNS answers, so those
+local captures are not a successful end-to-end Go intake. The new hosted intake
+job must download, parse, reconcile and seal the actual eight feeds without
+uploading private payloads. Its result is recorded separately when it runs.
+
+The 2026-11-09 infrastructure audit found no registered production self-hosted
+runner. Provisioning and verifying the required private profile/bootstrap remain
+execution requirements; workflow files and runner labels do not satisfy them.
+
+The current engineering includes partitioned compressed private records,
+authenticated state/retention, source-bound production receipts, streamed
+production materialization, MRT two-pass replay, per-item/authorization expiry,
+and exact-artifact candidate/preview/promotion workflows. `compile-state` with
+known-real inputs emits unpublishable private `engineering` artifacts. Public
+synthetic previews use synthetic fixtures only; real production requires
+`compile-production` qualification and the independent measured release gates.
+See [production-qualification.md](production-qualification.md) for the binding.
+
+Full standard-runner build and lookup populations, real-query browser acceptance,
+worst-case whole-worker memory and exact-artifact production approval are not
+established by the existence of these tools. The Go 2-microsecond lookup gate and
+all other limits remain unchanged. Source-rich evidence is never a public CI
+bootstrap. Final Tier-1 continuity integration must not skip an intervening
+authenticated observation when another compile gate fails.
+
+## Historical synthetic implementation pass — 2026-11-08
+
+The dated results below describe the earlier synthetic/local pass. References to
+its current/latest candidate are historical and do not assert the later catalog
+state, full production capacity or current-head hosted success.
 
 The user removed the mandatory complete-risk-feed release prerequisite and then
-requested dataset credits. Current `release-scope-v3` keeps numeric quality optional;
+requested dataset credits. At that checkpoint, `release-scope-v3` kept numeric quality optional;
 insufficient assessment still yields `quality=null` and retains positive reasons.
 Existing scoring qualification, weights and thresholds are unchanged. Every
 remaining required capability still needs current approved real-source evidence.
@@ -15,7 +64,8 @@ Credit text/links are bound to private source receipts and a content-addressed
 public credit document; source IDs and per-IP provenance remain prohibited.
 Synthetic releases have no real dataset credits. The updated local compiler,
 packager and 20 browser scenarios pass, including shared credits without query
-parameters or external requests. Required source fixtures remain unqualified.
+parameters or external requests. Required source fixtures were not yet qualified
+at that historical checkpoint; current admission is evaluated separately.
 
 - Added `atlas compile-state`, connecting all nine normalized record kinds to deterministic engineering materialization: quality regions, ASN context and direct identity, sparse `/24`, origin-specific RPKI, retained paths and directed relationships. It binds the exact intake/config/certification clock and receipts at publication, rechecks withdrawal and expiry, and refuses production mode. Full bulk streaming, real-source certification and provenance-qualified Tier-1 history remain required.
 - Fixed exact-announcement RPKI lookup in both Go and the browser. An unrelated more-specific RPKI row cannot hide the selected announcement's own result. Twelve shared compressed IPv4/IPv6, inherited-overlay and MOAS cases cover this behavior without changing the wire schema.
@@ -31,16 +81,16 @@ parameters or external requests. Required source fixtures remain unqualified.
 | Area | Executable work |
 |---|---|
 | Contracts | Closed schemas for all five configs; duplicate/unknown YAML rejection; canonical IP/ASN/URL corpus; byte layouts for all 14 VIA3 kinds; scoring and Tier-1 reference vectors. |
-| Admission | Source/coverage/family/rights/fixture checks, empty reviewed adapter-certification ledger, payload-bound clock contracts, dependency withdrawal and a derived private capability report. Labels and reconnaissance cannot activate a parser. |
+| Admission | Source/coverage/family/rights/fixture checks, exact current-code certification ledger, payload-bound clocks, dependency withdrawal and derived private capability reports. Labels and reconnaissance cannot activate a parser. |
 | Acquisition | HTTPS/public-address pinned dialing, redirect/retry/concurrency/run-byte limits, private atomic files, bounded streaming archive inspection and literal-IP subscription syntax decoders. |
 | Intelligence | Config-driven four-layer scoring; inadequate-coverage null scores; family dedupe; MOAS/ASN and leave-one-out `/24`; field-specific geo fusion; coordinates from the winning city; usage conflict handling. |
-| Routing | Directed relationships, origin-specific VRP validation, bounded streamed MRT TABLE_DUMP_V2, retained path segments, deterministic Tier-1 primitives and graph selection. |
-| Private state | Versioned typed normalized unions, parser/schema/policy-bound receipts, no-change expiry checks, withdrawal/dependency retraction and atomic bounded private state. Initial reconciliation rebuilds all dependent facts on change. |
-| Source intake | Closed-config validation before acquisition, exact fixture/ledger/code binding, bounded VRP dispatch, MRT fixture/runtime gate, exact GitHub asset digest/URL/size/time verification, private hash-only anti-replay publication receipts, exclusive writer lock and verified quarantine cleanup. Unsupported combinations stay quarantined. |
+| Routing | Directed relationships, origin-specific VRP validation, bounded streamed MRT RIB/UPDATE handling, retained original segments, transactional session/withdrawal replay and source-derived Tier-1/history contexts. Real-source qualification remains independent. |
+| Private state | Versioned typed normalized unions, compressed bounded partitions, authenticated state/chunk roots, parser/schema/policy-bound receipts, item/content expiry, withdrawal and eligible retention. Initial reconciliation rebuilds dependent facts on change. |
+| Source intake | Closed controls, exact fixture/ledger/code binding, source-specific original payload clocks, complete streamed RPKI-client parsing, coordinated two-family MRT acquisition and typed geolocation archive proofs. Exclusive writer lock, no-age-reset receipts and quarantine cleanup remain enforced; unresolved sources stay excluded. |
 | Binary | Deterministic compressed synthetic release, typed partition-compiler work, indexed IPv4/IPv6/ASN readers, inherited overlays, sparse cells, bounded prefix paging, shared Go/TypeScript compressed and hostile fixtures. |
-| Offline planner | Disk-backed external sort/merge, deterministic family-free fact identities, actual-byte prefix/ASN repacking with inherited overlays, bounded router metadata, per-partition object emission, resource watchdog and atomic private candidate publication. Geo/Usage/Origins boundary materialization rejects unsupported kinds. |
+| Offline planner | Disk-backed external sort/merge, source-free fact identities, actual-byte prefix/ASN repacking, inherited overlays, bounded per-partition processing for all nine normalized kinds, resource watchdog and atomic candidate publication. Full real-input capacity remains a measured gate. |
 | Browser | Nuxt static hero plus overview/quality/class-c/bgp/asn; worker lookup; hash validation; bounded IndexedDB/LRU; pinned sessions and expiry; light/dark, reduced motion, OSM, keyboard grid and SVG pan/zoom/fit/focus/export. |
-| Packaging | Complete same-origin atlas copy, object and decoded-string checks, source disclosure scanner, strict Pages inventory, canonical manifests, exact approval checks, CSP hashes, software notices and prepared integration workflows. |
+| Packaging | Complete same-origin atlas copy, decoded public scanner, strict inventory, canonical manifests, compiled-data/license credits, software notices, exact-artifact approval and independent production workflows. Private engineering mode is unpublishable; workflow existence is not acceptance evidence. |
 
 The source schema now separates raw fields from public field mappings. Scope and relationship aliases were explicitly normalized, assignment is `assignment_mode`, and internal signals map to public reason bits. Existing risk coefficients, half-lives, four layer weights and existing Tier-1 thresholds were preserved. New deterministic definitions and stability/bootstrap rules are explicit in the owning contract revisions.
 
@@ -69,11 +119,11 @@ unmeasured. All three earlier LCP failures are retained with their original resu
 
 ## Blocking work still required
 
-1. **Real-source certification:** 91 sources remain at 82 candidate, seven rights-approved and two retired; zero active, zero fixture-tested and no complete risk-coverage family. Numeric quality is optional/unrated under `release-scope-v3`; the other 12 required capability rows remain blocked. Redistribution and required-credit compliance, exact payload publication proof and observed parser certification still need source-specific evidence. Subscription items without a verified upstream item clock are quarantined.
-2. **Complete production ingestion and materialization:** the external planner and bounded reviewed intake now exist, and `compile-state` materializes all nine normalized kinds, including explicit ASN identity. Full real-adapter discovery/proof coverage, streamed private state and qualified Tier-1 history remain unfinished. The mapper preserves constant quality regions rather than propagating exact risk from an ancestor's first address. Intake still caps each source at 100,000 rows/64 MiB and complete normalized state at 64 MiB. The privately observed 125,830-row ASN CSV exceeds that input cap; parser support does not qualify full intake. The new materializer has an explicit bounded engineering population; it is not full bulk ingestion. Cache blob retention/GC, changed-partition reuse and full recompilation require actual-source capacity evidence.
-3. **Format/parser scope:** XZ/ZIP64 now have bounded synthetic integrity/security coverage, but real adapters still need individual schema/freshness/rights certification. TABLE_DUMP_V2 IPv4/IPv6 unicast/ADDPATH and the separate BGP4MP event parser are engineering components; live update feeds still require a disk-backed session/withdrawal replay reducer. Tier-1 history eligibility must be supplied from revalidated source receipts; a primitive or event parser does not certify a historical snapshot.
-4. **Full mandatory quality/performance:** broaden the shared corpus and actual-browser failure/cache/late-query checks, qualify all schemas, measure process-group RSS and scratch, cold/changed/no-change builds, full lookup distributions, 24-node graph performance, real accessibility/INP and the standard hosted baseline. Investigate failed measurements; never enlarge gates to force a pass.
-5. **Distribution review:** direct software notices are independent of IP-data provenance. Actual client/worker module ancestry now proves the 25 missing installed-package notices are absent from the Windows browser product; all 60 observed packages have copied notices. Each hosted build independently verifies its exact emitted code tree and fails if an unresolved runtime notice appears. The installed-package gaps remain recorded; no notice or grant was invented.
-6. **P7:** complete real immutable release, current capability evidence, hosted Pages preview with full object availability and privacy/route/header checks, exact artifact/hash approval, protected production promotion, live post-deploy verification and an eligible rollback artifact. Approval remains false and packaging refuses production mode.
+1. **Required real-source capabilities:** finish the source-specific rights, notice, publication and parser decisions needed by every required capability. Derive current status from authenticated surviving inputs rather than assuming zero active sources or treating a newly active subset as complete. Numeric quality remains optional/null under v4; unresolved reason/usage/routing/RPKI capabilities still block production. Undated subscription items cannot acquire a new clock from a wrapper.
+2. **Full capacity and real changes:** execute cold, genuine one-percent-change, unchanged, expiry and withdrawal scenarios three times each on the actual standard private runner, with whole-process RSS/scratch and semantic before/after proof. Partitioned source storage and materialization remove the former whole-source 100,000-row/64-MiB limit; the same values still bound each decoded partition. Full-source and complete build capacity must be measured, including allocation accounting and versioned performance comparison.
+3. **Routing and history qualification:** real MRT families require actual rights, complete RIB/UPDATE fixtures and current content/session/interval proofs. Replay is implemented with bounded cold fallback; its engineering fixtures are not live-source qualification. Final Tier-1 continuity must retain the immediately previous authenticated observation and never borrow an older candidate set through an intervening failure.
+4. **Mandatory performance populations:** obtain the pinned private runner/bootstrap and genuine query corpus; run 100,000 individually timed Go lookups over the 10,000-query corpus, full real-data browser viewport/theme populations, observed 24-node graph phases, Event Timing, accessibility, CLS and the accepted worst-case worker profile. The separate 384-MiB whole-worker proof remains unmeasured; sampled browser RSS cannot replace it. Preserve failed and unmeasured gates, including the unchanged 2-microsecond Go lookup target.
+5. **Distribution checks:** validate the exact CC BY-SA 4.0 data notice, included-dataset credits and applicable upstream obligations together with the emitted runtime software notices. Earlier synthetic notice audits apply only to their own exact product bytes. New hosted products must independently pass the same checks; a new license choice does not approve an unreviewed source or waive another license.
+6. **P7:** create a genuinely qualified immutable production candidate, run exact-head integration and full production measurements, verify its complete hosted Pages preview, then obtain explicit final exact-artifact approval. Protected promotion, live postchecks and an eligible rollback remain mandatory. The default approval is still false; implemented packaging accepts production only after its actual qualification and measured gates pass.
 
 The remaining source qualification problem cannot be repaired by synthetic fixtures, treating positive-only absence as clean or using a Tier-1 allowlist. Production stays unavailable until the user-approved scope is supported and all required gates actually run.

@@ -347,7 +347,7 @@ func TestUsageIndependentFlagsAndUnsafeLabels(t *testing.T) {
 	}
 }
 func TestRPKIReverseRelationshipsAndPathSemantics(t *testing.T) {
-	v, err := NewVRPIndex([]VRP{{netip.MustParsePrefix("192.0.2.0/24"), 24, 100}}, true)
+	v, err := NewVRPIndex([]VRP{{Prefix: netip.MustParsePrefix("192.0.2.0/24"), MaxLength: 24, ASN: 100}}, true)
 	if err != nil {
 		t.Fatal(err)
 	}

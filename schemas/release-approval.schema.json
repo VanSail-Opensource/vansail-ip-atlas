@@ -100,7 +100,7 @@
           "type": "boolean",
           "const": true
         },
-        "no_source_requiring_public_attribution": {
+        "included_dataset_credits_complete": {
           "type": "boolean",
           "const": true
         },
@@ -127,7 +127,7 @@
       },
       "required": [
         "all_required_capabilities_have_approved_current_sources",
-        "no_source_requiring_public_attribution",
+        "included_dataset_credits_complete",
         "hosted_regression_passed",
         "hosted_performance_passed",
         "public_output_scan_passed",

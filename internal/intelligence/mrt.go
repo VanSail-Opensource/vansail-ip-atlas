@@ -17,10 +17,15 @@ type MRTLimits struct {
 	Records, Peers int
 }
 type MRTRecord struct {
-	Prefix     netip.Prefix
-	Origin     uint32
-	Segments   []PathSegment
-	ObservedAt time.Time
+	Prefix                 netip.Prefix
+	Origin                 uint32
+	Segments               []PathSegment
+	ObservedAt             time.Time
+	PeerKey                [32]byte
+	PeerIndex              uint16
+	PeerTable              uint32
+	PathID                 uint32
+	AddPath, PeerAmbiguous bool
 }
 type mrtCursor struct {
 	data   []byte
@@ -59,13 +64,17 @@ func (c *mrtCursor) u32() (uint32, error) {
 
 // ParseMRT streams TABLE_DUMP_V2 unicast IPv4/IPv6 and their ADDPATH variants.
 // Unsupported MRT types fail closed. It is not a BGP4MP update parser.
-// Collector IDs, peer addresses, next hops, communities and path IDs are dropped.
+// Literal collector/peer addresses, next hops and communities are dropped.
+// Opaque peer keys and ADDPATH IDs remain private until replay/materialization.
 func ParseMRT(ctx context.Context, r io.Reader, limits MRTLimits, sink func(MRTRecord) error) error {
 	if limits.Bytes <= 0 || limits.Bytes > 3<<30 || limits.FrameBytes == 0 || limits.FrameBytes > 16<<20 || limits.Records <= 0 || limits.Peers <= 0 || limits.Peers > 65535 {
 		return errors.New("invalid MRT parser limits")
 	}
 	reader := &io.LimitedReader{R: contextReader{ctx, r}, N: limits.Bytes + 1}
 	peerCount := -1
+	var peerKeys [][32]byte
+	var peerDuplicates map[[32]byte]bool
+	var peerTable uint32
 	records := 0
 	header := [12]byte{}
 	for {
@@ -120,6 +129,9 @@ func ParseMRT(ctx context.Context, r io.Reader, limits MRTLimits, sink func(MRTR
 			if err != nil || int(count) > limits.Peers {
 				return errors.New("MRT peer budget exceeded")
 			}
+			peerKeys = make([][32]byte, int(count))
+			peerDuplicates = make(map[[32]byte]bool, int(count))
+			seenPeers := make(map[[32]byte]bool, int(count))
 			for i := 0; i < int(count); i++ {
 				flags, err := cursor.u8()
 				if err != nil || flags&0xfc != 0 {
@@ -133,14 +145,35 @@ func ParseMRT(ctx context.Context, r io.Reader, limits MRTLimits, sink func(MRTR
 				if flags&2 != 0 {
 					asnBytes = 4
 				}
-				if _, err := cursor.take(4 + ipBytes + asnBytes); err != nil {
+				if _, err := cursor.take(4); err != nil {
 					return err
 				}
+				address, err := cursor.take(ipBytes)
+				if err != nil {
+					return err
+				}
+				var asn uint32
+				if asnBytes == 4 {
+					asn, err = cursor.u32()
+				} else {
+					var short uint16
+					short, err = cursor.u16()
+					asn = uint32(short)
+				}
+				if err != nil {
+					return err
+				}
+				peerKeys[i] = mrtPeerKey(address, asn)
+				if seenPeers[peerKeys[i]] {
+					peerDuplicates[peerKeys[i]] = true
+				}
+				seenPeers[peerKeys[i]] = true
 			}
 			if cursor.offset != len(payload) {
 				return errors.New("MRT peer table trailing bytes")
 			}
 			peerCount = int(count)
+			peerTable++
 			continue
 		}
 		if peerCount < 0 {
@@ -204,8 +237,10 @@ func ParseMRT(ctx context.Context, r io.Reader, limits MRTLimits, sink func(MRTR
 			if err != nil {
 				return err
 			}
+			var pathID uint32
 			if addPath {
-				if _, err := cursor.take(4); err != nil {
+				pathID, err = cursor.u32()
+				if err != nil {
 					return err
 				}
 			}
@@ -230,7 +265,7 @@ func ParseMRT(ctx context.Context, r io.Reader, limits MRTLimits, sink func(MRTR
 			}
 			// An AS_SET terminal has no chosen linear origin; keep the typed
 			// observation with origin zero for private review, never invent one.
-			if err := sink(MRTRecord{prefix, origin, segments, time.Unix(int64(observed), 0).UTC()}); err != nil {
+			if err := sink(MRTRecord{Prefix: prefix, Origin: origin, Segments: segments, ObservedAt: time.Unix(int64(observed), 0).UTC(), PeerKey: peerKeys[peer], PeerIndex: peer, PeerTable: peerTable, PathID: pathID, AddPath: addPath, PeerAmbiguous: peerDuplicates[peerKeys[peer]]}); err != nil {
 				return err
 			}
 		}
@@ -345,6 +380,7 @@ type MRTUpdate struct {
 	Origin     uint32
 	Segments   []PathSegment
 	ObservedAt time.Time
+	PeerKey    [32]byte
 }
 
 type mrtNLRI struct {
@@ -366,6 +402,17 @@ type mrtBGPAttributes struct {
 // Supported NLRI is IPv4/IPv6 unicast, including ADDPATH; unsupported AFI/SAFI,
 // message/subtype and malformed framing fail closed. No source is activated.
 func ParseBGP4MP(ctx context.Context, r io.Reader, limits MRTLimits, sink func(MRTUpdate) error) error {
+	return parseBGP4MP(ctx, r, limits, sink, nil)
+}
+
+// ParseBGP4MPWithPeers additionally observes validated transport identities,
+// including KEEPALIVE-only peers. Observations stay transactional until the
+// complete stream parses; a truncated tail cannot establish a peer/session join.
+func ParseBGP4MPWithPeers(ctx context.Context, r io.Reader, limits MRTLimits, sink func(MRTUpdate) error, observe func(MRTPeerSession) error) error {
+	return parseBGP4MP(ctx, r, limits, sink, observe)
+}
+
+func parseBGP4MP(ctx context.Context, r io.Reader, limits MRTLimits, sink func(MRTUpdate) error, observe func(MRTPeerSession) error) error {
 	if limits.Bytes <= 0 || limits.Bytes > 3<<30 || limits.FrameBytes == 0 || limits.FrameBytes > 16<<20 || limits.Records <= 0 || limits.Peers <= 0 || limits.Peers > 65535 || sink == nil {
 		return errors.New("invalid MRT update parser limits")
 	}
@@ -442,8 +489,13 @@ func ParseBGP4MP(ctx context.Context, r io.Reader, limits MRTLimits, sink func(M
 		default:
 			return errors.New("unsupported BGP4MP subtype")
 		}
-		if _, err := cursor.take(2 * width); err != nil {
+		asnFields, err := cursor.take(2 * width)
+		if err != nil {
 			return err
+		}
+		peerASN := uint32(binary.BigEndian.Uint16(asnFields))
+		if width == 4 {
+			peerASN = binary.BigEndian.Uint32(asnFields)
 		}
 		// ASN widths and optional zero peer-AS state fields must not change
 		// session identity. The transport tuple identifies both directions.
@@ -459,15 +511,22 @@ func ParseBGP4MP(ctx context.Context, r io.Reader, limits MRTLimits, sink func(M
 		if afi == 2 {
 			addressBytes = 16
 		}
-		if _, err := cursor.take(2 * addressBytes); err != nil {
+		addresses, err := cursor.take(2 * addressBytes)
+		if err != nil {
 			return err
 		}
 		session := sha256.Sum256(payload[sessionStart:cursor.offset])
+		peerKey := mrtPeerKey(addresses[:addressBytes], peerASN)
 		if _, seen := peers[session]; !seen {
 			if len(peers) >= limits.Peers {
 				return errors.New("MRT update peer budget exceeded")
 			}
 			peers[session] = struct{}{}
+		}
+		if observe != nil {
+			if err := observe(MRTPeerSession{PeerKey: peerKey, Session: session, ObservedAt: observed, Local: local}); err != nil {
+				return err
+			}
 		}
 		emit := func(event MRTUpdate) error {
 			if err := ctx.Err(); err != nil {
@@ -478,6 +537,7 @@ func ParseBGP4MP(ctx context.Context, r io.Reader, limits MRTLimits, sink func(M
 				return errors.New("MRT update event budget exceeded")
 			}
 			event.Session, event.ObservedAt, event.Local, event.AddPath = session, observed, local, addPath
+			event.PeerKey = peerKey
 			return sink(event)
 		}
 		if state {

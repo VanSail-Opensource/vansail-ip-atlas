@@ -62,7 +62,7 @@ func TestDirectReferencePinsClearOnAllQueryExitsAndCacheEviction(t *testing.T) {
 			t.Fatal("query retained direct reference pins")
 		}
 		for _, reference := range reader.references {
-			if reference.active != nil {
+			if reference.query || (!reference.cache && !reference.router && reference.shard != nil) {
 				t.Fatal("completed query retains decoded shard through a direct reference")
 			}
 		}
@@ -85,7 +85,7 @@ func TestDirectReferencePinsClearOnAllQueryExitsAndCacheEviction(t *testing.T) {
 		t.Fatal(err)
 	}
 	reference := reader.router.lookup.references[0]
-	reader.evictCache(reference.hash)
+	reader.evictReference(reference)
 	if again, err := reader.reference(context.Background(), reader.router, 0); err != nil || again != shard {
 		t.Fatal("active reference lost its query pin on cache eviction", err)
 	}
@@ -94,7 +94,7 @@ func TestDirectReferencePinsClearOnAllQueryExitsAndCacheEviction(t *testing.T) {
 	}
 	reader.endQuery()
 	assertReleased()
-	if reader.residents[reference.hash] != nil {
+	if reference.shard != nil || reference.size != 0 {
 		t.Fatal("evicted shard remains resident after query pin release")
 	}
 	now = g.Manifest.ValidUntil

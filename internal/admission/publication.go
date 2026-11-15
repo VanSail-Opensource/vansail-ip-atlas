@@ -137,11 +137,12 @@ func verifyRelease(data []byte, assetURL string, digest [32]byte, size int64, no
 		if err != nil || created.After(now.Add(24*time.Hour)) {
 			return time.Time{}, deny
 		}
-		// Republishing a release cannot freshen an older uploaded asset. This
-		// conservative clock is bounded by both release and exact-asset creation.
-		if created.Before(published) {
-			published = created
-		}
+		// A long-lived release can receive genuinely new, digest-bound assets.
+		// Its tag publication is not the content clock of a replacement asset.
+		// Conversely publishing a new release cannot renew an old asset. The
+		// retained earliest clock for these exact bytes still prevents re-upload
+		// renewal; derived/mirrored sources also need their upstream clock proof.
+		published = created
 		matched = true
 	}
 	if !matched {

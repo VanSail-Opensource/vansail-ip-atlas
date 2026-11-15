@@ -33,11 +33,34 @@ type Result struct {
 	Bytes  int64
 }
 type Fetcher struct {
-	client   *http.Client
-	attempts int
-	delay    func(context.Context, time.Duration) error
-	slots    chan struct{}
-	budget   *atomic.Int64
+	client          *http.Client
+	attempts        int
+	delay           func(context.Context, time.Duration) error
+	slots           chan struct{}
+	budget          *atomic.Int64
+	secondaryBudget *atomic.Int64
+}
+
+// WithByteBudget adds one shared acquisition-group ceiling while retaining the
+// original run budget, client, SSRF checks and concurrency slots. A scoped
+// fetcher cannot be re-scoped to reset its consumed group budget.
+func (f *Fetcher) WithByteBudget(limit int64) (*Fetcher, error) {
+	if f == nil || f.client == nil || f.secondaryBudget != nil || limit <= 0 || limit > 2560<<20 {
+		return nil, ErrFetch
+	}
+	scoped := *f
+	scoped.secondaryBudget = &atomic.Int64{}
+	scoped.secondaryBudget.Store(limit)
+	return &scoped, nil
+}
+
+// GroupBytesRemaining reports the shared physical body budget without exposing
+// a reset operation. A header-only HTTP failure consumes zero payload bytes.
+func (f *Fetcher) GroupBytesRemaining() (int64, bool) {
+	if f == nil || f.secondaryBudget == nil {
+		return 0, false
+	}
+	return f.secondaryBudget.Load(), true
 }
 
 type budgetReader struct {
@@ -311,7 +334,7 @@ func (f *Fetcher) Fetch(ctx context.Context, raw, destination string, maxBytes i
 		if err != nil {
 			return Result{}, ErrFetch
 		}
-		request.Header.Set("User-Agent", "VanSail-Atlas-BulkBuilder/3")
+		request.Header.Set("User-Agent", "VanSail-IP-Atlas/3 (+https://github.com/VanSail-Opensource/vansail-ip-atlas)")
 		response, err := f.client.Do(request)
 		if err != nil {
 			if attempt+1 < f.attempts && f.delay(ctx, time.Second) == nil {
@@ -344,6 +367,14 @@ func (f *Fetcher) Fetch(ctx context.Context, raw, destination string, maxBytes i
 		var body io.Reader = response.Body
 		if f.budget != nil {
 			body = budgetReader{body, f.budget}
+		}
+		if f.secondaryBudget != nil {
+			body = budgetReader{body, f.secondaryBudget}
+			if response.ContentLength >= 0 {
+				// HTTP framing declares the exact body length. Stop there without
+				// probing one byte past a completely consumed group ceiling.
+				body = io.LimitReader(body, response.ContentLength)
+			}
 		}
 		n, copyErr := io.Copy(io.MultiWriter(temp, hash), io.LimitReader(body, maxBytes+1))
 		response.Body.Close()

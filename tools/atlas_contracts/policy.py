@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 HEX = re.compile(r"^[0-9a-f]{64}$")
 UTC_TIMESTAMP = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?Z$")
 LAYERS = ("exact", "explicit_prefix", "asn", "neighbors24")
-RELEASE_SCOPE = "release-scope-v3"
+RELEASE_SCOPE = "release-scope-v4"
 CREDIT_SECRET = re.compile(r"(?:vless|vmess|trojan|ss|ssr|hy|hy2|hysteria|hysteria2|tuic|anytls)://|-----BEGIN[^\r\n]*PRIVATE KEY-----|(?:gh[pousr]_|github_pat_)", re.IGNORECASE)
 
 
@@ -178,9 +178,15 @@ def static_issues(source, root: Path):
     if "reason_flags" in source.get("public_fields", []) and not source.get("signals"):
         issues.append("explicit_signal_mapping_required")
     download, discovery = source.get("download", {}), source.get("discovery", {})
-    if not (download.get("url") or download.get("urls") or (
-        isinstance(discovery, dict) and discovery.get("mode") == "latest-timestamped-asset"
-    )) or download.get("format", "unknown") == "unknown":
+    proof = source.get("publication_proof", {})
+    parser = source.get("parser", {})
+    dynamic_dbip = (isinstance(discovery, dict) and discovery.get("mode") == "latest-timestamped-asset"
+        and discovery.get("requires_exact_file") is True
+        and discovery.get("index_url") == "https://db-ip.com/db/download/ip-to-city-lite"
+        and parser.get("id") == "city-range-csv" and parser.get("schema") == "dbip-city-eight-columns-v1"
+        and download.get("format") == "csv-gz" and proof.get("kind") == "snapshot_metadata"
+        and proof.get("locator") == discovery.get("index_url") and proof.get("field") == "csv.sha1-md5.month")
+    if not (download.get("url") or download.get("urls") or dynamic_dbip) or download.get("format", "unknown") == "unknown":
         issues.append("exact_asset_and_parser_required")
     return sorted(set(issues))
 
@@ -264,8 +270,30 @@ def capability_report(config, now, root, snapshots=None):
         if state == "current":
             eligible.append(source)
 
+    # Use the same connected family groups as normalized reconciliation. Two
+    # catalog labels cannot turn byte-identical payloads into independent city,
+    # path, or complete-assessment observations. A bridging family correlates all
+    # its hashes transitively, independent of catalog order.
+    parents, hash_family = {}, {}
+
+    def family_root(name):
+        parents.setdefault(name, name)
+        if parents[name] != name:
+            parents[name] = family_root(parents[name])
+        return parents[name]
+
+    for source in sorted(eligible, key=lambda source: source["id"]):
+        name = source["evidence_family"]
+        digest = snapshots[source["id"]].payload_sha256
+        left = family_root(name)
+        if digest in hash_family:
+            right = family_root(hash_family[digest])
+            parents[max(left, right)] = min(left, right)
+        else:
+            hash_family[digest] = name
+
     def families(predicate):
-        return sorted({s["evidence_family"] for s in eligible if predicate(s)})
+        return sorted({family_root(s["evidence_family"]) for s in eligible if predicate(s)})
 
     def fields(*names):
         return lambda s: set(names).issubset(s["public_fields"])
@@ -280,13 +308,14 @@ def capability_report(config, now, root, snapshots=None):
     complete = families(lambda s: s["category"] in ("abuse", "proxy", "proxy_ip", "proxy_subscription_ip")
                         and s["coverage"]["kind"] == "complete")
     layer_scopes = {"exact": "exact_ip", "neighbors24": "exact_ip", "explicit_prefix": "prefix", "asn": "asn"}
-    complete_layers = {f: {layer for s in eligible if s["evidence_family"] == f and s["coverage"]["kind"] == "complete"
+    complete_layers = {f: {layer for s in eligible if family_root(s["evidence_family"]) == f and s["coverage"]["kind"] == "complete"
                           and s["category"] in ("abuse", "proxy", "proxy_ip", "proxy_subscription_ip")
                           and s["signals"] and "reason_flags" in s["public_fields"]
                           for layer in s.get("assessment_layers", []) if layer_scopes[layer] == s["scope"]} for f in complete}
     qualified = [f for f, layers in complete_layers.items() if set(LAYERS).issubset(layers)]
     reasons = ("malware", "botnet", "command_control", "abuse", "fraud", "scanning", "spam", "tor", "vpn", "proxy", "datacenter", "hosting")
-    missing_reasons = [reason for reason in reasons if not families(lambda s: reason in s["signals"] and "reason_flags" in s["public_fields"])]
+    reason_alias = {"c2": "command_control", "scanner": "scanning", "cloudflare_proxyip": "proxy"}
+    missing_reasons = [reason for reason in reasons if not families(lambda s: reason in {reason_alias.get(v, v) for v in s["signals"]} and "reason_flags" in s["public_fields"])]
     usage = families(lambda s: s["category"] in ("infrastructure", "asn", "geolocation") and s["coverage"]["kind"] == "mapping" and fields("usage_type")(s))
     rpki = families(lambda s: s["category"] == "rpki" and s["scope"] == "prefix" and s["coverage"]["kind"] == "mapping" and fields("rpki_status")(s))
     rows = [

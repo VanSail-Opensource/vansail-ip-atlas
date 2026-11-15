@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:vansail:contract:sources:3:2",
+  "$id": "urn:vansail:contract:sources:3:3",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -8,7 +8,7 @@
       "const": 3
     },
     "contract_revision": {
-      "const": 2
+      "const": 3
     },
     "description": {
       "type": "string",
@@ -128,7 +128,7 @@
             },
             "user_agent": {
               "type": "string",
-              "const": "IPDB-BulkBuilder/0.1 (+CONTACT_EMAIL_REQUIRED)"
+              "const": "VanSail-IP-Atlas/3 (+https://github.com/VanSail-Opensource/vansail-ip-atlas)"
             }
           },
           "required": [
@@ -753,6 +753,9 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
+            "compiled_data_license": {
+              "const": "CC-BY-SA-4.0"
+            },
             "atomic_manifest_pointer": {
               "type": "string",
               "const": "current.json"
@@ -880,6 +883,7 @@
           },
           "required": [
             "atomic_manifest_pointer",
+            "compiled_data_license",
             "frontend_api_calls",
             "retain_attribution",
             "verify_all_chunks_before_publish",
@@ -1568,7 +1572,8 @@
                   "tsv-gz",
                   "unknown",
                   "uri-list",
-                  "xdb"
+                  "xdb",
+                  "zip"
                 ]
               },
               "max_compressed_mib": {
@@ -1722,7 +1727,9 @@
                 "usage_type",
                 "visibility",
                 "vpn",
-                "vpn_provider"
+                "vpn_provider",
+                "latitude",
+                "longitude"
               ]
             },
             "uniqueItems": true,
@@ -6988,6 +6995,28 @@
                     "uniqueItems": true
                   }
                 ]
+              },
+              "latitude": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "latitude"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "longitude": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "longitude"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             }
           },
@@ -7268,6 +7297,18 @@
               },
               "synthetic": {
                 "type": "boolean"
+              },
+              "content_encoding": {
+                "enum": [
+                  "identity",
+                  "gzip"
+                ]
+              },
+              "payload_format": {
+                "enum": [
+                  "original",
+                  "decoded-csv"
+                ]
               }
             },
             "required": [
@@ -7276,6 +7317,9 @@
               "schema_observed",
               "tested_at"
             ]
+          },
+          "mrt_updates_fixture": {
+            "$ref": "#/properties/sources/items/properties/fixture"
           },
           "parser": {
             "type": "object",

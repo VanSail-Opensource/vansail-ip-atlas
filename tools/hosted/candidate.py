@@ -1,6 +1,6 @@
 """Verify an unchanged engineering candidate locally or on an immutable Pages URL.
 
-This verifies synthetic preview identity, not production eligibility or performance.
+This verifies frozen preview identity, not production eligibility or performance.
 No deployment token, source catalog or private evidence is accepted by this tool.
 """
 from __future__ import annotations
@@ -22,6 +22,7 @@ from tools.release_contract.contracts import (
     ContractError, canonical_bytes, parse_canonical, rollback_eligible, sha256, tree_inventory, verify_manifest,
 )
 from tools.release_contract.dataset_credits import validate_credit_tree
+from tools.release_contract.data_license import validate_data_license_tree
 
 HASH = re.compile(r"[0-9a-f]{64}\Z")
 QA_USER_AGENT = "VanSail-IP-Atlas-Preview-QA/1.0 (+https://github.com/VanSail-Opensource/vansail-ip-atlas)"
@@ -39,12 +40,16 @@ def check_preview_origin(value: str) -> str:
 
 def check_candidate(public: Path, report: dict, now: int) -> dict:
     if (not isinstance(report, dict) or report.get("status") != "passed"
-            or report.get("mode") != "synthetic" or report.get("production_eligible") is not False
+            or report.get("mode") not in ("synthetic", "production") or report.get("production_eligible") is not False
             or not HASH.fullmatch(str(report.get("candidate_bundle_sha256", "")))
             or not HASH.fullmatch(str(report.get("release_id", "")))
             or type(report.get("files")) is not int or type(report.get("bytes")) is not int):
-        raise ContractError("a passed source-free synthetic candidate report is required")
+        raise ContractError("a passed source-free frozen candidate report is required")
+    if report["mode"] == "production" and not HASH.fullmatch(str(report.get("qualification_receipt_sha256", ""))):
+        raise ContractError("production candidate needs its private qualification receipt digest")
     entries, digest = tree_inventory(public)
+    if any(path in ("_worker.js", "_routes.json") or path.startswith(("_worker.js/", "functions/")) for path, _, _ in entries):
+        raise ContractError("a static candidate cannot contain a Pages runtime")
     if (digest != report["candidate_bundle_sha256"] or len(entries) != report["files"]
             or sum(item[1] for item in entries) != report["bytes"]):
         raise ContractError("candidate tree changed after freezing")
@@ -54,8 +59,8 @@ def check_candidate(public: Path, report: dict, now: int) -> dict:
         raise ContractError("candidate release differs from report")
     manifest_bytes = (public / "_atlas/releases" / report["release_id"] / "manifest.json").read_bytes()
     manifest = verify_manifest(manifest_bytes, pointer_bytes, now)
-    if manifest["mode"] != "synthetic":
-        raise ContractError("production cannot use engineering preview evidence")
+    if manifest["mode"] != report["mode"]:
+        raise ContractError("candidate report and manifest modes differ")
     manifests = list((public / "_atlas/releases").glob("*/manifest.json"))
     if not 1 <= len(manifests) <= 2:
         raise ContractError("candidate has too many retained releases")
@@ -68,7 +73,7 @@ def check_candidate(public: Path, report: dict, now: int) -> dict:
             "format_version": 3, "release_id": path.parent.name,
             "manifest_path": f"/_atlas/releases/{path.parent.name}/manifest.json",
             "manifest_sha256": sha256(retained_bytes)}), now)
-        if retained["mode"] != "synthetic" or (path.parent.name != manifest["release_id"]
+        if retained["mode"] != manifest["mode"] or (path.parent.name != manifest["release_id"]
                 and not rollback_eligible(retained["valid_from"], retained["valid_until"], now)):
             raise ContractError("retained candidate release is ineligible")
         release_modes[retained["release_id"]] = retained["mode"]
@@ -81,6 +86,7 @@ def check_candidate(public: Path, report: dict, now: int) -> dict:
     if objects != expected_objects:
         raise ContractError("candidate has unreferenced database objects")
     validate_credit_tree(public, manifest["release_id"], release_modes)
+    validate_data_license_tree(public)
     if (public / "_redirects").read_text(encoding="utf-8").strip() != "/ /ip 302":
         raise ContractError("candidate requires the exact root 302 rule")
     return {"release_id": manifest["release_id"], "valid_until": manifest["valid_until"],
@@ -103,8 +109,15 @@ def _global_headers(public: Path) -> dict[str, str]:
     return result
 
 
-def verify_preview(public: Path, report: dict, origin: str, now: int, fetch=None) -> dict:
-    origin = check_preview_origin(origin)
+def verify_preview(public: Path, report: dict, origin: str, now: int, fetch=None, *, production_alias=False) -> dict:
+    if production_alias:
+        parsed = urlsplit(origin)
+        if (report.get("mode") != "production" or parsed.scheme != "https"
+                or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.pages\.dev", parsed.netloc)
+                or parsed.path or parsed.query or parsed.fragment):
+            raise ContractError("post-deployment verification requires the exact HTTPS Pages production origin")
+    else:
+        origin = check_preview_origin(origin)
     candidate = check_candidate(public, report, now)
     expected_headers = _global_headers(public)
     deadline = time.monotonic() + 600
@@ -155,7 +168,7 @@ def verify_preview(public: Path, report: dict, origin: str, now: int, fetch=None
     # Fetching all files can cross the release expiry; recheck at completion in live runs.
     if live and time.time() >= candidate["valid_until"]:
         raise ContractError("candidate expired during preview verification")
-    return {"scope": "hosted-synthetic-preview-identity", "status": "passed", "production_eligible": False,
+    return {"scope": "hosted-production-postdeploy-identity" if production_alias else f"hosted-{report['mode']}-preview-identity", "status": "passed", "production_eligible": False,
             "url": origin, "candidate_bundle_sha256": candidate["candidate_bundle_sha256"],
             "release_id": candidate["release_id"], "verified_files": verified,
             "control_files_verified_through_effective_headers_and_redirect": True}

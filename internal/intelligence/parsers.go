@@ -175,7 +175,7 @@ func vrpRecord(asn, prefix, maximum string) (VRP, error) {
 	if err != nil || int(maxLength) < network.Bits() || int(maxLength) > network.Addr().BitLen() {
 		return VRP{}, errors.New("VRP maximum length invalid")
 	}
-	return VRP{network.Masked(), uint8(maxLength), uint32(number)}, nil
+	return VRP{Prefix: network.Masked(), MaxLength: uint8(maxLength), ASN: uint32(number)}, nil
 }
 
 // ParseVRPJSON streams the explicit {"roas":[...]} schema. The input cap bounds

@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"vansail-ip-atlas/internal/admission"
 	"vansail-ip-atlas/internal/intelligence"
 )
@@ -79,26 +81,6 @@ func intakeSources(ctx context.Context, args []string) (returnErr error) {
 		return err
 	}
 	defer func() { returnErr = errors.Join(returnErr, engine.Close()) }()
-	policies := make([]intelligence.SourcePolicy, 0, len(sources))
-	snapshots := make([]intelligence.SourceSnapshot, 0, len(sources))
-	decisions := make([]intelligence.SourceDecision, 0, len(sources))
-	var normalizedBytes int
-	for _, source := range sources {
-		result, err := engine.Ingest(ctx, source, time.Unix(*clock, 0).UTC(), policyHash)
-		if err != nil {
-			return err
-		}
-		policies = append(policies, result.Policy)
-		decisions = append(decisions, result.Decision)
-		if result.Snapshot != nil {
-			encoded, err := json.Marshal(result.Snapshot)
-			if err != nil || len(encoded) > (64<<20)-normalizedBytes {
-				return errors.New("intake normalized state exceeds 64 MiB; streaming state partitioning required")
-			}
-			normalizedBytes += len(encoded)
-			snapshots = append(snapshots, *result.Snapshot)
-		}
-	}
 	var previous intelligence.BuildState
 	if _, err := os.Lstat(filepath.Join(private, "state-v1.json")); err == nil {
 		previous, err = intelligence.LoadPrivateState(root)
@@ -108,7 +90,79 @@ func intakeSources(ctx context.Context, args []string) (returnErr error) {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	plan, err := intelligence.Reconcile(previous, policies, snapshots, time.Unix(*clock, 0).UTC(), policyHash)
+	committed := previous
+	retained, err := intelligence.LoadRetainedPrivateState(ctx, root)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	before := previous
+	if before.PolicyHash != policyHash {
+		before = intelligence.BuildState{}
+	}
+	if err = intelligence.PruneRecordStore(ctx, root, before, retained, time.Unix(*clock, 0).UTC()); err != nil {
+		return err
+	}
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		returnErr = errors.Join(returnErr, intelligence.PruneRecordStore(cleanupCtx, root, committed, retained, time.Unix(*clock, 0).UTC()))
+	}()
+	policies := make([]intelligence.SourcePolicy, 0, len(sources))
+	snapshots := make([]intelligence.SourceSnapshot, 0, len(sources))
+	decisions := make([]intelligence.SourceDecision, 0, len(sources))
+	var normalizedBytes int
+	var mrtControls struct {
+		Build struct {
+			BGP struct {
+				Enabled bool `yaml:"mrt_enabled"`
+			} `yaml:"bgp"`
+		} `yaml:"build"`
+	}
+	if err := yaml.Unmarshal(sourceBytes, &mrtControls); err != nil {
+		return errors.New("MRT controls unavailable")
+	}
+	var mrtSources []admission.Source
+	if mrtControls.Build.BGP.Enabled {
+		for _, source := range sources {
+			if source.Admission == "active" && source.Parser.ID == "mrt-table-dump-v2" {
+				mrtSources = append(mrtSources, source)
+			}
+		}
+		if len(mrtSources) != 2 {
+			return errors.New("enabled MRT requires exactly two reviewed independent sources")
+		}
+	}
+	intakeResults := make(map[string]admission.Result, len(mrtSources))
+	if len(mrtSources) > 0 {
+		group, err := engine.IngestMRT(ctx, mrtSources, time.Unix(*clock, 0).UTC(), policyHash, admission.MRTIntakeOptions{Enabled: true})
+		if err != nil {
+			return err
+		}
+		for _, result := range group.Results {
+			intakeResults[result.Decision.ID] = result
+		}
+	}
+	for _, source := range sources {
+		result, ok := intakeResults[source.ID]
+		var err error
+		if !ok {
+			result, err = engine.IngestPartitioned(ctx, source, time.Unix(*clock, 0).UTC(), policyHash)
+		}
+		if err != nil {
+			return err
+		}
+		policies = append(policies, result.Policy)
+		decisions = append(decisions, result.Decision)
+		if result.Snapshot != nil {
+			encoded, err := json.Marshal(result.Snapshot)
+			if err != nil || len(encoded) > (64<<20)-normalizedBytes {
+				return errors.New("intake partition metadata exceeds 64 MiB")
+			}
+			normalizedBytes += len(encoded)
+			snapshots = append(snapshots, *result.Snapshot)
+		}
+	}
+	plan, err := intelligence.ReconcilePartitioned(ctx, root, previous, policies, snapshots, time.Unix(*clock, 0).UTC(), policyHash)
 	if err != nil {
 		return err
 	}
@@ -121,7 +175,17 @@ func intakeSources(ctx context.Context, args []string) (returnErr error) {
 	if err != nil || finalCertification != certificationHash {
 		return errors.New("certification changed during intake")
 	}
-	if err := intelligence.SavePrivateState(root, plan.State); err != nil {
+	if err := intelligence.SavePartitionedState(ctx, root, plan.State, previous); err != nil {
+		return err
+	}
+	committed = plan.State
+	retained = previous
+	if err := engine.SealPrivateState(ctx, policyHash); err != nil {
+		return err
+	}
+	// Record every authenticated observation before later capability or output
+	// failures can hide an intervening missing/failed Tier-1 epoch.
+	if _, err := intelligence.ObserveTier1State(ctx, root, plan.State, policyHash, time.Unix(*clock, 0).UTC()); err != nil {
 		return err
 	}
 	report := struct {

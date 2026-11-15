@@ -26,12 +26,20 @@ func commitSource(locator, assetURL string) (acquire.GitHubCommitQuery, bool) {
 }
 
 func publicationSupported(source Source) bool {
+	if dbipProvider(source) {
+		return true
+	}
+	if _, ok := ipapiCSVMember(source); ok {
+		return true
+	}
 	switch source.Publication.Kind {
 	case "github_release":
-		return source.Publication.Field == "published_at" && validReleaseLocator(source.Publication.Locator, source.URL)
+		return (source.Publication.Field == "published_at" || source.Publication.Field == "assets.created_at") && validReleaseLocator(source.Publication.Locator, source.URL)
 	case "github_commit":
 		_, ok := commitSource(source.Publication.Locator, source.URL)
 		return ok && source.Publication.Field == "commit.committer.date"
+	case "embedded":
+		return safeHTTPS(source.URL) && source.Publication.Locator == source.URL && (source.Parser.ID == "mrt-table-dump-v2" && source.Publication.Field == "mrt_frame_capture_timestamp" || source.Parser.ID == "rpki-client-json" && source.Publication.Field == "metadata.buildtime")
 	default:
 		return false
 	}

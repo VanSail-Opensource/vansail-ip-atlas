@@ -1,11 +1,11 @@
 package intelligence
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"net/netip"
 	"sort"
+	"time"
 
 	"vansail-ip-atlas/internal/facts"
 )
@@ -23,9 +23,10 @@ const (
 )
 
 type VRP struct {
-	Prefix    netip.Prefix
-	MaxLength uint8
-	ASN       uint32
+	Prefix     netip.Prefix
+	MaxLength  uint8
+	ASN        uint32
+	ValidUntil time.Time `json:",omitzero"`
 }
 type VRPIndex struct {
 	records map[netip.Prefix][]VRP
@@ -35,7 +36,7 @@ type VRPIndex struct {
 func NewVRPIndex(records []VRP, current bool) (*VRPIndex, error) {
 	index := &VRPIndex{records: map[netip.Prefix][]VRP{}, current: current}
 	for _, v := range records {
-		if !v.Prefix.IsValid() || v.MaxLength < uint8(v.Prefix.Bits()) || int(v.MaxLength) > v.Prefix.Addr().BitLen() || v.ASN != 0 && !IsPublicASN(v.ASN) {
+		if !v.Prefix.IsValid() || v.MaxLength < uint8(v.Prefix.Bits()) || int(v.MaxLength) > v.Prefix.Addr().BitLen() {
 			return nil, errors.New("invalid VRP prefix length")
 		}
 		key := v.Prefix.Masked()
@@ -91,6 +92,20 @@ func (r Relation) String() string {
 }
 
 type ASNEdge struct{ From, To uint32 }
+
+// RelationResolver exposes read-only relationship lookup without copying a
+// qualified global graph into every bounded materialization partition.
+type RelationResolver interface {
+	Relation(uint32, uint32) Relation
+}
+
+func resolveRelation(relations RelationResolver, from, to uint32) Relation {
+	if relations == nil {
+		return UnknownRelation
+	}
+	return relations.Relation(from, to)
+}
+
 type RelationshipIndex struct {
 	edges     map[ASNEdge]Relation
 	conflicts map[ASNEdge]bool
@@ -224,7 +239,7 @@ func canonicalPath(v PathObservation) (Path, error) {
 	}
 	return path, nil
 }
-func RankPaths(observations []PathObservation, relations *RelationshipIndex) ([]Path, error) {
+func RankPaths(observations []PathObservation, relations RelationResolver) ([]Path, error) {
 	if len(observations) > 100000 {
 		return nil, errors.New("path partition budget exceeded")
 	}
@@ -254,56 +269,10 @@ func RankPaths(observations []PathObservation, relations *RelationshipIndex) ([]
 	}
 	paths := make([]Path, 0, len(groups))
 	for _, g := range groups {
-		p := g.path
-		p.visibility = len(g.families)
-		if p.visibility >= 3 {
-			p.VisibilityBand = 3
-		} else if p.visibility == 2 {
-			p.VisibilityBand = 2
-		} else {
-			p.VisibilityBand = 1
-		}
-		previous := uint32(0)
-		for _, segment := range p.Segments {
-			if segment.Type != ASSequence {
-				previous = 0
-				continue
-			}
-			for _, asn := range segment.ASNs {
-				if previous != 0 && previous != asn {
-					p.total++
-					if relations.Relation(previous, asn) != UnknownRelation {
-						p.known++
-					}
-				}
-				previous = asn
-			}
-		}
+		p := prepareRankedPath(g.path, len(g.families), relations)
 		paths = append(paths, p)
 	}
-	sort.Slice(paths, func(i, j int) bool {
-		a, b := paths[i], paths[j]
-		if a.Origin != b.Origin {
-			return a.Origin < b.Origin
-		}
-		ad, bd := a.total, b.total
-		if ad == 0 {
-			ad = 1
-		}
-		if bd == 0 {
-			bd = 1
-		}
-		if a.known*bd != b.known*ad {
-			return a.known*bd > b.known*ad
-		}
-		if a.length != b.length {
-			return a.length < b.length
-		}
-		if a.visibility != b.visibility {
-			return a.visibility > b.visibility
-		}
-		return bytes.Compare(a.canonical, b.canonical) < 0
-	})
+	sort.Slice(paths, func(i, j int) bool { return rankedPathLess(paths[i], paths[j]) })
 	out := paths[:0]
 	counts := map[uint32]int{}
 	for _, p := range paths {
@@ -333,7 +302,7 @@ type Graph struct {
 	Truncated bool
 }
 
-func ProjectGraph(paths []Path, relations *RelationshipIndex) Graph {
+func ProjectGraph(paths []Path, relations RelationResolver) Graph {
 	result := Graph{}
 	protected := map[uint32]struct{}{}
 	selected := []ProjectedRoute{}
@@ -396,7 +365,7 @@ func ProjectGraph(paths []Path, relations *RelationshipIndex) Graph {
 		route.OriginalPositions = route.OriginalPositions[:visible]
 		for i := 1; i < len(route.Nodes); i++ {
 			key := ASNEdge{route.Nodes[i-1], route.Nodes[i]}
-			relation := relations.Relation(key.From, key.To)
+			relation := resolveRelation(relations, key.From, key.To)
 			edges[key] = GraphEdge{key.From, key.To, relation.String(), true, relation != UnknownRelation}
 		}
 		result.Routes = append(result.Routes, route)

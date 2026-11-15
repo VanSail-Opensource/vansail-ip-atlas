@@ -1,6 +1,20 @@
 # Source Admission and Freshness Policy
 
-## Current release scope `release-scope-v3` — 2026-11-08
+## Current release scope `release-scope-v4` — 2026-11-09
+
+The owner approved CC BY-SA 4.0 for compiled database material. The exact
+data-license notice and reviewed credits for included datasets are bound into the
+immutable candidate. Source code and dependencies retain their own licenses.
+This choice grants no permission for an unreviewed source: redistribution,
+derivative-license compatibility, publication proof and parser certification
+remain source-specific requirements. The private capability report uses schema
+version 3 and `release_scope: release-scope-v4`.
+
+V4 retains v3's global-credit exception and v2's optional numeric quality.
+Complete negative risk feeds are not required for production release; all
+existing coverage rules still govern every non-null score.
+
+## Approved prior release scope `release-scope-v3` — 2026-11-08
 
 The user explicitly approved dataset credit display. Reviewed, legally required
 attribution may appear in one global shared frontend display and its dedicated
@@ -9,10 +23,8 @@ the earlier blanket no-credit admission condition. It permits only approved
 credit names, plain text and attribution/license URLs; source IDs, per-IP
 provenance and source metadata in VIA3/lookup answers remain private.
 
-`release-scope-v3` retains the numeric-quality amendment below: numeric quality
-is optional for release, and all existing coverage rules still govern any number.
-The current private capability report uses schema version 3 and
-`release_scope: release-scope-v3`.
+This credit amendment retains the numeric-quality amendment below. It does not
+make a dataset eligible by displaying its name or changing a catalog label.
 
 ## Approved release scope `release-scope-v2` — 2026-11-08
 
@@ -31,10 +43,15 @@ change the scoring model.
 - `candidate`: cataloged but not fixture-tested.
 - `fixture_tested`: observed payload and parser fixture passed.
 - `rights_approved`: a recorded redistribution decision permits the proposed derived product. This peer milestone alone does not establish attribution compliance or fixture certification.
-- `active`: fixture-tested, rights-approved, and eligible for the current build.
+- `active`: fixture-tested and rights-approved, with controls permitting attempted intake; current build eligibility still requires actual runtime proof.
 - `retired`: withdrawn or legally excluded.
 
 Runtime state is not stored in YAML. A source may be statically `active` but dynamically `stale`, `missing`, `invalid`, or `quarantined`.
+
+At the November 9 reviewed checkpoint, eight of 91 entries are statically active.
+Their observed fixtures and source-specific rights decisions do not establish
+current production coverage. Derive current eligibility from revalidated intake,
+not this dated count; see `SOURCES_AUDIT.md` for the review boundary.
 
 ## Required Source Fields
 
@@ -57,7 +74,7 @@ Unknown fields are rejected. A source cannot be active without a validated fixtu
 
 `schemas/*.schema.json` are reviewed, closed JSON Schema 2020-12 contracts. `tools/validate_blueprint.py` loads them without regenerating schemas from the submitted YAML. Duplicate keys, aliases, non-string keys, excessive nesting, nonfinite numbers and unknown properties fail. Policy values in all five configs are frozen by type and value; changing a coefficient, threshold, limit, route or policy requires a reviewed owning-contract/schema amendment. Source entries use reusable typed objects and tagged states; changing a candidate's URL does not rewrite its schema.
 
-`parser: {id: null, schema: null, version: null}` is an explicit unresolved parser, not automatic format detection. No existing parser has been certified for production. A candidate may retain an `unknown` download format, but neither it nor a guessed parser can become active. Every source has separate raw `fields`, canonical `public_fields`, `signals` and `field_mappings`. The initial public lists/mappings are empty because reconnaissance did not certify field meaning. In particular, `country_code` does not automatically become a physical country and `organization_domain` never becomes a public label. IP/prefix selectors are parsed into typed record keys; they are not copied as arbitrary fact fields. Null mapping targets discard raw fields immediately. Every non-null target must be in both the source's public allowlist and the global public allowlist.
+`parser: {id: null, schema: null, version: null}` is an explicit unresolved parser, not automatic format detection. A candidate may retain an `unknown` download format, but neither it nor a guessed parser can become active. Every source has separate raw `fields`, canonical `public_fields`, `signals` and `field_mappings`. Unreviewed public lists/mappings remain empty; admitted sources require observed field meaning and explicit mappings. In particular, `country_code` does not automatically become a physical country and `organization_domain` never becomes a public label. IP/prefix selectors are parsed into typed record keys; they are not copied as arbitrary fact fields. Null mapping targets discard raw fields immediately. Every non-null target must be in both the source's public allowlist and the global public allowlist.
 
 Source scopes are exactly `exact_ip`, `prefix`, `asn`, `asn_edge`, `path`. Historical `exact`, `exact-ip` and `asn-edge` spellings are rejected after this explicit catalog normalization. Public relationship classes are exactly `transit_upstream`, `peer`, `customer`, `sibling`, `unknown`; `provider_transit` is rejected. Internal `c2`, `scanner`, and `cloudflare_proxyip` signals map to `command_control`, `scanning`, and `proxy` reason bits, respectively. Assignment is `assignment_mode`; it is independent of anycast and `ipv4_directed_broadcast`.
 
@@ -85,11 +102,11 @@ and private lineage, deduplicates identical reviewed credit entries and emits th
 dedicated global credit artifact. Merely cataloged, candidate, missing, stale,
 withdrawn or synthetic datasets cannot acquire a displayed inclusion credit.
 
-`fixtures/source-certification/adapter-certifications.json` is a reviewed build-private ledger, initially empty. A fixture milestone additionally matches its source ID, parser/schema/version, fixture hash/test time and current internal Go implementation hash in that ledger. Unknown parser strings and changed implementations cannot qualify by flipping YAML booleans. The ledger records independently reviewed parser-run evidence; the policy evaluator does not fabricate a parser run or discover licensing permission. Future source certification must execute the observed parser and review the corresponding evidence before adding an entry.
+`fixtures/source-certification/adapter-certifications.json` is a reviewed build-private ledger, originally empty and now populated for the reviewed subset. A fixture milestone additionally matches its source ID, parser/schema/version, fixture hash/test time and current internal Go implementation hash in that ledger. Unknown parser strings and changed implementations cannot qualify by flipping YAML booleans. The ledger records independently reviewed parser-run evidence; the policy evaluator does not fabricate a parser run or discover licensing permission. Any new or renewed certification must execute the observed parser and review the corresponding evidence before adding an entry.
 
-The P0 policy evaluator accepts trusted payload-verifier results only; it is not a network ingestor or proof verifier. P2 must construct these results from actual downloaded bytes, their schema validation, current policy, and asset-specific metadata. The CLI intentionally supplies no such results and consequently reports no current sources. A config label or checked-in report cannot produce a current payload. Build-private reports include config hashes, decisions and missing capabilities and must never enter `web/` or a deploy artifact.
+The P0 policy evaluator accepts trusted payload-verifier results only; it is not a network ingestor or proof verifier. Actual intake constructs receipts from complete downloaded bytes, schema validation, current policy and asset-specific metadata. `validate_blueprint.py` intentionally supplies no runtime snapshots and therefore reports no current sources; the authenticated production path independently reopens surviving normalized partitions. A config label or checked-in report cannot produce a current payload. Build-private reports include config hashes, decisions and missing capabilities and must never enter `web/` or a deploy artifact.
 
-The capability report counts distinct `evidence_family` values, explicit canonical fields and signal mappings. Numeric quality needs the same two complete families assessing all four layers to qualify for numeric publication. The current schema-version-3 report carries `release_scope: release-scope-v3`, retains the v2 numeric-quality row as `required: false` and reports `status: unrated` when unqualified; that optional row does not block production eligibility. Every other capability remains required. Usage cannot qualify from a provider name or a datacenter reason. The Pages row cannot qualify from config booleans; exact candidate evidence, preview and approval verification remain separate mandatory gates. Missing runtime evidence blocks each required data capability even if a source is statically active; it leaves optional numeric quality unrated.
+The capability report counts distinct `evidence_family` values, explicit canonical fields and signal mappings. Numeric quality needs the same two complete families assessing all four layers to qualify for numeric publication. The current schema-version-3 report carries `release_scope: release-scope-v4`, retains the v2 numeric-quality row as `required: false` and reports `status: unrated` when unqualified; that optional row does not block production eligibility. Every other capability remains required. Usage cannot qualify from a provider name or a datacenter reason. The Pages row cannot qualify from config booleans; exact candidate evidence, preview and approval verification remain separate mandatory gates. Missing runtime evidence blocks each required data capability even if a source is statically active; it leaves optional numeric quality unrated.
 
 ## Event clocks, runtime failures and retraction
 
@@ -101,7 +118,11 @@ When eligibility is lost, the production pipeline must discard every previous co
 
 ## Cold BGP acquisition
 
-MRT remains disabled. A future cold build must acquire one selected RIPE RIS and one RouteViews snapshot sequentially, within the unchanged shared 1024 MiB compressed MRT budget and 2 vCPU/8 GiB/14 GiB envelope. Two collectors from the same family cannot qualify. `max_mrt_sources_per_run: 2` is a cold-build source allowance, not concurrent workers or a relaxed byte limit. If both snapshots cannot fit or freshness cannot be proved, block the release and report measured failure.
+The dedicated MRT coordinator enforces two reviewed independent families, sequential acquisition and the unchanged shared 1024 MiB compressed MRT budget within the 2 vCPU/8 GiB/14 GiB envelope. The current cold-build plan selects one RIPE RIS and one RouteViews snapshot; other explicitly reviewed authoritative MRT sources may use cold intake without acquiring the recognized providers' replay privileges. The source allowance is two logical sources, not concurrent workers or a relaxed byte limit. Failed body reads and oversize probes consume the same non-resettable byte ceiling. If both snapshots cannot fit or freshness cannot be proved, block the release and report measured failure. Implemented coordinator tests do not enable or certify catalog entries; actual rights, observed fixtures and full-payload gates remain mandatory.
+
+For the explicit embedded proof field `mrt_frame_capture_timestamp`, every MRT common header must pass complete framing and the 720-hour age/future-clock checks before the earliest capture establishes publication. SHA-256 binds that clock to the exact bytes, and retained identical bytes keep the earliest verified clock. TABLE_DUMP_V2 entry originated time is retained privately and does not expire an otherwise fresh captured RIB merely because a route was first heard more than 720 hours ago.
+
+Incremental replay additionally requires a separately reviewed, code-bound `mrt_updates_fixture` for the BGP4MP schema. Its optional presence never waives the primary RIB certificate or rights checks. A sealed RIB can advance only through complete contiguous same-collector archives and an unambiguous RIB peer-to-transport-session join. Replay is bounded to one million logical update events / 180 seconds across both families and a 128 MiB changed-route working estimate. Missing proofs, unsupported sessions, gaps or exhausted replay limits trigger cold acquisition using the remaining shared budget; they never manufacture current paths. A replayed snapshot keeps the base RIB's original publication deadline and records the actual contiguous logical capture-through clock privately.
 
 CAIDA serial-2 discovery chooses the newest matching `YYYYMMDD.as-rel2.txt.bz2` filename, with canonical URL bytes breaking equal-date ties, from its fixed directory. The filename/date and directory mtime select a candidate only; neither is a publication proof. The hardcoded dated download was removed without asserting that a fresh redistributable payload exists. See `docs/bgp-tier1.md` for independent path-family qualification and deterministic derivation.
 
@@ -145,10 +166,12 @@ Only literal public IPs are accepted. Credentials, ports, protocols, transports,
 ## Rights
 
 Public hosting of a derived database can constitute redistribution. Sources
-prohibiting the proposed redistribution remain excluded. Under `release-scope-v3`,
+prohibiting the proposed redistribution remain excluded. Under `release-scope-v4`,
 public attribution is permitted through the reviewed global dataset credits when
 that placement and content satisfy the actual license and upstream obligations.
-Attribution does not waive redistribution, share-alike or other applicable terms.
+Compiled database material uses the owner-approved CC BY-SA 4.0 license; each
+included source must permit that distribution. Attribution does not waive
+redistribution, share-alike or other applicable terms.
 The renderer escapes plain text and renders only reviewed safe links; it executes
 no downloaded HTML or script. Credits make no per-IP provenance assertion and
 cause no automatic request to a publisher. OpenStreetMap tile attribution remains
@@ -164,7 +187,7 @@ Production is blocked unless approved current sources exist for every required c
 - proxy/risk reasons and exact `/24` observations;
 - current MRT paths, directed relationships, origin data, and RPKI for BGP/Tier-1.
 
-Numeric quality remains optional under `release-scope-v3` (retaining v2). Two independent complete
+Numeric quality remains optional under `release-scope-v4` (retaining v2). Two independent complete
 risk-assessment families covering all required layers remain necessary for a
 non-null score, but are not necessary to release supported reasons and unrated
 quality. The reason display, null-score semantics and scoring invariant tests
@@ -185,7 +208,8 @@ syntax is required. Reserved ASNs abstain through the shared public-ASN predicat
 instead of invalidating an otherwise valid publisher file.
 
 Implementing this parser is not source certification. The observed publisher
-CSV has 125,830 rows; current intake still rejects more than 100,000 rows or
-64 MiB of normalized source state. No bound was raised to admit it. Full streamed
-state, exact publication proof, reviewed rights and real-fixture certification
-remain prerequisites before any source entry can become active.
+CSV has 125,830 rows and is supported by version-2 partitioned intake. The
+100,000-record and 64-MiB decoded limits apply to each partition, not the complete
+source; whole-store and runner budgets remain unchanged. Exact publication proof,
+reviewed rights and current real-fixture certification remain mandatory on every
+intake, independently of the reviewed source's static active label.

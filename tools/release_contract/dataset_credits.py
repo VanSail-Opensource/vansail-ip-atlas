@@ -2,7 +2,7 @@
 
 These pure shape/integrity checks do not certify legal approval or inclusion.
 Production callers must independently bind reviewed entries to included current
-source receipts and the frozen candidate. The tree writer is synthetic-only.
+source receipts and the frozen candidate before calling the explicit tree writer.
 """
 from __future__ import annotations
 
@@ -253,9 +253,18 @@ def write_synthetic_credit_tree(public: Path, current_id: str, release_modes: di
     _release_modes(current_id, release_modes)
     if any(mode != "synthetic" for mode in release_modes.values()):
         _reject()
+    return write_credit_tree(public, current_id, release_modes, {key: [] for key in release_modes})
+
+
+def write_credit_tree(public: Path, current_id: str, release_modes: dict[str, str],
+                      entries_by_release: dict[str, list[dict]]) -> set[str]:
+    """Serialize exact qualified inclusion notices; this pure writer grants no rights."""
+    _release_modes(current_id, release_modes)
+    if type(entries_by_release) is not dict or set(entries_by_release) != set(release_modes):
+        _reject()
     documents, releases = {}, []
     for release_id in sorted(release_modes):
-        data = build_credit_document(release_id, "synthetic", [])
+        data = build_credit_document(release_id, release_modes[release_id], entries_by_release[release_id])
         digest = sha256(data)
         relative = f"_atlas/credits/{digest}.json"
         documents[relative] = data

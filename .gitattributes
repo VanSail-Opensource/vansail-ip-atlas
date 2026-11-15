@@ -1,3 +1,7 @@
 * text=auto eol=lf
 # Preserve copied third-party notice bytes and their recorded content hashes.
 web/public/licenses/*.txt -text -whitespace
+# Reviewed source fixtures bind exact captured bytes, including line endings.
+fixtures/source-certification/*.csv -text -whitespace
+fixtures/source-certification/observed-*.txt -text -whitespace
+fixtures/source-certification/notices/*.txt -text -whitespace

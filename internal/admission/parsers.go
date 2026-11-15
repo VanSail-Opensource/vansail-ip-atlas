@@ -24,6 +24,11 @@ const (
 	mrtRIB
 	subscriptionSyntax
 	asnIdentityCSV
+	bulkAdapter
+	mrtUpdates
+	rpkiClientJSON
+	ipapiCityZIP
+	riskAdapter
 )
 
 // Adapter IDs describe implemented schemas, not source certification. None is
@@ -34,18 +39,26 @@ func selectAdapter(source Source) (adapter, bool) {
 		return 0, false
 	}
 	switch source.Parser.ID {
+	case "ip-count-tsv", "feodo-csv":
+		return riskAdapter, selectRiskAdapter(source)
+	case "ipapi-free-city-csv":
+		return ipapiCityZIP, selectGeoProvider(source)
 	case "asn-identity-csv":
 		return asnIdentityCSV, source.Parser.Schema == "asn-handle-description-country-csv-v1" && source.Category == "asn" && source.Coverage == "mapping" && source.Scope == "asn" && fieldsEqual(source.PublicFields, "asn", "as_name", "organization", "asn_country") && mappedFields(source, map[string]string{"asn": "asn", "handle": "as_name", "description": "organization", "country-code": "asn_country"}) && (source.Format == "csv" || source.Format == "csv-gz")
 	case "vrp-csv":
 		return vrpCSV, source.Parser.Schema == "asn-prefix-maxLength-csv-v1" && source.Category == "rpki" && source.Coverage == "mapping" && source.Scope == "prefix" && fieldsEqual(source.PublicFields, "rpki_status") && mappedFields(source, map[string]string{"roa": "rpki_status"}) && (source.Format == "csv" || source.Format == "csv-gz")
 	case "vrp-json":
 		return vrpJSON, source.Parser.Schema == "roas-json-v1" && source.Category == "rpki" && source.Coverage == "mapping" && source.Scope == "prefix" && fieldsEqual(source.PublicFields, "rpki_status") && mappedFields(source, map[string]string{"roa": "rpki_status"}) && (source.Format == "json" || source.Format == "json-gz")
+	case "rpki-client-json":
+		return rpkiClientJSON, source.Parser.Schema == "rpki-client-payloads-json-v1" && source.Category == "rpki" && source.Coverage == "mapping" && source.Scope == "prefix" && fieldsEqual(source.PublicFields, "rpki_status") && mappedFields(source, map[string]string{"roa": "rpki_status"}) && (source.Format == "json" || source.Format == "json-gz")
 	case "mrt-table-dump-v2":
 		return mrtRIB, source.Parser.Schema == "mrt-table-dump-v2-unicast-v1" && source.Category == "bgp" && source.Coverage == "mapping" && source.Scope == "path" && fieldsEqual(source.PublicFields, "bgp_origins", "bgp_paths") && mappedFields(source, map[string]string{"asn": "bgp_origins", "as_path": "bgp_paths"}) && (source.Format == "mrt" || source.Format == "mrt-gz" || source.Format == "mrt-bz2")
+	case "mrt-bgp4mp":
+		return mrtUpdates, source.Parser.Schema == "mrt-bgp4mp-unicast-v1" && source.Category == "bgp" && source.Coverage == "mapping" && source.Scope == "path" && fieldsEqual(source.PublicFields, "bgp_origins", "bgp_paths") && mappedFields(source, map[string]string{"asn": "bgp_origins", "as_path": "bgp_paths"}) && (source.Format == "mrt" || source.Format == "mrt-gz" || source.Format == "mrt-bz2")
 	case "subscription-literal":
 		return subscriptionSyntax, source.Parser.Schema == "literal-ip-subscription-v1" && source.Category == "proxy_subscription_ip" && source.Family == "public-subscription-aggregators" && source.Scope == "exact_ip" && source.Coverage == "positive_only" && fieldsEqual(source.PublicFields, "reason_flags") && (source.Format == "txt" || source.Format == "base64" || source.Format == "mihomo-yaml" || source.Format == "sing-box-json")
 	default:
-		return 0, false
+		return bulkAdapter, selectBulkAdapter(source)
 	}
 }
 
@@ -88,20 +101,10 @@ func parsePayload(ctx context.Context, file *os.File, size int64, source Source,
 	if implementation == subscriptionSyntax {
 		return nil, errors.New("per-item publication verifier required")
 	}
-	format := "plain"
-	if strings.HasSuffix(source.Format, "-gz") {
-		format = "gzip"
-	} else if strings.HasSuffix(source.Format, "-bz2") {
-		format = "bzip2"
-	}
-	limits := acquire.ArchiveLimits{CompressedBytes: source.MaxCompressedBytes, DecodedBytes: 3 << 30, EntryBytes: 3 << 30, Entries: 1, NameBytes: 4096}
 	output := make([]intelligence.NormalizedRecord, 0)
 	bytes := int64(0)
-	emit := func(record intelligence.NormalizedRecord) error {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if len(output) >= 100000 || record.Validate() != nil {
+	err := parsePayloadTo(ctx, file, size, source, implementation, published, 100000, func(record intelligence.NormalizedRecord) error {
+		if len(output) >= 100000 {
 			return errors.New("normalized source partition budget exceeded")
 		}
 		encoded, err := json.Marshal(record)
@@ -114,10 +117,51 @@ func parsePayload(ctx context.Context, file *os.File, size int64, source Source,
 		}
 		output = append(output, record)
 		return nil
+	}, asnStats...)
+	if err == nil && len(output) == 0 {
+		err = errors.New("source contains no accepted records")
 	}
+	return output, err
+}
+
+func parsePayloadTo(ctx context.Context, file *os.File, size int64, source Source, implementation adapter, published time.Time, maxRecords int, emit func(intelligence.NormalizedRecord) error, asnStats ...*intelligence.ASNIdentityStats) error {
+	if emit == nil || maxRecords <= 0 || implementation == subscriptionSyntax {
+		return errors.New("bounded supported parser and record sink required")
+	}
+	if implementation == ipapiCityZIP {
+		return parseIPAPIArchive(ctx, file, size, source, maxRecords, emit)
+	}
+	if implementation == mrtRIB && source.Publication.Kind == "embedded" && source.Publication.Field == "mrt_frame_capture_timestamp" {
+		_, err := parseMRTCapturePayload(ctx, file, size, source, published, maxRecords, emit)
+		return err
+	}
+	if implementation == mrtUpdates {
+		_, err := scanMRTUpdatesFile(ctx, file, size, source, published, min(maxRecords, 1_000_000), func(event intelligence.MRTUpdate) error {
+			if event.Kind != intelligence.MRTAnnounce {
+				return nil
+			}
+			if !intelligence.IsPublicASN(event.Origin) {
+				return errors.New("unrepresentable MRT update origin")
+			}
+			return emit(intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordPath, Path: &intelligence.ScopedPath{Prefix: event.Prefix, Observation: intelligence.PathObservation{Origin: event.Origin, Segments: event.Segments, Family: source.Family, Current: true}}})
+		}, nil)
+		return err
+	}
+	format := "plain"
+	if strings.HasSuffix(source.Format, "-gz") {
+		format = "gzip"
+	} else if strings.HasSuffix(source.Format, "-bz2") {
+		format = "bzip2"
+	}
+	limits := acquire.ArchiveLimits{CompressedBytes: source.MaxCompressedBytes, DecodedBytes: 3 << 30, EntryBytes: 3 << 30, Entries: 1, NameBytes: 4096}
 	parse := func(_ string, reader io.Reader) error {
-		limits := intelligence.ParseLimits{Bytes: 3 << 30, Records: 100000, LineBytes: 1 << 20}
+		limits := intelligence.ParseLimits{Bytes: 3 << 30, Records: maxRecords, LineBytes: 1 << 20}
 		switch implementation {
+		case riskAdapter:
+			return parseRiskPayload(ctx, reader, source, published, maxRecords, emit)
+		case rpkiClientJSON:
+			_, err := parseRPKIClientPayload(ctx, reader, limits, published, emit)
+			return err
 		case asnIdentityCSV:
 			stats, err := intelligence.ParseASNIdentityCSV(ctx, reader, limits, func(value intelligence.ASNIdentityEvidence) error {
 				return emit(intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordASNIdentity, ASNIdentity: &value})
@@ -128,7 +172,7 @@ func parsePayload(ctx context.Context, file *os.File, size int64, source Source,
 			return err
 		case vrpCSV, vrpJSON:
 			sink := func(value intelligence.VRP) error {
-				if !value.Prefix.IsValid() || value.Prefix.Addr().Is4In6() || value.Prefix.Addr().Zone() != "" || value.ASN != 0 && !intelligence.IsPublicASN(value.ASN) {
+				if !value.Prefix.IsValid() || value.Prefix.Addr().Is4In6() || value.Prefix.Addr().Zone() != "" {
 					return errors.New("VRP facts invalid")
 				}
 				return emit(intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordVRP, VRP: &value})
@@ -139,7 +183,7 @@ func parsePayload(ctx context.Context, file *os.File, size int64, source Source,
 			limits.Bytes = 64 << 20
 			return intelligence.ParseVRPJSON(ctx, reader, limits, sink)
 		case mrtRIB:
-			return intelligence.ParseMRT(ctx, reader, intelligence.MRTLimits{Bytes: 3 << 30, FrameBytes: 8 << 20, Records: 50000, Peers: 65535}, func(value intelligence.MRTRecord) error {
+			return intelligence.ParseMRT(ctx, reader, intelligence.MRTLimits{Bytes: 3 << 30, FrameBytes: 8 << 20, Records: maxRecords / 2, Peers: 65535}, func(value intelligence.MRTRecord) error {
 				if !intelligence.IsPublicASN(value.Origin) || !value.Prefix.IsValid() || value.Prefix.Addr().Is4In6() || value.Prefix.Addr().Zone() != "" || value.ObservedAt.After(published.Add(24*time.Hour)) || !published.Before(value.ObservedAt.Add(source.MaxAge)) {
 					return errors.New("unrepresentable or expired MRT observation")
 				}
@@ -149,16 +193,13 @@ func parsePayload(ctx context.Context, file *os.File, size int64, source Source,
 				return emit(intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordPath, Path: &intelligence.ScopedPath{Prefix: value.Prefix, Observation: intelligence.PathObservation{Origin: value.Origin, Segments: value.Segments, Family: source.Family, Current: true, OriginOutward: false}}})
 			})
 		default:
-			return errors.New("unsupported source adapter")
+			return parseBulkPayload(ctx, reader, source, published, maxRecords, emit)
 		}
 	}
 	if err := acquire.WalkArchive(ctx, acquire.ArchiveInput{Reader: file, ReaderAt: file, Size: size}, format, limits, parse); err != nil {
-		return nil, err
+		return err
 	}
-	if len(output) == 0 {
-		return nil, errors.New("source contains no accepted records")
-	}
-	return output, nil
+	return nil
 }
 
 // LiteralEvidence converts only the decoder's stripped record after a separate

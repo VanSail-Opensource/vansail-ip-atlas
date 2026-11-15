@@ -39,18 +39,24 @@ jobs:
         run: python tools/validate_blueprint.py --report reports/capabilities.json
       - name: Focused contract regressions
         run: python -m unittest discover -s tools -p 'test_*.py' -v
-      - name: Frozen candidate and Pages identity regressions
-        run: python -m unittest tools.hosted.test_candidate -v
+      - name: Frozen candidate and hosted measurement regressions
+        run: python -m unittest tools.hosted.test_candidate tools.hosted.test_production_build tools.hosted.test_source_intake -v
       - name: Go regressions
         run: go test ./...
       - name: Go static checks
         run: go vet ./...
+      - name: Workflow syntax and expression checks
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
       - name: Selected race tests
         run: go test -race ./internal/... ./tools/source_samples
       - name: Production subscription decoder fuzz smoke
         run: go test ./internal/subscription -run '^$' -fuzz '^FuzzLiteralDecoder$' -fuzztime 10s -parallel 2
       - name: MRT parser fuzz smoke
         run: go test ./internal/intelligence -run '^$' -fuzz '^FuzzParseMRT$' -fuzztime 10s -parallel 2
+      - name: Full RPKI snapshot parser fuzz smoke
+        run: go test ./internal/admission -run '^$' -fuzz '^FuzzRPKIClientPayload$' -fuzztime 10s -parallel 2
+      - name: Positive risk feed parser fuzz smoke
+        run: go test ./internal/admission -run '^$' -fuzz '^FuzzRiskPayload$' -fuzztime 10s -parallel 2
       - name: BGP4MP event and AS4 transition fuzz smoke
         run: go test ./internal/intelligence -run '^$' -fuzz '^FuzzParseBGP4MP$' -fuzztime 10s -parallel 2
       - name: VIA3 reader fuzz smoke
@@ -77,6 +83,35 @@ jobs:
             reports/pending-gates.json
             reports/go-benchmarks.log
           retention-days: 7
+
+  source-intake:
+    needs: contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version: '1.27.3'
+          cache: true
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.13.7'
+      - name: Install pinned validation dependencies
+        run: python -m pip install -r tools/requirements.txt
+      - name: Verify full actual reviewed source intake
+        run: python tools/hosted/source_intake.py
+      - uses: actions/upload-artifact@v7.0.0
+        if: always()
+        with:
+          name: source-free-intake-status
+          path: reports/source-intake.json
+          if-no-files-found: ignore
+          retention-days: 7
+      # Source payloads, fixture receipts, lineage and normalized partitions stay
+      # on this ephemeral runner. Never upload its private working directories.
 
   bundled-codec:
     runs-on: ubuntu-24.04

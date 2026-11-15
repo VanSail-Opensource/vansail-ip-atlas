@@ -13,6 +13,7 @@
   "vue_tsc": "3.3.14",
   "leaflet_types": "1.9.22",
   "playwright": "1.65.0",
+  "axe_core": "4.14.0",
   "bundled_zstd_decoder": "fzstd@0.1.1",
   "decoder_integrity": "sha512-dkuVSOKKwh3eas5VkJy1AW1vFpet8TA/fGmVA5krThl8YcOVE/8ZIoEA1+U1vEn5ckxxhLirSdY837azmbaNHA==",
   "browser_channel": "chrome",

@@ -223,19 +223,15 @@ func (r *Release) prefixes(ctx context.Context, q string, cursor uint32) (ASNPre
 type Release struct {
 	mu             sync.Mutex
 	Manifest       Manifest
-	objects        map[string]ObjectInfo
 	load           func(string) ([]byte, error)
-	cache          map[string]*Shard
-	cacheOrder     []string
 	cacheBytes     int
-	active         map[string]bool
-	activeObjects  map[string]*Shard
 	activeBytes    int
 	routerBytes    int
-	residents      map[string]*resident
 	residentBytes  int
 	router         *Shard
 	references     map[string]*objectReference
+	cacheHead      *objectReference
+	cacheTail      *objectReference
 	usedReferences []*objectReference
 	Clock          func() int64
 	Reads          int
@@ -259,8 +255,11 @@ type shardLookup struct {
 }
 
 type objectReference struct {
-	hash   string
-	active *Shard // same query pin as activeObjects; cleared by endQuery
+	info                 ObjectInfo
+	shard                *Shard
+	size                 int
+	query, cache, router bool
+	previous, next       *objectReference // bounded intrusive FIFO cache links
 }
 
 func shardLookupMetadata(s *Shard, references []*objectReference) *shardLookup {
@@ -350,16 +349,19 @@ func NewRelease(pointerBytes, manifestBytes []byte, load func(string) ([]byte, e
 	if Hash(canonical(desc)) != manifest.ReleaseID {
 		return nil, fail("manifest")
 	}
-	r := &Release{Manifest: manifest, objects: make(map[string]ObjectInfo, len(manifest.Objects)), load: load, cache: make(map[string]*Shard), active: make(map[string]bool), activeObjects: make(map[string]*Shard), Clock: clock}
+	slots := make([]objectReference, len(manifest.Objects))
+	r := &Release{Manifest: manifest, references: make(map[string]*objectReference, len(manifest.Objects)),
+		usedReferences: make([]*objectReference, 0, len(manifest.Objects)), load: load, Clock: clock}
 	previous := ""
 	routerHash := ""
-	for _, o := range manifest.Objects {
+	for index, o := range manifest.Objects {
 		h, err := hex.DecodeString(o.SHA256)
 		if err != nil || len(h) != 32 || o.SHA256 != strings.ToLower(o.SHA256) || o.SHA256 <= previous || o.Kind < 1 || o.Kind > 14 || o.Bytes < 64 || o.Bytes >= MaxFile || !validPartition(o.Partition) {
 			return nil, fail("manifest")
 		}
 		previous = o.SHA256
-		r.objects[o.SHA256] = o
+		slots[index].info = o
+		r.references[o.SHA256] = &slots[index]
 		if o.Kind == 1 {
 			if routerHash != "" || o.Partition != "all" {
 				return nil, fail("manifest")
@@ -379,7 +381,7 @@ func NewRelease(pointerBytes, manifestBytes []byte, load func(string) ([]byte, e
 	}
 	r.router = router
 	r.routerBytes = decodedSize(router)
-	r.residents[routerHash].router = true
+	r.references[routerHash].router = true
 	r.endQuery()
 	return r, nil
 }
@@ -426,26 +428,33 @@ func (r *Release) object(ctx context.Context, hash string) (*Shard, error) {
 	if err := r.current(); err != nil {
 		return nil, err
 	}
-	if s := r.activeObjects[hash]; s != nil {
-		return s, nil
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	if s := r.cache[hash]; s != nil {
-		if err := r.admit(hash, decodedSize(s)); err != nil {
-			return nil, err
-		}
-		if r.activeObjects == nil {
-			r.activeObjects = make(map[string]*Shard)
-		}
-		r.activeObjects[hash] = s
-		return s, nil
-	}
-	info, ok := r.objects[hash]
-	if !ok {
+	reference := r.references[hash]
+	if reference == nil {
 		return nil, fail("missing_object")
+	}
+	return r.objectReference(ctx, reference)
+}
+
+func (r *Release) objectReference(ctx context.Context, reference *objectReference) (*Shard, error) {
+	if err := r.current(); err != nil {
+		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if reference.shard != nil {
+		if !reference.query {
+			if err := r.admitReference(reference, reference.size); err != nil {
+				return nil, err
+			}
+		}
+		return reference.shard, nil
+	}
+	info := reference.info
+	hash := info.SHA256
 	b, err := r.load(hash)
 	if err != nil {
 		return nil, fail("missing_object")
@@ -461,7 +470,7 @@ func (r *Release) object(ctx context.Context, hash string) (*Shard, error) {
 	if declared > PublicObjectDecoded {
 		return nil, fail("resource_limit")
 	}
-	if err := r.admit(hash, int(declared)); err != nil {
+	if err := r.admitReference(reference, int(declared)); err != nil {
 		return nil, err
 	}
 	s, err := Read(ctx, b)
@@ -479,19 +488,11 @@ func (r *Release) object(ctx context.Context, hash string) (*Shard, error) {
 	for p := 0; p < len(dir); p += 40 {
 		var encoded [64]byte
 		hex.Encode(encoded[:], dir[p+8:p+40])
-		o, ok := r.objects[string(encoded[:])]
-		if !ok || o.Kind != u16(dir, p) || o.Bytes != int(u32(dir, p+4)) || o.SHA256 == hash {
+		target := r.references[string(encoded[:])]
+		if target == nil || target.info.Kind != u16(dir, p) || target.info.Bytes != int(u32(dir, p+4)) || target == reference {
 			return nil, fail("record")
 		}
-		if r.references == nil {
-			r.references = make(map[string]*objectReference)
-		}
-		reference := r.references[o.SHA256]
-		if reference == nil {
-			reference = &objectReference{hash: o.SHA256}
-			r.references[o.SHA256] = reference
-		}
-		references[p/40] = reference
+		references[p/40] = target
 	}
 	if strings.HasPrefix(info.Partition, "4:") || strings.HasPrefix(info.Partition, "6:") {
 		parts := strings.Split(info.Partition[2:], "/")
@@ -545,11 +546,8 @@ func (r *Release) object(ctx context.Context, hash string) (*Shard, error) {
 		}
 	}
 	s.lookup = shardLookupMetadata(&s, references)
-	r.cacheObject(hash, &s)
-	if r.activeObjects == nil {
-		r.activeObjects = make(map[string]*Shard)
-	}
-	r.activeObjects[hash] = &s
+	reference.shard = &s
+	r.cacheReference(reference)
 	return &s, nil
 }
 func (r *Release) reference(ctx context.Context, from *Shard, index uint32) (*Shard, error) {
@@ -557,22 +555,7 @@ func (r *Release) reference(ctx context.Context, from *Shard, index uint32) (*Sh
 		if uint64(index) >= uint64(len(from.lookup.references)) {
 			return nil, fail("record")
 		}
-		reference := from.lookup.references[index]
-		if reference.active != nil {
-			if err := r.current(); err != nil {
-				return nil, err
-			}
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			return reference.active, nil
-		}
-		shard, err := r.object(ctx, reference.hash)
-		if err == nil {
-			reference.active = shard
-			r.usedReferences = append(r.usedReferences, reference)
-		}
-		return shard, err
+		return r.objectReference(ctx, from.lookup.references[index])
 	}
 	dir, _ := from.Rows(7)
 	if uint64(index) >= uint64(len(dir)/40) {
@@ -583,13 +566,13 @@ func (r *Release) reference(ctx context.Context, from *Shard, index uint32) (*Sh
 	// dictionary/path references do not allocate two hexadecimal copies each.
 	var encoded [64]byte
 	hex.Encode(encoded[:], dir[int(index)*40+8:int(index)*40+40])
-	info, ok := r.objects[string(encoded[:])]
-	if !ok {
+	reference := r.references[string(encoded[:])]
+	if reference == nil {
 		return nil, fail("missing_object")
 	}
-	return r.object(ctx, info.SHA256)
+	return r.objectReference(ctx, reference)
 }
-func (r *Release) label(ctx context.Context, from *Shard, row []byte, p int, target *string) (*string, error) {
+func (r *Release) label(ctx context.Context, from *Shard, row []byte, p int, target *string, labels *lookupLabels) (*string, error) {
 	object, id := u32(row, p), u32(row, p+4)
 	if object == None && id == None {
 		return nil, nil
@@ -606,8 +589,7 @@ func (r *Release) label(ctx context.Context, from *Shard, row []byte, p int, tar
 	if uint64(id)+1 >= uint64(len(offsets)/4) {
 		return nil, fail("record")
 	}
-	*target = string(text[u32(offsets, int(id)*4):u32(offsets, (int(id)+1)*4)])
-	return target, nil
+	return labels.add(text[u32(offsets, int(id)*4):u32(offsets, (int(id)+1)*4)], target)
 }
 func (s *Shard) ASNRecord(asn uint32) ([]byte, bool) {
 	index, _ := s.Rows(2)
@@ -738,6 +720,8 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 	}
 	r.beginQuery()
 	defer r.endQuery()
+	var labels lookupLabels
+	defer labels.finish() // Preserve partial error answers before releasing pins.
 	budget := newAnswerBudget()
 	if err = r.current(); err != nil {
 		return LookupAnswer{}, err
@@ -758,10 +742,10 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 				geoValues = &geoLookupValues{}
 				g := &geoValues.answer
 				g.Country, g.RegistrationCountry = countryInto(u16(row, 4), &geoValues.country), countryInto(u16(row, 6), &geoValues.registration)
-				if g.Region, err = r.label(ctx, s, row, 8, &geoValues.region); err != nil {
+				if g.Region, err = r.label(ctx, s, row, 8, &geoValues.region, &labels); err != nil {
 					return answer, err
 				}
-				if g.City, err = r.label(ctx, s, row, 16, &geoValues.city); err != nil {
+				if g.City, err = r.label(ctx, s, row, 16, &geoValues.city, &labels); err != nil {
 					return answer, err
 				}
 				answer.Geo = g
@@ -787,13 +771,13 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 				}
 				values := &networkLookupValues{answer: NetworkAnswer{Prefix: prefix.String(), Origins: origins(s, row)}}
 				n := &values.answer
-				if n.Name, err = r.label(ctx, s, row, 16, &values.name); err != nil {
+				if n.Name, err = r.label(ctx, s, row, 16, &values.name, &labels); err != nil {
 					return answer, err
 				}
-				if n.Organization, err = r.label(ctx, s, row, 24, &values.organization); err != nil {
+				if n.Organization, err = r.label(ctx, s, row, 24, &values.organization, &labels); err != nil {
 					return answer, err
 				}
-				if n.ISP, err = r.label(ctx, s, row, 32, &values.isp); err != nil {
+				if n.ISP, err = r.label(ctx, s, row, 32, &values.isp, &labels); err != nil {
 					return answer, err
 				}
 				answer.Network = n
@@ -868,10 +852,10 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 				}
 				values := &asnLookupValues{}
 				a := ASNAnswer{ASN: asn, Country: countryInto(u16(row, 24), &values.country), Risk: riskValue(row, 28, 23, &values.risk), RiskBand: []string{"unknown", "low", "medium", "high"}[row[26]], Confidence: confidence(row[27]), Prefixes: []string{}, NetworkClass: className(row[52]), Stability: stability(row[53])}
-				if a.Name, err = r.label(ctx, s, row, 8, &values.name); err != nil {
+				if a.Name, err = r.label(ctx, s, row, 8, &values.name, &labels); err != nil {
 					return answer, err
 				}
-				if a.Organization, err = r.label(ctx, s, row, 16, &values.organization); err != nil {
+				if a.Organization, err = r.label(ctx, s, row, 16, &values.organization, &labels); err != nil {
 					return answer, err
 				}
 				if present(row, 25) {
@@ -1001,6 +985,7 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 		}
 		answer.BGP.Relationships = append(answer.BGP.Relationships, edge)
 	}
+	labels.finish()
 	if err := ctx.Err(); err != nil {
 		return answer, err
 	}

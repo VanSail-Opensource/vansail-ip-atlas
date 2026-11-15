@@ -14,6 +14,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"vansail-ip-atlas/internal/intelligence"
 )
 
 type certification struct {
@@ -90,7 +92,43 @@ func (e *Engine) certify(ctx context.Context, source Source, adapter adapter, no
 	defer file.Close()
 	// Review evidence is necessary, but not sufficient: the current adapter must
 	// still successfully parse the exact reviewed fixture on this run.
-	_, err = parsePayload(ctx, file, size, source, adapter, tested)
+	count := uint64(0)
+	if fixture.PayloadFormat == "decoded-csv" {
+		selected, supported := selectAdapter(source)
+		if !supported || selected != adapter || adapter != ipapiCityZIP && (adapter != bulkAdapter || !dbipProvider(source)) {
+			return errors.New("decoded CSV fixture requires its selected geolocation provider adapter")
+		}
+		if fixture.ContentEncoding != "" && fixture.ContentEncoding != "identity" {
+			return errors.New("decoded fixture has an unsupported second envelope")
+		}
+		err = parseGeoProviderFixture(ctx, file, source, (64<<20)/2, func(record intelligence.NormalizedRecord) error { count++; return record.Validate() })
+		if err == nil && count == 0 {
+			return errors.New("reviewed decoded fixture contains no accepted records")
+		}
+		return err
+	}
+	if fixture.PayloadFormat != "" && fixture.PayloadFormat != "original" {
+		return errors.New("unknown fixture payload stage")
+	}
+	fixtureSource := source
+	switch fixture.ContentEncoding {
+	case "", "identity":
+	case "gzip":
+		switch source.Format {
+		case "json":
+			fixtureSource.Format = "json-gz"
+		case "csv":
+			fixtureSource.Format = "csv-gz"
+		default:
+			return errors.New("unsupported fixture content encoding")
+		}
+	default:
+		return errors.New("unknown fixture content encoding")
+	}
+	err = parsePayloadTo(ctx, file, size, fixtureSource, adapter, tested, (64<<20)/2, func(record intelligence.NormalizedRecord) error { count++; return record.Validate() })
+	if err == nil && count == 0 {
+		return errors.New("reviewed fixture contains no accepted records")
+	}
 	return err
 }
 
@@ -237,6 +275,20 @@ func CertificationFingerprint(ctx context.Context, workspace string, sources []S
 		hash.Write([]byte(source.ID + "\x00" + source.Fixture.Path + "\x00"))
 		hash.Write(fixture[:])
 		hash.Write([]byte{0})
+		if companion := source.MRTUpdatesFixture; companion != nil && companion.Status == "passed" {
+			path, err := privateFile(base, filepath.Join(root, filepath.FromSlash(companion.Path)))
+			if err != nil {
+				return output, err
+			}
+			digest, size, err := hashFile(ctx, path, remaining)
+			if err != nil {
+				return output, err
+			}
+			remaining -= size
+			hash.Write([]byte(source.ID + "-updates\x00" + companion.Path + "\x00"))
+			hash.Write(digest[:])
+			hash.Write([]byte{0})
+		}
 	}
 	copy(output[:], hash.Sum(nil))
 	return output, nil

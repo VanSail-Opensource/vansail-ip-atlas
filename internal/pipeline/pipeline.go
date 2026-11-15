@@ -60,7 +60,10 @@ type Options struct {
 	ProductionGate          func(context.Context) error
 	// InputGate binds source/config/state inputs throughout a build in either
 	// mode. It is independent of the mandatory production capability gate.
-	InputGate func(context.Context) error
+	InputGate       func(context.Context) error
+	externalScratch func() uint64
+	scratchUsage    func(uint64)
+	prefixProvider  via3.ASNPrefixProvider
 }
 
 // Stats account this compiler's files and process, not unrelated processes or
@@ -115,7 +118,7 @@ func Build(ctx context.Context, options Options, produce Producer) (Candidate, e
 	if err := options.Limits.validate(); err != nil {
 		return result, err
 	}
-	if produce == nil || options.Mode != "synthetic" && options.Mode != "production" || options.Clock < 0 || options.ValidUntil <= options.Clock || options.ValidUntil-options.Clock > 720*3600 || options.ValidUntil > 9007199254740991 {
+	if produce == nil || options.Mode != "synthetic" && options.Mode != "production" && options.Mode != "engineering" || options.Clock < 0 || options.ValidUntil <= options.Clock || options.ValidUntil-options.Clock > 720*3600 || options.ValidUntil > 9007199254740991 {
 		return result, errors.New("invalid pipeline contract")
 	}
 	gate := func(gateCtx context.Context) error {
@@ -317,12 +320,19 @@ func (c *compiler) next() string {
 	return filepath.Join(c.scratch, fmt.Sprintf("run-%08d.bin", c.serial))
 }
 func (c *compiler) reserve(n uint64) error {
-	if n > c.options.Limits.ScratchBytes-c.used {
+	extra := uint64(0)
+	if c.options.externalScratch != nil {
+		extra = c.options.externalScratch()
+	}
+	if extra > c.options.Limits.ScratchBytes || c.used > c.options.Limits.ScratchBytes-extra || n > c.options.Limits.ScratchBytes-extra-c.used {
 		return errors.New("pipeline scratch ceiling exceeded")
 	}
 	c.used += n
-	if c.used > c.stats.ScratchPeak {
-		c.stats.ScratchPeak = c.used
+	if c.options.scratchUsage != nil {
+		c.options.scratchUsage(c.used)
+	}
+	if c.used+extra > c.stats.ScratchPeak {
+		c.stats.ScratchPeak = c.used + extra
 	}
 	return nil
 }
@@ -335,6 +345,9 @@ func (c *compiler) remove(path string) error {
 		return err
 	}
 	c.used -= uint64(info.Size())
+	if c.options.scratchUsage != nil {
+		c.options.scratchUsage(c.used)
+	}
 	return nil
 }
 func (c *compiler) write(path string, data []byte) error {
@@ -796,7 +809,7 @@ func (c *compiler) partition(path string, s scope) error {
 	r.file.Close()
 	var compiled via3.CompiledPartition
 	if !overflow {
-		compiled, err = via3.CompilePartition(c.ctx, via3.PartitionInput{Partition: s.name(), Records: records})
+		compiled, err = via3.CompilePartition(c.ctx, via3.PartitionInput{Partition: s.name(), Records: records, PrefixProvider: c.options.prefixProvider})
 		if err != nil {
 			code := via3.ErrorCode(err)
 			if code == "partition_budget" || code == "resource_limit" || code == "length" {

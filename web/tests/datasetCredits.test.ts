@@ -44,7 +44,7 @@ test('credit index pins content-addressed documents and rejects unrelated or dup
   assert.throws(() => parseCreditIndex(bytes({ ...index, releases: [{ ...index.releases[0], credits_path: '/private.json?q=1' }] })))
 })
 
-test('only opening credits fetches shared metadata without any query or external origin', async () => {
+test('credit verification fetches release-scoped static metadata without any query or external origin', async () => {
   const document = bytes({ format_version: 1, release_id: id, mode: 'synthetic', entries: [] })
   const hash = Buffer.from(await crypto.subtle.digest('SHA-256', document)).toString('hex')
   const index = bytes({ format_version: 1, current_release_id: id, releases: [{ release_id: id, credits_path: `/_atlas/credits/${hash}.json`, credits_sha256: hash }] })

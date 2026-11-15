@@ -152,6 +152,55 @@ try {
         requests: creditRequests, external_requests: 0, query_associations: 0 }
     } finally { await isolated.close() }
   })
+  await test('production facts wait for verified credits and keep publisher links visible', async () => {
+    // Isolated HTTP controls exercise the real worker/controller with a mock
+    // production-mode manifest. These bytes never enter the frozen candidate.
+    const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(',')}]`
+      : value && typeof value === 'object' ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}` : JSON.stringify(value)
+    const pointer = await (await context.request.get(`${base}/_atlas/current.json`)).json()
+    const original = await (await context.request.get(`${base}${pointer.manifest_path}`)).json()
+    const { release_id: ignored, ...descriptor } = original
+    descriptor.mode = 'production'
+    const releaseId = createHash('sha256').update(canonical(descriptor)).digest('hex')
+    const manifest = Buffer.from(canonical({ ...descriptor, release_id: releaseId }))
+    const mockPointer = canonical({ format_version: 3, release_id: releaseId, manifest_path: `/_atlas/releases/${releaseId}/manifest.json`, manifest_sha256: createHash('sha256').update(manifest).digest('hex') })
+    const entry = { name: 'Legal placement fixture', text: 'Isolated placement check, never included in candidate data.', url: 'https://publisher.example/credit' }
+    const document = Buffer.from(canonical({ format_version: 1, release_id: releaseId, mode: 'production', entries: [entry] }))
+    const hash = createHash('sha256').update(document).digest('hex'), creditPath = `/_atlas/credits/${hash}.json`
+    const index = canonical({ format_version: 1, current_release_id: releaseId, releases: [{ release_id: releaseId, credits_path: creditPath, credits_sha256: hash }] })
+    for (const corrupt of [false, true]) {
+      const isolated = await browser.newContext({ serviceWorkers: 'block' })
+      let releaseCredit, requested
+      const delay = new Promise(resolve => { releaseCredit = resolve }), started = new Promise(resolve => { requested = resolve })
+      try {
+        await isolated.route('**/_atlas/current.json', route => route.fulfill({ contentType: 'application/json', body: mockPointer }))
+        await isolated.route(`**/_atlas/releases/${releaseId}/manifest.json`, route => route.fulfill({ contentType: 'application/json', body: manifest }))
+        await isolated.route('**/dataset-credits.json', route => route.fulfill({ contentType: 'application/json', body: index }))
+        await isolated.route(`**${creditPath}`, async route => { requested(); await delay; await route.fulfill({ contentType: 'application/json', body: corrupt ? '{}' : document }) })
+        const creditPage = await isolated.newPage()
+        await creditPage.goto(`${base}/ip/quality/?q=203.0.113.1`)
+        await Promise.race([started, new Promise((_, reject) => setTimeout(() => reject(new Error('Credit verification did not start')), 20000))])
+        assert(await creditPage.getByRole('status').isVisible())
+        assert.equal(await creditPage.locator('.quality-layout').count(), 0, 'Production facts must wait for credit integrity')
+        releaseCredit()
+        if (corrupt) {
+          await creditPage.getByRole('alert').waitFor()
+          assert.equal(await creditPage.locator('.quality-layout').count(), 0, 'Unverified legal metadata cannot leave production facts visible')
+        } else {
+          await creditPage.locator('.quality-layout').waitFor()
+          const visible = creditPage.getByTestId('visible-dataset-credits')
+          assert(await visible.isVisible())
+          assert.equal(await visible.locator('a').getAttribute('href'), entry.url)
+          const details = creditPage.getByTestId('dataset-credits')
+          assert(await details.evaluate(node => node.open), 'Required full notices open when production data first appears')
+          await details.locator('summary').click()
+          assert(await visible.isVisible(), 'Required credit remains visible after collapsing notices')
+          assert.equal(await creditPage.locator('.demo-label').count(), 0)
+        }
+      } finally { releaseCredit(); await isolated.close() }
+    }
+    report.production_credit_fixture = { scope: 'isolated-intercept-only-not-candidate-data', delayed_facts: true, corrupted_document_rejected: true, visible_collapsed_credit: true }
+  })
   await test('global credit renderer escapes notices and exposes safe keyboard-accessible links', async () => {
     // An isolated HTTP mock exercises a nonempty legal display. It is never
     // written to the candidate and does not claim inclusion of a real dataset.
@@ -187,6 +236,10 @@ try {
         assert.equal(await link.getAttribute('rel'), 'noopener noreferrer')
         assert.equal(await link.getAttribute('referrerpolicy'), 'no-referrer')
       }
+      const visibleCredits = creditPage.getByTestId('visible-dataset-credits')
+      assert(await visibleCredits.isVisible(), 'Required credit links must be visible outside the disclosure')
+      await details.locator('summary').click()
+      assert(await visibleCredits.isVisible(), 'Closing full notices must not hide the required publisher credit')
       assert.deepEqual(external, [], 'Displaying credits must not fetch the publisher or license origin')
       report.credit_renderer_fixture = { scope: 'isolated-intercept-only-not-candidate-data', entries: 1, external_requests: 0 }
     } finally { await isolated.close() }

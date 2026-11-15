@@ -18,6 +18,7 @@ FIELD_TARGETS = {
     "country_code": {"physical_country", "registration_country"},
     "allocation_country": {"registration_country"}, "region": {"region"}, "city": {"city"},
     "coordinates": {"latitude", "longitude", "coordinate_precision"},
+    "latitude": {"latitude"}, "longitude": {"longitude"},
     "asn": {"asn", "origins", "bgp_origins"}, "organization": {"organization"}, "isp": {"isp"},
     "handle": {"as_name"}, "description": {"organization"}, "country-code": {"asn_country"},
     "network_type": {"usage_type"}, "usage_type": {"usage_type"},
@@ -161,6 +162,18 @@ def validate_sources(config):
             or source["fixture"]["tested_at"] is not None
         ):
             raise ContractError(f"{sid}: missing fixture has certification data")
+        companion = source.get("mrt_updates_fixture")
+        if companion is not None:
+            if source["category"] != "bgp" or source["scope"] != "path" or len(sid) > 120:
+                raise ContractError(f"{sid}: MRT UPDATE fixture scope invalid")
+            if companion["status"] == "missing" and (companion["sha256"] is not None or companion["schema_observed"] or companion["tested_at"] is not None):
+                raise ContractError(f"{sid}: missing MRT UPDATE fixture has certification data")
+            if companion["status"] == "passed":
+                from .policy import fixture_issues
+                controls = {**source, "id": sid + "-updates", "fixture": companion,
+                            "parser": {"id": "mrt-bgp4mp", "schema": "mrt-bgp4mp-unicast-v1", "version": 1}}
+                if fixture_issues(controls, ROOT):
+                    raise ContractError(f"{sid}: MRT UPDATE fixture is not certified")
         if source["category"] == "proxy_subscription_ip" and (
             source["evidence_family"] != "public-subscription-aggregators"
             or source["fields"] != ["ip", "proxy"]
@@ -186,6 +199,8 @@ def validate_sources(config):
             if static_issues(source, ROOT):
                 raise ContractError(f"{sid}: active admission gates failed")
     by_id = {s["id"]: s for s in sources}
+    if any("mrt_updates_fixture" in s and s["id"] + "-updates" in by_id for s in sources):
+        raise ContractError("MRT UPDATE companion identity collides with a source")
     visiting, visited = set(), set()
 
     def visit(sid):

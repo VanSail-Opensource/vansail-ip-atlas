@@ -1,10 +1,12 @@
 import { AtlasClient, type LookupAnswer, type ClassCAnswer } from '~/lib/via3'
 import { resolve, validateOrigin } from '~/lib/query'
+import { loadDatasetCredits, type CreditDocument } from '~/lib/datasetCredits'
 
 let atlas: AtlasClient | undefined
 export function useAtlas() {
   const route = useRoute()
-  const releaseInfo = useState<{ releaseId: string; validUntil: number } | null>('atlas-release-info', () => null)
+  const releaseInfo = useState<{ releaseId: string; validUntil: number; synthetic: boolean } | null>('atlas-release-info', () => null)
+  const verifiedCredits = useState<CreditDocument | null>('atlas-dataset-credits', () => null)
   const data = shallowRef<LookupAnswer | null>(null)
   const classC = shallowRef<ClassCAnswer | null>(null)
   const error = ref('')
@@ -18,6 +20,7 @@ export function useAtlas() {
   let ready = false
   function invalidate() {
     releaseInfo.value = null
+    verifiedCredits.value = null
     serial++
     active?.abort()
     data.value = null
@@ -28,6 +31,7 @@ export function useAtlas() {
 
   async function load() {
     releaseInfo.value = null
+    verifiedCredits.value = null
     const run = ++serial
     active?.abort()
     active = new AbortController()
@@ -71,8 +75,17 @@ export function useAtlas() {
             cells: Array.from({ length: 256 }, (_, suffix) => ({ ip: `${base}.${suffix}`, observed: false, score: null, confidence: 'unrated', reasons: [], usage: 'unknown', origins: [] })) }
         } else classC.value = cells
       }
+      // Reviewed credits are part of a production release. Verify their exact
+      // release document before showing facts that depend on those datasets.
+      if (!answer.synthetic) {
+        const credits = await loadDatasetCredits(answer.releaseId, AbortSignal.any([active.signal, AbortSignal.timeout(10_000)]))
+        if (run !== serial) return
+        if (credits.mode !== 'production') throw new Error('release_credits')
+        verifiedCredits.value = credits
+      }
+      if (Date.now() / 1000 >= answer.validUntil) throw new Error('release_expired')
       data.value = answer
-      releaseInfo.value = { releaseId: answer.releaseId, validUntil: answer.validUntil }
+      releaseInfo.value = { releaseId: answer.releaseId, validUntil: answer.validUntil, synthetic: answer.synthetic }
     } catch (cause) {
       if (run !== serial || active.signal.aborted) return
       const code = cause instanceof Error ? cause.message : ''

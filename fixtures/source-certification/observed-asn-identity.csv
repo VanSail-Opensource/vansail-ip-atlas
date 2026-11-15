@@ -1,0 +1,33 @@
+asn,handle,description,country-code
+1,LVLT-1,Level 3 Parent LLC,US
+2,UDEL-DCN,University of Delaware,US
+3,MIT-GATEWAYS,Massachusetts Institute of Technology,US
+4,ISI-AS,University of Southern California,US
+5,SYMBOLICS,WFA Group LLC,US
+6,BULL-NETWORK,"ATOS IT Solutions and Services, Inc.",US
+7,DSTL,The Defence Science and Technology Laboratory,GB
+8,RICE-AS,Rice University,US
+9,CMU-ROUTER,Carnegie Mellon University,US
+10,CSNET-EXT-AS,CSNET Coordination and Information Center (CSNET-CIC),US
+11,HARVARD,Harvard University,US
+12,NYU-DOMAIN,New York University,US
+13,DNIC-AS-00013,Headquarters USAISC,US
+14,COLUMBIA-GW,Columbia University,US
+15,NET-DYNAMICS-EXP,DYNAMICS,US
+16,LBL,Lawrence Berkeley National Laboratory,US
+17,PURDUE,Purdue University,US
+18,UTEXAS,University of Texas at Austin,US
+19,LEIDOS-AS,Leidos Inc.,US
+20,UR,University of Rochester,US
+21,RAND,The RAND Corporation,US
+22,DNIC-AS-00022,Navy Network Information Center (NNIC),US
+23,AS23,National Aeronautics and Space Administration,US
+24,AS24,National Aeronautics and Space Administration,US
+25,UCB,University of California at Berkeley,US
+26,CORNELL,Cornell University,US
+27,UMDNET,University of Maryland,US
+28,DFVLR-SYS,Deutsches Zentrum fuer Luft- und Raumfahrt e.V.,DE
+29,YALE-AS,Yale University,US
+30,SRI-AICNET,SRI International,US
+31,CIT,California Institute of Technology,US
+32,STANFORD,Stanford University,US

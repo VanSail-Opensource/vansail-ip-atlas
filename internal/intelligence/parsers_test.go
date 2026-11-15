@@ -182,7 +182,7 @@ func FuzzParseMRT(f *testing.F) {
 	})
 }
 func TestVRPLongestCoverAndMOAS(t *testing.T) {
-	index, err := NewVRPIndex([]VRP{{netip.MustParsePrefix("2001:db8::/32"), 48, 100}, {netip.MustParsePrefix("2001:db8:1::/48"), 48, 200}}, true)
+	index, err := NewVRPIndex([]VRP{{Prefix: netip.MustParsePrefix("2001:db8::/32"), MaxLength: 48, ASN: 100}, {Prefix: netip.MustParsePrefix("2001:db8:1::/48"), MaxLength: 48, ASN: 200}}, true)
 	if err != nil {
 		t.Fatal(err)
 	}

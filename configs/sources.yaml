@@ -26,7 +26,7 @@ build:
     max_one_uncompressed_mib: 3072
     max_line_bytes: 1048576
     max_archive_entries: 10000
-    user_agent: IPDB-BulkBuilder/0.1 (+CONTACT_EMAIL_REQUIRED)
+    user_agent: VanSail-IP-Atlas/3 (+https://github.com/VanSail-Opensource/vansail-ip-atlas)
   normalize:
     sort_buffer_mib: 96
     max_parallel_partitions: 2
@@ -209,6 +209,7 @@ build:
     minimum_independent_path_families: 2
     mrt_acquisition: two-families-sequential-cold-build-with-shared-byte-budget
   release:
+    compiled_data_license: CC-BY-SA-4.0
     atomic_manifest_pointer: current.json
     frontend_api_calls: false
     retain_attribution: true
@@ -405,7 +406,7 @@ sources:
   evidence_family: sapics-original-country
   source_group: sapics-original-country
   category: geolocation
-  admission: rights_approved
+  admission: active
   download:
     url: https://github.com/sapics/ip-location-db/releases/download/latest/user-country-ipv4.csv
     format: range-csv
@@ -421,38 +422,47 @@ sources:
     identifier: PDDL-1.0
     distribution: allow
     evidence_url: https://github.com/sapics/ip-location-db/blob/main/README.md
-    review_basis: publisher documentation, 2026-10-30; owner must revalidate prior to first public release
-    attribution_required: null
+    review_basis: '2026-11-09: inspected publisher original-country PDDL-1.0 grant and actual complete three-column
+      release CSV. Exact asset SHA-256, size and asset creation clock verified; no attribution condition. All variants
+      remain one correlated family.'
+    attribution_required: false
   trust:
     source_weight: 70
     correlation_group: sapics-original-country
   scope: prefix
-  notes: Original compiled dataset; registered/WHOIS/geofeed-derived country evidence, not guaranteed physical location.
-    Confirm exact schema against README.
+  notes: Observed start-address,end-address,country-code CSV. Published country is evidence, not verified device
+    location; user-country prioritizes end-user geography and server-country prioritizes relay geography. Correlated
+    conflicting values cannot manufacture independent support.
   publication_proof:
     kind: github_release
-    locator: https://api.github.com/repos/sapics/ip-location-db/releases/latest
-    field: published_at
+    locator: https://api.github.com/repos/sapics/ip-location-db/releases/tags/latest
+    field: assets.created_at
   coverage:
     kind: mapping
     scope: prefix
   fixture:
-    status: missing
-    sha256: null
-    schema_observed: false
-    tested_at: null
+    status: passed
+    path: fixtures/source-certification/observed-user-country-ipv4.csv
+    sha256: 28568361445bb9b69974be1730ad27e03ff621f0a20c49c80bd674065b4cd6b8
+    parser: country-range-csv
+    schema: start-end-country-csv-v1
+    schema_observed: true
+    tested_at: '2026-11-15T03:21:13Z'
+    synthetic: false
   parser:
-    id: null
-    schema: null
-    version: null
-  public_fields: []
-  field_mappings: {}
+    id: country-range-csv
+    schema: start-end-country-csv-v1
+    version: 1
+  public_fields:
+  - physical_country
+  field_mappings:
+    country_code: physical_country
   signals: []
 - id: sapics-user-country-v6
   evidence_family: sapics-original-country
   source_group: sapics-original-country
   category: geolocation
-  admission: rights_approved
+  admission: active
   download:
     url: https://github.com/sapics/ip-location-db/releases/download/latest/user-country-ipv6.csv
     format: range-csv
@@ -468,37 +478,47 @@ sources:
     identifier: PDDL-1.0
     distribution: allow
     evidence_url: https://github.com/sapics/ip-location-db/blob/main/README.md
-    review_basis: publisher documentation, 2026-10-30; owner must revalidate prior to first public release
-    attribution_required: null
+    review_basis: '2026-11-09: inspected publisher original-country PDDL-1.0 grant and actual complete three-column
+      release CSV. Exact asset SHA-256, size and asset creation clock verified; no attribution condition. All variants
+      remain one correlated family.'
+    attribution_required: false
   trust:
     source_weight: 70
     correlation_group: sapics-original-country
   scope: prefix
-  notes: IPv6 counterpart, correlated with user-country-v4 publisher.
+  notes: Observed start-address,end-address,country-code CSV. Published country is evidence, not verified device
+    location; user-country prioritizes end-user geography and server-country prioritizes relay geography. Correlated
+    conflicting values cannot manufacture independent support.
   publication_proof:
     kind: github_release
-    locator: https://api.github.com/repos/sapics/ip-location-db/releases/latest
-    field: published_at
+    locator: https://api.github.com/repos/sapics/ip-location-db/releases/tags/latest
+    field: assets.created_at
   coverage:
     kind: mapping
     scope: prefix
   fixture:
-    status: missing
-    sha256: null
-    schema_observed: false
-    tested_at: null
+    status: passed
+    path: fixtures/source-certification/observed-user-country-ipv6.csv
+    sha256: 780d2a253095b64bf00230ad8c5eb40798ac18299eba073269eb25c96a0ba0e2
+    parser: country-range-csv
+    schema: start-end-country-csv-v1
+    schema_observed: true
+    tested_at: '2026-11-15T03:21:13Z'
+    synthetic: false
   parser:
-    id: null
-    schema: null
-    version: null
-  public_fields: []
-  field_mappings: {}
+    id: country-range-csv
+    schema: start-end-country-csv-v1
+    version: 1
+  public_fields:
+  - physical_country
+  field_mappings:
+    country_code: physical_country
   signals: []
 - id: sapics-server-country-v4
-  evidence_family: sapics-original-server
-  source_group: sapics-original-server
+  evidence_family: sapics-original-country
+  source_group: sapics-original-country
   category: geolocation
-  admission: rights_approved
+  admission: active
   download:
     url: https://github.com/sapics/ip-location-db/releases/download/latest/server-country-ipv4.csv
     format: range-csv
@@ -514,31 +534,41 @@ sources:
     identifier: PDDL-1.0
     distribution: allow
     evidence_url: https://github.com/sapics/ip-location-db/blob/main/README.md
-    review_basis: publisher documentation, 2026-10-30; owner must revalidate prior to first public release
-    attribution_required: null
+    review_basis: '2026-11-09: inspected publisher original-country PDDL-1.0 grant and actual complete three-column
+      release CSV. Exact asset SHA-256, size and asset creation clock verified; no attribution condition. All variants
+      remain one correlated family.'
+    attribution_required: false
   trust:
     source_weight: 70
-    correlation_group: sapics-original-server
+    correlation_group: sapics-original-country
   scope: prefix
-  notes: Distinct country methodology; do not treat same website as independent upstream by default.
+  notes: Observed start-address,end-address,country-code CSV. Published country is evidence, not verified device
+    location; user-country prioritizes end-user geography and server-country prioritizes relay geography. Correlated
+    conflicting values cannot manufacture independent support.
   publication_proof:
     kind: github_release
-    locator: https://api.github.com/repos/sapics/ip-location-db/releases/latest
-    field: published_at
+    locator: https://api.github.com/repos/sapics/ip-location-db/releases/tags/latest
+    field: assets.created_at
   coverage:
     kind: mapping
     scope: prefix
   fixture:
-    status: missing
-    sha256: null
-    schema_observed: false
-    tested_at: null
+    status: passed
+    path: fixtures/source-certification/observed-server-country-ipv4.csv
+    sha256: 28568361445bb9b69974be1730ad27e03ff621f0a20c49c80bd674065b4cd6b8
+    parser: country-range-csv
+    schema: start-end-country-csv-v1
+    schema_observed: true
+    tested_at: '2026-11-15T03:21:13Z'
+    synthetic: false
   parser:
-    id: null
-    schema: null
-    version: null
-  public_fields: []
-  field_mappings: {}
+    id: country-range-csv
+    schema: start-end-country-csv-v1
+    version: 1
+  public_fields:
+  - physical_country
+  field_mappings:
+    country_code: physical_country
   signals: []
 - id: sapics-dbip-city-v4
   evidence_family: dbip-lite
@@ -642,8 +672,14 @@ sources:
   evidence_family: dbip-lite
   source_group: dbip-lite
   category: geolocation
-  admission: candidate
-  discovery: https://db-ip.com/db/lite.php
+  admission: active
+  discovery:
+    mode: latest-timestamped-asset
+    requires_exact_file: true
+    index_url: https://db-ip.com/db/download/ip-to-city-lite
+    filename_pattern: dbip-city-lite-[0-9]{4}-[0-9]{2}\.csv\.gz
+    ordering: filename-date-desc-then-url-bytes
+    no_guessing: true
   download:
     url: null
     format: csv-gz
@@ -655,47 +691,74 @@ sources:
   - country_code
   - region
   - city
-  - coordinates
+  - latitude
+  - longitude
   depends_on: []
   license:
-    status: needs-review
+    status: reviewed
     identifier: CC-BY-4.0
-    distribution: review
-    evidence_url: null
-    attribution_required: null
+    distribution: allow
+    evidence_url: https://db-ip.com/db/download/ip-to-city-lite
+    attribution_required: true
+    review_basis: '2026-11-09: original publisher CC BY 4.0 and web backlink condition reviewed; complete November
+      gzip decoded to 7,777,816 rows and matched publisher CSV SHA1+MD5. Calendar month start is conservative content
+      clock; full hashes, page proof and decoded identity retained privately.'
+    attribution:
+      name: DB-IP IP to City Lite
+      text: IP geolocation by DB-IP. VanSail IP Atlas selects and compiles the monthly Lite CSV into prefix mappings;
+        city coordinates are approximate.
+      url: https://db-ip.com
+      license_url: https://creativecommons.org/licenses/by/4.0/
   trust:
     source_weight: 70
     correlation_group: dbip-lite
   scope: prefix
-  notes: Monthly original DB-IP Lite; mirror is alternate fetch path.
+  notes: Original monthly city dataset. Resolve only the exact current official page asset and verify full decoded
+    publisher checksums; no HTTP-clock freshness. Correlated mirrors remain one family. Compiled adaptation CC BY-SA
+    4.0 with visible publisher credit.
   publication_proof:
-    kind: unavailable
-    locator: null
-    field: null
+    kind: snapshot_metadata
+    locator: https://db-ip.com/db/download/ip-to-city-lite
+    field: csv.sha1-md5.month
   coverage:
     kind: mapping
     scope: prefix
   fixture:
-    status: missing
-    sha256: null
-    schema_observed: false
-    tested_at: null
+    status: passed
+    sha256: 9f1d79394ceedd24445922f84d17325c0f1809cadac60da410a5c7610bbf57ef
+    schema_observed: true
+    tested_at: '2026-11-15T03:21:13Z'
+    path: fixtures/source-certification/observed-dbip-city.csv
+    parser: city-range-csv
+    schema: dbip-city-eight-columns-v1
+    synthetic: false
+    payload_format: decoded-csv
   parser:
-    id: null
-    schema: null
-    version: null
-  public_fields: []
-  field_mappings: {}
+    id: city-range-csv
+    schema: dbip-city-eight-columns-v1
+    version: 1
+  public_fields:
+  - physical_country
+  - region
+  - city
+  - latitude
+  - longitude
+  field_mappings:
+    country_code: physical_country
+    region: region
+    city: city
+    latitude: latitude
+    longitude: longitude
   signals: []
 - id: ipapi-free-geo-v4
   evidence_family: ipapi-free-geo
   source_group: ipapi-free-geo
   category: geolocation
-  admission: candidate
+  admission: active
   discovery: https://ipapi.is/geolocation.html
   download:
-    url: null
-    format: csv
+    url: https://ipapi.is/data/geolocationDatabaseIPv4.csv.zip
+    format: zip
     max_compressed_mib: 750
   refresh:
     interval: 168h
@@ -704,49 +767,76 @@ sources:
   - country_code
   - region
   - city
-  - coordinates
-  - accuracy
+  - latitude
+  - longitude
   depends_on: []
   license:
-    status: needs-review
+    status: reviewed
     identifier: CC-BY-SA-4.0
-    distribution: review
-    evidence_url: null
-    attribution_required: null
+    distribution: allow
+    evidence_url: https://ipapi.is/geolocation.html
+    attribution_required: true
+    review_basis: '2026-11-09: actual free ZIP notice and publisher terms section 2 reviewed. Free WHOIS-derived
+      subset is CC BY-SA 4.0 with web credit and same-license derived database; owner expressly approved compiled-data
+      CC BY-SA 4.0. Complete archive CRC, exact notice hash, decoded identity and UTC Extended Timestamp validated;
+      HTTP/page time and DOS time are not publication clocks.'
+    attribution:
+      name: ipapi.is Free IP Geolocation Database
+      text: Contains data from ipapi.is, licensed under CC BY-SA 4.0. VanSail IP Atlas selects and compiles the
+        free WHOIS-derived CSV into prefix mappings, suppressing details that exceed the publisher accuracy level;
+        the compiled adaptation is licensed under CC BY-SA 4.0.
+      url: https://ipapi.is
+      license_url: https://creativecommons.org/licenses/by-sa/4.0/
   trust:
     source_weight: 70
     correlation_group: ipapi-free-geo
   scope: prefix
-  notes: 'Free full geolocation CSV (not sample): very large (~559 MB stated 2026-10-28); optional budgeted weekly
-    job. Resolve official download link.'
+  notes: Free WHOIS geolocation subset, not complete Internet assessment coverage. Verified original ZIP member
+    UTC modification bound (2026-10-19) is conservative and cannot be reset by wrapper timestamps or recompression.
+    Accuracy 1/2 city centroid, 3 region only, 4/5 country only. No timezone/postal/continent/source column survives.
   publication_proof:
-    kind: unavailable
-    locator: null
-    field: null
+    kind: embedded
+    locator: https://ipapi.is/data/geolocationDatabaseIPv4.csv.zip
+    field: zip.csv.extended_timestamp
   coverage:
     kind: mapping
     scope: prefix
   fixture:
-    status: missing
-    sha256: null
-    schema_observed: false
-    tested_at: null
+    status: passed
+    sha256: 4df74d3dbe3a08c3bc7e6a63d4c3912f7bf4932fc203a69f566656f1f71e2836
+    schema_observed: true
+    tested_at: '2026-11-15T03:21:13Z'
+    path: fixtures/source-certification/observed-ipapi-city-ipv4.csv
+    parser: ipapi-free-city-csv
+    schema: ipapi-free-fourteen-columns-v1
+    synthetic: false
+    payload_format: decoded-csv
   parser:
-    id: null
-    schema: null
-    version: null
-  public_fields: []
-  field_mappings: {}
+    id: ipapi-free-city-csv
+    schema: ipapi-free-fourteen-columns-v1
+    version: 1
+  public_fields:
+  - physical_country
+  - region
+  - city
+  - latitude
+  - longitude
+  field_mappings:
+    country_code: physical_country
+    region: region
+    city: city
+    latitude: latitude
+    longitude: longitude
   signals: []
 - id: ipapi-free-geo-v6
   evidence_family: ipapi-free-geo
   source_group: ipapi-free-geo
   category: geolocation
-  admission: candidate
+  admission: active
   discovery: https://ipapi.is/geolocation.html
   download:
-    url: null
-    format: csv
+    url: https://ipapi.is/data/geolocationDatabaseIPv6.csv.zip
+    format: zip
     max_compressed_mib: 350
   refresh:
     interval: 168h
@@ -755,38 +845,66 @@ sources:
   - country_code
   - region
   - city
-  - coordinates
-  - accuracy
+  - latitude
+  - longitude
   depends_on: []
   license:
-    status: needs-review
+    status: reviewed
     identifier: CC-BY-SA-4.0
-    distribution: review
-    evidence_url: null
-    attribution_required: null
+    distribution: allow
+    evidence_url: https://ipapi.is/geolocation.html
+    attribution_required: true
+    review_basis: '2026-11-09: actual free ZIP notice and publisher terms section 2 reviewed. Free WHOIS-derived
+      subset is CC BY-SA 4.0 with web credit and same-license derived database; owner expressly approved compiled-data
+      CC BY-SA 4.0. Complete archive CRC, exact notice hash, decoded identity and UTC Extended Timestamp validated;
+      HTTP/page time and DOS time are not publication clocks.'
+    attribution:
+      name: ipapi.is Free IP Geolocation Database
+      text: Contains data from ipapi.is, licensed under CC BY-SA 4.0. VanSail IP Atlas selects and compiles the
+        free WHOIS-derived CSV into prefix mappings, suppressing details that exceed the publisher accuracy level;
+        the compiled adaptation is licensed under CC BY-SA 4.0.
+      url: https://ipapi.is
+      license_url: https://creativecommons.org/licenses/by-sa/4.0/
   trust:
     source_weight: 70
     correlation_group: ipapi-free-geo
   scope: prefix
-  notes: Free full IPv6 geolocation CSV (~130 MB stated); commercial ASN/VPN/hosting are SAMPLE ONLY.
+  notes: Free WHOIS geolocation subset, not complete Internet assessment coverage. Verified original ZIP member
+    UTC modification bound (2026-10-19) is conservative and cannot be reset by wrapper timestamps or recompression.
+    Accuracy 1/2 city centroid, 3 region only, 4/5 country only. No timezone/postal/continent/source column survives.
   publication_proof:
-    kind: unavailable
-    locator: null
-    field: null
+    kind: embedded
+    locator: https://ipapi.is/data/geolocationDatabaseIPv6.csv.zip
+    field: zip.csv.extended_timestamp
   coverage:
     kind: mapping
     scope: prefix
   fixture:
-    status: missing
-    sha256: null
-    schema_observed: false
-    tested_at: null
+    status: passed
+    sha256: 99f6c0ba9fbeacda88749d62782ba1a9eadb55aea2a5e4940a6f4a20b03704b7
+    schema_observed: true
+    tested_at: '2026-11-15T03:21:13Z'
+    path: fixtures/source-certification/observed-ipapi-city-ipv6.csv
+    parser: ipapi-free-city-csv
+    schema: ipapi-free-fourteen-columns-v1
+    synthetic: false
+    payload_format: decoded-csv
   parser:
-    id: null
-    schema: null
-    version: null
-  public_fields: []
-  field_mappings: {}
+    id: ipapi-free-city-csv
+    schema: ipapi-free-fourteen-columns-v1
+    version: 1
+  public_fields:
+  - physical_country
+  - region
+  - city
+  - latitude
+  - longitude
+  field_mappings:
+    country_code: physical_country
+    region: region
+    city: city
+    latitude: latitude
+    longitude: longitude
   signals: []
 - id: ipgeo-community-mmdb
   evidence_family: ipgeo-community
@@ -1379,53 +1497,64 @@ sources:
   evidence_family: ipverse-as
   source_group: ipverse-as
   category: asn
-  admission: rights_approved
+  admission: active
   download:
-    url: https://raw.githubusercontent.com/ipverse/as-metadata/master/as.json
-    format: json
+    url: https://raw.githubusercontent.com/ipverse/as-metadata/master/as.csv
+    format: csv
     max_compressed_mib: 800
   refresh:
     interval: 24h
     max_stale: 720h
   fields:
   - asn
-  - organization
-  - country_code
-  - network_role
-  - providers
-  - customers
-  - peers
+  - handle
+  - description
+  - country-code
   depends_on: []
   license:
     status: reviewed
     identifier: CC0-1.0
     distribution: allow
-    evidence_url: https://github.com/ipverse/as-metadata/blob/master/README.md
-    review_basis: publisher documentation, 2026-10-30; owner must revalidate prior to first public release
-    attribution_required: null
+    evidence_url: https://github.com/ipverse/as-metadata/blob/master/LICENSE
+    review_basis: '2026-11-09: inspected actual publisher CC0-1.0 dedication; full CSV and immutable commit bytes
+      match SHA-256; no credit condition. Rights reviewed for derived ASN facts only.'
+    attribution_required: false
   trust:
     source_weight: 70
     correlation_group: ipverse-as
   scope: asn
-  notes: RIR metadata + inferred roles/relationships; distinguish inferred edges from observed MRT path.
+  notes: Observed four-column publisher CSV header asn,handle,description,country-code. Reserved ASNs are skipped;
+    unsafe display labels are dropped. Registration country remains an ASN fact.
   publication_proof:
     kind: github_commit
-    locator: https://api.github.com/repos/ipverse/as-metadata/commits?path=as.json&sha=master&per_page=1
+    locator: https://api.github.com/repos/ipverse/as-metadata/commits?path=as.csv&sha=master&per_page=1
     field: commit.committer.date
   coverage:
     kind: mapping
     scope: asn
   fixture:
-    status: missing
-    sha256: null
-    schema_observed: false
-    tested_at: null
+    status: passed
+    path: fixtures/source-certification/observed-asn-identity.csv
+    sha256: 354777d8e6b3e4ebc2d63b84aa84ab7ba8e4ba2d6b907c5d673ec6a25490310a
+    parser: asn-identity-csv
+    schema: asn-handle-description-country-csv-v1
+    schema_observed: true
+    tested_at: '2026-11-15T03:21:13Z'
+    synthetic: false
   parser:
-    id: null
-    schema: null
-    version: null
-  public_fields: []
-  field_mappings: {}
+    id: asn-identity-csv
+    schema: asn-handle-description-country-csv-v1
+    version: 1
+  public_fields:
+  - asn
+  - as_name
+  - organization
+  - asn_country
+  field_mappings:
+    asn: asn
+    handle: as_name
+    description: organization
+    country-code: asn_country
   signals: []
 - id: ipverse-as-blocks
   evidence_family: ipverse-as
@@ -2290,7 +2419,7 @@ sources:
   evidence_family: x4b
   source_group: x4b
   category: proxy
-  admission: rights_approved
+  admission: active
   download:
     url: https://raw.githubusercontent.com/X4BNet/lists_vpn/main/output/vpn/ipv4.txt
     format: cidr-text
@@ -2303,16 +2432,37 @@ sources:
   depends_on: []
   license:
     status: reviewed
-    identifier: MIT
+    identifier: MIT AND CC-BY-SA-4.0
     distribution: allow
     evidence_url: https://github.com/X4BNet/lists_vpn/blob/main/README.md
-    review_basis: publisher documentation, 2026-10-30; owner must revalidate prior to first public release
-    attribution_required: null
+    attribution_required: true
+    review_basis: '2026-11-09: original full VPN list matched immutable file commit 7174b1693b58c1ce1293cd7ec02c62b2faaf6517
+      (11,130 rows); current build workflow, MIT list notice and IPLocate upstream CC BY-SA 4.0 terms reviewed.
+      Both notices retained, compiled data CC BY-SA 4.0 owner-approved; positive prefix VPN context only, no usage
+      or negative coverage.'
+    attribution:
+      name: X4BNet VPN prefixes / IPLocate IP to ASN
+      text: 'X4BNet VPN prefixes, using the IPLocate IP to ASN database (CC BY-SA 4.0). IP address data provided
+        by IPLocate.io. VanSail IP Atlas selects and compiles the original lists into prefix evidence; this adaptation
+        is distributed under CC BY-SA 4.0. MIT License Copyright (c) 2026 X4B (Mathew Heard) Permission is hereby
+        granted, free of charge, to any person obtaining a copy of this software and associated documentation files
+        (the "Software"), to deal in the Software without restriction, including without limitation the rights to
+        use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit
+        persons to whom the Software is furnished to do so, subject to the following conditions: The above copyright
+        notice and this permission notice shall be included in all copies or substantial portions of the Software.
+        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+        TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+        SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+        ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE
+        OR OTHER DEALINGS IN THE SOFTWARE.'
+      url: https://www.iplocate.io
+      license_url: https://creativecommons.org/licenses/by-sa/4.0/
   trust:
     source_weight: 70
     correlation_group: x4b
   scope: prefix
-  notes: VPN-specific prefixes only; source based heavily on ASN clusters, not per-IP proof.
+  notes: VPN-specific positive prefix evidence, one correlated X4B/IPLocate derivation family. ASN-derived list
+    is contextual rather than proof of behavior at each IP; never assessment coverage or a usage assignment.
   publication_proof:
     kind: github_commit
     locator: https://api.github.com/repos/X4BNet/lists_vpn/commits?path=output/vpn/ipv4.txt&sha=main&per_page=1
@@ -2321,17 +2471,24 @@ sources:
     kind: positive_only
     scope: prefix
   fixture:
-    status: missing
-    sha256: null
-    schema_observed: false
-    tested_at: null
+    status: passed
+    sha256: a7038a372eebed2e872c8e8ee92c52ce5340c62c585f891b13f139de75d8f640
+    schema_observed: true
+    tested_at: '2026-11-15T03:21:13Z'
+    path: fixtures/source-certification/observed-x4b-vpn-ipv4.txt
+    parser: literal-prefix-text
+    schema: one-literal-ip-or-prefix-per-line-v1
+    synthetic: false
   parser:
-    id: null
-    schema: null
-    version: null
-  public_fields: []
-  field_mappings: {}
-  signals: []
+    id: literal-prefix-text
+    schema: one-literal-ip-or-prefix-per-line-v1
+    version: 1
+  public_fields:
+  - reason_flags
+  field_mappings:
+    vpn: reason_flags
+  signals:
+  - vpn
 - id: x4b-datacenter-v4
   evidence_family: x4b
   source_group: x4b
@@ -4795,4 +4952,4 @@ sources:
   public_fields: []
   field_mappings: {}
   signals: []
-contract_revision: 2
+contract_revision: 3

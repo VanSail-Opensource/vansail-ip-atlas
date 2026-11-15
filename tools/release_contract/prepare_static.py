@@ -1,4 +1,4 @@
-"""Verify a synthetic immutable atlas, include it in Nuxt's tree and freeze CSP.
+"""Verify an immutable atlas, include it in Nuxt's tree and freeze CSP.
 
 Production remains default-deny. This local packaging tool does not deploy files.
 """
@@ -27,7 +27,9 @@ from tools.release_contract.contracts import (
     scan_frontend_text, scan_public_records, sha256, tree_inventory, verify_manifest,
 )
 from tools.release_contract.nuxt_timestamps import canonicalize_operational_times
-from tools.release_contract.dataset_credits import validate_credit_tree, write_synthetic_credit_tree
+from tools.release_contract.dataset_credits import validate_credit_tree, write_credit_tree
+from tools.release_contract.production import qualify
+from tools.release_contract.data_license import validate_data_license_tree, LICENSE_ID
 
 ROOT = Path(__file__).resolve().parents[2]
 INLINE_SCRIPT = re.compile(r"<script\b([^>]*)>([\s\S]*?)</script\s*>", re.IGNORECASE)
@@ -55,7 +57,7 @@ def _check_tree_path(path: Path, *, must_exist=True) -> Path:
     return path.resolve()
 
 
-def verify_atlas(atlas: Path, now: int) -> dict:
+def verify_atlas(atlas: Path, now: int, *, production: bool = False, credits: bool = False) -> dict:
     atlas = _check_tree_path(atlas)
     pointer_path = atlas / "current.json"
     if pointer_path.is_symlink() or not pointer_path.is_file():
@@ -69,13 +71,15 @@ def verify_atlas(atlas: Path, now: int) -> dict:
     if current_path.is_symlink() or not current_path.is_file():
         raise ContractError("missing safe current manifest")
     current = verify_manifest(current_path.read_bytes(), pointer_bytes, now)
-    if current["mode"] != "synthetic":
-        raise ContractError("production packaging requires unimplemented full capability and approval gates")
+    expected_mode = "production" if production else "synthetic"
+    if current["mode"] != expected_mode:
+        raise ContractError("production packaging requires explicit source-qualified materialization receipts")
     expected = {"current.json"}
     manifests = list((atlas / "releases").glob("*/manifest.json"))
     if not 1 <= len(manifests) <= 2:
         raise ContractError("only current and immediate previous eligible manifests allowed")
     objects = {}
+    modes = {}
     for path in manifests:
         if path.is_symlink() or not re.fullmatch(r"[0-9a-f]{64}", path.parent.name):
             raise ContractError("unsafe retained manifest")
@@ -84,8 +88,9 @@ def verify_atlas(atlas: Path, now: int) -> dict:
             "manifest_path": f"/_atlas/releases/{path.parent.name}/manifest.json",
             "manifest_sha256": sha256(manifest_bytes)})
         manifest = verify_manifest(manifest_bytes, retained_pointer, now)
-        if manifest["mode"] != "synthetic":
-            raise ContractError("synthetic candidate cannot retain production data")
+        modes[manifest["release_id"]] = manifest["mode"]
+        if manifest["mode"] != expected_mode:
+            raise ContractError("candidate cannot retain data from another release mode")
         if path.parent.name != release_id and not rollback_eligible(manifest["valid_from"], manifest["valid_until"], now):
             raise ContractError("retained generation is ineligible for rollback")
         expected.add(path.relative_to(atlas).as_posix())
@@ -95,6 +100,9 @@ def verify_atlas(atlas: Path, now: int) -> dict:
                 raise ContractError("conflicting retained object metadata")
             objects[filename] = obj
             expected.add(filename)
+    if credits:
+        credit_files = validate_credit_tree(atlas.parent, release_id, modes)
+        expected.update(path.removeprefix("_atlas/") for path in credit_files if path.startswith("_atlas/"))
     actual_entries, _ = tree_inventory(atlas)
     if {entry[0] for entry in actual_entries} != expected:
         raise ContractError("atlas contains missing, private or unreferenced extra files")
@@ -258,11 +266,22 @@ def verify_software_notices(public: Path) -> None:
             raise ContractError("invalid software package identity")
 
 
-def prepare(atlas: Path, public: Path, now: int) -> dict:
+def prepare(atlas: Path, public: Path, now: int, *, production_receipts: dict[str, Path] | None = None) -> dict:
     atlas, public = _check_tree_path(atlas), _check_tree_path(public)
     if atlas == public or atlas in public.parents or public in atlas.parents:
         raise ContractError("atlas input and generated public tree must be separate")
-    metadata = verify_atlas(atlas, now)
+    production = production_receipts is not None
+    metadata = verify_atlas(atlas, now, production=production)
+    modes = {path.parent.name: parse_canonical(path.read_bytes())["mode"]
+             for path in (atlas / "releases").glob("*/manifest.json")}
+    qualifications = {}
+    if production:
+        if set(production_receipts) != set(modes):
+            raise ContractError("every retained production release requires its exact private qualification receipt")
+        for release_id, receipt in production_receipts.items():
+            qualifications[release_id] = qualify(receipt, atlas, now)
+            if qualifications[release_id].release_id != release_id:
+                raise ContractError("qualification release differs from retained manifest")
     private_values = known_private_values()
     inspected = inspect_binary(atlas, private_values)
     if inspected != metadata["object_count"]:
@@ -282,7 +301,7 @@ def prepare(atlas: Path, public: Path, now: int) -> dict:
     index_managed = False
     try:
         shutil.copytree(atlas, stage / "_atlas")
-        verify_atlas(stage / "_atlas", now)
+        verify_atlas(stage / "_atlas", now, production=production)
         if target.exists():
             previous = stage / "previous"
             os.replace(target, previous)
@@ -292,18 +311,26 @@ def prepare(atlas: Path, public: Path, now: int) -> dict:
             previous_index = stage / "previous-dataset-credits.json"
             os.replace(credit_index, previous_index)
         index_managed = True
-        modes = {path.parent.name: parse_canonical(path.read_bytes())["mode"]
-                 for path in (target / "releases").glob("*/manifest.json")}
-        write_synthetic_credit_tree(public, metadata["release_id"], modes)
+        write_credit_tree(public, metadata["release_id"], modes,
+            {release_id: list(qualifications[release_id].credits) if production else [] for release_id in modes})
         normalized_timestamps = canonicalize_operational_times(public, metadata["valid_from"])
         hashes = freeze_csp(public)
         verify_software_notices(public)
+        validate_data_license_tree(public)
         scan_frontend(public, private_values)
+        # A rights/expiry/catalog change during scanning cannot freeze old decisions.
+        if production:
+            for release_id, receipt in production_receipts.items():
+                if qualify(receipt, atlas, now).receipt_sha256 != qualifications[release_id].receipt_sha256:
+                    raise ContractError("production qualification changed during packaging")
         entries, digest = tree_inventory(public)
-        return {**metadata, "status": "passed", "scope": "local-synthetic-static-candidate",
+        return {**metadata, "status": "passed", "scope": "local-production-static-candidate" if production else "local-synthetic-static-candidate",
                 "candidate_bundle_sha256": digest, "files": len(entries), "bytes": sum(item[1] for item in entries),
                 "framework_operational_timestamps_normalized": normalized_timestamps,
-                "inline_script_hashes": hashes, "hosted_acceptance": "pending", "production_eligible": False}
+                "inline_script_hashes": hashes, "hosted_acceptance": "pending", "production_eligible": False,
+                "compiled_data_license": LICENSE_ID,
+                **({"qualification_receipt_sha256": qualifications[metadata["release_id"]].receipt_sha256,
+                    "normalized_state_sha256": qualifications[metadata["release_id"]].normalized_state_sha256} if production else {})}
     except BaseException:
         if previous is not None and previous.exists():
             if target.exists():
@@ -329,14 +356,26 @@ def main() -> int:
     parser.add_argument("--public", type=Path, default=ROOT / "web/.output/public")
     parser.add_argument("--now", type=int, default=int(time.time()))
     parser.add_argument("--report", type=Path, default=ROOT / "reports/static-candidate.json")
+    parser.add_argument("--qualification-receipt", type=Path, action="append", default=None,
+                        help="private canonical receipt for each retained production release; revalidated by Go")
     args = parser.parse_args()
     try:
         if args.report.resolve().is_relative_to(args.public.resolve()):
             raise ContractError("candidate reports must remain outside the public tree")
-        report = prepare(args.atlas, args.public, args.now)
+        receipts = None
+        if args.qualification_receipt is not None:
+            receipts = {}
+            for path in args.qualification_receipt:
+                from tools.release_contract.production import read_private
+                value = parse_canonical(read_private(path))
+                release_id = value.get("release_id") if isinstance(value, dict) else None
+                if not isinstance(release_id, str) or not re.fullmatch(r"[0-9a-f]{64}", release_id) or release_id in receipts:
+                    raise ContractError("invalid or duplicate production qualification receipt")
+                receipts[release_id] = path
+        report = prepare(args.atlas, args.public, args.now, production_receipts=receipts)
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-        print(f"PASS: complete local synthetic candidate; {report['files']} files; production blocked")
+        print(f"PASS: frozen {report['mode']} candidate; {report['files']} files; preview and exact-artifact approval required")
         return 0
     except (ContractError, OSError, ValueError) as error:
         print(f"FAIL: static candidate: {error}")

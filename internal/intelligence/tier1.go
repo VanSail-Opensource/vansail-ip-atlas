@@ -28,6 +28,19 @@ var ErrGraphBudget = errors.New("Tier-1 graph work budget exceeded")
 // budget instead of materializing an unbounded all-pairs customer-cone matrix.
 // A budget failure is a failed build, never a smaller percentile population.
 func DeriveTier1(ctx context.Context, relations *RelationshipIndex, paths []PathObservation, publishedAt, now time.Time, policyHash string, previous *Tier1Snapshot, maxWork int) (Tier1Snapshot, error) {
+	return deriveTier1(ctx, relations, func(visit func(PathObservation) error) error {
+		for _, path := range paths {
+			if err := visit(path); err != nil {
+				return err
+			}
+		}
+		return nil
+	}, publishedAt, now, policyHash, previous, maxWork)
+}
+
+// deriveTier1 accepts a bounded iterator so production can read immutable
+// private partitions without retaining every MRT path in process memory.
+func deriveTier1(ctx context.Context, relations *RelationshipIndex, walk func(func(PathObservation) error) error, publishedAt, now time.Time, policyHash string, previous *Tier1Snapshot, maxWork int) (Tier1Snapshot, error) {
 	out := Tier1Snapshot{PublishedAt: publishedAt, PolicyHash: policyHash, RawCandidates: map[uint32]bool{}}
 	if relations == nil {
 		return out, nil
@@ -53,21 +66,31 @@ func DeriveTier1(ctx context.Context, relations *RelationshipIndex, paths []Path
 	families := map[string]struct{}{}
 	visibility := map[uint32]map[string]struct{}{}
 	incidentUnknown := map[uint32]bool{}
-	for _, v := range paths {
+	visibilityPairs := 0
+	if err := walk(func(v PathObservation) error {
 		if !v.Current || v.Family == "" {
-			continue
+			return nil
 		}
 		p, err := canonicalPath(v)
 		if err != nil {
-			return out, err
+			return err
 		}
 		families[v.Family] = struct{}{}
+		if len(families) > 1000 {
+			return ErrGraphBudget
+		}
 		if !p.GraphEligible {
-			continue
+			return nil
 		}
 		var prior uint32
 		for _, segment := range p.Segments {
 			for _, asn := range segment.ASNs {
+				if _, exists := visibility[asn][v.Family]; !exists {
+					visibilityPairs++
+					if visibilityPairs > 1_000_000 || len(visibility) >= 200_000 && visibility[asn] == nil {
+						return ErrGraphBudget
+					}
+				}
 				addFamily(visibility, asn, v.Family)
 				if prior != 0 && prior != asn && relations.Relation(prior, asn) == UnknownRelation {
 					incidentUnknown[prior] = true
@@ -76,6 +99,9 @@ func DeriveTier1(ctx context.Context, relations *RelationshipIndex, paths []Path
 				prior = asn
 			}
 		}
+		return nil
+	}); err != nil {
+		return out, err
 	}
 	if len(families) < 2 {
 		return out, nil
@@ -158,6 +184,9 @@ func DeriveTier1(ctx context.Context, relations *RelationshipIndex, paths []Path
 		}
 	}
 	for len(pool) >= 3 {
+		if err := ctx.Err(); err != nil {
+			return out, err
+		}
 		threshold := int(math.Ceil(.80 * float64(len(pool)-1)))
 		degrees := map[uint32]int{}
 		lowest := int(^uint(0) >> 1)
@@ -165,6 +194,18 @@ func DeriveTier1(ctx context.Context, relations *RelationshipIndex, paths []Path
 		complete := true
 		for asn := range pool {
 			for other := range pool {
+				// Percentile ties may leave a large pool even when customer-cone
+				// traversal was cheap. Charge every peer comparison to that same
+				// graph budget; repeated peeling must never escape the bound.
+				work++
+				if work > maxWork {
+					return out, ErrGraphBudget
+				}
+				if work%1024 == 0 {
+					if err := ctx.Err(); err != nil {
+						return out, err
+					}
+				}
 				if other != asn && relations.Relation(asn, other) == Peer {
 					degrees[asn]++
 				}

@@ -1,6 +1,7 @@
 package intelligence
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -42,17 +43,19 @@ type RelationshipRecord struct {
 // NormalizedRecord is a versioned tagged union; exactly one payload is allowed.
 // It has no URI, port, protocol, credential, source URL, or raw publisher field.
 type NormalizedRecord struct {
-	Version      uint16
-	Kind         RecordKind
-	Evidence     *Evidence            `json:",omitempty"`
-	Coverage     *Coverage            `json:",omitempty"`
-	Origins      *OriginMapping       `json:",omitempty"`
-	Geo          *GeoEvidence         `json:",omitempty"`
-	Usage        *ScopedUsage         `json:",omitempty"`
-	VRP          *VRP                 `json:",omitempty"`
-	Path         *ScopedPath          `json:",omitempty"`
-	Relationship *RelationshipRecord  `json:",omitempty"`
-	ASNIdentity  *ASNIdentityEvidence `json:",omitempty"`
+	Version         uint16
+	Kind            RecordKind
+	Evidence        *Evidence            `json:",omitempty"`
+	Coverage        *Coverage            `json:",omitempty"`
+	Origins         *OriginMapping       `json:",omitempty"`
+	Geo             *GeoEvidence         `json:",omitempty"`
+	Usage           *ScopedUsage         `json:",omitempty"`
+	VRP             *VRP                 `json:",omitempty"`
+	Path            *ScopedPath          `json:",omitempty"`
+	Relationship    *RelationshipRecord  `json:",omitempty"`
+	ASNIdentity     *ASNIdentityEvidence `json:",omitempty"`
+	MRTOriginatedAt *time.Time           `json:",omitempty"` // private route-heard clock, never a public fact
+	MRT             *MRTRouteIdentity    `json:",omitempty"`
 }
 
 func (r NormalizedRecord) Validate() error {
@@ -65,6 +68,12 @@ func (r NormalizedRecord) Validate() error {
 	}
 	if r.Version != 3 || r.Kind < 1 || r.Kind > 9 || count != 1 || !present[int(r.Kind)-1] {
 		return errors.New("normalized record union invalid")
+	}
+	if r.MRTOriginatedAt != nil && (r.MRTOriginatedAt.IsZero() || r.Kind != RecordOrigins && r.Kind != RecordPath) {
+		return errors.New("private MRT originated clock invalid")
+	}
+	if r.MRT != nil && (r.Kind != RecordOrigins && r.Kind != RecordPath || r.MRT.PeerTable == 0 || r.MRT.CapturedAt.IsZero() || !r.MRT.AddPath && r.MRT.PathID != 0) {
+		return errors.New("private MRT route identity invalid")
 	}
 	return nil
 }
@@ -86,18 +95,25 @@ type SourceSnapshot struct {
 	NormalizationPolicyHash                               [32]byte
 	ParserVersion, SchemaVersion                          uint32
 	PublishedAt                                           time.Time
+	ContentValidUntil                                     time.Time `json:",omitzero"`
 	ProofKind                                             string
 	PayloadVerified, SchemaVerified, ImmutableCommitBound bool
 	Records                                               []NormalizedRecord
+	RecordPartitions                                      []RecordPartition `json:",omitempty"`
 	ASNIdentityStats                                      *ASNIdentityStats `json:",omitempty"`
+	MRTProof                                              *MRTSourceProof   `json:",omitempty"`
+	GeoProof                                              *GeoSourceProof   `json:",omitempty"`
+	VRPProof                                              *VRPSourceProof   `json:",omitempty"`
 }
 type SourceDecision struct{ ID, State, Reason string }
 type StoredSource struct {
-	ID          string
-	Fingerprint [32]byte
-	ExpiresAt   time.Time
-	Records     []NormalizedRecord
-	Attribution *DatasetAttribution `json:",omitempty"`
+	ID               string
+	Fingerprint      [32]byte
+	ExpiresAt        time.Time
+	Records          []NormalizedRecord
+	RecordPartitions []RecordPartition   `json:",omitempty"`
+	Attribution      *DatasetAttribution `json:",omitempty"`
+	Receipt          *SourceReceipt      `json:",omitempty"`
 }
 type BuildState struct {
 	Version     uint16
@@ -119,7 +135,14 @@ type ReconcilePlan struct {
 // Time-dependent decay also requires recompilation; it is never hidden by a
 // byte-identical download or HTTP 304. Object hashing can still dedupe output.
 func Reconcile(previous BuildState, policies []SourcePolicy, snapshots []SourceSnapshot, now time.Time, policyHash [32]byte) (ReconcilePlan, error) {
+	return reconcile(context.Background(), previous, policies, snapshots, now, policyHash, nil)
+}
+
+func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy, snapshots []SourceSnapshot, now time.Time, policyHash [32]byte, storage *reconcileStorage) (ReconcilePlan, error) {
 	plan := ReconcilePlan{State: BuildState{Version: 1, PolicyHash: policyHash, EvaluatedAt: now}}
+	if storage != nil {
+		plan.State.Version = 2
+	}
 	if now.IsZero() || policyHash == ([32]byte{}) || len(policies) > 1000 || len(snapshots) > 1000 {
 		return plan, errors.New("bounded explicit reconciliation inputs required")
 	}
@@ -186,6 +209,20 @@ func Reconcile(previous BuildState, policies []SourcePolicy, snapshots []SourceS
 			if snapshot.PayloadHash == ([32]byte{}) || snapshot.PayloadHash != snapshot.ProofPayloadHash || snapshot.ProofKind != policy.ProofKind {
 				deny("quarantined", "publication_not_payload_bound")
 			}
+			if snapshot.MRTProof != nil {
+				content, err := snapshot.MRTProof.ContentHash()
+				if err != nil || content != snapshot.PayloadHash || snapshot.ProofKind != "embedded" || snapshot.PublishedAt.After(snapshot.MRTProof.CapturedAt) || snapshot.MRTProof.Through.After(now.Add(24*time.Hour)) || snapshot.MRTProof.CaptureEnd().After(now.Add(24*time.Hour)) {
+					deny("quarantined", "mrt_content_set_not_bound")
+				}
+			}
+			if snapshot.GeoProof != nil {
+				if _, err := snapshot.GeoProof.ContentHash(); err != nil || snapshot.PublishedAt.After(snapshot.GeoProof.UpstreamClock) || snapshot.GeoProof.UpstreamClock.After(now.Add(24*time.Hour)) {
+					deny("invalid", "geolocation_payload_or_clock_invalid")
+				}
+			}
+			if snapshot.VRPProof != nil && snapshot.VRPProof.Validate(now, snapshot.PublishedAt, snapshot.ContentValidUntil) != nil {
+				deny("quarantined", "complete_vrp_snapshot_not_bound")
+			}
 			switch snapshot.ProofKind {
 			case "embedded", "github_release", "snapshot_metadata":
 			case "github_commit":
@@ -199,6 +236,9 @@ func Reconcile(previous BuildState, policies []SourcePolicy, snapshots []SourceS
 				deny("quarantined", "publication_clock_invalid")
 			}
 			deadline := snapshot.PublishedAt.Add(policy.MaxAge)
+			if !snapshot.ContentValidUntil.IsZero() && snapshot.ContentValidUntil.Before(deadline) {
+				deadline = snapshot.ContentValidUntil
+			}
 			if policy.Subscription && snapshot.PublishedAt.Add(168*time.Hour).Before(deadline) {
 				deadline = snapshot.PublishedAt.Add(168 * time.Hour)
 			}
@@ -253,17 +293,28 @@ func Reconcile(previous BuildState, policies []SourcePolicy, snapshots []SourceS
 		if states[id].State != "current" {
 			continue
 		}
-		family, digest := byID[id].Family, payloads[id].PayloadHash
-		left := familyRoot(family)
-		if previous, ok := hashFamily[digest]; ok {
-			right := familyRoot(previous)
-			if left < right {
-				parents[right] = left
-			} else {
-				parents[left] = right
+		family := byID[id].Family
+		snapshot := payloads[id]
+		identities := [][32]byte{snapshot.PayloadHash}
+		if snapshot.GeoProof != nil {
+			digest, err := snapshot.GeoProof.ContentHash()
+			if err != nil {
+				return plan, err
 			}
-		} else {
-			hashFamily[digest] = family
+			identities = append(identities, digest)
+		}
+		for _, digest := range identities {
+			left := familyRoot(family)
+			if previous, ok := hashFamily[digest]; ok {
+				right := familyRoot(previous)
+				if left < right {
+					parents[right] = left
+				} else {
+					parents[left] = right
+				}
+			} else {
+				hashFamily[digest] = family
+			}
 		}
 	}
 	total := 0
@@ -275,17 +326,24 @@ func Reconcile(previous BuildState, policies []SourcePolicy, snapshots []SourceS
 		policy, snapshot := byID[id], payloads[id]
 		family := familyRoot(policy.Family)
 		records := make([]NormalizedRecord, 0, len(snapshot.Records))
-		for _, record := range snapshot.Records {
+		var writer *RecordWriter
+		var parts []RecordPartition
+		var vrpCount uint64
+		if storage != nil {
+			writer = storage.store.Writer(ctx)
+			defer writer.Abort()
+		}
+		process := func(record NormalizedRecord) error {
 			total++
-			if total > 2_000_000 {
-				return plan, errors.New("normalized record partition budget exceeded")
+			if storage == nil && total > 2_000_000 {
+				return errors.New("normalized record partition budget exceeded")
 			}
 			if err := record.Validate(); err != nil {
-				return plan, err
+				return err
 			}
 			clone, err := cloneRecord(record)
 			if err != nil {
-				return plan, err
+				return err
 			}
 			switch clone.Kind {
 			case RecordEvidence:
@@ -293,7 +351,7 @@ func Reconcile(previous BuildState, policies []SourcePolicy, snapshots []SourceS
 				var canonical bool
 				v.Signal, canonical = CanonicalSignal(v.Signal)
 				if !canonical {
-					return plan, errors.New("normalized signal not supported")
+					return errors.New("normalized signal not supported")
 				}
 				v.Family = family
 				v.Weight = policy.Weight
@@ -303,19 +361,23 @@ func Reconcile(previous BuildState, policies []SourcePolicy, snapshots []SourceS
 				// A publisher's fresh wrapper cannot date an endpoint copied from an
 				// older subscription. Only a verified upstream item clock qualifies.
 				if policy.Subscription && v.ItemPublishedAt.IsZero() {
-					continue
+					return nil
 				}
 				if v.ItemPublishedAt.After(now.Add(24 * time.Hour)) {
-					return plan, errors.New("normalized item publication is in future")
+					return errors.New("normalized item publication is in future")
 				}
 				itemClock := snapshot.PublishedAt
 				if !v.ItemPublishedAt.IsZero() && v.ItemPublishedAt.Before(itemClock) {
 					itemClock = v.ItemPublishedAt
 				}
-				if policy.Subscription {
-					itemExpiry := itemClock.Add(168 * time.Hour)
+				{
+					maximum := policy.MaxAge
+					if policy.Subscription && maximum > 168*time.Hour {
+						maximum = 168 * time.Hour
+					}
+					itemExpiry := itemClock.Add(maximum)
 					if !now.Before(itemExpiry) {
-						continue
+						return nil
 					}
 					if itemExpiry.Before(expiry[id]) {
 						expiry[id] = itemExpiry
@@ -342,12 +404,12 @@ func Reconcile(previous BuildState, policies []SourcePolicy, snapshots []SourceS
 				switch v.Type {
 				case "", "unknown", "residential", "business", "mobile", "datacenter", "hosting", "education", "government":
 				default:
-					return plan, errors.New("normalized usage enum invalid")
+					return errors.New("normalized usage enum invalid")
 				}
 				switch v.Assignment {
 				case "", "unknown", "native", "broadcast_or_routed":
 				default:
-					return plan, errors.New("normalized assignment enum invalid")
+					return errors.New("normalized assignment enum invalid")
 				}
 				clone.Usage.Evidence.Family = family
 				clone.Usage.Evidence.Current = true
@@ -357,7 +419,7 @@ func Reconcile(previous BuildState, policies []SourcePolicy, snapshots []SourceS
 			case RecordASNIdentity:
 				v := clone.ASNIdentity
 				if !IsPublicASN(v.ASN) {
-					return plan, errors.New("normalized ASN identity invalid")
+					return errors.New("normalized ASN identity invalid")
 				}
 				v.Family = family
 				v.Weight = policy.Weight
@@ -365,18 +427,52 @@ func Reconcile(previous BuildState, policies []SourcePolicy, snapshots []SourceS
 				v.Name = SafeLabel(v.Name)
 				v.Organization = SafeLabel(v.Organization)
 				v.Country = country(v.Country)
+			case RecordVRP:
+				vrpCount++
+				if until := clone.VRP.ValidUntil; !until.IsZero() {
+					if snapshot.ContentValidUntil.IsZero() || until.Before(snapshot.ContentValidUntil) || !now.Before(until) {
+						return errors.New("VRP expiry is missing, expired or exceeds its source bound")
+					}
+				}
+			}
+			if writer != nil {
+				return writer.Append(clone)
 			}
 			records = append(records, clone)
+			return nil
+		}
+		if storage != nil {
+			if err := WalkStoredSource(ctx, storage.workspace, StoredSource{Records: snapshot.Records, RecordPartitions: snapshot.RecordPartitions}, process); err != nil {
+				return plan, err
+			}
+			var err error
+			parts, err = writer.Finish()
+			if err != nil {
+				return plan, err
+			}
+		} else {
+			if len(snapshot.RecordPartitions) > 0 {
+				return plan, errors.New("partitioned input requires streamed reconciliation")
+			}
+			for _, record := range snapshot.Records {
+				if err := process(record); err != nil {
+					return plan, err
+				}
+			}
+		}
+		if snapshot.VRPProof != nil && vrpCount != snapshot.VRPProof.AcceptedRows {
+			return plan, errors.New("complete VRP proof differs from retained record count")
 		}
 		encoded, err := json.Marshal(struct {
-			Policy   SourcePolicy
-			Snapshot SourceSnapshot
-			Records  []NormalizedRecord
-		}{policy, SourceSnapshot{ID: id, PayloadHash: snapshot.PayloadHash, ProofPayloadHash: snapshot.ProofPayloadHash, NormalizationPolicyHash: snapshot.NormalizationPolicyHash, ParserVersion: snapshot.ParserVersion, SchemaVersion: snapshot.SchemaVersion, PublishedAt: snapshot.PublishedAt, ProofKind: snapshot.ProofKind, PayloadVerified: true, SchemaVerified: true, ImmutableCommitBound: snapshot.ImmutableCommitBound}, records})
+			Policy           SourcePolicy
+			Snapshot         SourceSnapshot
+			Records          []NormalizedRecord
+			RecordPartitions []RecordPartition `json:",omitempty"`
+		}{policy, SourceSnapshot{ID: id, PayloadHash: snapshot.PayloadHash, ProofPayloadHash: snapshot.ProofPayloadHash, NormalizationPolicyHash: snapshot.NormalizationPolicyHash, ParserVersion: snapshot.ParserVersion, SchemaVersion: snapshot.SchemaVersion, PublishedAt: snapshot.PublishedAt, ContentValidUntil: snapshot.ContentValidUntil, ProofKind: snapshot.ProofKind, PayloadVerified: true, SchemaVerified: true, ImmutableCommitBound: snapshot.ImmutableCommitBound, MRTProof: cloneMRTProof(snapshot.MRTProof), GeoProof: cloneGeoProof(snapshot.GeoProof), VRPProof: cloneVRPProof(snapshot.VRPProof)}, records, parts})
 		if err != nil {
 			return plan, err
 		}
-		stored := StoredSource{ID: id, Fingerprint: sha256.Sum256(encoded), ExpiresAt: expiry[id], Records: records}
+		stored := StoredSource{ID: id, Fingerprint: sha256.Sum256(encoded), ExpiresAt: expiry[id], Records: records, RecordPartitions: parts, Receipt: receipt(policy, snapshot)}
 		if policy.Attribution != nil {
 			credit := *policy.Attribution
 			stored.Attribution = &credit
@@ -403,7 +499,7 @@ func Reconcile(previous BuildState, policies []SourcePolicy, snapshots []SourceS
 		}
 	}
 	sort.Strings(plan.ChangedSources)
-	plan.FullRebuild = previous.Version != 1 || previous.PolicyHash != policyHash || len(plan.ChangedSources) > 0 || hasDecay && !previous.EvaluatedAt.Equal(now)
+	plan.FullRebuild = previous.Version != plan.State.Version || previous.PolicyHash != policyHash || len(plan.ChangedSources) > 0 || hasDecay && !previous.EvaluatedAt.Equal(now)
 	return plan, nil
 }
 func cloneRecord(input NormalizedRecord) (NormalizedRecord, error) {
@@ -510,10 +606,18 @@ func LoadPrivateState(workspace string) (BuildState, error) {
 	if err := decoder.Decode(new(json.RawMessage)); err != io.EOF {
 		return BuildState{}, errors.New("private state trailing data")
 	}
-	if state.Version != 1 {
+	if state.Version != 1 && state.Version != 2 {
 		return BuildState{}, errors.New("unsupported private state version")
 	}
 	for _, source := range state.Sources {
+		if len(source.RecordPartitions) > maxRecordPartitions || len(source.Records) > 0 && len(source.RecordPartitions) > 0 {
+			return BuildState{}, errors.New("invalid private record storage")
+		}
+		for _, part := range source.RecordPartitions {
+			if !validPartition(part) {
+				return BuildState{}, errors.New("invalid private partition descriptor")
+			}
+		}
 		if source.Attribution != nil && source.Attribution.Validate() != nil {
 			return BuildState{}, errors.New("private dataset attribution invalid")
 		}

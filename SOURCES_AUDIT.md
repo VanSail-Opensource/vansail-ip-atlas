@@ -2,7 +2,52 @@
 
 ## Purpose
 
-This audit documents how **retained** bulk datasets are interpreted, tested and reconciled. There is no per-IP source catalog or source/provenance section in the binary output. Under the user-approved `release-scope-v3`, one global dataset-credit display contains reviewed notices for included datasets. The compiler retains internal origin family, timestamp and rights status to stop duplicate observations and stale feeds from corrupting reputation.
+This audit documents how **retained** bulk datasets are interpreted, tested and reconciled. There is no per-IP source catalog or source/provenance section in the binary output. Under the user-approved `release-scope-v4`, one global dataset-credit display contains reviewed notices for included datasets and the compiled database uses CC BY-SA 4.0. The compiler retains internal origin family, timestamp and rights status to stop duplicate observations and stale feeds from corrupting reputation.
+
+## Reviewed qualification checkpoint, 2026-11-09
+
+Eight catalog entries now have reviewed rights, observed original-byte fixtures,
+implemented parser/publication contracts and code-bound certification. Activation
+permits attempted intake; each release still requires a complete downloaded,
+current, authenticated receipt. No static admission label proves a current source
+or production readiness.
+
+| Admitted source | Reviewed interpretation and rights | Content clock and full-file evidence |
+|---|---|---|
+| Sapics user-country IPv4/IPv6 and server-country IPv4 | Original-country PDDL; one correlated publisher family, not three votes; country only | Exact uploaded release asset creation time and asset SHA-256, not long-lived release tag time. Complete captures parsed into 420,789 / 568,801 / 403,601 prefixes. |
+| Ipverse ASN identity | CC0; ASN name, organization and registration country only; no inferred IP location or usage | File-specific GitHub commit and byte-identical immutable CSV. 125,830 rows, one reserved ASN excluded. |
+| DB-IP City Lite direct | CC BY 4.0, visible publisher backlink and modification notice; city centroid precision | Resolve the exact official monthly download; verify complete decoded CSV against publisher SHA1 and MD5. Conservative month-start clock. 7,777,816 rows produced 14,288,199 prefixes. Mirrors remain correlated. |
+| ipapi.is free IPv4/IPv6 city subsets | CC BY-SA 4.0, visible publisher credit, modification notice and same-license compiled database, explicitly owner-approved. Free database exemption in publisher terms applies; paid product permissions were not assumed. | Complete ZIP CRC/member/notice checks, exact decoded identities and UTC Extended Timestamp. Actual October 19 member clocks prevail over the November 6 page/HTTP labels. Complete captures contain 4,810,023 / 792,388 data rows. |
+| X4B VPN prefixes | MIT list notice plus IPLocate upstream CC BY-SA 4.0 credit; both notices retained. VPN prefix context only, never usage or negative assessment coverage. | File-specific commit and byte-identical immutable list; 11,130 observed prefixes. |
+
+Tiny observed excerpts and required notices are under
+`fixtures/source-certification/`, outside every deployment tree. Decoded CSV
+fixtures certify the observed schema only: actual intake must still verify the
+complete original compressed asset and its publisher clock. Certification binds
+the exact internal Go bytes and is invalid after any implementation change until
+the observed fixtures are reviewed and run again.
+
+IPAPI accuracy 1/2 allows approximate city centroids, 3 suppresses city and
+coordinates, and 4/5 keeps country only. No provider, timezone, postal or continent
+column survives normalization. Captured ZIP-local DOS timestamps are insufficient;
+only matched UTC extended timestamps establish the conservative content bound.
+Previously seen raw or decoded content retains its earliest verified clock.
+
+Other entries remain disabled when rights, freshness, schema, semantics or parser
+proof is missing. Feodo's observed March indicators are expired; its newly fetched
+container cannot renew them. IPsum and malware-filter aggregate upstream lists
+whose combined redistribution obligations remain unresolved. HaGeZi's GPLv3 and
+C2IntelFeeds' noncommercial share-alike conditions are not cleared by the owner's
+CC BY-SA 4.0 choice. CAIDA's citation/reporting condition and remaining publication
+binding, RIPE/RPKI data redistribution rights, complete current RIB qualification,
+and other source-specific conditions remain open. Software licenses alone do not
+grant rights to their exported datasets.
+
+Complete real-payload parsing is local evidence. The hosted source-intake job
+must independently download, verify and reconcile every active source; its public
+artifact contains aggregate counts and hashes only. At this checkpoint no current
+production receipt or production deployment is claimed. The dated November 8
+states below are historical, not current admission controls.
 
 ## Canonical source categories
 
@@ -47,9 +92,9 @@ This audit documents how **retained** bulk datasets are interpreted, tested and 
 
 ## Source verification states
 
-- **Current catalog, 2026-11-08:** 91 entries, 82 candidate, 7 rights-approved, 2 retired, zero fixture-tested and zero active. All fixtures remain missing; format fragments are reconnaissance only.
-- **Rights-approved:** seven entries have a reviewed allow decision but still have unresolved `attribution_required: null`, missing observed fixtures and no certified parser. This peer milestone does not enable publication.
-- **Active:** every static admission gate has passed; no current catalog entry qualifies. Runtime proof is still required on every build.
+- **Historical catalog, 2026-11-08:** 91 entries, 82 candidate, 7 rights-approved, 2 retired, zero fixture-tested and zero active. At that checkpoint all fixtures were missing; format fragments were reconnaissance only.
+- **Rights-approved:** a reviewed allow decision without the remaining schema, fixture, publication or parser proof does not enable publication.
+- **Active:** every static admission gate has passed; the November 9 checkpoint above admits eight entries. Runtime proof is still required on every build.
 - **Candidate:** URL/format may be documented or unresolved; cannot contribute to production.
 - **Stale:** proven publication deadline reached; excluded and all prior influence retracted. Unknown freshness is quarantined.
 

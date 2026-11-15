@@ -25,7 +25,7 @@ func main() {
 	defer stop()
 	ctx, cancel := context.WithTimeout(signals, 35*time.Minute)
 	defer cancel()
-	if err := run(ctx, os.Args[1:]); err != nil {
+	if err := runWithProcessMetrics(ctx, os.Args[1:], run); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -61,13 +61,19 @@ func writeJSON(path string, value any) error {
 }
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: atlas synthetic|compile-facts|compile-state|intake|lookup|inspect")
+		return fmt.Errorf("usage: atlas synthetic|compile-facts|compile-state|compile-production|verify-production|state-fingerprints|intake|lookup|inspect")
 	}
 	switch args[0] {
 	case "compile-facts":
 		return compileFacts(ctx, args[1:])
 	case "compile-state":
 		return compileState(ctx, args[1:])
+	case "verify-production":
+		return verifyProduction(ctx, args[1:])
+	case "state-fingerprints":
+		return stateFingerprints(ctx, args[1:])
+	case "compile-production":
+		return compileProduction(ctx, args[1:])
 	case "intake":
 		return intakeSources(ctx, args[1:])
 	case "synthetic":

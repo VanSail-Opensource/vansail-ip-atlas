@@ -33,6 +33,12 @@ class CanonicalTests(unittest.TestCase):
 
 
 class IdentityTests(unittest.TestCase):
+    def test_private_engineering_data_cannot_be_packaged_as_public_fixture(self):
+        value=descriptor()
+        value["mode"]="engineering"
+        with self.assertRaises(ContractError):
+            make_manifest(value)
+
     def test_acyclic_deterministic_identity(self):
         first = make_manifest(descriptor())
         second = make_manifest(dict(reversed(list(descriptor().items()))))

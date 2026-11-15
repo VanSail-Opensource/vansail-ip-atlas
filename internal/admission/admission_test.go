@@ -60,7 +60,7 @@ func prepared(t *testing.T, payload []byte, format string) (*Engine, Source, *fi
 	source := Source{ID: "unit-vrp", Family: "unit-rpki-family", Category: "rpki", Admission: "active", URL: "https://github.com/unit/publisher/releases/download/v1/vrp.csv", Format: format,
 		MaxCompressedBytes: 1 << 20, MaxAge: 720 * time.Hour, Weight: 70,
 		Rights: Rights{Status: "reviewed", Distribution: "allow", EvidenceURL: "https://github.com/unit/publisher/blob/main/LICENSE", ReviewBasis: "unit-test reviewed evidence only", AttributionRequired: &no},
-		Parser: Parser{"vrp-csv", "asn-prefix-maxLength-csv-v1", 1}, Fixture: Fixture{"passed", "fixtures/source-certification/unit-observed.csv", hashString(sha256.Sum256(payload)), "vrp-csv", "asn-prefix-maxLength-csv-v1", now.Add(-time.Hour).Format(time.RFC3339), true, &no},
+		Parser: Parser{"vrp-csv", "asn-prefix-maxLength-csv-v1", 1}, Fixture: Fixture{"passed", "fixtures/source-certification/unit-observed.csv", hashString(sha256.Sum256(payload)), "vrp-csv", "asn-prefix-maxLength-csv-v1", now.Add(-time.Hour).Format(time.RFC3339), true, &no, "", ""},
 		Publication: Publication{"github_release", "https://api.github.com/repos/unit/publisher/releases/latest", "published_at"},
 		Coverage:    "mapping", Scope: "prefix", PublicFields: []string{"rpki_status"}, Fields: []string{"roa"}, FieldMappings: map[string][]string{"roa": {"rpki_status"}}}
 	implementation, err := implementationHash(context.Background(), root)
@@ -74,7 +74,7 @@ func prepared(t *testing.T, payload []byte, format string) (*Engine, Source, *fi
 	if err := os.WriteFile(filepath.Join(base, "adapter-certifications.json"), data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	metadata := metadataFor(t, source.URL, payload, now.Add(-2*time.Hour), now.Add(-time.Hour))
+	metadata := metadataFor(t, source.URL, payload, now.Add(-time.Hour), now.Add(-2*time.Hour))
 	fetch := &fixtureFetch{assets: map[string][]byte{source.URL: payload, source.Publication.Locator: metadata}}
 	engine, err := New(root)
 	if err != nil {
@@ -225,7 +225,7 @@ func TestClockCanOnlyMoveEarlierAndInvalidHistoryBlocks(t *testing.T) {
 	if err != nil || result.Snapshot == nil {
 		t.Fatal("initial clock failed")
 	}
-	fetch.assets[source.Publication.Locator] = metadataFor(t, source.URL, fetch.assets[source.URL], now.Add(-5*time.Hour), now.Add(-4*time.Hour))
+	fetch.assets[source.Publication.Locator] = metadataFor(t, source.URL, fetch.assets[source.URL], now.Add(-4*time.Hour), now.Add(-5*time.Hour))
 	result, err = engine.Ingest(context.Background(), source, now, policyHash)
 	if err != nil || result.Snapshot == nil || result.Snapshot.PublishedAt != now.Add(-5*time.Hour) {
 		t.Fatalf("earlier verified clock lost: %v %v", result, err)

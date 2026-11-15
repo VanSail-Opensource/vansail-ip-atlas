@@ -119,11 +119,24 @@ func compileState(ctx context.Context, args []string) (returnErr error) {
 	if !filepath.IsAbs(destination) {
 		destination = filepath.Join(root, destination)
 	}
-	candidate, err := pipeline.BuildIntelligence(ctx, pipeline.Options{Workspace: root, Output: destination, Mode: "synthetic", Clock: *clock, ValidUntil: deadline, Limits: pipeline.DefaultLimits(), InputGate: gate}, state, policy, pipeline.MaterializationInputs{VRPComplete: *vrpComplete})
+	options := pipeline.Options{Workspace: root, Output: destination, Mode: "synthetic", Clock: *clock, ValidUntil: deadline, Limits: pipeline.DefaultLimits(), InputGate: gate}
+	var candidate pipeline.Candidate
+	if state.Version == 2 {
+		if *vrpComplete {
+			return errors.New("streamed engineering state cannot assert complete VRP coverage")
+		}
+		candidate, err = pipeline.BuildStreamedIntelligence(ctx, options, state, policy)
+	} else {
+		candidate, err = pipeline.BuildIntelligence(ctx, options, state, policy, pipeline.MaterializationInputs{VRPComplete: *vrpComplete})
+	}
 	if err != nil {
 		return err
 	}
-	fmt.Printf("synthetic compiled state %s: %d objects; %d records; production blocked\n", candidate.Pointer.ReleaseID, len(candidate.Manifest.Objects), candidate.Stats.UniqueRecords)
+	if candidate.Manifest.Mode == "engineering" {
+		fmt.Printf("private engineering state %s: %d objects; %d records; cannot be packaged for publication\n", candidate.Pointer.ReleaseID, len(candidate.Manifest.Objects), candidate.Stats.UniqueRecords)
+	} else {
+		fmt.Printf("synthetic compiled state %s: %d objects; %d records; production blocked\n", candidate.Pointer.ReleaseID, len(candidate.Manifest.Objects), candidate.Stats.UniqueRecords)
+	}
 	return nil
 }
 

@@ -29,8 +29,11 @@ The release publication verifier fetches GitHub release metadata using the
 same public-address-pinned HTTPS acquisition code. It requires the source and
 metadata URLs to name the same repository, an exact asset download URL, uploaded
 state, matching actual size and a publisher SHA-256 digest matching the locally
-stream-hashed payload. The older of release publication and asset creation is
-the clock. Missing digests, different assets, malformed or duplicate JSON keys,
+stream-hashed payload. The exact asset's creation is the content clock;
+release publication must also be valid but an old tag does not age a genuinely
+new uploaded asset. Publishing a new tag cannot renew an old asset. The retained
+earliest clock still prevents identical-byte re-upload renewal. A derived mirror
+additionally needs its original upstream content clock. Missing digests, different assets, malformed or duplicate JSON keys,
 unapproved origins, unknown/future clocks and stale content fail closed. It does
 not use download time, HTTP 304 or local file timestamps as content age.
 
@@ -62,18 +65,39 @@ workspace lock across processes. `Close` waits for in-flight operations and
 releases only its owned lock; closed engines cannot perform IO. A stale lock
 fails closed and is never automatically erased or stolen.
 
-Runtime dispatch currently handles the explicit VRP CSV/JSON schemas. The bounded
-MRT TABLE_DUMP_V2 unicast/ADDPATH fixture parser exists, but runtime intake
-quarantines MRT until a dedicated coordinator enforces the global enable switch,
-two independent families, sequential downloads and their shared 1 GiB budget.
-Payloads may be plain, gzip or bzip2 as declared. A source partition is capped at
-100,000 normalized records / 64 MiB,
-with 1 MiB records and bounded existing archive/parser readers. Larger sources
-are rejected, not truncated. Whole-source streaming partitions/external merge,
-additional source adapters, archive-member selection, discovery, embedded clocks
-and broader publication proof methods are future integration
-work. Unrepresentable or expired MRT observations fail the partition rather than
-inventing an origin or silently dropping route structure.
+The dedicated `IngestMRT` coordinator is the only runtime MRT entry point. It
+checks the enable switch, two reviewed independent families and their exact
+parser certificates before sequential acquisition. Its shared 1 GiB physical
+body-byte ceiling survives failures and repeated calls on the same engine and
+also consumes the original run download budget. Complete TABLE_DUMP_V2 framing
+and every common-header capture clock bind the raw payload hash to publication;
+the prefix entry's older originated time is private route history, not the RIB's
+publication clock. Plain/gzip/bzip2 inputs stream into bounded private record
+partitions. A malformed or unrepresentable route aborts the candidate rather than
+being truncated or assigned an invented origin.
+
+An optional `mrt_updates_fixture` has its own exact `source-id-updates` ledger
+certificate for `mrt-bgp4mp-unicast-v1`. Its encoded bytes and metadata participate
+in the certification/policy identity, so revocation also invalidates a retained
+replay base. Without that certificate, acquisition remains a cold RIB. With it,
+the coordinator may reuse an authenticated current base and derive only complete
+same-collector 5-minute RIS or 15-minute RouteViews archive intervals. Explicit
+archive plans obey the same checks. Names prove continuity, never freshness:
+every archive is completely parsed, SHA-256 bound and checked against its frame
+capture interval. No new closed interval reuses the exact sealed snapshot
+without renewing its original publication age.
+
+Replay joins a unique normalized peer-address/ASN hash from the RIB to a unique
+BGP4MP transport session. Peer-table ordinals are never transport session IDs.
+Missing/ambiguous peers, duplicate path keys, collector changes, interval gaps,
+ADDPATH mode conflicts, unsupported restart semantics or exceeded limits fall
+back to a new cold RIB within the remaining shared acquisition budget. The
+transactional two-pass replay keeps only changed routes in a bounded 128 MiB
+working estimate, with at most one million logical events and 180 seconds shared
+across both families. It preserves exact prefixes and ADDPATH IDs, applies
+withdrawals and session resets, and never publishes a partial family pair.
+Full-RIB runner RSS, scratch and runtime still require actual-payload hosted
+measurements; bounded synthetic tests do not certify a real source.
 
 Subscription syntax support remains deliberately quarantined at intake: an
 enclosing release timestamp cannot prove each item's publication. No subscription

@@ -99,11 +99,16 @@ type RelationshipData struct {
 	Observed, Inferred bool
 }
 type TierData struct{ NetworkClass, Stability uint8 }
+
+// ASNPrefixProvider streams strictly ordered unique prefixes from an offline
+// bounded store. The callback is never serialized into a binary or sort record.
+type ASNPrefixProvider func(context.Context, uint32, func(netip.Prefix) error) (bool, error)
 type PartitionInput struct {
-	Partition    string
-	PrefixRoutes []netip.Prefix
-	ASNRoutes    []uint32
-	Records      []PublicRecord
+	Partition      string
+	PrefixRoutes   []netip.Prefix
+	ASNRoutes      []uint32
+	Records        []PublicRecord
+	PrefixProvider ASNPrefixProvider `json:"-"`
 }
 type CompiledPartition struct {
 	Objects      []BuiltObject
@@ -393,43 +398,122 @@ func CompilePartition(ctx context.Context, input PartitionInput) (CompiledPartit
 			references = append(references, dict)
 		}
 		// ASN prefix page objects precede their aggregate; each page has <=256 rows.
-		pagesByASN := make(map[uint32][]BuiltObject)
+		type prefixPageSpan struct {
+			object       BuiltObject
+			first, count uint32
+		}
+		pagesByASN := make(map[uint32][]prefixPageSpan)
+		prefixKnownByASN := make(map[uint32]bool)
 		if kind == 8 {
-			for _, r := range records {
-				prefixes := append([]netip.Prefix(nil), r.ASNAggregate.Prefixes...)
-				for i := range prefixes {
-					if !prefixes[i].IsValid() {
+			type ownedPrefix struct {
+				asn uint32
+				key []byte
+			}
+			pending := make([]ownedPrefix, 0, 256)
+			flush := func() error {
+				if len(pending) == 0 {
+					return nil
+				}
+				sort.Slice(pending, func(i, j int) bool {
+					if order := keyCompare(pending[i].key, pending[j].key); order != 0 {
+						return order < 0
+					}
+					return pending[i].asn < pending[j].asn
+				})
+				var rows [][]byte
+				positions := map[uint32][]uint32{}
+				var previous []byte
+				for _, value := range pending {
+					if previous == nil || keyCompare(previous, value.key) != 0 {
+						row := make([]byte, 24)
+						copy(row[:20], value.key[:20])
+						rows = append(rows, row)
+						previous = value.key
+					}
+					position := uint32(len(rows) - 1)
+					list := positions[value.asn]
+					if len(list) == 0 || list[len(list)-1] != position {
+						positions[value.asn] = append(list, position)
+					}
+				}
+				page := newShard(8)
+				page.set(11, Vector(24, rows...))
+				object, err := add(page, "all")
+				if err != nil {
+					return err
+				}
+				references = append(references, object)
+				for asn, list := range positions {
+					first, last := list[0], list[0]
+					appendSpan := func() { pagesByASN[asn] = append(pagesByASN[asn], prefixPageSpan{object, first, last - first + 1}) }
+					for _, position := range list[1:] {
+						if position == last+1 {
+							last = position
+						} else {
+							appendSpan()
+							first, last = position, position
+						}
+					}
+					appendSpan()
+				}
+				pending = make([]ownedPrefix, 0, 256)
+				return nil
+			}
+			for _, record := range records {
+				var previous netip.Prefix
+				emitPrefix := func(prefix netip.Prefix) error {
+					if err := ctx.Err(); err != nil {
+						return err
+					}
+					if !prefix.IsValid() || prefix.Addr().Is4In6() || prefix.Addr().Zone() != "" || prefix != prefix.Masked() {
+						return fail("record")
+					}
+					key := PrefixKey(prefix, false, 0)
+					if previous.IsValid() && keyCompare(PrefixKey(previous, false, 0), key) >= 0 {
+						return fail("record")
+					}
+					previous = prefix
+					if input.PrefixProvider != nil {
+						estimated += 24
+						if estimated > 32<<20 {
+							return fail("partition_budget")
+						}
+					}
+					pending = append(pending, ownedPrefix{record.ASN, key})
+					if len(pending) == 256 {
+						return flush()
+					}
+					return nil
+				}
+				if input.PrefixProvider != nil {
+					if len(record.ASNAggregate.Prefixes) > 0 {
 						return out, fail("record")
 					}
-					prefixes[i] = prefixes[i].Masked()
-				}
-				sort.Slice(prefixes, func(i, j int) bool {
-					return keyCompare(PrefixKey(prefixes[i], false, 0), PrefixKey(prefixes[j], false, 0)) < 0
-				})
-				for first := 0; first < len(prefixes); first += 256 {
-					end := first + 256
-					if end > len(prefixes) {
-						end = len(prefixes)
-					}
-					prefixRows := make([][]byte, 0, end-first)
-					for i := first; i < end; i++ {
-						if i > 0 && prefixes[i] == prefixes[i-1] {
-							return out, fail("record")
-						}
-						key := PrefixKey(prefixes[i], false, 0)
-						row := make([]byte, 24)
-						copy(row[:20], key[:20])
-						prefixRows = append(prefixRows, row)
-					}
-					page := newShard(8)
-					page.set(11, Vector(24, prefixRows...))
-					object, err := add(page, "all")
+					known, err := input.PrefixProvider(ctx, record.ASN, emitPrefix)
 					if err != nil {
 						return out, err
 					}
-					pagesByASN[r.ASN] = append(pagesByASN[r.ASN], object)
-					references = append(references, object)
+					prefixKnownByASN[record.ASN] = known || previous.IsValid()
+				} else {
+					prefixes := append([]netip.Prefix(nil), record.ASNAggregate.Prefixes...)
+					for i := range prefixes {
+						if !prefixes[i].IsValid() {
+							return out, fail("record")
+						}
+						prefixes[i] = prefixes[i].Masked()
+					}
+					sort.Slice(prefixes, func(i, j int) bool {
+						return keyCompare(PrefixKey(prefixes[i], false, 0), PrefixKey(prefixes[j], false, 0)) < 0
+					})
+					for _, prefix := range prefixes {
+						if err := emitPrefix(prefix); err != nil {
+							return out, err
+						}
+					}
 				}
+			}
+			if err := flush(); err != nil {
+				return out, err
 			}
 		}
 		if kind == 7 {
@@ -758,15 +842,15 @@ func CompilePartition(ctx context.Context, input PartitionInput) (CompiledPartit
 					p32(row, 0, u32(row, 0)|bits(28))
 					row[53] = v.Stability
 				}
-				if v.Prefixes != nil {
+				if v.Prefixes != nil || prefixKnownByASN[r.ASN] {
 					p32(row, 0, u32(row, 0)|bits(24))
 					p32(row, 36, uint32(len(pageRows)))
 					p32(row, 40, uint32(len(pagesByASN[r.ASN])))
 					for _, page := range pagesByASN[r.ASN] {
 						p := make([]byte, 16)
-						p32(p, 0, objectID(page))
-						prefixes, _ := page.Shard.Rows(11)
-						p32(p, 8, uint32(len(prefixes)/24))
+						p32(p, 0, objectID(page.object))
+						p32(p, 4, page.first)
+						p32(p, 8, page.count)
 						pageRows = append(pageRows, p)
 					}
 				}

@@ -1,14 +1,17 @@
-# Release and deployment contract v3.2 (dataset-credit amendment)
+# Release and deployment contract v3.3 (compiled-data license amendment)
 
 This contract freezes C07/C08; its executable vectors are
 `tools/release_contract/test_contracts.py`. Passing these vectors does not certify
 a real dataset, a complete binary scanner, a hosted preview or a production release.
 
-`release-scope-v3` (user-approved 2026-11-08) permits reviewed legally required
-dataset credits through the separate global frontend display defined below.
-It retains v2's optional numeric quality and unchanged per-score qualification.
-This amendment adds static credit metadata; it changes no VIA3 bytes, descriptor,
-manifest or lookup-answer schema and activates no source.
+Current `release-scope-v4` (user-approved 2026-11-09) distributes compiled database
+material under CC BY-SA 4.0 with the exact notice in `DATA_LICENSE.md` and its
+dedicated public asset. It retains v3's reviewed global dataset credits and v2's
+optional numeric quality with unchanged per-score qualification. Complete
+negative risk feeds are not a release prerequisite. Each source still needs
+compatible reviewed rights and actual current source qualification; this product
+license activates no source. Source code and dependency licenses stay separate.
+No source/provenance field is added to VIA3 or lookup answers.
 
 ## Identity and canonical bytes
 
@@ -30,7 +33,7 @@ The descriptor has exactly these keys:
 |---|---|
 | `format_version`, `schema_version` | Integer `3` |
 | `codec` | `zstd-1` |
-| `mode` | `synthetic` or `production`; synthetic cannot be approved |
+| `mode` | Public candidates: `synthetic` or `production`; synthetic cannot be approved. Private `engineering` artifacts are never publishable. |
 | `valid_from` | Nonnegative UTC Unix seconds; evaluation clock, not an upstream clock |
 | `valid_until` | UTC Unix seconds, strictly greater than `valid_from` |
 | `objects` | Nonempty array, sorted by unique ascending whole-file hash |
@@ -58,7 +61,13 @@ external origins and incompatible versions. Read pointer, verify manifest hash,
 verify descriptor-derived ID, verify expiry, then verify each complete object hash
 before interpreting bytes. No partial publication or mixed-release fallback exists.
 
-## Global dataset-credit artifacts — `release-scope-v3`
+`compile-state` materializing admitted real data emits private `engineering`
+artifacts. The same immutable identity machinery may inspect them locally, but
+the public packager, preview verifier and production promotion reject that mode.
+Do not relabel known-real data as synthetic to omit source qualification or
+credits. Public synthetic previews contain synthetic fixture data only.
+
+## Global dataset-credit artifacts — retained by `release-scope-v4`
 
 Credit documents are immutable content-addressed static assets at
 `/_atlas/credits/<sha256>.json`. The hash is the SHA-256 of the complete canonical
@@ -104,12 +113,15 @@ freshness, completeness or evidence independence. If the global display cannot
 satisfy the actual license/upstream obligations, that dataset remains ineligible.
 
 The frontend uses one global shared credit display, separate from IP/ASN fact
-owners. It loads the same-origin static index/document lazily when opened,
-preserving zero atlas requests on initial hero navigation. The hero selects the
-index's current release; a lookup session selects its pinned release ID. Verify
-the document's complete SHA-256 and release identity before display. Neither
-request contains the queried address/ASN. Render escaped plain text and reviewed
-links; never execute notice HTML or fetch publisher/license URLs automatically.
+owners. On the hero, it loads the same-origin static index/document when opened,
+preserving zero atlas requests on initial synthetic hero navigation. The hero
+selects the index's current release; a lookup session selects its pinned release
+ID. Production lookup facts wait for the corresponding credit document's full
+SHA-256/release verification. Included required publisher links remain visible
+when full notices are collapsed, and full production notices open automatically
+when verified included credits arrive. Neither request contains the queried
+address/ASN. Render escaped plain text and reviewed links; never execute notice
+HTML or fetch publisher/license URLs automatically.
 External credit links are navigation only and must not receive a query-bearing
 referrer. OSM map attribution and software notices retain their own conditions.
 
@@ -132,6 +144,24 @@ unused/fabricated entries, missing required credits and nonempty synthetic credi
 The exception never applies to VIA3, decoded dictionaries, lookup answers or other
 frontend data. These are mandatory candidate/hosted regression checks, not a
 generic allowlist for a publisher domain throughout the application.
+
+## Compiled database license — `release-scope-v4`
+
+`configs/sources.yaml` fixes `build.release.compiled_data_license` to
+`CC-BY-SA-4.0`. `DATA_LICENSE.md` records the approved repository policy;
+`/data-license.txt` carries the exact reviewed static notice. Packaging and
+candidate verification check the required notice bytes. The notice, credit index
+and referenced credit documents are included in the complete frozen inventory,
+candidate bundle digest, hosted identity checks and final approval. A legal-asset
+change requires a new candidate identity, preview and approval.
+
+The compiled-data grant does not change public-domain inputs' status, relicense
+software dependencies, approve an unreviewed dataset, or override upstream
+copyright/notice, derivative-license, placement or other conditions. Retain each
+included dataset's applicable reviewed obligations. Unresolved or incompatible
+conditions exclude that source. Neither the notice nor credits may associate a
+publisher with a queried IP, ASN, field or reason. Source-rich qualification and
+included-source receipts stay private.
 
 ## Expiry, withdrawal and suspended sessions
 
@@ -217,9 +247,17 @@ synthetic packaging command is:
 python tools/release_contract/prepare_static.py --atlas build-private/synthetic-atlas --public web/.output/public
 ```
 
-It hard-rejects production mode until production capability/approval/report gates
-exist. Its source-free local report is `reports/static-candidate.json`; only a
-passing exact digest may be supplied to preview. No report is stored in the tree.
+Without an explicit private qualification receipt the command remains synthetic
+only. Production uses repeatable `--qualification-receipt <private-path>` for the
+current and every retained production release. `production.qualify` rejects unknown
+receipt fields, mismatched catalog/rights/manifest/parser/family/credit bindings and
+expired observations, then calls the Go `atlas verify-production` command to reopen
+the authenticated source store, certification and normalized record chunks. A
+caller-written receipt or success boolean cannot manufacture qualification. The
+packager derives credits only from the verified inclusion set, validates every
+binary dictionary and freezes the complete tree. Its source-free report contains
+the private receipt SHA-256, never its source IDs or proof details. Packaging does
+not grant approval. No report is stored in the public tree.
 
 Approval schema v3 remains default-deny. It binds `source_catalog_sha256`,
 `rights_audit_sha256`, `release_manifest_sha256`, `candidate_bundle_sha256`,
@@ -231,12 +269,50 @@ ID, exact revision/config hashes and every required report. `requirements: true`
 is policy, not evidence. `verify_approval` checks identity binding only; it cannot
 replace independent report verification, production capabilities or current rights.
 
-No automatic production workflow exists in P0. After every required gate passes,
-an explicit protected promotion rechecks source eligibility, withdrawal, expiry,
-approval/evidence hashes and candidate tree digest. Promote the exact preview
-artifact; never rebuild between preview and production. Read-only post-deploy
-checks verify pointer/manifest hashes, actual root HTTP 302, cache/CSP headers and
-the complete object inventory. Upload success alone is insufficient.
+The production workflows are manual main-branch operations; no push/schedule can
+promote production. `production-candidate.yml` requires successful exact-head
+integration and qualified real inputs; `production-preview.yml` deploys the exact
+frozen artifact to an immutable preview and runs the full production harness.
+`production-promotion.yml` requires an independently approved acceptance packet,
+current private source receipts and a reviewer-protected `atlas-production`
+environment with protected main and self-review disabled. The verifier checks the
+actual GitHub environment policy rather than treating an environment name as proof.
+These workflows require a privately provisioned ephemeral runner labelled
+`atlas-private-2cpu-8g-14g`; the resource report independently checks its actual
+CPU/memory/disk. Merely adding a label cannot meet the capacity gate.
+
+`promotion.py` retrieves successful exact-head main integration/candidate/preview
+runs from GitHub, verifies originating run IDs plus API artifact sizes/SHA-256 and
+reads an exact source-free report allowlist from the archives. Locally edited
+reports cannot substitute for archived trusted bytes. It derives every mandatory
+gate from raw measurements, rechecks source eligibility/withdrawal/expiry, all
+decoded binaries, exact global credit completeness and the entire live preview.
+Only then can the named UTC approval bind the canonical packet, catalog, rights,
+manifest and complete candidate digest. Approval must be dated after the packet
+and before promotion. The approved result exposes the separate `pages_release`
+capability; source qualification alone never satisfies that row.
+
+`pages.py` performs bounded REST Direct Upload using an ephemeral asset JWT held
+only in memory. It verifies exact bytes before/after asset preparation and rechecks
+approval/current qualification immediately before creating production. No build,
+CSP rewrite, credit edit or timestamp normalization occurs during promotion.
+Postchecks verify every served file and effective root 302/cache/CSP policy on both
+the immutable deployment URL and actual production Pages alias. Upload success
+alone is insufficient. If these checks fail, the workflow may restore only the
+independently approved, original production deployment after current rights,
+complete served bytes, original hosted reports and the strict 48-hour rollback
+bound are reverified. Missing eligible rollback state is reported as unavailable;
+it cannot cause restoration of stale, withdrawn or synthetic records.
+
+The private bootstrap must supply observed source fixtures, original authenticated
+state/receipt and the versioned real query/scenario corpus. Do not download current
+mutable upstream bytes and assume they reproduce an earlier receipt. Do not move
+these files through public Actions artifacts. Candidate/preview/promotion upload
+only explicit source-free reports and the already-scanned public tree. The private
+bootstrap is erased from the ephemeral checkout after the job; permitted original
+audit state is retained separately within the rights/expiry/168-hour bounds below.
+Missing bootstrap, required runner protection, measurements, current sources or
+approval fails closed. The repository approval remains disabled by default.
 
 ## Retention and rollback
 

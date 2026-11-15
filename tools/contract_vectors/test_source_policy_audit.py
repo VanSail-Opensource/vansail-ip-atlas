@@ -6,11 +6,12 @@ separate admission verifier; no synthetic record is added to the real catalog.
 
 import copy
 import json
+from hashlib import sha256
 import unittest
 from unittest.mock import patch
 
 from tools.atlas_contracts.config import ContractError, ROOT, load_configs, safe_https, validate_sources
-from tools.atlas_contracts.policy import capability_report, utc, attribution_url, attribution_issues
+from tools.atlas_contracts.policy import Snapshot, capability_report, utc, attribution_url, attribution_issues
 
 
 class SourcePolicyAuditTests(unittest.TestCase):
@@ -76,11 +77,15 @@ class SourcePolicyAuditTests(unittest.TestCase):
 
     def report(self, sources, states=None):
         states = states or {}
+        snapshots = {}
+        for source in sources:
+            digest = sha256(source["id"].encode()).hexdigest()
+            snapshots[source["id"]] = Snapshot(digest, digest, "github_release", "2026-11-08T00:00:00Z", True, True)
         with patch("tools.atlas_contracts.policy.static_issues", return_value=[]), patch(
             "tools.atlas_contracts.policy.runtime_state",
             side_effect=lambda source, *args: (states.get(source["id"], "current"), [])
         ):
-            return capability_report({"sources": sources}, utc("2026-11-08T00:00:00Z"), ROOT)
+            return capability_report({"sources": sources}, utc("2026-11-08T00:00:00Z"), ROOT, snapshots)
 
     @staticmethod
     def capability(report, name):

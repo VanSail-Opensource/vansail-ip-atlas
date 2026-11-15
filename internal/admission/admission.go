@@ -32,16 +32,19 @@ type Source struct {
 	Rights                          Rights
 	Parser                          Parser
 	Fixture                         Fixture
+	MRTUpdatesFixture               *Fixture
 	Publication                     Publication
 	Coverage                        string
 	Scope                           string
 	PublicFields                    []string
 	Fields                          []string
 	FieldMappings                   map[string][]string
+	Signals                         []string
 }
 
 type Rights struct {
 	Status, Distribution, EvidenceURL, ReviewBasis string
+	Identifier                                     string
 	AttributionRequired                            *bool
 	Attribution                                    *intelligence.DatasetAttribution
 }
@@ -55,6 +58,8 @@ type Fixture struct {
 	Status, Path, SHA256, Parser, Schema, TestedAt string
 	SchemaObserved                                 bool
 	Synthetic                                      *bool
+	ContentEncoding                                string
+	PayloadFormat                                  string
 }
 
 type Publication struct{ Kind, Locator, Field string }
@@ -73,16 +78,19 @@ type fetcher interface {
 }
 
 type Engine struct {
-	workspace string
-	fetch     fetcher
-	cleanup   func(string) error
-	clockMu   sync.Mutex
-	clocks    map[[32]byte]time.Time
-	lifecycle sync.RWMutex
-	closed    bool
-	lock      *os.File
-	lockInfo  os.FileInfo
-	lockPath  string
+	workspace   string
+	fetch       fetcher
+	cleanup     func(string) error
+	clockMu     sync.Mutex
+	clocks      map[[32]byte]time.Time
+	lifecycle   sync.RWMutex
+	closed      bool
+	lock        *os.File
+	lockInfo    os.FileInfo
+	lockPath    string
+	storeMu     sync.Mutex
+	recordStore *intelligence.RecordStore
+	mrt         *mrtAcquisitionState
 }
 
 // New creates one bounded acquisition run. Reuse it across sources so retries
@@ -123,6 +131,16 @@ func policy(source Source) intelligence.SourcePolicy {
 // Unsupported clocks, discovery rules and adapters quarantine instead of
 // treating fetch times, filenames or repository activity as freshness evidence.
 func (e *Engine) Ingest(ctx context.Context, source Source, now time.Time, normalizationPolicyHash [32]byte) (result Result, failure error) {
+	return e.ingest(ctx, source, now, normalizationPolicyHash, false)
+}
+
+// IngestPartitioned retains the same admission gates while streaming normalized
+// rows into bounded immutable private objects instead of a whole-source slice.
+func (e *Engine) IngestPartitioned(ctx context.Context, source Source, now time.Time, normalizationPolicyHash [32]byte) (Result, error) {
+	return e.ingest(ctx, source, now, normalizationPolicyHash, true)
+}
+
+func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, normalizationPolicyHash [32]byte, partitioned bool) (result Result, failure error) {
 	result = Result{Policy: policy(source), Decision: intelligence.SourceDecision{ID: source.ID, State: "quarantined"}}
 	deny := func(state, reason string) (Result, error) {
 		result.Decision.State, result.Decision.Reason = state, reason
@@ -154,14 +172,14 @@ func (e *Engine) Ingest(ctx context.Context, source Source, now time.Time, norma
 	if *source.Rights.AttributionRequired && source.Rights.Attribution == nil || source.Rights.Attribution != nil && source.Rights.Attribution.Validate() != nil {
 		return deny("quarantined", "reviewed_dataset_attribution_required")
 	}
-	if !safeHTTPS(source.URL) || !publicationSupported(source) {
+	if !safeHTTPS(source.URL) && !dbipProvider(source) || !publicationSupported(source) {
 		return deny("quarantined", "unsupported_or_unbound_publication_verifier")
 	}
 	adapter, ok := selectAdapter(source)
 	if !ok {
 		return deny("quarantined", "unsupported_adapter_or_public_field_contract")
 	}
-	if adapter == mrtRIB {
+	if adapter == mrtRIB || adapter == mrtUpdates {
 		// Source milestones do not override the currently disabled global MRT
 		// switch. A dedicated cold-build coordinator must enforce two independent
 		// families, sequential downloads and their shared 1 GiB budget first.
@@ -197,7 +215,23 @@ func (e *Engine) Ingest(ctx context.Context, source Source, now time.Time, norma
 		}
 	}()
 	payload := filepath.Join(quarantine, "payload")
-	if _, err := e.fetch.Fetch(ctx, source.URL, payload, source.MaxCompressedBytes); err != nil {
+	assetURL := source.URL
+	var dbipPlan dbipMonthlyPlan
+	if dbipProvider(source) {
+		metadata := filepath.Join(quarantine, "publication")
+		if _, err := e.fetch.Fetch(ctx, source.Publication.Locator, metadata, 4<<20); err != nil {
+			return deny("quarantined", "publication_metadata_unavailable")
+		}
+		page, err := boundedFile(ctx, metadata, 4<<20)
+		if err == nil {
+			dbipPlan, err = resolveDBIPMonthlyPage(page, now)
+		}
+		if err != nil {
+			return deny("quarantined", "publication_not_payload_bound")
+		}
+		assetURL = dbipPlan.AssetURL
+	}
+	if _, err := e.fetch.Fetch(ctx, assetURL, payload, source.MaxCompressedBytes); err != nil {
 		if ctx.Err() != nil {
 			return result, ctx.Err()
 		}
@@ -207,18 +241,47 @@ func (e *Engine) Ingest(ctx context.Context, source Source, now time.Time, norma
 	if err != nil {
 		return deny("invalid", "payload_integrity_failed")
 	}
-	metadata := filepath.Join(quarantine, "publication")
-	if _, err := e.fetch.Fetch(ctx, source.Publication.Locator, metadata, 4<<20); err != nil {
-		if ctx.Err() != nil {
-			return result, ctx.Err()
+	var published, contentValidUntil time.Time
+	var geoProof *intelligence.GeoSourceProof
+	var vrpProof *intelligence.VRPSourceProof
+	if dbipProvider(source) || adapter == ipapiCityZIP {
+		proofFile, openErr := os.Open(payload)
+		if openErr != nil {
+			return deny("invalid", "payload_read_failed")
 		}
-		return deny("quarantined", "publication_metadata_unavailable")
-	}
-	var published time.Time
-	if source.Publication.Kind == "github_commit" {
-		published, err = e.verifyCommit(ctx, metadata, quarantine, source, hash, size, now)
+		if dbipProvider(source) {
+			geoProof, err = verifyDBIPGzip(ctx, proofFile, size, source, dbipPlan)
+		} else {
+			geoProof, err = verifyIPAPIArchive(ctx, proofFile, size, source, now)
+		}
+		if closeErr := proofFile.Close(); err == nil {
+			err = closeErr
+		}
+		if err == nil {
+			published = geoProof.UpstreamClock
+			published, err = e.retainClock(ctx, decodedGeoClockKey(geoProof.DecodedSHA256), published)
+		}
+	} else if adapter == rpkiClientJSON {
+		proof, proofErr := verifyRPKIClientFile(ctx, payload, size, source, now)
+		err = proofErr
+		published = proof.BuiltAt
+		contentValidUntil = proof.ContentValidUntil
+		if err == nil {
+			vrpProof = &intelligence.VRPSourceProof{Version: 1, Rows: uint64(proof.Rows), AcceptedRows: uint64(proof.AcceptedRows), ExpiredRows: uint64(proof.ExpiredRows), BuiltAt: proof.BuiltAt, EvaluatedAt: now, ValidUntil: proof.ContentValidUntil}
+		}
 	} else {
-		published, err = verifyReleaseFile(ctx, metadata, source.URL, hash, size, now)
+		metadata := filepath.Join(quarantine, "publication")
+		if _, err := e.fetch.Fetch(ctx, source.Publication.Locator, metadata, 4<<20); err != nil {
+			if ctx.Err() != nil {
+				return result, ctx.Err()
+			}
+			return deny("quarantined", "publication_metadata_unavailable")
+		}
+		if source.Publication.Kind == "github_commit" {
+			published, err = e.verifyCommit(ctx, metadata, quarantine, source, hash, size, now)
+		} else {
+			published, err = verifyReleaseFile(ctx, metadata, source.URL, hash, size, now)
+		}
 	}
 	if err != nil {
 		return deny("quarantined", "publication_not_payload_bound")
@@ -229,6 +292,9 @@ func (e *Engine) Ingest(ctx context.Context, source Source, now time.Time, norma
 	}
 	if !now.Before(published.Add(source.MaxAge)) {
 		return deny("stale", "publication_expired")
+	}
+	if !contentValidUntil.IsZero() && !now.Before(contentValidUntil) {
+		return deny("stale", "content_expired")
 	}
 	file, err := os.Open(payload)
 	if err != nil {
@@ -242,7 +308,34 @@ func (e *Engine) Ingest(ctx context.Context, source Source, now time.Time, norma
 		}
 	}()
 	var asnStats intelligence.ASNIdentityStats
-	records, err := parsePayload(ctx, file, size, source, adapter, published, &asnStats)
+	var records []intelligence.NormalizedRecord
+	var partitions []intelligence.RecordPartition
+	parserClock := published
+	if adapter == rpkiClientJSON {
+		parserClock = now
+	}
+	if partitioned {
+		e.storeMu.Lock()
+		if e.recordStore == nil {
+			e.recordStore, err = intelligence.NewRecordStore(e.workspace, intelligence.DefaultRecordStoreLimits())
+		}
+		store := e.recordStore
+		e.storeMu.Unlock()
+		if err != nil {
+			return result, err
+		}
+		writer := store.Writer(ctx)
+		defer writer.Abort()
+		err = parsePayloadTo(ctx, file, size, source, adapter, parserClock, 100_000_000, writer.Append, &asnStats)
+		if err == nil {
+			partitions, err = writer.Finish()
+		}
+		if err == nil && len(partitions) == 0 {
+			err = errors.New("source contains no accepted records")
+		}
+	} else {
+		records, err = parsePayload(ctx, file, size, source, adapter, parserClock, &asnStats)
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			return result, ctx.Err()
@@ -251,8 +344,10 @@ func (e *Engine) Ingest(ctx context.Context, source Source, now time.Time, norma
 	}
 	result.Snapshot = &intelligence.SourceSnapshot{ID: source.ID, PayloadHash: hash,
 		ProofPayloadHash: hash, NormalizationPolicyHash: normalizationPolicyHash,
-		ParserVersion: source.Parser.Version, SchemaVersion: 3, PublishedAt: published,
-		ProofKind: source.Publication.Kind, PayloadVerified: true, SchemaVerified: true, ImmutableCommitBound: source.Publication.Kind == "github_commit", Records: records}
+		ParserVersion: source.Parser.Version, SchemaVersion: 3, PublishedAt: published, ContentValidUntil: contentValidUntil,
+		ProofKind: source.Publication.Kind, PayloadVerified: true, SchemaVerified: true, ImmutableCommitBound: source.Publication.Kind == "github_commit", Records: records, RecordPartitions: partitions}
+	result.Snapshot.GeoProof = geoProof
+	result.Snapshot.VRPProof = vrpProof
 	if adapter == asnIdentityCSV {
 		result.Snapshot.ASNIdentityStats = &asnStats
 	}

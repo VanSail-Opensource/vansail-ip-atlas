@@ -20,10 +20,13 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_actual_catalog_is_blocked_and_has_shared_family(self):
         report = capability_report(self.configs["sources"], utc("2026-11-08T00:00:00Z"), ROOT)
-        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (91, 0, 0))
+        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (91, 8, 0))
+        self.assertEqual({s["id"] for s in self.configs["sources"]["sources"] if s["admission"] == "active"}, {
+            "sapics-user-country-v4", "sapics-user-country-v6", "sapics-server-country-v4", "ipverse-as-metadata",
+            "dbip-lite-direct", "ipapi-free-geo-v4", "ipapi-free-geo-v6", "x4b-vpn-v4"})
         self.assertFalse(report["production_eligible"])
         self.assertEqual(report["schema_version"], 3)
-        self.assertEqual(report["release_scope"], "release-scope-v3")
+        self.assertEqual(report["release_scope"], "release-scope-v4")
         self.assertEqual(report["dataset_attributions"], [])
         self.assertEqual(len(report["capabilities"]), 13)
         required = [row for row in report["capabilities"] if row["required"]]
@@ -126,6 +129,7 @@ class ConfigurationTests(unittest.TestCase):
         for status in ("active", "fixture_tested"):
             invalid = copy.deepcopy(self.configs["sources"])
             invalid["sources"][0]["admission"] = status
+            invalid["sources"][0]["fixture"]["sha256"] = "0" * 64
             with self.subTest(status=status), self.assertRaises(ContractError):
                 validate_sources(invalid)
 
@@ -176,6 +180,30 @@ class AdmissionClockTests(unittest.TestCase):
 
     def state(self, snapshot=None, now=None):
         return runtime_state(self.source, snapshot or self.snapshot, now or self.now, self.root)[0]
+
+    def test_identical_payloads_cannot_qualify_two_city_families(self):
+        left = copy.deepcopy(self.source)
+        right = copy.deepcopy(self.source)
+        right["id"] = "independent-looking-label"
+        right["evidence_family"] = "independent-looking-family"
+        for source in (left, right):
+            source["public_fields"] = ["physical_country", "region", "city", "latitude", "longitude"]
+        ledger_path = self.root / "fixtures/source-certification/adapter-certifications.json"
+        ledger = json.loads(ledger_path.read_text())
+        entry = copy.deepcopy(ledger["certifications"][0])
+        entry["source_id"] = right["id"]
+        ledger["certifications"].append(entry)
+        ledger_path.write_text(json.dumps(ledger))
+        snapshots = {source["id"]: self.snapshot for source in (left, right)}
+        report = capability_report({"sources": [left, right]}, self.now, self.root, snapshots)
+        city = next(row for row in report["capabilities"] if row["capability"] == "region_city")
+        self.assertEqual(report["current_count"], 2)
+        self.assertEqual(city["status"], "blocked")
+        self.assertEqual(len(city["families"]), 1)
+        snapshots[right["id"]] = replace(self.snapshot, payload_sha256="b" * 64, proof_payload_sha256="b" * 64)
+        report = capability_report({"sources": [right, left]}, self.now, self.root, snapshots)
+        city = next(row for row in report["capabilities"] if row["capability"] == "region_city")
+        self.assertEqual(city["status"], "qualified")
 
     def test_publication_expiry_boundary_and_future_tolerance(self):
         self.assertEqual(self.state(), "current")

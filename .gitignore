@@ -17,3 +17,13 @@ fixtures/source-samples/
 fixtures/source-certification/*
 !fixtures/source-certification/README.md
 !fixtures/source-certification/adapter-certifications.json
+!fixtures/source-certification/observed-user-country-ipv4.csv
+!fixtures/source-certification/observed-server-country-ipv4.csv
+!fixtures/source-certification/observed-user-country-ipv6.csv
+!fixtures/source-certification/observed-asn-identity.csv
+!fixtures/source-certification/observed-dbip-city.csv
+!fixtures/source-certification/observed-ipapi-city-ipv4.csv
+!fixtures/source-certification/observed-ipapi-city-ipv6.csv
+!fixtures/source-certification/observed-x4b-vpn-ipv4.txt
+!fixtures/source-certification/notices/
+!fixtures/source-certification/notices/*.txt

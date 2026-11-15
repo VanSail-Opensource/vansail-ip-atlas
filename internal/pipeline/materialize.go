@@ -16,7 +16,15 @@ import (
 // MaterializationInputs describes completeness that cannot be inferred from a
 // positive VRP row. It is an engineering input, never source certification.
 // Missing or partial VRP snapshots must leave VRPComplete false.
-type MaterializationInputs struct{ VRPComplete bool }
+type MaterializationInputs struct {
+	VRPComplete      bool
+	scope            netip.Prefix
+	contexts         map[uint32]intelligence.ASNContext
+	prepare          func(*intelligence.Engine) error
+	prepareOnly      bool
+	resolver         intelligence.RelationResolver
+	verifiedEmptyVRP bool
+}
 
 // BuildIntelligence connects all nine normalized record kinds to the bounded
 // public-fact planner. This engineering entry point refuses production: its
@@ -25,6 +33,9 @@ type MaterializationInputs struct{ VRPComplete bool }
 func BuildIntelligence(ctx context.Context, options Options, state intelligence.BuildState, policy intelligence.Policy, inputs ...MaterializationInputs) (Candidate, error) {
 	if options.Mode != "synthetic" {
 		return Candidate{}, &via3.Error{Code: "production_blocked"}
+	}
+	if containsAdmittedData(state) {
+		options.Mode = "engineering"
 	}
 	clock := time.Unix(options.Clock, 0).UTC()
 	if !state.EvaluatedAt.Equal(clock) {
@@ -36,6 +47,18 @@ func BuildIntelligence(ctx context.Context, options Options, state intelligence.
 		}
 	}
 	return Build(ctx, options, IntelligenceProducer(state, policy, clock, inputs...))
+}
+
+// Known real intake can be inspected privately but cannot be mislabeled as a
+// publishable synthetic fixture with an empty legal-credit document. Public Go,
+// browser and Pages readers deliberately reject the private engineering mode.
+func containsAdmittedData(state intelligence.BuildState) bool {
+	for _, source := range state.Sources {
+		if source.Receipt != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // IntelligenceProducer recomputes facts from only surviving source receipts.
@@ -76,6 +99,11 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 		profiles := map[netip.Prefix]struct{}{}
 		exacts := map[netip.Addr]struct{}{}
 		var regions qualityRegions
+		if len(inputs) == 1 && inputs[0].scope.IsValid() {
+			if err := regions.addBoundary(inputs[0].scope); err != nil {
+				return err
+			}
+		}
 		seen := map[string]struct{}{}
 		count, bytes := 0, 0
 		for _, source := range state.Sources {
@@ -244,7 +272,20 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 		if err != nil {
 			return err
 		}
-		completeVRP := len(vrps) > 0 && len(inputs) == 1 && inputs[0].VRPComplete
+		if len(inputs) == 1 {
+			if inputs[0].contexts != nil {
+				engine.UseASNContexts(inputs[0].contexts)
+			}
+			if inputs[0].prepare != nil {
+				if err = inputs[0].prepare(engine); err != nil {
+					return err
+				}
+			}
+			if inputs[0].prepareOnly {
+				return nil
+			}
+		}
+		completeVRP := len(inputs) == 1 && inputs[0].VRPComplete && (len(vrps) > 0 || inputs[0].verifiedEmptyVRP)
 		vrpIndex, err := intelligence.NewVRPIndex(vrps, completeVRP)
 		if err != nil {
 			return err
@@ -254,7 +295,11 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 			key := vrp.Prefix.Masked()
 			vrpsByPrefix[key] = append(vrpsByPrefix[key], vrp)
 		}
-		paths, err := intelligence.RankPaths(observations, relations)
+		var resolver intelligence.RelationResolver = relations
+		if len(inputs) == 1 && inputs[0].resolver != nil {
+			resolver = inputs[0].resolver
+		}
+		paths, err := intelligence.RankPaths(observations, resolver)
 		if err != nil {
 			return err
 		}
@@ -430,7 +475,7 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 			return edgeKeys[i].To < edgeKeys[j].To
 		})
 		for _, edge := range edgeKeys {
-			relation := relations.Relation(edge.From, edge.To)
+			relation := resolver.Relation(edge.From, edge.To)
 			if err := emit(via3.PublicRecord{Version: 3, Kind: 12, ASN: edge.From, Relationship: &via3.RelationshipData{To: edge.To, Relation: uint8(relation), Observed: edges[edge], Inferred: relation != intelligence.UnknownRelation}}); err != nil {
 				return err
 			}
@@ -511,6 +556,10 @@ type qualityRegions struct {
 }
 
 func (r *qualityRegions) add(prefix netip.Prefix) error {
+	return r.addPrefix(prefix, true)
+}
+func (r *qualityRegions) addBoundary(prefix netip.Prefix) error { return r.addPrefix(prefix, false) }
+func (r *qualityRegions) addPrefix(prefix netip.Prefix, covered bool) error {
 	p, err := canonicalMappingPrefix(prefix)
 	if err != nil {
 		return err
@@ -549,7 +598,7 @@ func (r *qualityRegions) add(prefix netip.Prefix) error {
 		}
 		node = node.children[branch]
 	}
-	node.covered = true
+	node.covered = node.covered || covered
 	return nil
 }
 func (r *qualityRegions) visit(ctx context.Context, emit func(netip.Prefix) error) error {

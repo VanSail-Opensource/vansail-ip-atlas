@@ -148,6 +148,31 @@ apart. Both snapshots must still be eligible under current freshness/rights
 policy. A missing, changed-policy or disqualified intervening snapshot breaks
 continuity; do not search backward for a convenient historical success.
 
+For a cold MRT input, the observation epoch is its verified capture clock. For
+authenticated replay it is the verified closed UPDATE-coverage end
+`MRTProof.Through`, across the complete same-collector archive intervals and
+unique peer/session join. That coverage end is not a content-publication clock:
+the original retained base `PublishedAt` still controls the unchanged maximum
+source age. Local evaluation/build time never advances the observation epoch.
+
+The private HMAC-authenticated evaluation ledger records every authenticated
+epoch before unrelated capability checks, compilation or publication. It first
+writes an atomic pending marker, then the eligible or ineligible outcome;
+interrupted computation, missing input or an ineligible observation breaks
+continuity even when no candidate is published. Only the immediately previous
+eligible actual epoch can act as an anchor. Identical relevant path/relationship
+source fingerprints and observation clocks reuse the recorded stability outcome,
+so compiling the same stable epoch again cannot turn it into a first snapshot.
+Changes confined to unrelated geo/risk inputs or local time do not create a new
+Tier-1 observation. The context still authenticates the complete current state.
+
+A stable outcome retains its actual prior-anchor identity, membership evidence
+and source expiry. Both current sources and that anchor must remain current;
+the public candidate lifetime cannot extend the anchor's expiry. The bounded
+`tier1-history-v2.json` ledger is private source-evaluation history, never a query
+cache. Legacy v1 publication-only history remains an audit file and cannot
+establish an unrecorded evaluation or cached stability outcome.
+
 On a first snapshot or insufficient separation, a raw candidate is publicly
 `unknown` with source-free `pending` stability. On a second qualified observation
 it is `tier1_candidate` with `stable` stability. Failure of the current predicate
@@ -157,8 +182,8 @@ time-smoothed evidence or permanent membership.
 
 ## Discovery and cold-build acquisition (C05)
 
-Production MRT remains disabled. Certification may use bounded private fixtures
-without enabling production. The executable cold-build plan reserves two source
+Certification may use bounded private fixtures without enabling production.
+The dedicated runtime coordinator reserves two source
 slots, one selected RIPE RIS-family snapshot and one RouteViews-family snapshot,
 downloaded and parsed sequentially under the existing aggregate 1024 MiB MRT
 compressed budget. If one source exceeds its share or the aggregate budget,
@@ -211,12 +236,58 @@ rules. A reconstructed path exceeding the existing 4096-ASN/255-segment limits
 fails. Unsupported AFI/SAFI and enhanced refresh markers fail explicitly instead
 of being mistaken for ordinary unicast or silently losing stale-route semantics.
 
-This API is not a RIB reducer. A future disk-backed transactional replay stage
-must apply replacement/withdrawal by source session, direction, prefix and path
-ID; clear both directions on session resets; and handle snapshot/EOR boundaries
-before producing current facts. Snapshot intake still rejects update feeds.
-No source rights, publication proof, MRT admission or production gate changes.
-Focused synthetic fixtures cover subtype/transport/clock combinations, transition
-rules, controls, malformed data and resource/cancellation/sink bounds; the hosted
-workflow includes a separate BGP4MP fuzz smoke. Only actual run results establish
+`IngestMRT` performs transactional streaming replay only from authenticated
+current RIB partitions. Each selected source requires its primary RIB fixture
+and an optional independently ledger-certified `mrt_updates_fixture`; missing or
+revoked UPDATE certification means cold RIB acquisition. Both fixture byte
+identities enter the candidate's certification fingerprint. UPDATE inputs never
+enter ordinary snapshot dispatch.
+
+The coordinator derives closed same-collector archive intervals from the sealed
+capture-through clock (RIS 5 minutes; RouteViews 15 minutes), or validates an
+explicit equivalent plan. Filename schedules establish continuity only. Full
+frame validation, interval clocks and the exact raw SHA-256 establish a payload
+proof; download time and directory activity do not. A no-change interval returns
+the exact current receipt without extending its age. The base RIB's earliest
+retained publication clock remains the expiry clock after replay.
+
+A replay bootstrap requires a unique peer-address/ASN hash to match one BGP4MP
+transport tuple. Duplicate RIB peers, multiple peer tables, absent/ambiguous
+sessions or a different collector force cold fallback. Peer-table index is an
+ordinal and is never assumed to equal a transport session. Address literals and
+collector labels are discarded; the private normalized record retains only
+opaque identity, capture clock, ADDPATH mode and exact path ID. Original entry
+originated time survives privately, separately from snapshot publication.
+
+Two complete parser passes validate identities before applying bounded changed
+routes. Replacements and withdrawals use peer, exact prefix and ADDPATH ID;
+session reset retracts that peer's prior routes and changes in both directions.
+New announcements after a reset require a cold snapshot because an incomplete
+restart cannot establish the replacement table. Local outgoing messages cannot
+replace the observed incoming RIB. Unknown restart/refresh semantics, archive
+gaps, malformed tails and budget/deadline exhaustion also fall back to cold.
+The sink publishes both complete independent snapshots or neither.
+
+Replay shares a one-million-event / 180-second ceiling across both families and
+a 128 MiB changed-route working estimate; original RIBs stream from bounded
+private partitions. Acquisition remains sequential under the original 1024 MiB
+physical body-byte ceiling, including failures, with no reset between replay
+and fallback. Actual full-source RSS, scratch and runtime remain hosted gates.
+
+Tier-1 qualification authenticates the entire state and partition roots, builds
+the bounded relationship index and streams independent path visibility. Its
+read-only context binds policy, exact state identity and expiry; a caller
+boolean or membership allowlist cannot replace it. HMAC-authenticated private
+history stores the immediately previous evaluated real source epoch and its
+eligible/ineligible outcome independently of publication success. A first
+observation is pending; a newer observation less than 24 hours later cannot
+skip backward to an older convenient success. A fully evaluated disqualified
+snapshot clears continuity. Policy changes, history tampering and source
+withdrawal cannot preserve old candidacy. These are the existing derivation
+predicates and thresholds, not additional membership assumptions.
+
+Focused synthetic fixtures cover subtype/transport/clock combinations, actual
+unique-session bootstrap, exact-prefix/ADDPATH withdrawal, reset, gaps,
+malformed tails, cancellation and bounds. They do not establish real source
+rights, freshness or production acceptance. Only actual run results establish
 hosted acceptance.

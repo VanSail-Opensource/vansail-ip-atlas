@@ -1,8 +1,10 @@
 # VanSail IP Atlas
 
-A Go compiler and Nuxt 4 static IP/ASN atlas. The local synthetic application is runnable; real-source qualification, complete production ingestion, hosted gates and production deployment remain blocked. See [implementation status](docs/implementation-status.md) for the exact boundary.
+A Go compiler and Nuxt 4 static IP/ASN atlas. The local synthetic application and authenticated production path are implemented; remaining source qualification, complete production measurements, hosted gates and production deployment are still open. See [implementation status](docs/implementation-status.md) for the exact boundary.
 
-The browser reads indexed, compressed VIA3 objects bundled with the site. It never uses an IP lookup API, resolves subscription hosts, or executes proxy connections. The only external runtime requests are optional OpenStreetMap tiles. IP lookup facts and VIA3 contain no source metadata. A shared footer displays reviewed dataset credits for included data, loaded from the same deployment only when opened; private lineage and source IDs stay private.
+The browser reads indexed, compressed VIA3 objects bundled with the site. It never uses an IP lookup API, resolves subscription hosts, or executes proxy connections. The only external runtime requests are optional OpenStreetMap tiles. IP lookup facts and VIA3 contain no source metadata. A shared footer displays reviewed dataset credits for included data from the same deployment; production facts wait for verified credits, and required publisher links remain visible when full notices are collapsed. Private lineage and source IDs stay private.
+
+Under the owner-approved `release-scope-v4`, compiled database material uses [CC BY-SA 4.0](DATA_LICENSE.md). The exact data-license notice and included-dataset credits are part of each immutable candidate. Source code and software dependencies retain their separate licenses; the product data license does not approve an unreviewed source.
 
 ## Local preview
 
@@ -22,7 +24,7 @@ python tools/hosted/static-server.py --directory web/.output/public --port 4173
 
 Open `http://127.0.0.1:4173/ip`. Synthetic examples are `203.0.113.1`, `203.0.114.1`, `2001:db8::1` and `AS13335`; `AS424240` exercises the artificial 24-node graph. All displayed facts for these fixtures are synthetic. A real address without a fixture remains unknown. Use a fresh atlas output directory when changing the release clock or corpus; packaging rejects unreferenced old objects.
 
-The final prepared deployment directory is `web/.output/public`, including its complete `_atlas/` tree, redirect, CSP/cache headers and software notices. `prepare_static.py` validates every object, decoded string table, inventory and immutable hash before producing the private candidate report. It refuses production mode. Regenerate headers and restart the local static server after rebuilding.
+The final prepared deployment directory is `web/.output/public`, including its complete `_atlas/` tree, redirect, CSP/cache headers, data-license notice, global credits and software notices. `prepare_static.py` validates every object, decoded string table, inventory and immutable hash before producing the private candidate report. The commands above package synthetic fixtures; production packaging additionally requires authenticated source qualification and its exact private receipt. Regenerate headers and restart the local static server after rebuilding.
 
 ## Verification
 
@@ -63,9 +65,9 @@ Selected race tests require a CGO-capable toolchain: `go test -race ./internal/.
 
 ## Production boundary
 
-The catalog still contains 91 entries: 82 candidates, seven rights-approved entries and two retired entries. Zero sources are active; all real parser fixtures remain missing, no source declares complete risk coverage, and no real capability currently qualifies. All 21 subscription repositories share one scoring family. No rights decision, attribution exception or source activation was invented during implementation.
+The November 9 catalog checkpoint contains 91 entries: eight active, 79 candidate, two rights-approved and two retired. The eight admitted entries have observed fixtures and reviewed source-specific controls; a static active label does not establish current downloaded data or complete production coverage. Every build rechecks actual bytes, clocks, rights and certifications. All 21 subscription repositories share one scoring family. See [the source audit](SOURCES_AUDIT.md) for the dated review and remaining source blockers.
 
-Production requires all required capabilities, real-source schema/freshness/rights certification, complete bulk ingestion/repacking, hosted regression and performance, a verified Pages preview and approval bound to the exact candidate. Under user-approved `release-scope-v3`, numeric quality remains optional/unrated without assessment coverage, and reviewed required dataset credits are allowed in the shared footer. Scoring eligibility is unchanged. Attribution requirements must actually be satisfied before a source is admitted; no source was activated by this scope change. `configs/release-approval.yaml` remains default-deny.
+Production requires all required capabilities, real-source schema/freshness/rights certification, complete bulk ingestion/repacking, hosted regression and performance, a verified Pages preview and approval bound to the exact candidate. Current `release-scope-v4` retains v2's optional/unrated numeric quality and v3's reviewed global credits, and adds the approved CC BY-SA 4.0 compiled-data license. Complete negative risk feeds are not a release prerequisite; every non-null score still needs the unchanged coverage qualification. Source-specific redistribution, derivative-license and credit conditions remain mandatory. `configs/release-approval.yaml` remains default-deny.
 
 The external planner can also compile the small post-fusion engineering fixture:
 
@@ -81,20 +83,22 @@ To revalidate reviewed source controls and retract ineligible records from priva
 go run ./cmd/atlas intake
 ```
 
-This runs all five closed config checks before acquisition, then records private decisions and normalized state under `.atlas-private/`. The current catalog admits zero sources and makes no download requests. Only the implemented, separately certified adapter/proof combinations can acquire data; unsupported adapters, missing rights/fixtures and subscriptions without verified item clocks stay quarantined. Intake currently enforces a 64 MiB normalized-state ceiling and does not produce a public release.
+This runs all five closed config checks before acquisition, then records private decisions and authenticated normalized state under `.atlas-private/`. Only active, separately certified adapter/proof combinations may acquire data; unsupported adapters, missing rights/fixtures and subscriptions without verified item clocks stay quarantined. Version-2 state streams large sources into compressed partitions, each bounded at 100,000 records and 64 MiB decoded, within the unchanged whole-store and runner budgets. Intake does not produce a public release.
 
 `atlas compile-state -clock <intake-clock> -out build-private/compiled-state`
 connects surviving reconciled receipts to bounded engineering materialization.
-It rechecks config/certification/state identity, clock and expiry at publication.
-With the current empty intake it rejects the build rather than inventing facts.
-See [the pipeline contract](internal/pipeline/README.md) for supported inputs and
-the remaining bulk/Tier-1/source-certification gates. Production mode remains refused.
+Admitted real records produce private `engineering` artifacts that public
+packaging rejects; they cannot become synthetic previews. `compile-production`
+uses authenticated source and Tier-1 qualification, with `verify-production`
+checking the exact resulting artifact. See [production qualification](docs/production-qualification.md)
+and [production evidence](docs/production-evidence.md) for the commands and
+remaining coverage, capacity, preview and approval gates.
 
-The new `asn-identity-csv` adapter streams the observed
+The `asn-identity-csv` adapter streams the observed
 `asn,handle,description,country-code` schema into direct ASN name, organization
 and country facts. It counts/skips reserved ASNs, bounds logical CSV records
 before decoding, and preserves unknown field conflicts. It does not infer IP
-location, usage, relationships or Tier-1 class. Actual-source intake is still
-limited to 100,000 rows/64 MiB; the privately observed 125,830-row publisher file
-therefore remains blocked until streamed state and full-capacity gates are
-implemented. No catalog source is activated by the new adapter.
+location, usage, relationships or Tier-1 class. The full observed 125,830-row
+publisher CSV is supported by partitioned intake without raising the per-partition
+limits. Its reviewed source admission is separate from full production capability
+and runner-capacity acceptance.

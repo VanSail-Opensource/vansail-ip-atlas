@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"vansail-ip-atlas/internal/admission"
 	"vansail-ip-atlas/internal/intelligence"
 	"vansail-ip-atlas/internal/via3"
@@ -19,12 +21,36 @@ import (
 func stateCommandFixture(t *testing.T) (string, intelligence.BuildState) {
 	t.Helper()
 	root := t.TempDir()
-	// The current real catalog stays inactive. These handcrafted records are
+	// Deactivate the copied source controls: these handcrafted records are
 	// engineering state and can only produce a visibly synthetic candidate.
 	for _, relative := range []string{"configs/sources.yaml", "configs/scoring.yaml", "configs/tier1.yaml", "configs/web.yaml", "configs/release-approval.yaml", "SOURCES_AUDIT.md", "fixtures/source-certification/adapter-certifications.json"} {
 		data, err := os.ReadFile(filepath.Join("../..", filepath.FromSlash(relative)))
 		if err != nil {
 			t.Fatal(err)
+		}
+		if relative == "configs/sources.yaml" {
+			var document yaml.Node
+			if err = yaml.Unmarshal(data, &document); err != nil {
+				t.Fatal(err)
+			}
+			var walk func(*yaml.Node)
+			walk = func(n *yaml.Node) {
+				if n.Kind == yaml.MappingNode {
+					for i := 0; i < len(n.Content); i += 2 {
+						if n.Content[i].Value == "admission" {
+							n.Content[i+1].Value = "candidate"
+						}
+					}
+				}
+				for _, child := range n.Content {
+					walk(child)
+				}
+			}
+			walk(&document)
+			data, err = yaml.Marshal(&document)
+			if err != nil {
+				t.Fatal(err)
+			}
 		}
 		path := filepath.Join(root, filepath.FromSlash(relative))
 		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {

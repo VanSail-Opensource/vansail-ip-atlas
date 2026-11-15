@@ -1,0 +1,119 @@
+name: Atlas qualified production Pages preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: Successful exact-head qualified production candidate run
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: atlas-production-preview
+  cancel-in-progress: false
+
+jobs:
+  preview:
+    if: github.ref == 'refs/heads/main' && github.repository == 'VanSail-Opensource/vansail-ip-atlas'
+    runs-on: [self-hosted, linux, x64, atlas-private-2cpu-8g-14g]
+    environment: atlas-preview
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7.0.0
+        with:
+          persist-credentials: false
+          clean: false
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.13.7'
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.13.0'
+      - name: Require successful exact-head candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ATLAS_CANDIDATE_RUN: ${{ inputs.candidate_run_id }}
+        run: |
+          python - <<'PY'
+          import os, re
+          from tools.release_contract.promotion import TrustedCI
+          value = os.environ['ATLAS_CANDIDATE_RUN']
+          if not re.fullmatch(r'[1-9][0-9]{0,19}', value):
+              raise SystemExit('invalid candidate run')
+          TrustedCI().run(int(value), os.environ['GITHUB_SHA'], '.github/workflows/production-candidate.yml')
+          PY
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: atlas-production-public
+          path: build-private/frozen-production
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: production-candidate-evidence
+          path: reports
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+      - name: Install locked browser harness
+        run: |
+          python -m pip install -r tools/requirements.txt
+          npm exec --yes --package pnpm@12.18.0 -- pnpm --dir tools/hosted install --frozen-lockfile --ignore-scripts
+          npm exec --yes --package pnpm@12.18.0 -- pnpm --dir tools/hosted exec playwright install --with-deps chrome
+      - name: Upload exact frozen candidate as preview only
+        id: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ATLAS_ACCOUNT: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          ATLAS_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+        run: |
+          python tools/release_contract/pages.py preview --public build-private/frozen-production --qualification-receipt .atlas-private/production-receipt.json --account "$ATLAS_ACCOUNT" --project "$ATLAS_PROJECT" --head "$GITHUB_SHA"
+          python - <<'PY'
+          import json, os
+          from tools.hosted.candidate import check_preview_origin
+          value = json.load(open('reports/pages-deployment.json'))
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write('ATLAS_PREVIEW_URL=' + check_preview_origin(value['url']) + '\n')
+          PY
+      - name: Verify every deployed file and control policy
+        run: python tools/hosted/candidate.py --public build-private/frozen-production --preview-url "$ATLAS_PREVIEW_URL"
+      - name: Full production browser populations and strict gates
+        run: node tools/hosted/production-browser.mjs
+      - name: Recheck frozen preview and expiry after browser script
+        if: always() && steps.deploy.outcome == 'success'
+        run: python tools/hosted/candidate.py --public build-private/frozen-production --preview-url "$ATLAS_PREVIEW_URL"
+      - uses: actions/upload-artifact@v7.0.0
+        if: always()
+        with:
+          name: production-preview-evidence
+          path: |
+            reports/preview-identity.json
+            reports/production-browser.json
+            reports/pages-deployment.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Erase ephemeral private bootstrap
+        if: always()
+        run: |
+          python - <<'PY'
+          import os, shutil
+          from pathlib import Path
+          root=Path(os.environ['GITHUB_WORKSPACE']).resolve()
+          for relative in ('.atlas-private','fixtures/source-certification'):
+              target=root/relative
+              if target.exists():
+                  if target.is_symlink() or not target.resolve().is_relative_to(root) or target.resolve()==root:
+                      raise SystemExit('unsafe private cleanup target')
+                  shutil.rmtree(target)
+          PY
+
+# Original authenticated receipt/state and corpus are provisioned privately.
+# Latest upstream bytes cannot reconstruct the approved candidate by assumption.
+# This job has no production operation and never publishes receipt/source artifacts.

@@ -1,4 +1,78 @@
-# VanSail IP Atlas - Implementation validation (2026-11-08)
+# VanSail IP Atlas - Implementation validation
+
+## Current checkpoint, 2026-11-09
+
+Follow-up verification on 2026-11-15: the compiler now issues a private HMAC
+attestation binding the exact receipt, manifest, authenticated state, policy and
+deadline. Artifact substitution and read-only retained-state verification are
+covered by regressions. Actual Go allocation instrumentation and independently
+recomputed allocation-population gates replace missing counters; their scope is
+all Atlas Go processes in a measured scenario, with Node/Python/toolchain
+allocations explicitly excluded. The updated full Go suite and vet pass. Eight
+observed fixtures were re-parsed and their certifications refreshed against the
+final internal implementation. Hosted exact-revision results remain separate.
+
+The production compiler, private source-state authentication, release receipts,
+measured acceptance harness and exact-artifact promotion workflow are implemented.
+**The complete production plan is not yet satisfied and production is not deployed.**
+The following dated evidence supersedes older implementation-limit statements
+below without relabeling historical synthetic results as production acceptance.
+
+The owner approved `release-scope-v4`: compiled database material uses CC BY-SA
+4.0 and reviewed global dataset credits are displayed. The requirement for two
+complete negative-assessment feeds was removed; insufficient numeric assessment
+coverage remains unrated. Scoring coefficients and all performance budgets remain
+unchanged. `/data-license.txt` and verified release-scoped credit documents are
+required packaging assets; production facts wait for their verified notices.
+
+Eight of 91 sources are now statically admitted with observed byte-exact fixtures
+and current-code certifications. They cover three country lists, ASN identity,
+DB-IP city, ipapi.is IPv4/IPv6 city and X4B VPN prefixes. Their full real captures
+were parsed and their publication/rights evidence reviewed locally. Complete
+network acquisition and reconciliation on the hosted runner remain a distinct
+gate, and no catalog label asserts current runtime data. Remaining entries are
+disabled until their missing rights, freshness, schema or semantics are resolved.
+
+Local verification for this checkpoint:
+
+- `go test ./...` and `go vet ./...` pass, including more than 200,000 prefixes for
+  one ASN, streaming source partitions, cold/replayed MRT, qualified Tier-1
+  history, complete VRP proof, expiry, deterministic output and lookup ownership.
+- All 127 Python contract/release regressions and 198 TypeScript/JavaScript tests
+  pass. Pinned Nuxt typechecking and static generation pass. Workflow actionlint
+  passes.
+- Current stable Chrome passes all 21 local static UI scenarios. The prepared
+  synthetic tree has 87 files / 2,161,541 bytes / 18 database objects and bundle
+  SHA-256 `42e6485ac2115449215770014b1d1aa6256da62826cd4b09ea7faea5154ac1c0`.
+  Software runtime notice audit and full public object inclusion pass.
+- The local synthetic performance sample reports LCP p50/p95/p99
+  2220/2260/2452 ms, CLS 0, initial JavaScript 195,111 gzip bytes and 10,258 cold
+  atlas bytes. All measured comparisons, including the complete 24-node graph,
+  pass; full interaction INP/CLS, mandatory populations and memory remain
+  unmeasured, so the overall production gate remains blocked.
+- Complete DB-IP proof plus parsing preserves 7,777,816 rows and 14,288,199
+  prefixes while reducing local time from 221.6 to 117.9 seconds and cumulative
+  allocation from 41.8 to 2.93 GB. This discard-sink measurement is not full-build
+  capacity evidence. Compressed real ASN partitions use 6.4 MB versus 45.8 MB
+  previously; no storage limit was raised.
+- Full canonical Go lookup improved to roughly 2.5 microseconds mean with 31
+  allocations. This still does not pass the unchanged 2-microsecond p95 gate.
+
+The repository has zero registered self-hosted production runners as queried on
+November 9. The protected standard-profile private runner/bootstrap, complete
+current BGP/relationship/RPKI/usage/threat source coverage, authentic Tier-1
+continuity, full build and real-query performance populations, worst-case worker
+memory, hosted preview acceptance and final exact-artifact approval remain
+blocking. Local DNS maps some upstreams into reserved address space; the pinned
+Go downloader correctly refuses those addresses. Its SSRF checks were retained.
+
+New exact-revision hosted integration and actual-source intake results will be
+reported separately when they finish. No old hosted success is reused for this
+revision. Detailed current boundaries are in
+[production qualification](docs/production-qualification.md) and
+[production evidence](docs/production-evidence.md).
+
+## Historical implementation evidence, 2026-11-08
 
 The local synthetic compiler and static application are runnable. **The full P0-P7 production plan remains incomplete.** Real-source qualification, full bulk ingestion, mandatory capacity/performance gates and production deployment remain blocked. The public implementation repository is `VanSail-Opensource/vansail-ip-atlas`; delivery evidence is recorded as it actually runs, independently of local results below.
 

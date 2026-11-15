@@ -15,7 +15,7 @@ approval_scope:
   release_manifest_template: web/.output/public/_atlas/releases/{release_id}/manifest.json
 requirements:
   all_required_capabilities_have_approved_current_sources: true
-  no_source_requiring_public_attribution: true
+  included_dataset_credits_complete: true
   hosted_regression_passed: true
   hosted_performance_passed: true
   public_output_scan_passed: true

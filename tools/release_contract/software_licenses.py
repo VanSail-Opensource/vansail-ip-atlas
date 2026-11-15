@@ -10,6 +10,7 @@ import re
 ROOT = Path(__file__).resolve().parents[2]
 NOTICE = re.compile(r"^(?:license|licence|copying|notice|copyright)(?:[._-].*)?$", re.IGNORECASE)
 DIRECT = {
+    "@noble/hashes": "noble-hashes.txt",
     "fzstd": "fzstd.txt", "leaflet": "leaflet.txt", "nuxt": "nuxt.txt", "@nuxt/ui": "nuxt-ui.txt",
     "vue": "vue.txt", "vue-router": "vue-router.txt", "motion-v": "motion-v.txt", "tailwindcss": "tailwindcss.txt",
 }

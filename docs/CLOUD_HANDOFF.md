@@ -89,7 +89,7 @@ count is zero, linear history and conversation resolution are required.
   guards, cancellation, cross-partition context and withdrawal coverage.
 - Local full Go tests/vet, seven fuzz targets, strict contracts, 132 Python
   contract tests, 31 hosted Python tests, actual age roundtrip/wrong-key/corruption
-  tests, frontend typecheck and 216 Node/TypeScript tests passed. Chrome passed
+  tests, frontend typecheck and 217 Node/TypeScript tests passed. Chrome passed
   21 synthetic UI scenarios and all three actual worker boundary workloads.
 - Local synthetic LCP p95 was 2.904 seconds against the unchanged 2.5-second
   ceiling during concurrent validation; other measured local comparisons passed.
@@ -126,6 +126,14 @@ count is zero, linear history and conversation resolution are required.
   The final local profile retains every boundary and answer, with sampled PSS
   approximately 467 MiB. Bounded source-free cgroup sampling aids diagnosis;
   acceptance still uses the unchanged raw peak from Chrome process birth.
+- Run 43683638898 again completed all memory cases without an OOM but reached
+  the strict ceiling. Its sampled peak occurred during the repeated 96 MiB
+  lookup. Worker SHA-256 now uses pinned `@noble/hashes` 2.0.1 to avoid WebCrypto's
+  input-sized snapshot copy; digests, async API and integrity checks are unchanged.
+  Independent native-reference comparisons and the exact MIT notice/runtime audit
+  pass. The emitted local workload peak fell another approximately 24 MiB, to
+  444 MiB PSS. The maximum workload slowed from approximately 3.8 to 7.5 seconds;
+  this measured CPU/memory tradeoff still requires exact-head hosted acceptance.
 
 The four routing-source qualifications below remain unresolved. No production
 release or publisher permission is implied by these implementation fixes.

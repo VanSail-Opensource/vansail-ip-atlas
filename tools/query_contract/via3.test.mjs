@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import test from 'node:test'
 import { AtlasReader, parseShard, hash, answerJSONBytes, PathSegmentPool, prefixKeyValid, comparePrefixKeys } from '../../web/app/workers/atlas.ts'
 
@@ -14,6 +15,28 @@ const response = (path, options) => {
   const bytes = files.get(path)
   return Promise.resolve(new Response(bytes, { status: bytes ? 200 : 404, headers: { 'content-length': String(bytes?.length ?? 0) } }))
 }
+
+test('worker SHA-256 preserves standard digests, sliced inputs and maximum-sized sections', async () => {
+  for (const [text, expected] of [
+    ['', 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'],
+    ['abc', 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'],
+    ['abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq', '248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1'],
+  ]) {
+    const result = hash(new TextEncoder().encode(text))
+    assert(result instanceof Promise)
+    assert.equal(await result, expected)
+  }
+  for (const size of [1, 55, 56, 63, 64, 65, 119, 120, 127, 128, 129, 255, 256, 257, 4095, 4096, 4097, 1024 * 1024, 32 * 1024 * 1024]) {
+    const storage = new Uint8Array(size + 17).fill(0xa5)
+    const input = storage.subarray(7, size + 7)
+    for (let i = 0; i < input.length; i++) input[i] = (i * 37 + (i >>> 9)) & 255
+    const expected = createHash('sha256').update(input).digest('hex')
+    assert.equal(await hash(input), expected, `section length ${size}`)
+    assert.equal(createHash('sha256').update(input).digest('hex'), expected, 'Hashing must leave its owned input unchanged')
+    assert(storage.subarray(0, 7).every(value => value === 0xa5))
+    assert(storage.subarray(size + 7).every(value => value === 0xa5))
+  }
+})
 
 test('bounded answer byte counting matches JSON UTF-8 without materializing the complete serialization', () => {
   const encoder = new TextEncoder()

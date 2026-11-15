@@ -13,6 +13,7 @@
     "test:codec": "node --test tests/zstd.test.ts"
   },
   "dependencies": {
+    "@noble/hashes": "2.0.1",
     "@nuxt/ui": "4.12.0",
     "fzstd": "0.1.1",
     "leaflet": "1.9.4",

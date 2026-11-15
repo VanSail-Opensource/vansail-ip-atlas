@@ -1,4 +1,5 @@
 import { decodeZstd } from '../lib/zstd.ts'
+import { sha256 } from '@noble/hashes/sha2.js'
 import { parseInput } from '../lib/query.ts'
 import type { Input } from '../lib/query.ts'
 import type { LookupAnswer, ClassCAnswer, ASNAnswer, BGPAnswer, ASNPrefixPage, CoverageAnswer } from '../lib/via3.ts'
@@ -37,7 +38,9 @@ const range = (first: number, count: number, total: number) => first <= total &&
 const checkAbort = (signal?: AbortSignal) => { if (signal?.aborted) throw new DOMException('Aborted', 'AbortError') }
 const hex = (b: Uint8Array) => Array.from(b, value => value.toString(16).padStart(2, '0')).join('')
 const unhex = (text: string) => Uint8Array.from(text.match(/../g) ?? [], part => parseInt(part, 16))
-export const hash = async (b: Uint8Array) => hex(new Uint8Array(await crypto.subtle.digest('SHA-256', b as BufferSource)))
+// Read the owned input in fixed-size blocks. WebCrypto snapshots the complete
+// BufferSource, temporarily duplicating a maximum-sized decoded section.
+export const hash = async (b: Uint8Array): Promise<string> => hex(sha256(b))
 const textDecoder = new TextDecoder('utf-8', { fatal: true })
 const reasonNames = ['malware', 'botnet', 'command_control', 'abuse', 'fraud', 'scanning', 'spam', 'tor', 'vpn', 'proxy', 'datacenter', 'hosting', 'asn_context', 'subnet_context']
 const reasons = (bits: number) => reasonNames.filter((_, bit) => (bits & (1 << bit)) !== 0)

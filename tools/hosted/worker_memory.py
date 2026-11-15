@@ -20,6 +20,20 @@ from tools.release_contract.contracts import ContractError
 from tools.hosted.memory_profile import verify_memory_profile
 from tools.hosted.runner_budget import cgroup, effective, require_descendant, slice_cgroup
 
+def safe_progress(path: Path) -> dict | None:
+    """Only fixed synthetic phase names cross into public failure evidence."""
+    try:
+        value=json.loads(path.read_bytes()).get('progress')
+    except (OSError,ValueError,AttributeError):
+        return None
+    if (type(value) is not dict or set(value)!={'phase','case_name','completed_cases'}
+        or value['phase'] not in ('connecting','ready','first-lookup','first-answer','repeat-lookup',
+                                'repeat-answer','retained-answers','complete')
+        or value['case_name'] not in (None,'maximum-materialized-answer','maximum-live-decoded','live-limit-rejection')
+        or type(value['completed_cases']) is not int or not 0<=value['completed_cases']<=3):
+        return None
+    return value
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--public',type=Path,required=True)
@@ -28,9 +42,11 @@ def main():
     args=parser.parse_args()
     report={'accounting':'isolated-cgroup-v2-memory.peak','profile_exercised':None,
         'includes_worker_children':True,'accounting_scope':'entire-Chrome-tree-from-process-birth',
-        'peak_bytes':None,'errors':[]}
+        'peak_bytes':None,'errors':[],'phase':'environment'}
     process=None;unit='atlas-worker-memory-'+uuid.uuid4().hex
+    case_report=ROOT/'.atlas-private/worker-memory-cases.json'
     try:
+        case_report.unlink(missing_ok=True)
         if sys.platform!='linux' or os.environ.get('RUNNER_ENVIRONMENT')!='github-hosted':
             raise ContractError('worker peak proof requires official Linux runner')
         import pwd
@@ -41,6 +57,7 @@ def main():
         effective(budget_group)
         private=ROOT/'.atlas-private';private.mkdir(exist_ok=True,mode=0o700)
         profile=private/'worker-memory-profile.json'
+        report['phase']='fixture-generation'
         with tempfile.TemporaryFile(dir=private) as log:
             result=subprocess.run(['build-private/atlas','memory-profile','-out','build-private/worker-profile',
                 '-profile',str(profile)],cwd=ROOT,stdout=log,stderr=log)
@@ -55,6 +72,7 @@ def main():
         with socket.socket() as sock:
             sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
         with tempfile.TemporaryDirectory(prefix='chrome-memory-',dir=ROOT/'build-private') as temporary, tempfile.TemporaryFile(dir=private) as log:
+            report['phase']='browser-start'
             argv=['sudo','-E','systemd-run','--scope','--quiet','--unit',unit,
                 '--slice',budget_slice,
                 '-p','CPUQuota=200%','-p','CPUQuotaPeriodSec=100ms','-p','MemoryMax=384M','-p','MemorySwapMax=0',
@@ -80,21 +98,26 @@ def main():
             if (group_root/'memory.max').read_text().strip()!=str(384*1024**2):
                 raise ContractError('Chrome memory limit unavailable')
             environment={**os.environ,'ATLAS_MEMORY_CDP':endpoint,'ATLAS_MEMORY_PUBLIC':str(args.public.resolve()),
-                         'ATLAS_MEMORY_PROFILE':str(profile),'ATLAS_MEMORY_CASE_REPORT':str(private/'worker-memory-cases.json')}
+                         'ATLAS_MEMORY_PROFILE':str(profile),'ATLAS_MEMORY_CASE_REPORT':str(case_report)}
+            report['phase']='workload'
             result=subprocess.run(['node','tools/hosted/worker-memory.mjs'],cwd=ROOT,env=environment,stdout=log,stderr=log,timeout=900)
             report['peak_bytes']=int((group_root/'memory.peak').read_text())
             report['memory_events']={k:int(v) for k,v in (line.split() for line in (group_root/'memory.events').read_text().splitlines())}
             if result.returncode or report['memory_events'].get('oom_kill') or report['memory_events'].get('oom'):
                 raise ContractError('worst-case Chrome workload failed or exceeded memory')
             cases=json.loads((private/'worker-memory-cases.json').read_bytes())
+            report['phase']='profile-verification'
             verify_memory_profile(value,cases,ROOT/'build-private/worker-profile')
             report.update(profile_exercised=value['scope'],cases=cases,
                           browser=cases['browser'],worker_sha256=cases['worker_sha256'])
             if not 0<report['peak_bytes']<384*1024**2:
                 raise ContractError('worker memory gate failed')
+            report['phase']='complete'
     except (ContractError,OSError,RuntimeError,ValueError,KeyError,subprocess.SubprocessError):
         report['errors'].append('worst-case-worker-memory-proof-failed')
     finally:
+        progress=safe_progress(case_report)
+        if progress is not None:report['workload_progress']=progress
         if process is not None:
             subprocess.run(['sudo','systemctl','stop',unit+'.scope'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             try: process.wait(timeout=15)

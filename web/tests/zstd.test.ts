@@ -79,3 +79,66 @@ test('malformed block type and oversized block fail before decoder allocation', 
   oversized[6] = 0xf9; oversized[7] = 0xff; oversized[8] = 0xff
   assert.throws(() => inspectZstdFrame(oversized, vectors[1].decoded_bytes), ZstdError)
 })
+
+// Independent BigInt specification retained only in tests. The production
+// implementation must not allocate BigInts for every decoded eight-byte lane.
+const MASK = (1n << 64n) - 1n
+const P1 = 11400714785074694791n
+const P2 = 14029467366897019727n
+const P3 = 1609587929392839161n
+const P4 = 9650029242287828579n
+const P5 = 2870177450012600261n
+const rotl = (value: bigint, bits: bigint) => ((value << bits) | (value >> (64n - bits))) & MASK
+const round = (acc: bigint, lane: bigint) => rotl((acc + lane * P2) & MASK, 31n) * P1 & MASK
+
+function referenceChecksum(input: Uint8Array): number {
+  const view = new DataView(input.buffer, input.byteOffset, input.byteLength)
+  let offset = 0
+  let hash: bigint
+  if (input.length >= 32) {
+    let v1 = (P1 + P2) & MASK, v2 = P2, v3 = 0n, v4 = (-P1) & MASK
+    while (offset <= input.length - 32) {
+      v1 = round(v1, view.getBigUint64(offset, true)); offset += 8
+      v2 = round(v2, view.getBigUint64(offset, true)); offset += 8
+      v3 = round(v3, view.getBigUint64(offset, true)); offset += 8
+      v4 = round(v4, view.getBigUint64(offset, true)); offset += 8
+    }
+    hash = (rotl(v1, 1n) + rotl(v2, 7n) + rotl(v3, 12n) + rotl(v4, 18n)) & MASK
+    for (const lane of [v1, v2, v3, v4]) hash = ((hash ^ round(0n, lane)) * P1 + P4) & MASK
+  } else hash = P5
+  hash = (hash + BigInt(input.length)) & MASK
+  while (offset <= input.length - 8) {
+    hash = (rotl(hash ^ round(0n, view.getBigUint64(offset, true)), 27n) * P1 + P4) & MASK
+    offset += 8
+  }
+  if (offset <= input.length - 4) {
+    hash = (rotl(hash ^ (BigInt(view.getUint32(offset, true)) * P1 & MASK), 23n) * P2 + P3) & MASK
+    offset += 4
+  }
+  while (offset < input.length) {
+    hash = rotl(hash ^ (BigInt(input[offset++]!) * P5 & MASK), 11n) * P1 & MASK
+  }
+  hash ^= hash >> 33n
+  hash = hash * P2 & MASK
+  hash ^= hash >> 29n
+  hash = hash * P3 & MASK
+  hash ^= hash >> 32n
+  return Number(hash & 0xffffffffn)
+}
+
+
+test('XXH64 limb arithmetic matches the BigInt specification at block and carry boundaries', () => {
+  const lengths = [...Array.from({ length: 129 }, (_, i) => i), 255, 256, 257, 511, 512, 513, 4095, 4096, 4097, 65535, 65536, 65537]
+  for (const fill of [0, 255, -1]) {
+    const backing = new Uint8Array(65544 + 17)
+    let random = 0x9e3779b9
+    for (let i = 0; i < backing.length; i++) {
+      random ^= random << 13; random ^= random >>> 17; random ^= random << 5
+      backing[i] = fill < 0 ? random >>> 24 : fill
+    }
+    for (const length of lengths) {
+      const input = backing.subarray(17, 17 + length)
+      assert.equal(zstdChecksum(input), referenceChecksum(input), `fill=${fill}, length=${length}, nonzero byteOffset`)
+    }
+  }
+})

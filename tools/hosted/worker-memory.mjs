@@ -12,7 +12,18 @@ const workers=(await readdir(join(publicRoot,'_nuxt'))).filter(name=>/^atlas-[A-
 if(workers.length!==1)throw new Error('One exact emitted atlas worker is required')
 const workerPath='/_nuxt/'+workers[0]
 const workerBytes=await readFile(join(publicRoot,workerPath))
-const report={browser:null,worker_sha256:createHash('sha256').update(workerBytes).digest('hex'),completed_cases:0,cases:[],object_hashes:[],retained_answer_bytes:[],errors:[]}
+const report={browser:null,worker_sha256:createHash('sha256').update(workerBytes).digest('hex'),completed_cases:0,cases:[],object_hashes:[],retained_answer_bytes:[],errors:[],
+  progress:{phase:'connecting',case_name:null,completed_cases:0}}
+const caseNames=new Set(['maximum-materialized-answer','maximum-live-decoded','live-limit-rejection'])
+const phases=new Set(['connecting','ready','first-lookup','first-answer','repeat-lookup','repeat-answer','retained-answers','complete'])
+let pendingReport=Promise.resolve()
+const persistReport=()=>{const bytes=JSON.stringify(report)+'\n';pendingReport=pendingReport.then(()=>writeFile(process.env.ATLAS_MEMORY_CASE_REPORT,bytes));return pendingReport}
+const progress=async value=>{
+  if(!value||Object.keys(value).sort().join(',')!=='case_name,completed_cases,phase'||!phases.has(value.phase)
+    ||value.case_name!==null&&!caseNames.has(value.case_name)||!Number.isInteger(value.completed_cases)||value.completed_cases<0||value.completed_cases>3)
+    throw new Error('Invalid memory progress')
+  report.progress=value;report.completed_cases=value.completed_cases;await persistReport()
+}
 const requestedObjects=new Set()
 const server=createServer(async(req,res)=>{
   try{
@@ -30,13 +41,20 @@ const server=createServer(async(req,res)=>{
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
 let browser
 try{
+  await persistReport()
   browser=await chromium.connectOverCDP(process.env.ATLAS_MEMORY_CDP)
   report.browser=browser.version()
-  const context=await browser.newContext()
-  const page=await context.newPage()
+  // Python starts exactly one fresh about:blank page. Reuse it so an unrelated
+  // idle renderer does not overlap the one measured page and its actual worker.
+  const contexts=browser.contexts()
+  if(contexts.length!==1||contexts[0].pages().length!==1||contexts[0].pages()[0].url()!=='about:blank')
+    throw new Error('Expected one fresh startup page')
+  const context=contexts[0],page=context.pages()[0]
+  await page.exposeFunction('__atlasMemoryProgress',progress)
   const origin=`http://127.0.0.1:${server.address().port}`
   await context.route('**/*',route=>new URL(route.request().url()).origin===origin?route.continue():route.abort())
   await page.goto(origin)
+  await progress({phase:'ready',case_name:null,completed_cases:0})
   const measured=await page.evaluate(async({workerPath,cases})=>{
     const worker=new Worker(workerPath,{type:'module'})
     let id=0;const completed=[],retained=[]
@@ -49,30 +67,35 @@ try{
     })
     for(const test of cases){
       if(!['lookup','classC','prefixes'].includes(test.action)||typeof test.q!=='string')throw new Error('invalid memory profile case')
+      await window.__atlasMemoryProgress({phase:'first-lookup',case_name:test.name,completed_cases:completed.length})
       const answer=await invoke(test)
       if(!test.expected_error&&(answer===undefined||answer===null))throw new Error('memory case did not materialize answer')
       const answerBytes=answer===undefined?0:new TextEncoder().encode(JSON.stringify(answer)).length
       if(test.answer_bytes!==undefined&&answerBytes!==test.answer_bytes)throw new Error('materialized answer boundary differs')
+      await window.__atlasMemoryProgress({phase:'first-answer',case_name:test.name,completed_cases:completed.length})
       if(test.retain_answer)retained.push(answer)
       // Hold the structured clone while repeating the real lookup/IDB path.
+      await window.__atlasMemoryProgress({phase:'repeat-lookup',case_name:test.name,completed_cases:completed.length})
       const repeated=await invoke(test)
       const repeatedBytes=repeated===undefined?0:new TextEncoder().encode(JSON.stringify(repeated)).length
       if(repeatedBytes!==answerBytes)throw new Error('repeat lookup changed materialized answer size')
       completed.push({name:test.name,answer_bytes:answerBytes,repeat_answer_bytes:repeatedBytes,retained_answers:retained.length})
+      await window.__atlasMemoryProgress({phase:'repeat-answer',case_name:test.name,completed_cases:completed.length})
     }
     // Read every retained object after the resident-limit cases. Merely retaining
     // an array length would not prove the earlier structured clone remained live.
+    await window.__atlasMemoryProgress({phase:'retained-answers',case_name:null,completed_cases:completed.length})
     const retainedAnswerBytes=retained.map(answer=>new TextEncoder().encode(JSON.stringify(answer)).length)
     worker.terminate();return {cases:completed,retained_answer_bytes:retainedAnswerBytes}
   },{workerPath,cases:profile.cases})
   report.cases=measured.cases;report.completed_cases=measured.cases.length;report.retained_answer_bytes=measured.retained_answer_bytes;report.object_hashes=[...requestedObjects].sort()
   for(const test of profile.cases)for(const hash of test.required_objects??[])
     if(!requestedObjects.has(hash))throw new Error('required boundary object was not actually fetched')
-  await context.close()
+  await progress({phase:'complete',case_name:null,completed_cases:measured.cases.length})
 }catch{report.errors.push('worker-memory-workload-failed')}
 finally{
   // Disconnect, do not kill Chrome: the parent must read memory.peak before stop.
-  await writeFile(process.env.ATLAS_MEMORY_CASE_REPORT,JSON.stringify(report)+'\n')
+  await persistReport()
   server.close()
 }
 process.exit(report.errors.length?1:0)

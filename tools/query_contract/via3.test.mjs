@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { AtlasReader, parseShard, hash } from '../../web/app/workers/atlas.ts'
+import { AtlasReader, parseShard, hash, answerJSONBytes } from '../../web/app/workers/atlas.ts'
 
 const golden = JSON.parse(readFileSync(new URL('../../fixtures/bin/synthetic-via3.json', import.meta.url), 'utf8'))
 const canonical = value => JSON.stringify(value, Object.keys(value).sort())
@@ -14,6 +14,27 @@ const response = (path, options) => {
   const bytes = files.get(path)
   return Promise.resolve(new Response(bytes, { status: bytes ? 200 : 404, headers: { 'content-length': String(bytes?.length ?? 0) } }))
 }
+
+test('bounded answer byte counting matches JSON UTF-8 without materializing the complete serialization', () => {
+  const encoder = new TextEncoder()
+  const samples = [null, true, false, 0, -0, 1e-7, 1e21, -1.25, '\\"\n\r\t\b\f\u0000\u001f',
+    'Atlas é 中 😀', '\ud800x\udfff', '\ud800\udfff', [], {}, { q: 'AS13335', nested: [null, 0, { label: 'é' }] }]
+  let seed = 0xace1
+  for (let sample = 0; sample < 128; sample++) {
+    let text = ''
+    for (let i = 0; i < sample; i++) { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; text += String.fromCharCode(seed >>> 16) }
+    samples.push({ [text]: [text, sample] })
+  }
+  for (const value of samples) {
+    const expected = encoder.encode(JSON.stringify(value)).length
+    assert.equal(answerJSONBytes(value, expected), expected)
+    assert.throws(() => answerJSONBytes(value, expected - 1), { message: 'resource_limit' })
+  }
+  const maximum = { text: 'x'.repeat(8 * 1024 * 1024 - 11) }
+  assert.equal(answerJSONBytes(maximum), 8 * 1024 * 1024)
+  maximum.text += 'x'
+  assert.throws(() => answerJSONBytes(maximum), { message: 'resource_limit' })
+})
 
 test('every frozen VIA3 shard kind decodes its Go-produced compressed bytes', async () => {
   const kinds = new Set()
@@ -136,6 +157,31 @@ test('resident ledger counts shared router/cache buffers once', () => {
   reader.endQuery()
   assert.equal(reader.residentBytes, object)
   assert.equal(reader.active.size, 0)
+  reader.clear()
+})
+
+test('decoded storage is detached only after its final query, cache and router pin is released', async () => {
+  const reader = new AtlasReader(response, () => golden.clock)
+  const expected = await reader.lookup('203.0.113.1')
+  const routerKey = [...reader.residents].find(([, entry]) => entry.router)[0]
+  const key = [...reader.residents].find(([, entry]) => !entry.router)[0]
+  const shard = reader.cache.get(key)
+  const buffers = [...shard.sections.values()].map(section => section.buffer)
+  reader.beginQuery()
+  await reader.object(key)
+  reader.evictCache(key)
+  assert(buffers.every(buffer => buffer.byteLength > 0), 'The active query still owns the shard')
+  reader.endQuery()
+  assert(buffers.every(buffer => buffer.byteLength === 0), 'The last pin releases decoded backing stores immediately')
+  assert.deepEqual(await reader.lookup('203.0.113.1'), expected, 'A later lookup reloads identical verified facts')
+  const routerBuffers = [...reader.router.sections.values()].map(section => section.buffer)
+  reader.evictCache(routerKey)
+  assert(routerBuffers.every(buffer => buffer.byteLength > 0), 'The router pin survives cache eviction')
+  const retained = [...reader.cache.values()].flatMap(shard => [...shard.sections.values()].map(section => section.buffer))
+  assert(retained.every(buffer => buffer.byteLength > 0), 'End-of-query preserves cached objects')
+  reader.clear()
+  assert([...routerBuffers, ...retained].every(buffer => buffer.byteLength === 0))
+  assert.deepEqual(await reader.lookup('203.0.113.1'), expected, 'Clearing cannot corrupt a subsequent release lookup')
   reader.clear()
 })
 

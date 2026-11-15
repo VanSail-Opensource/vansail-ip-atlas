@@ -14,9 +14,17 @@ const PUBLIC_PATH_ASNS = 49152
 const NONE = 0xffffffff
 const fail = (code: string): never => { throw new Error(code) }
 const view = (b: Uint8Array) => new DataView(b.buffer, b.byteOffset, b.byteLength)
-const u16 = (b: Uint8Array, p: number) => view(b).getUint16(p, true)
-const u32 = (b: Uint8Array, p: number) => view(b).getUint32(p, true)
-const i32 = (b: Uint8Array, p: number) => view(b).getInt32(p, true)
+// Whole-shard validation reads millions of fields. Keep its temporary heap
+// bounded instead of allocating a DataView for every small integer.
+const u16 = (b: Uint8Array, p: number) => {
+  if (p < 0 || p > b.length - 2) throw new RangeError('Field outside section')
+  return b[p]! | b[p + 1]! << 8
+}
+const u32 = (b: Uint8Array, p: number) => {
+  if (p < 0 || p > b.length - 4) throw new RangeError('Field outside section')
+  return (b[p]! | b[p + 1]! << 8 | b[p + 2]! << 16 | b[p + 3]! << 24) >>> 0
+}
+const i32 = (b: Uint8Array, p: number) => u32(b, p) | 0
 const u64 = (b: Uint8Array, p: number, limit: number) => {
   const value = view(b).getBigUint64(p, true)
   if (value > BigInt(limit)) return fail('bounds')
@@ -49,7 +57,46 @@ class AnswerBudget {
   path(count: number): void { if (count > PUBLIC_PATH_ASNS - this.paths) fail('resource_limit'); this.paths += count; this.charge(count * 16 + 128) }
   cellOrigins(count: number): void { if (count > PUBLIC_ORIGINS - this.origins) fail('resource_limit'); this.origins += count; this.charge(count * 16) }
 }
-const answerFits = (value: unknown) => { if (new TextEncoder().encode(JSON.stringify(value)).byteLength > PUBLIC_ANSWER) fail('resource_limit') }
+/** Exact JSON UTF-8 size for the reader's plain JSON answers, without an
+ * answer-sized temporary string and encoded buffer alongside the live answer. */
+export function answerJSONBytes(value: unknown, maximum = PUBLIC_ANSWER): number {
+  let bytes = 0
+  const charge = (count: number) => { if (count > maximum - bytes) fail('resource_limit'); bytes += count }
+  const string = (text: string) => {
+    charge(2)
+    for (let i = 0; i < text.length; i++) {
+      const code = text.charCodeAt(i)
+      if (code === 34 || code === 92) charge(2)
+      else if (code < 32) charge(code === 8 || code === 9 || code === 10 || code === 12 || code === 13 ? 2 : 6)
+      else if (code < 128) charge(1)
+      else if (code < 2048) charge(2)
+      else if (code >= 0xd800 && code <= 0xdbff) {
+        const next = text.charCodeAt(i + 1)
+        if (next >= 0xdc00 && next <= 0xdfff) { charge(4); i++ } else charge(6)
+      } else charge(code >= 0xdc00 && code <= 0xdfff ? 6 : 3)
+    }
+  }
+  const visit = (item: unknown): void => {
+    if (item === null) charge(4)
+    else if (typeof item === 'boolean') charge(item ? 4 : 5)
+    else if (typeof item === 'number') charge(Number.isFinite(item) ? String(item).length : 4)
+    else if (typeof item === 'string') string(item)
+    else if (Array.isArray(item)) {
+      charge(2 + Math.max(0, item.length - 1))
+      for (const child of item) visit(child)
+    } else if (typeof item === 'object') {
+      charge(2)
+      let first = true
+      for (const key in item) if (Object.hasOwn(item, key)) {
+        charge(first ? 1 : 2); first = false
+        string(key); visit((item as Record<string, unknown>)[key])
+      }
+    } else fail('record')
+  }
+  visit(value)
+  return bytes
+}
+const answerFits = (value: unknown) => { answerJSONBytes(value) }
 const country = (value: number) => value === 0 ? null : String.fromCharCode(65 + Math.floor((value - 1) / 26), 65 + (value - 1) % 26)
 const countryCodes = new Set('AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW'.split(' '))
 const publicASN = (value: number) => Number.isInteger(value) && ((value >= 1 && value <= 23455) || (value >= 23457 && value <= 64495) || (value >= 131072 && value <= 4199999999))
@@ -181,6 +228,15 @@ export class Shard {
       const row = this.record(u32(index, lo * 32 + 20)); return u32(row, 4) === origin ? row : null
     }
     return null
+  }
+}
+
+function releaseDecoded(sections: Map<number, Uint8Array>): void {
+  // Decoder outputs are owned, dedicated ArrayBuffers. Public answers contain
+  // plain values only; no section view escapes the reader's pin ledger.
+  for (const section of sections.values()) {
+    const buffer = section.buffer as ArrayBuffer
+    if (buffer.byteLength) buffer.transfer(0)
   }
 }
 
@@ -346,17 +402,22 @@ export async function parseShard(bytes: Uint8Array, signal?: AbortSignal): Promi
   }
   if (end !== bytes.length || total !== u64(bytes, 36, MAX_TOTAL)) return fail('bounds')
   const sections = new Map<number, Uint8Array>()
-  for (const descriptor of descriptors) {
+  try {
+    for (const descriptor of descriptors) {
+      checkAbort(signal)
+      let decoded: Uint8Array
+      try { decoded = await decodeZstd(bytes.subarray(descriptor.offset, descriptor.offset + descriptor.length), descriptor.decoded) } catch (error) { const code = (error as { code?: string }).code; return fail(code === 'limit' ? 'decompression_limit' : code === 'integrity' ? 'integrity' : 'codec') }
+      sections.set(descriptor.id, decoded)
+      if (decoded.length !== descriptor.decoded || await hash(decoded) !== descriptor.hash) return fail('integrity')
+    }
     checkAbort(signal)
-    let decoded: Uint8Array
-    try { decoded = await decodeZstd(bytes.subarray(descriptor.offset, descriptor.offset + descriptor.length), descriptor.decoded) } catch (error) { const code = (error as { code?: string }).code; return fail(code === 'limit' ? 'decompression_limit' : code === 'integrity' ? 'integrity' : 'codec') }
-    if (decoded.length !== descriptor.decoded || await hash(decoded) !== descriptor.hash) return fail('integrity')
-    sections.set(descriptor.id, decoded)
+    const shard = new Shard(kind, sections)
+    validate(shard)
+    return shard
+  } catch (error) {
+    releaseDecoded(sections)
+    throw error
   }
-  checkAbort(signal)
-  const shard = new Shard(kind, sections)
-  validate(shard)
-  return shard
 }
 
 type ObjectInfo = { bytes: number; kind: number; partition: string; sha256: string }
@@ -439,7 +500,7 @@ export class AtlasReader {
   private activeReserved = new Set<string>()
   private activeBytes = 0
   private routerBytes = 0
-  private residents = new Map<string, { size: number; query: boolean; cache: boolean; router: boolean }>()
+  private residents = new Map<string, { size: number; query: boolean; cache: boolean; router: boolean; shard?: Shard }>()
   private residentBytes = 0
   private router: Shard | null = null
   private persistent = new ObjectCache()
@@ -450,8 +511,8 @@ export class AtlasReader {
   private leaseEpoch = 0
   private revalidateController: AbortController | null = null
   constructor(fetcher: typeof fetch = fetch, clock = () => Math.floor(Date.now() / 1000), invalidate: (reason: string) => void = () => {}, leaseClock = () => performance.now() / 1000) { this.fetcher = fetcher.bind(globalThis); this.clock = clock; this.invalidate = invalidate; this.leaseClock = leaseClock }
-  clear(): void { this.cache.clear(); this.cacheBytes = 0; this.active.clear(); this.activeReserved.clear(); this.activeBytes = 0; this.routerBytes = 0; this.residents.clear(); this.residentBytes = 0; this.manifest = null; this.router = null; this.inventory.clear(); this.pointerHash = ''; this.pointerCheckedAt = -Infinity; this.leaseEpoch++; this.revalidateController?.abort(); if (this.expiryTimer) clearTimeout(this.expiryTimer); if (this.leaseTimer) clearTimeout(this.leaseTimer); if (this.revalidateTimer) clearTimeout(this.revalidateTimer) }
-  private releaseResident(key: string): void { const entry = this.residents.get(key); if (entry && !entry.query && !entry.cache && !entry.router) { this.residentBytes -= entry.size; this.residents.delete(key) } }
+  clear(): void { for (const entry of this.residents.values()) if (entry.shard) releaseDecoded(entry.shard.sections); this.cache.clear(); this.cacheBytes = 0; this.active.clear(); this.activeReserved.clear(); this.activeBytes = 0; this.routerBytes = 0; this.residents.clear(); this.residentBytes = 0; this.manifest = null; this.router = null; this.inventory.clear(); this.pointerHash = ''; this.pointerCheckedAt = -Infinity; this.leaseEpoch++; this.revalidateController?.abort(); if (this.expiryTimer) clearTimeout(this.expiryTimer); if (this.leaseTimer) clearTimeout(this.leaseTimer); if (this.revalidateTimer) clearTimeout(this.revalidateTimer) }
+  private releaseResident(key: string): void { const entry = this.residents.get(key); if (entry && !entry.query && !entry.cache && !entry.router) { if (entry.shard) releaseDecoded(entry.shard.sections); this.residentBytes -= entry.size; this.residents.delete(key) } }
   private endQuery(): void { for (const key of this.activeReserved) { const entry = this.residents.get(key); if (entry) { entry.query = false; this.releaseResident(key) } }; this.active.clear(); this.activeReserved.clear(); this.activeBytes = 0 }
   private beginQuery(): void { this.endQuery() }
   private shardBytes(shard: Shard): number { return [...shard.sections.values()].reduce((sum, bytes) => sum + bytes.length, 0) }
@@ -546,6 +607,9 @@ export class AtlasReader {
     if (bytes.length < 64 || view(bytes).getBigUint64(36, true) > BigInt(PUBLIC_OBJECT)) return fail('resource_limit')
     this.admit(key, Number(view(bytes).getBigUint64(36, true)))
     const shard = await parseShard(bytes, signal)
+    const resident = this.residents.get(key)
+    if (!resident) { releaseDecoded(shard.sections); return fail('expired') }
+    resident.shard = shard
     checkAbort(signal); this.current()
     if (shard.kind !== info.kind) return fail('schema')
     const references = shard.rows(7)
@@ -623,7 +687,29 @@ export class AtlasReader {
       if (paths) {
         const rows = paths.asn(asn, true); if (rows.length > 12) return fail('record')
         const segments = paths.rows(9); const ints = paths.rows(4)
-        for (const row of rows) { const path: BGPAnswer['paths'][number] = { origin: asn, asns: [], visibility: ['unknown', 'low', 'medium', 'high'][row[15]!]!, graphEligible: !!(row[14]! & 1), segments: [] }; for (let j = u32(row, 8); j < u32(row, 8) + u16(row, 12); j++) { const segment = segments.subarray(j * 12, (j + 1) * 12); budget.path(u32(segment, 8)); const asns = Array.from({ length: u32(segment, 8) }, (_, index) => u32(ints, (u32(segment, 4) + index) * 4)); path.segments.push({ type: ['', 'sequence', 'set', 'confederation_sequence', 'confederation_set'][segment[0]!]!, asns }); path.asns.push(...asns) }; answer.bgp.paths.push(path) }
+        for (const row of rows) {
+          const first = u32(row, 8), count = u16(row, 12)
+          const path: BGPAnswer['paths'][number] = { origin: asn, asns: [], visibility: ['unknown', 'low', 'medium', 'high'][row[15]!]!, graphEligible: !!(row[14]! & 1), segments: new Array(count) }
+          let total = 0
+          for (let index = 0; index < count; index++) {
+            const segment = segments.subarray((first + index) * 12, (first + index + 1) * 12)
+            const length = u32(segment, 8), start = u32(segment, 4)
+            budget.path(length)
+            const asns = new Array<number>(length)
+            for (let i = 0; i < length; i++) asns[i] = u32(ints, (start + i) * 4)
+            path.segments[index] = { type: ['', 'sequence', 'set', 'confederation_sequence', 'confederation_set'][segment[0]!]!, asns }
+            total += length
+          }
+          // A single segment already is the complete path. Sharing this array
+          // also survives structured clone, avoiding a second array per route.
+          if (count === 1) path.asns = path.segments[0]!.asns
+          else {
+            path.asns = new Array<number>(total)
+            let next = 0
+            for (const segment of path.segments) for (const asn of segment.asns) path.asns[next++] = asn
+          }
+          answer.bgp.paths.push(path)
+        }
       }
       const tier = related.get(13)?.asn(asn)[0]
       if (tier) answer.bgp.tier1.push({ asn, networkClass: networkClass(tier[8]!), stability: stability(tier[9]!) })

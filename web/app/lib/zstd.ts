@@ -70,48 +70,106 @@ export function inspectZstdFrame(input: Uint8Array, expectedLength: number): { c
 
 // XXH64's low 32 bits are Zstandard's required frame content checksum. fzstd
 // deliberately skips this checksum; verify it independently before exposing data.
-const MASK = (1n << 64n) - 1n
-const P1 = 11400714785074694791n
-const P2 = 14029467366897019727n
-const P3 = 1609587929392839161n
-const P4 = 9650029242287828579n
-const P5 = 2870177450012600261n
-const rotl = (value: bigint, bits: bigint) => ((value << bits) | (value >> (64n - bits))) & MASK
-const round = (acc: bigint, lane: bigint) => rotl((acc + lane * P2) & MASK, 31n) * P1 & MASK
+type Word64 = { low: number; high: number }
+const P1_LOW = 0x85ebca87, P1_HIGH = 0x9e3779b1
+const P2_LOW = 0x27d4eb4f, P2_HIGH = 0xc2b2ae3d
+const P3_LOW = 0x9e3779f9, P3_HIGH = 0x165667b1
+const P4_LOW = 0xc2b2ae63, P4_HIGH = 0x85ebca77
+const P5_LOW = 0x165667c5, P5_HIGH = 0x27d4eb2f
+
+function add64(value: Word64, low: number, high: number): void {
+  const sum = value.low + low
+  value.low = sum >>> 0
+  value.high = (value.high + high + (sum >= 0x100000000 ? 1 : 0)) >>> 0
+}
+function multiply64(value: Word64, low: number, high: number): void {
+  const a = value.low, b = value.high
+  // Split the low-word product into 16-bit limbs. Every intermediate remains
+  // an exact integer below 2^53; imul supplies the modulo-2^32 cross products.
+  const a0 = a & 0xffff, a1 = a >>> 16, b0 = low & 0xffff, b1 = low >>> 16
+  const carry = Math.floor((a0 * b0) / 0x10000) + a1 * b0 + a0 * b1
+  value.low = Math.imul(a, low) >>> 0
+  value.high = (Math.imul(b, low) + Math.imul(a, high) + a1 * b1 + Math.floor(carry / 0x10000)) >>> 0
+}
+function rotate64(value: Word64, bits: number): void {
+  // XXH64 uses only rotations between 1 and 31 bits.
+  const low = value.low, high = value.high
+  value.low = ((low << bits) | (high >>> (32 - bits))) >>> 0
+  value.high = ((high << bits) | (low >>> (32 - bits))) >>> 0
+}
+function round64(value: Word64, low: number, high: number, scratch: Word64): void {
+  scratch.low = low; scratch.high = high
+  multiply64(scratch, P2_LOW, P2_HIGH)
+  add64(value, scratch.low, scratch.high)
+  rotate64(value, 31)
+  multiply64(value, P1_LOW, P1_HIGH)
+}
 
 export function zstdChecksum(input: Uint8Array): number {
   const view = new DataView(input.buffer, input.byteOffset, input.byteLength)
+  // Reuse a fixed number of word pairs. BigInt arithmetic here used to create
+  // temporary heap values for every eight decoded bytes of a large section.
+  const scratch: Word64 = { low: 0, high: 0 }, mixed: Word64 = { low: 0, high: 0 }
+  const hash: Word64 = { low: P5_LOW, high: P5_HIGH }
   let offset = 0
-  let hash: bigint
   if (input.length >= 32) {
-    let v1 = (P1 + P2) & MASK, v2 = P2, v3 = 0n, v4 = (-P1) & MASK
+    const v1: Word64 = { low: 0xadc0b5d6, high: 0x60ea27ee } // P1 + P2
+    const v2: Word64 = { low: P2_LOW, high: P2_HIGH }
+    const v3: Word64 = { low: 0, high: 0 }
+    const v4: Word64 = { low: 0x7a143579, high: 0x61c8864e } // -P1
     while (offset <= input.length - 32) {
-      v1 = round(v1, view.getBigUint64(offset, true)); offset += 8
-      v2 = round(v2, view.getBigUint64(offset, true)); offset += 8
-      v3 = round(v3, view.getBigUint64(offset, true)); offset += 8
-      v4 = round(v4, view.getBigUint64(offset, true)); offset += 8
+      round64(v1, view.getUint32(offset, true), view.getUint32(offset + 4, true), scratch); offset += 8
+      round64(v2, view.getUint32(offset, true), view.getUint32(offset + 4, true), scratch); offset += 8
+      round64(v3, view.getUint32(offset, true), view.getUint32(offset + 4, true), scratch); offset += 8
+      round64(v4, view.getUint32(offset, true), view.getUint32(offset + 4, true), scratch); offset += 8
     }
-    hash = (rotl(v1, 1n) + rotl(v2, 7n) + rotl(v3, 12n) + rotl(v4, 18n)) & MASK
-    for (const lane of [v1, v2, v3, v4]) hash = ((hash ^ round(0n, lane)) * P1 + P4) & MASK
-  } else hash = P5
-  hash = (hash + BigInt(input.length)) & MASK
+    hash.low = 0; hash.high = 0
+    const lanes = [v1, v2, v3, v4], rotations = [1, 7, 12, 18]
+    for (let i = 0; i < lanes.length; i++) {
+      mixed.low = lanes[i]!.low; mixed.high = lanes[i]!.high
+      rotate64(mixed, rotations[i]!)
+      add64(hash, mixed.low, mixed.high)
+    }
+    for (const lane of lanes) {
+      mixed.low = 0; mixed.high = 0
+      round64(mixed, lane.low, lane.high, scratch)
+      hash.low ^= mixed.low; hash.high ^= mixed.high
+      multiply64(hash, P1_LOW, P1_HIGH)
+      add64(hash, P4_LOW, P4_HIGH)
+    }
+  }
+  add64(hash, input.length >>> 0, Math.floor(input.length / 0x100000000))
   while (offset <= input.length - 8) {
-    hash = (rotl(hash ^ round(0n, view.getBigUint64(offset, true)), 27n) * P1 + P4) & MASK
+    mixed.low = 0; mixed.high = 0
+    round64(mixed, view.getUint32(offset, true), view.getUint32(offset + 4, true), scratch)
+    hash.low ^= mixed.low; hash.high ^= mixed.high
+    rotate64(hash, 27)
+    multiply64(hash, P1_LOW, P1_HIGH)
+    add64(hash, P4_LOW, P4_HIGH)
     offset += 8
   }
   if (offset <= input.length - 4) {
-    hash = (rotl(hash ^ (BigInt(view.getUint32(offset, true)) * P1 & MASK), 23n) * P2 + P3) & MASK
+    mixed.low = view.getUint32(offset, true); mixed.high = 0
+    multiply64(mixed, P1_LOW, P1_HIGH)
+    hash.low ^= mixed.low; hash.high ^= mixed.high
+    rotate64(hash, 23)
+    multiply64(hash, P2_LOW, P2_HIGH)
+    add64(hash, P3_LOW, P3_HIGH)
     offset += 4
   }
   while (offset < input.length) {
-    hash = rotl(hash ^ (BigInt(input[offset++]!) * P5 & MASK), 11n) * P1 & MASK
+    mixed.low = input[offset++]!; mixed.high = 0
+    multiply64(mixed, P5_LOW, P5_HIGH)
+    hash.low ^= mixed.low; hash.high ^= mixed.high
+    rotate64(hash, 11)
+    multiply64(hash, P1_LOW, P1_HIGH)
   }
-  hash ^= hash >> 33n
-  hash = hash * P2 & MASK
-  hash ^= hash >> 29n
-  hash = hash * P3 & MASK
-  hash ^= hash >> 32n
-  return Number(hash & 0xffffffffn)
+  hash.low ^= hash.high >>> 1 // xor with hash >> 33
+  multiply64(hash, P2_LOW, P2_HIGH)
+  hash.low ^= (hash.low >>> 29) | (hash.high << 3)
+  hash.high ^= hash.high >>> 29
+  multiply64(hash, P3_LOW, P3_HIGH)
+  return (hash.low ^ hash.high) >>> 0 // xor with hash >> 32
 }
 
 /** Pinned, bundled Zstandard only. No native/remote/alternate-codec fallback. */

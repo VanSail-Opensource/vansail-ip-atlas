@@ -156,7 +156,9 @@ jobs:
           retention-days: 7
 
   synthetic-browser:
-    needs: [contracts, bundled-codec]
+    # Independent frontend evidence can run alongside the Go contracts. The
+    # complete workflow and every required PR check must still pass to release.
+    needs: bundled-codec
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:

@@ -26,10 +26,10 @@ const (
 )
 
 func selectFFraudAdapter(s Source) bool {
-	return s.Parser.Schema == "ffraud-five-column-risk-csv-v1" && s.Format == "csv" &&
+	return s.Parser.Version == 2 && s.Parser.Schema == "ffraud-five-column-risk-csv-v2" && s.Format == "csv" &&
 		fieldsEqual(s.Fields, "ip", "ffraud_score", "confirmations", "category", "type") &&
-		fieldsEqual(s.Signals, "abuse", "botnet", "c2", "fraud", "malware", "scanner", "spam") &&
-		mappedFields(s, map[string]string{"ip": "reason_flags", "category": "reason_flags"})
+		fieldsEqual(s.Signals, "abuse", "botnet", "c2", "datacenter", "fraud", "malware", "proxy", "scanner", "spam", "tor", "vpn") &&
+		mappedFields(s, map[string]string{"ip": "reason_flags", "category": "reason_flags", "type": "reason_flags"})
 }
 
 func ffraudSignal(label string) (intelligence.Signal, bool) {
@@ -122,6 +122,15 @@ func scanFFraud(ctx context.Context, input io.Reader, maximum int, emit func(net
 			if err = emit(address, signal); err != nil {
 				return rows, err
 			}
+			// This column is the publisher's explicit classification of this IP,
+			// not an ASN/cloud-owner inference. It supplies another reason under
+			// the same family and snapshot clock, never another independent vote.
+			switch fields[4] {
+			case "proxy", "vpn", "tor", "datacenter":
+				if err = emit(address, intelligence.Signal(fields[4])); err != nil {
+					return rows, err
+				}
+			}
 		}
 	}
 	if err := ctx.Err(); err != nil {
@@ -143,6 +152,9 @@ func parseFFraudPayload(ctx context.Context, input io.Reader, s Source, publishe
 	emitted := 0
 	_, err := scanFFraud(ctx, input, min(maximum, ffraudRowLimit), func(address netip.Addr, signal intelligence.Signal) error {
 		emitted++
+		if emitted > maximum {
+			return errors.New("FFraud normalized record budget exceeded")
+		}
 		value := intelligence.Evidence{Family: s.Family, Signal: signal, Scope: intelligence.Exact, Address: address, SourcePublishedAt: published, Current: true}
 		return emit(intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordEvidence, Evidence: &value})
 	})

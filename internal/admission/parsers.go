@@ -36,7 +36,11 @@ const (
 // Adapter IDs describe implemented schemas, not source certification. None is
 // enabled by this registry; reviewed per-source fixture evidence is still needed.
 func selectAdapter(source Source) (adapter, bool) {
-	if source.Parser.Version != 1 || source.Coverage != "mapping" && source.Coverage != "positive_only" {
+	version := uint32(1)
+	if source.Parser.ID == "ffraud-csv" {
+		version = 2
+	}
+	if source.Parser.Version != version || source.Coverage != "mapping" && source.Coverage != "positive_only" {
 		// These parsers cannot establish absence-as-clean assessment coverage.
 		return 0, false
 	}

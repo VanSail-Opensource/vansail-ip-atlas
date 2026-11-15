@@ -11,3 +11,4 @@ ip,ffraud_score,confirmations,category,type
 176.65.149.105,100,29,spam,tor
 71.6.233.150,100,20,scanner,datacenter
 176.65.148.216,100,20,abuse,datacenter
+51.158.205.203,100,40,c2,vpn

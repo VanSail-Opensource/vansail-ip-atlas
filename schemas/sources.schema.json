@@ -7142,7 +7142,15 @@
                 "type": "null"
               },
               "type": {
-                "type": "null"
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "reason_flags"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             }
           },

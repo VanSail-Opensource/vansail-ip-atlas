@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -121,8 +122,9 @@ func TestFFraudPrivateCompleteCapture(t *testing.T) {
 	for _, count := range counts {
 		total += count
 	}
-	if err != nil || total != 1651501 || len(counts) != 6 || counts["fraud"] != 0 {
+	want := map[string]int{"abuse": 525852, "botnet": 138895, "c2": 681160, "malware": 32216, "scanner": 7828, "spam": 265550, "proxy": 83110, "datacenter": 66220, "tor": 18319, "vpn": 21852}
+	if err != nil || total != 1841002 || !reflect.DeepEqual(counts, want) {
 		t.Fatal("complete normalization census mismatch", total, counts, err)
 	}
-	t.Logf("Complete private capture: %d input rows, %d public observations, category counts %v; no source admission/certification", rows, total, counts)
+	t.Logf("Complete private capture: %d input rows, 1651501 public IPs/category observations plus189501 infrastructure observations = %d normalized records; counts %v; no source admission/certification", rows, total, counts)
 }

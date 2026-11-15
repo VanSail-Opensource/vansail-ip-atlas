@@ -19,7 +19,11 @@ import (
 // These adapters recognize observed publisher schemas. They do not certify
 // redistribution rights, upstream independence, freshness or assessment coverage.
 func selectRiskAdapter(s Source) bool {
-	if s.Parser.Version != 1 || s.Category != "abuse" || s.Coverage != "positive_only" || s.Scope != "exact_ip" || !fieldsEqual(s.PublicFields, "reason_flags") {
+	version := uint32(1)
+	if s.Parser.ID == "ffraud-csv" {
+		version = 2
+	}
+	if s.Parser.Version != version || s.Category != "abuse" || s.Coverage != "positive_only" || s.Scope != "exact_ip" || !fieldsEqual(s.PublicFields, "reason_flags") {
 		return false
 	}
 	switch s.Parser.ID {

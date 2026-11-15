@@ -296,6 +296,67 @@ try {
       }
     })
   }
+  await test('RPKI snapshot expiry remains visible and preserves graph state across timer and resume', async () => {
+    const pointer = await (await context.request.get(`${base}/_atlas/current.json`)).json()
+    const manifest = await (await context.request.get(`${base}${pointer.manifest_path}`)).json()
+    const isolated = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: 'reduce' })
+    try {
+      const snapshot = await isolated.newPage()
+      snapshot.on('pageerror', error => report.errors.push(error.message))
+      await snapshot.clock.install({ time: new Date(manifest.valid_from * 1000) })
+      await snapshot.goto(`${base}/ip/bgp/?q=203.0.113.1`)
+      const valid = snapshot.locator('[data-rpki-origin="13335"]')
+      const invalid = snapshot.locator('[data-rpki-origin="15169"]')
+      await valid.waitFor()
+      // Let Nuxt's hydration/idle scheduling finish before controlling timers.
+      await snapshot.clock.pauseAt(await snapshot.evaluate(() => Date.now() + 1000))
+      assert.match(await valid.innerText(), /Snapshot result: valid/)
+      assert.match(await invalid.innerText(), /Snapshot result: invalid.*Expired snapshot/)
+      assert.equal(await valid.locator('.rpki-expired').count(), 0)
+      const clocks = await valid.locator('dd').allTextContents()
+      assert.equal(clocks.length, 2)
+      const observedAt = Date.parse(clocks[0]), expiry = Date.parse(clocks[1])
+      assert(Number.isFinite(observedAt) && observedAt < manifest.valid_from * 1000)
+      assert(Number.isFinite(expiry) && expiry > manifest.valid_from * 1000 && expiry < manifest.valid_until * 1000)
+      const svg = snapshot.locator('.bgp-graph svg')
+      await snapshot.getByRole('combobox', { name: 'Focus observed route' }).selectOption('0')
+      await svg.focus(); await snapshot.keyboard.press('ArrowRight'); await snapshot.keyboard.press('+')
+      const original = await svg.elementHandle()
+      const transform = await svg.locator(':scope > g').getAttribute('transform')
+      const checkPreserved = async () => {
+        assert(await original.evaluate(node => node === document.querySelector('.bgp-graph svg')), 'Snapshot timing must not remount the graph')
+        assert.equal(await svg.locator(':scope > g').getAttribute('transform'), transform)
+        assert.equal(await snapshot.getByRole('combobox', { name: 'Focus observed route' }).inputValue(), '0')
+        assert.match(await valid.innerText(), /Snapshot result: valid/)
+        assert.deepEqual(await valid.locator('dd').allTextContents(), clocks)
+      }
+      await snapshot.clock.setSystemTime(expiry - 1000)
+      await snapshot.clock.runFor(1000)
+      await valid.locator('.rpki-expired').waitFor()
+      await checkPreserved()
+      // A tab suspended across the deadline must refresh immediately on resume.
+      await snapshot.clock.setSystemTime(expiry - 1000)
+      const resumed = snapshot.waitForResponse('**/_atlas/current.json')
+      await snapshot.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+      await resumed
+      await valid.locator('.rpki-expired').waitFor({ state: 'detached' })
+      await checkPreserved()
+      await snapshot.clock.setSystemTime(expiry)
+      await snapshot.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+      await valid.locator('.rpki-expired').waitFor()
+      await checkPreserved()
+      for (const width of [320, 390, 1280, 1440]) {
+        await snapshot.setViewportSize({ width, height: 900 })
+        assert(await snapshot.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `RPKI dates overflow at ${width}`)
+      }
+      await snapshot.clock.setSystemTime(manifest.valid_until * 1000)
+      await snapshot.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+      await snapshot.getByRole('alert').waitFor()
+      assert.equal(await snapshot.locator('.rpki-snapshots, .bgp-graph').count(), 0, 'Whole-release expiry still removes ineligible facts')
+      report.rpki_snapshot_checks = { observed_status_retained: true, timer_expiry: true, resume_expiry: true,
+        graph_state_preserved: true, whole_release_expiry_enforced: true }
+    } finally { await isolated.close() }
+  })
   await test('downloaded BGP SVG is standalone and keeps geometry under route focus', async () => {
     await page.goto(`${base}/ip/bgp/?q=203.0.113.1`)
     await page.locator('.graph-node').first().waitFor()

@@ -236,6 +236,59 @@ func TestBenchmarkMutationPreservesAuthenticatedSourceBytes(t *testing.T) {
 	}
 }
 
+func TestBenchmarkMutationPreservesUntouchedPartitionsAndRecordOrder(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	limits := intelligence.DefaultRecordStoreLimits()
+	limits.PartitionRecords = 2
+	store, err := intelligence.NewRecordStore(root, limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := store.Writer(ctx)
+	for _, prefix := range []string{"8.8.0.0/24", "8.8.1.0/24", "8.8.2.0/24", "8.8.3.0/24", "8.8.4.0/24", "8.8.5.0/24"} {
+		if err := writer.Append(intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordGeo,
+			Geo: &intelligence.GeoEvidence{Prefix: netip.MustParsePrefix(prefix), PhysicalCountry: "US", City: "Original", Family: "fixture", Weight: 70, Current: true}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	parts, err := writer.Finish()
+	if err != nil || len(parts) != 3 {
+		t.Fatalf("parts=%d err=%v", len(parts), err)
+	}
+	baseline := intelligence.BuildState{Sources: []intelligence.StoredSource{{ID: "fixture", RecordPartitions: parts}}}
+	before, _ := json.Marshal(baseline)
+	isolated := filepath.Join(root, "build-private", "isolated")
+	if err = cloneBenchmarkRecords(ctx, root, isolated, baseline); err != nil {
+		t.Fatal(err)
+	}
+	changed := baseline
+	changed.Sources = append([]intelligence.StoredSource(nil), baseline.Sources...)
+	if err = mutateBenchmarkGeo(ctx, isolated, &changed, 1); err != nil {
+		t.Fatal(err)
+	}
+	got := changed.Sources[0].RecordPartitions
+	if len(got) != 3 || got[0] == parts[0] || got[1] != parts[1] || got[2] != parts[2] {
+		t.Fatalf("untouched descriptors changed: before=%v after=%v", parts, got)
+	}
+	after, _ := json.Marshal(baseline)
+	if string(before) != string(after) {
+		t.Fatal("original partition descriptor slice mutated")
+	}
+	index := 0
+	err = intelligence.WalkStoredSource(ctx, isolated, changed.Sources[0], func(record intelligence.NormalizedRecord) error {
+		want := netip.PrefixFrom(netip.AddrFrom4([4]byte{8, 8, byte(index), 0}), 24)
+		if record.Geo.Prefix != want || (record.Geo.City != "Original") != (index == 0) {
+			t.Fatalf("record %d has changed order/content: %+v", index, record.Geo)
+		}
+		index++
+		return nil
+	})
+	if err != nil || index != 6 {
+		t.Fatalf("records=%d err=%v", index, err)
+	}
+}
+
 func TestBenchmarkDestinationRejectsEscapeAndLink(t *testing.T) {
 	root := t.TempDir()
 	for _, path := range []string{"build-private", "../escape", ".atlas-private", "build-private/../../escape"} {

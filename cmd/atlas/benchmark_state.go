@@ -341,37 +341,70 @@ func mutateBenchmarkGeo(ctx context.Context, root string, state *intelligence.Bu
 		if remaining == 0 {
 			break
 		}
-		writer := store.Writer(ctx)
-		changed := uint64(0)
-		err = intelligence.WalkStoredSource(ctx, root, source, func(record intelligence.NormalizedRecord) error {
-			if remaining > 0 && record.Geo != nil {
-				geo := *record.Geo
-				if geo.City == "Benchmark mutation A" {
-					geo.City = "Benchmark mutation B"
-				} else {
-					geo.City = "Benchmark mutation A"
-				}
-				record.Geo = &geo
-				remaining--
-				changed++
+		// The baseline has already passed complete authentication and semantic
+		// verification. Transform the same first N geographic records, but keep
+		// immutable descriptors for every untouched partition. Full input checks
+		// still run in the materializer; this only avoids rewriting unchanged
+		// engineering-copy bytes after the requested mutation is complete.
+		var replacement []intelligence.RecordPartition
+		before := remaining
+		units := source.RecordPartitions
+		if len(units) == 0 {
+			units = []intelligence.RecordPartition{{}}
+		}
+		for j, part := range units {
+			if err := ctx.Err(); err != nil {
+				return err
 			}
-			return writer.Append(record)
-		})
-		if err != nil {
-			_ = writer.Abort()
-			return err
+			if remaining == 0 {
+				replacement = append(replacement, units[j:]...)
+				break
+			}
+			unit := source
+			if len(source.RecordPartitions) > 0 {
+				unit.RecordPartitions = []intelligence.RecordPartition{part}
+			}
+			writer := store.Writer(ctx)
+			changed := uint64(0)
+			err = intelligence.WalkStoredSource(ctx, root, unit, func(record intelligence.NormalizedRecord) error {
+				if remaining > 0 && record.Geo != nil {
+					geo := *record.Geo
+					if geo.City == "Benchmark mutation A" {
+						geo.City = "Benchmark mutation B"
+					} else {
+						geo.City = "Benchmark mutation A"
+					}
+					record.Geo = &geo
+					remaining--
+					changed++
+				}
+				return writer.Append(record)
+			})
+			if err != nil {
+				_ = writer.Abort()
+				return err
+			}
+			if changed == 0 && len(source.RecordPartitions) > 0 {
+				if err = writer.Abort(); err != nil {
+					return err
+				}
+				replacement = append(replacement, part)
+				continue
+			}
+			parts, e := writer.Finish()
+			if e != nil {
+				_ = writer.Abort()
+				return e
+			}
+			replacement = append(replacement, parts...)
 		}
-		parts, e := writer.Finish()
-		if e != nil {
-			_ = writer.Abort()
-			return e
-		}
-		if changed > 0 {
-			state.Sources[i].RecordPartitions = parts
+		if remaining < before {
+			state.Sources[i].RecordPartitions = replacement
+			state.Sources[i].Records = nil
 		}
 	}
 	if remaining != 0 {
 		return errors.New("real corpus lacks enough geographic records for rounded one-percent mutation")
 	}
-	return nil
+	return ctx.Err()
 }

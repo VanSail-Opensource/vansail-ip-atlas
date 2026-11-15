@@ -274,9 +274,8 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		proof, proofErr := verifyRPKIClientFile(ctx, payload, size, source, now)
 		err = proofErr
 		published = proof.BuiltAt
-		contentValidUntil = proof.ContentValidUntil
 		if err == nil {
-			vrpProof = &intelligence.VRPSourceProof{Version: 1, Rows: uint64(proof.Rows), AcceptedRows: uint64(proof.AcceptedRows), ExpiredRows: uint64(proof.ExpiredRows), BuiltAt: proof.BuiltAt, EvaluatedAt: now, ValidUntil: proof.ContentValidUntil}
+			vrpProof = &intelligence.VRPSourceProof{Version: 2, Rows: uint64(proof.Rows), RetainedRows: uint64(proof.RetainedRows), ObservedAt: proof.BuiltAt, EvaluatedAt: now, CoverageValidUntil: proof.CoverageValidUntil}
 		}
 	} else {
 		metadata := filepath.Join(quarantine, "publication")

@@ -39,6 +39,7 @@ type SourceStatistics struct {
 	Family                                      string
 	Country, City, Coordinates, Usage, Exact    bool
 	VRPComplete                                 bool
+	VRPObservedAt, VRPCoverageValidUntil        time.Time
 	Signals                                     map[intelligence.Signal]bool
 }
 
@@ -61,12 +62,13 @@ func requiredProductionCapability(name string) (required, known bool) {
 // intake. Its fields are private so materializers cannot turn a boolean into
 // complete VRP or source coverage. Validate binds the exact normalized roots.
 type ProductionQualification struct {
-	state       intelligence.BuildState
-	stateHash   [32]byte
-	report      CapabilityReport
-	validUntil  time.Time
-	vrpComplete bool
-	validation  *sourceValidation
+	state                                  intelligence.BuildState
+	stateHash                              [32]byte
+	report                                 CapabilityReport
+	validUntil                             time.Time
+	vrpComplete                            bool
+	rpkiObservedAt, rpkiCoverageValidUntil time.Time
+	validation                             *sourceValidation
 }
 
 func QualifyProductionState(ctx context.Context, root string, catalog []Source, now time.Time, binding [32]byte) (*ProductionQualification, error) {
@@ -157,10 +159,20 @@ func qualificationFromReport(state intelligence.BuildState, report CapabilityRep
 		if s.ExpiresAt.Before(q.validUntil) {
 			q.validUntil = s.ExpiresAt
 		}
+		if s.Receipt != nil && s.Receipt.VRPProof != nil && s.Receipt.VRPProof.Version == 2 {
+			proof := s.Receipt.VRPProof
+			if !q.rpkiObservedAt.IsZero() && !q.rpkiObservedAt.Equal(proof.ObservedAt) {
+				return nil, errors.New("RPKI observation epochs differ")
+			}
+			q.rpkiObservedAt = proof.ObservedAt
+			if q.rpkiCoverageValidUntil.IsZero() || proof.CoverageValidUntil.Before(q.rpkiCoverageValidUntil) {
+				q.rpkiCoverageValidUntil = proof.CoverageValidUntil
+			}
+		}
 	}
 	for _, c := range report.Capabilities {
 		if c.Capability == "rpki" {
-			q.vrpComplete = c.Qualified
+			q.vrpComplete = c.Qualified && q.rpkiObservedAt.IsZero()
 		}
 	}
 	return q, nil
@@ -177,6 +189,16 @@ func (q *ProductionQualification) Validate(state intelligence.BuildState, clock 
 }
 func (q *ProductionQualification) VRPComplete() bool {
 	return q != nil && q.stateHash != ([32]byte{}) && q.vrpComplete
+}
+
+// RPKIObservation supplies only an authenticated complete publisher epoch.
+// It does not assert that its historical authorizations remain current now.
+// Legacy v1 proofs omitted rows at intake and cannot establish this epoch.
+func (q *ProductionQualification) RPKIObservation() (observedAt, coverageValidUntil time.Time, ok bool) {
+	if q == nil || q.stateHash == ([32]byte{}) || q.rpkiObservedAt.IsZero() || !q.rpkiObservedAt.Before(q.rpkiCoverageValidUntil) {
+		return time.Time{}, time.Time{}, false
+	}
+	return q.rpkiObservedAt, q.rpkiCoverageValidUntil, true
 }
 func (q *ProductionQualification) State() intelligence.BuildState {
 	if q == nil {
@@ -424,12 +446,14 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 			}
 		}
 		stat := SourceStatistics{ID: s.ID, Family: find(s.Family), Signals: map[intelligence.Signal]bool{}}
+		var vrpMinimumExpiry time.Time
 		if prior != nil {
 			previous, ok := prior[s.ID]
 			if !ok || previous.ID != stat.ID || previous.Family != stat.Family {
 				return report, nil, errors.New("verified source statistics differ from current controls")
 			}
 			stat = previous
+			vrpMinimumExpiry = previous.VRPCoverageValidUntil
 		} else if err := intelligence.WalkStoredSource(ctx, root, v, func(record intelligence.NormalizedRecord) error {
 			if err := record.Validate(); err != nil {
 				return err
@@ -504,7 +528,15 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 				if !contains(s.PublicFields, "rpki_status") {
 					return errors.New("production VRP binding invalid")
 				}
-				if until := record.VRP.ValidUntil; !until.IsZero() {
+				until := record.VRP.ValidUntil
+				if proof := v.Receipt.VRPProof; proof != nil && proof.Version == 2 {
+					if until.IsZero() || !proof.ObservedAt.Before(until) || until.Before(proof.CoverageValidUntil) {
+						return errors.New("production VRP observation expiry binding invalid")
+					}
+					if vrpMinimumExpiry.IsZero() || until.Before(vrpMinimumExpiry) {
+						vrpMinimumExpiry = until
+					}
+				} else if !until.IsZero() {
 					if v.Receipt.ContentValidUntil.IsZero() || until.Before(v.Receipt.ContentValidUntil) || !now.Before(until) {
 						return errors.New("production VRP expiry binding invalid")
 					}
@@ -537,17 +569,52 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 			return report, nil, errors.New("empty production source")
 		}
 		if proof := v.Receipt.VRPProof; proof != nil {
-			if stat.Kinds[intelligence.RecordVRP-1] != proof.AcceptedRows || stat.Records != proof.AcceptedRows {
+			retained := proof.AcceptedRows
+			if proof.Version == 2 {
+				retained = proof.RetainedRows
+				if !vrpMinimumExpiry.Equal(proof.CoverageValidUntil) {
+					return report, nil, errors.New("complete VRP observation expiry differs from retained records")
+				}
+				stat.VRPObservedAt, stat.VRPCoverageValidUntil = proof.ObservedAt, proof.CoverageValidUntil
+			}
+			if stat.Kinds[intelligence.RecordVRP-1] != retained || stat.Records != retained {
 				return report, nil, errors.New("complete VRP proof differs from retained records")
 			}
 			stat.VRPComplete = true
 		}
 		stats = append(stats, stat)
 	}
+	if err := validateRPKIObservationCohort(stats); err != nil {
+		return report, nil, err
+	}
 	sort.Slice(stats, func(i, j int) bool { return stats[i].ID < stats[j].ID })
 	report = deriveCapabilities(stats, state.EvaluatedAt)
 	return report, stats, nil
 }
+
+// A single public observation clock cannot describe a union of different
+// historical epochs, or rows whose full publisher epoch was never retained.
+func validateRPKIObservationCohort(stats []SourceStatistics) error {
+	var observed time.Time
+	for _, stat := range stats {
+		if !stat.VRPObservedAt.IsZero() {
+			if !observed.IsZero() && !observed.Equal(stat.VRPObservedAt) {
+				return errors.New("RPKI observation epochs differ")
+			}
+			observed = stat.VRPObservedAt
+		}
+	}
+	if observed.IsZero() {
+		return nil
+	}
+	for _, stat := range stats {
+		if stat.Kinds[intelligence.RecordVRP-1] != 0 && (!stat.VRPComplete || !stat.VRPObservedAt.Equal(observed) || !observed.Before(stat.VRPCoverageValidUntil)) {
+			return errors.New("RPKI observation cohort contains unbound rows")
+		}
+	}
+	return nil
+}
+
 func contains(values []string, value string) bool {
 	for _, v := range values {
 		if v == value {

@@ -263,3 +263,38 @@ its SHA-256 and size; a fresh wrapper cannot renew an old category observation.
 Source contract revision 5 records the educational-use decision and explicit
 reviewed-distribution policy names. Normalized schema, VIA3 and public schema
 versions are unchanged; exact configuration hashes invalidate older qualification.
+
+## User-approved RPKI snapshot observations — 2026-11-15
+
+RPKI results describe the complete exporter snapshot at its authenticated embedded
+publisher build time. They do not assert the current global authorization state.
+The user explicitly requested keeping expired results visible. Retain all VRPs,
+including those whose authorizations expire between publisher build and intake;
+require each original authorization deadline to follow the actual publisher build
+time. Preserve AS0 and reserved/private authorization ASNs for correct observed
+invalid/not-found classification. Never replace the clock with intake time or
+remove still-valid short-lived rows to create a longer apparent lifetime.
+
+The version-2 private proof binds the full original body, all five trust anchors,
+exact original/retained row counts, observation time, intake evaluation time and
+the earliest authorization expiry of the complete snapshot. The source content
+expiry field remains zero for this explicit proof kind: snapshot eligibility is
+still bounded by the original verified publication time plus its configured
+maximum age, never more than 720 hours. Old version-1 proofs retain their original
+strict expiry behavior and cannot establish a complete historical publisher epoch.
+
+Observed valid results retain the latest deadline among matching authorizations;
+observed invalid/not-found results carry the conservative complete-snapshot
+coverage deadline. The public schema carries the real observation time and this
+deadline alongside the observed result. Passing the deadline changes its visible
+as-of/expired indication, not the historical result. No interface may present it
+as current authorization. A single observed clock cannot describe a union of
+different publisher epochs or unauthenticated partial rows; reject that cohort.
+The rest of the website does not expire because one authorization did.
+
+Expired authorizations remain eligible only as dated observations within a fresh,
+rights-approved snapshot. Publication-age expiry or withdrawal still retracts
+that source and its dependent output under the existing retention and garbage
+collection rules. Retained generations and no-change cache hits preserve original
+clocks, proofs and exact policy bindings; they never renew observation age. This
+amendment is RPKI-specific and changes no subscription or other item expiry.

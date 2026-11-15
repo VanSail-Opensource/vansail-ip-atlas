@@ -17,6 +17,16 @@ still needs terms evidence, a nonblank review basis, an explicit attribution
 decision, publication proof, an observed parser fixture and required credits.
 Source code and dependencies retain their separate licenses.
 
+The explicit RPKI amendment (2026-11-15) retains expired authorization results as
+publisher snapshot observations. Every original VRP is evaluated at the actual
+payload-bound publisher build clock and keeps its authorization expiry. Public
+schema 5 carries observed status, observation time and expiry together; the UI
+keeps expired results visible with a neutral as-of/expired indication. This does
+not assert current authorization or extend the snapshot's publication-based
+source freshness (at most 720 hours). All non-RPKI expiry and other gates remain.
+The proof/admission and schema/reader/UI halves must ship together before this
+observation semantics is enabled for a production source.
+
 ## Implementation contracts
 
 - Go ingests approved downloaded bulk files and emits deterministic VIA3 objects.

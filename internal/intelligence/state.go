@@ -340,6 +340,7 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 		var writer *RecordWriter
 		var parts []RecordPartition
 		var vrpCount uint64
+		var vrpMinimumExpiry time.Time
 		if storage != nil {
 			writer = storage.store.Writer(ctx)
 			defer writer.Abort()
@@ -351,6 +352,9 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 			}
 			if err := record.Validate(); err != nil {
 				return err
+			}
+			if snapshot.VRPProof != nil && snapshot.VRPProof.Version == 2 && record.Kind != RecordVRP {
+				return errors.New("complete VRP observation snapshot contains another record kind")
 			}
 			clone, err := cloneRecord(record)
 			if err != nil {
@@ -452,7 +456,17 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 				v.Country = country(v.Country)
 			case RecordVRP:
 				vrpCount++
-				if until := clone.VRP.ValidUntil; !until.IsZero() {
+				until := clone.VRP.ValidUntil
+				if proof := snapshot.VRPProof; proof != nil && proof.Version == 2 {
+					// The row describes the original publisher snapshot, not a
+					// renewed authorization at intake or materialization time.
+					if !until.After(proof.ObservedAt) || until.Before(proof.CoverageValidUntil) {
+						return errors.New("VRP observation expiry does not bind the publisher snapshot")
+					}
+					if vrpMinimumExpiry.IsZero() || until.Before(vrpMinimumExpiry) {
+						vrpMinimumExpiry = until
+					}
+				} else if !until.IsZero() {
 					if snapshot.ContentValidUntil.IsZero() || until.Before(snapshot.ContentValidUntil) || !now.Before(until) {
 						return errors.New("VRP expiry is missing, expired or exceeds its source bound")
 					}
@@ -483,8 +497,14 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 				}
 			}
 		}
-		if snapshot.VRPProof != nil && vrpCount != snapshot.VRPProof.AcceptedRows {
-			return plan, errors.New("complete VRP proof differs from retained record count")
+		if proof := snapshot.VRPProof; proof != nil {
+			if proof.Version == 2 {
+				if vrpCount != proof.RetainedRows || !vrpMinimumExpiry.Equal(proof.CoverageValidUntil) {
+					return plan, errors.New("complete VRP observation proof differs from retained rows or expiry")
+				}
+			} else if vrpCount != proof.AcceptedRows {
+				return plan, errors.New("complete VRP proof differs from retained record count")
+			}
 		}
 		encoded, err := json.Marshal(struct {
 			Policy           SourcePolicy

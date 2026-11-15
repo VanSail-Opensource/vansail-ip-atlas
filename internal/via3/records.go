@@ -492,7 +492,11 @@ func Validate(s Shard) error {
 				return fail("record")
 			}
 		case 9:
-			if u32(r, 4) == 0 || r[8] > 3 || r[9] > 128 || !zero(r[10:]) || !present(r, 20) && (r[8] != 0 || r[9] != 0) {
+			observedAt, validUntil := u64(r, 16), u64(r, 24)
+			if u32(r, 4) == 0 || r[8] > 3 || r[9] > 128 || !zero(r[10:16]) || !present(r, 20) && (r[8] != 0 || r[9] != 0) {
+				return fail("record")
+			}
+			if r[8] == 0 && (observedAt != 0 || validUntil != 0) || r[8] != 0 && (observedAt == 0 || validUntil <= observedAt || validUntil > 9007199254740991) {
 				return fail("record")
 			}
 		case 10:

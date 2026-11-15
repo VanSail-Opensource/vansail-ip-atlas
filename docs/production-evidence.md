@@ -1,7 +1,7 @@
 # Production evidence and automatic hosted delivery
 
 The user-approved `release-scope-v6` retains CC BY-SA 4.0 compiled data and strict
-source qualification. It adds schema-4 observed-risk answers, verified included
+source qualification. It adds schema-5 dated RPKI snapshots and observed-risk answers, verified included
 publisher logos, encrypted state transfer and automatic promotion after all gates.
 A pipeline or passing fixture is not evidence that a real source or release passed.
 

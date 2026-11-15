@@ -4,9 +4,9 @@ This contract freezes C07/C08; its executable vectors are
 `tools/release_contract/test_contracts.py`. Passing these vectors does not certify
 a real dataset, a complete binary scanner, a hosted preview or a production release.
 
-Current `release-scope-v6` preserves CC BY-SA 4.0 compiled-data licensing while
-adding public schema 4 observed risk, verified global publisher logos, encrypted
-private-state transport and automatic promotion under reviewed policy. Source rights
+Current `release-scope-v6` licenses original compilation contributions under CC BY-SA 4.0 while
+adding public schema 5 dated RPKI snapshots and observed risk, verified global publisher logos, encrypted
+private-state transport and automatic promotion under reviewed policy. Source terms and explicit distribution decisions
 remain individually reviewed and current; no license or policy revision activates
 a source. Source code and dependency licenses stay separate.
 
@@ -28,7 +28,7 @@ The descriptor has exactly these keys:
 
 | Key | Encoding |
 |---|---|
-| `format_version`, `schema_version` | Integer `3`, integer `4` respectively |
+| `format_version`, `schema_version` | Integer `3`, integer `5` respectively |
 | `codec` | `zstd-1` |
 | `mode` | Public candidates: `synthetic` or `production`; synthetic cannot be approved. Private `engineering` artifacts are never publishable. |
 | `valid_from` | Nonnegative UTC Unix seconds; evaluation clock, not an upstream clock |
@@ -156,11 +156,23 @@ The compiled-data grant does not change public-domain inputs' status, relicense
 software dependencies, approve an unreviewed dataset, or override upstream
 copyright/notice, derivative-license, placement or other conditions. Retain each
 included dataset's applicable reviewed obligations. Unresolved or incompatible
-conditions exclude that source. Neither the notice nor credits may associate a
+conditions remain documented. Under the 2026-11-15 owner amendment, an explicit
+`user_authorized_educational_use` decision may admit a technically qualified source
+without claiming compatible redistribution rights. The notice grants only rights
+held by the project and preserves upstream terms. Neither the notice nor credits may associate a
 publisher with a queried IP, ASN, field or reason. Source-rich qualification and
 included-source receipts stay private.
 
 ## Expiry, withdrawal and suspended sessions
+
+RPKI snapshot observations have an explicit user-approved exception: the original
+publisher snapshot freshness contributes to release `valid_until`, while each
+observed RPKI status carries its own observation time and authorization/coverage
+expiry under public schema 5. The status remains visible after that expiry with
+a neutral as-of/expired indication and must never be presented as a current
+authorization claim. Authorization expiry alone does not clear the page or renew
+any clock. This does not change whole-release publication freshness, withdrawal,
+pointer revalidation, or expiry rules for other facts.
 
 `valid_until` is the minimum applicable contributing observation expiry, never
 `built_at + 720h`. A normal snapshot expires at its verified publication clock plus
@@ -169,7 +181,9 @@ included-source receipts stay private.
 expiry. Missing verified upstream item publication time quarantines that item;
 first observation, fetch time and snapshot republication cannot invent its clock.
 The payload itself still requires exact upstream publication proof. A stricter reviewed source limit wins. Public
-metadata exposes only aggregate `valid_until`, no source-specific expiry list.
+metadata exposes aggregate release `valid_until`, no source-specific expiry list.
+The RPKI observation exception exposes only its fact-level observation and
+authorization/coverage clocks, never per-source provenance.
 
 Eligibility is `valid_from <= now < valid_until`; equality at expiry is ineligible.
 The evaluation clock and all upstream clocks are UTC. Future publication tolerance
@@ -340,6 +354,8 @@ finishes within this bound; do not extend expiry to create a rollback.
 Private approved snapshots/normalized evidence have a maximum 168-hour rollback
 retention after removal, shortened by rights withdrawal and source expiry. Delete
 expired input snapshots and derived output immediately from eligible build state;
+RPKI authorization expiry alone leaves its explicitly dated snapshot observation
+eligible until the unchanged source publication-freshness deadline;
 retention is isolated audit storage, never an ingestion cache. Raw subscription
 bytes remain only in controlled parsing quarantine and are deleted immediately
 after parsing or failure (retention zero hours). Redacted audit decisions and hashes

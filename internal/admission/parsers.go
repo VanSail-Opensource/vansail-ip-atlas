@@ -36,7 +36,11 @@ const (
 // Adapter IDs describe implemented schemas, not source certification. None is
 // enabled by this registry; reviewed per-source fixture evidence is still needed.
 func selectAdapter(source Source) (adapter, bool) {
-	if source.Parser.Version != 1 || source.Coverage != "mapping" && source.Coverage != "positive_only" {
+	version := uint32(1)
+	if source.Parser.ID == "ffraud-csv" {
+		version = 2
+	}
+	if source.Parser.Version != version || source.Coverage != "mapping" && source.Coverage != "positive_only" {
 		// These parsers cannot establish absence-as-clean assessment coverage.
 		return 0, false
 	}
@@ -45,7 +49,7 @@ func selectAdapter(source Source) (adapter, bool) {
 		return torExits, torExitSource(source)
 	case "ipverse-asn-usage-json":
 		return ipverseUsageJSON, source.Parser.Schema == "ipverse-as-category-json-v1" && source.Category == "asn" && source.Coverage == "mapping" && source.Scope == "asn" && source.Format == "json" && fieldsEqual(source.PublicFields, "usage_type") && mappedFields(source, map[string]string{"metadata.category": "usage_type"})
-	case "ip-count-tsv", "feodo-csv":
+	case "ip-count-tsv", "feodo-csv", "ffraud-csv":
 		return riskAdapter, selectRiskAdapter(source)
 	case "ipapi-free-city-csv":
 		return ipapiCityZIP, selectGeoProvider(source)
@@ -204,6 +208,10 @@ func parsePayloadTo(ctx context.Context, file *os.File, size int64, source Sourc
 				return emit(intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordPath, Path: &intelligence.ScopedPath{Prefix: value.Prefix, Observation: intelligence.PathObservation{Origin: value.Origin, Segments: value.Segments, Family: source.Family, Current: true, OriginOutward: false}}})
 			})
 		default:
+			if caidaSource(source) {
+				_, err := parseCAIDASerial2(ctx, reader, maxRecords, emit)
+				return err
+			}
 			return parseBulkPayload(ctx, reader, source, published, maxRecords, emit)
 		}
 	}

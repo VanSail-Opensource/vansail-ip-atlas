@@ -59,14 +59,16 @@ type MRTPeerBinding struct {
 // RIB bytes and a contiguous set of complete UPDATE payloads. Collector identity
 // is separate from content hashing, so mirrors cannot manufacture family votes.
 type MRTSourceProof struct {
-	Version             uint16
-	Collector           [32]byte
-	BasePayloadHash     [32]byte
-	BaseBytes           int64
-	CapturedAt, Through time.Time
-	CaptureUntil        time.Time `json:",omitzero"`
-	Archives            []MRTArchiveProof
-	Peers               []MRTPeerBinding
+	Version               uint16
+	Collector             [32]byte
+	BasePayloadHash       [32]byte
+	BaseBytes             int64
+	BaseArchiveURL        string    `json:",omitempty"` // actual reviewed rotating archive; private seal binds it
+	BaseArchiveSelectedAt time.Time `json:",omitzero"`
+	CapturedAt, Through   time.Time
+	CaptureUntil          time.Time `json:",omitzero"`
+	Archives              []MRTArchiveProof
+	Peers                 []MRTPeerBinding
 }
 
 // CaptureEnd is the last fully validated base-RIB frame clock. Legacy proofs
@@ -95,7 +97,7 @@ func cloneMRTProof(proof *MRTSourceProof) *MRTSourceProof {
 // ContentHash deduplicates exact input sets independently of collector labels.
 // Source/peer binding remains authenticated by the complete private state seal.
 func (p *MRTSourceProof) ContentHash() ([32]byte, error) {
-	if p == nil || p.Version != 1 || p.Collector == ([32]byte{}) || p.BasePayloadHash == ([32]byte{}) || p.BaseBytes <= 0 || p.BaseBytes > 1<<30 || p.CapturedAt.IsZero() || p.CaptureEnd().Before(p.CapturedAt) || p.Through.Before(p.CapturedAt) || len(p.Archives) > 512 || len(p.Peers) > 2*65535 {
+	if p == nil || p.Version != 1 || p.Collector == ([32]byte{}) || p.BasePayloadHash == ([32]byte{}) || p.BaseBytes <= 0 || p.BaseBytes > 1<<30 || len(p.BaseArchiveURL) > 4096 || p.CapturedAt.IsZero() || p.CaptureEnd().Before(p.CapturedAt) || p.Through.Before(p.CapturedAt) || len(p.Archives) > 512 || len(p.Peers) > 2*65535 {
 		return [32]byte{}, errors.New("private MRT source proof invalid")
 	}
 	seenPeers := map[struct {

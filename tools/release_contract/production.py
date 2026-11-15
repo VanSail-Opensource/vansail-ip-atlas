@@ -111,6 +111,7 @@ def qualify(receipt_path: Path, atlas: Path, now: int, *, workspace: Path = ROOT
     Production invokes the Go revalidator even when every receipt digest matches.
     """
     from tools.atlas_contracts.config import load_yaml
+    from tools.atlas_contracts.policy import reviewed_distribution_decision
     from .dataset_credits import build_credit_document
 
     _clock(now)
@@ -159,7 +160,7 @@ def qualify(receipt_path: Path, atlas: Path, now: int, *, workspace: Path = ROOT
         if (value["parser"] != parser["id"] or value["schema"] != parser["schema"]
                 or type(value["parser_version"]) is not int or value["parser_version"] != parser["version"]
                 or value["evidence_family"] != source["evidence_family"]
-                or rights["status"] != "reviewed" or rights["distribution"] != "allow"
+                or not reviewed_distribution_decision(rights)
                 or type(rights["attribution_required"]) is not bool
                 or value["rights_sha256"] != sha256(canonical_bytes(rights))):
             _fail("included source parser/family/rights binding changed")

@@ -166,11 +166,27 @@ func (e *Engine) IngestMRT(ctx context.Context, sources []Source, now time.Time,
 		}
 		maximum := min(remaining, source.MaxCompressedBytes)
 		payload := filepath.Join(quarantine, []string{"first", "second"}[i])
-		fetched, err := state.fetch.Fetch(ctx, source.URL, payload, maximum)
-		// A failed transfer may already have consumed its whole bounded body.
-		// Reserve the attempted ceiling on failure so retries cannot reset it.
+		candidates, err := mrtRIBCandidates(source, now)
 		if err != nil {
-			state.chargeFetch(maximum)
+			return deny("reviewed_mrt_archive_policy_required")
+		}
+		var fetched acquire.Result
+		var actualURL string
+		for candidate, raw := range candidates {
+			actualURL = raw
+			fetched, err = state.fetch.Fetch(ctx, raw, payload, maximum)
+			if err == nil {
+				break
+			}
+			if errors.Is(err, acquire.ErrNotFound) {
+				state.chargeFetch(0) // only this classified header-only failure consumed no body
+				if source.MRTArchivePolicy == latestCompleteMRTPolicy && candidate+1 < len(candidates) && ctx.Err() == nil {
+					continue
+				}
+			} else {
+				// An unsuccessful transfer may already have consumed its ceiling.
+				state.chargeFetch(maximum)
+			}
 			return deny("mrt_asset_unavailable_or_budget_exceeded")
 		}
 		digest, size, err := hashFile(ctx, payload, maximum)
@@ -190,6 +206,15 @@ func (e *Engine) IngestMRT(ctx context.Context, sources []Source, now time.Time,
 		if err != nil || closeErr != nil {
 			_ = writer.Abort()
 			return deny("mrt_complete_capture_proof_or_parser_failed")
+		}
+		var selected *intelligence.MRTSourceProof
+		if source.MRTArchivePolicy != "" {
+			location, _ := mrtArchiveURL(actualURL)
+			selected = &intelligence.MRTSourceProof{Collector: location.collector, BaseArchiveURL: actualURL, BaseArchiveSelectedAt: now.UTC(), CapturedAt: clock.First, CaptureUntil: clock.Last}
+			if !validMRTArchiveBinding(source, selected, now) {
+				_ = writer.Abort()
+				return deny("mrt_archive_capture_interval_mismatch")
+			}
 		}
 		published, err := e.retainClock(ctx, digest, clock.First)
 		if err != nil || !now.Before(published.Add(source.MaxAge)) {
@@ -211,6 +236,10 @@ func (e *Engine) IngestMRT(ctx context.Context, sources []Source, now time.Time,
 			collector = location.collector
 		}
 		result.Results[i].Snapshot.MRTProof = &intelligence.MRTSourceProof{Version: 1, Collector: collector, BasePayloadHash: digest, BaseBytes: size, CapturedAt: clock.First, CaptureUntil: clock.Last, Through: clock.First}
+		if selected != nil {
+			proof := result.Results[i].Snapshot.MRTProof
+			proof.Collector, proof.BaseArchiveURL, proof.BaseArchiveSelectedAt = selected.Collector, selected.BaseArchiveURL, selected.BaseArchiveSelectedAt
+		}
 		result.CaptureClocks = append(result.CaptureClocks, clock)
 		result.Results[i].Decision.State, result.Results[i].Decision.Reason = "current", ""
 	}
@@ -222,10 +251,10 @@ func (e *Engine) IngestMRT(ctx context.Context, sources []Source, now time.Time,
 
 func validMRTControls(source Source) bool {
 	adapter, supported := selectAdapter(source)
-	return supported && adapter == mrtRIB && source.Admission == "active" && identity(source.ID) && identity(source.Family) &&
+	return supported && adapter == mrtRIB && validMRTArchivePolicy(source) && source.Admission == "active" && identity(source.ID) && identity(source.Family) &&
 		source.MaxAge > 0 && source.MaxAge <= 720*time.Hour && !math.IsNaN(source.Weight) && !math.IsInf(source.Weight, 0) && source.Weight >= 0 && source.Weight <= 100 && source.MaxCompressedBytes > 0 && source.MaxCompressedBytes <= 1<<30 &&
 		safeHTTPS(source.URL) && source.Publication.Kind == "embedded" && source.Publication.Locator == source.URL && source.Publication.Field == "mrt_frame_capture_timestamp" &&
-		source.Rights.Status == "reviewed" && source.Rights.Distribution == "allow" && source.Rights.AttributionRequired != nil && safeHTTPS(source.Rights.EvidenceURL) && strings.TrimSpace(source.Rights.ReviewBasis) != "" &&
+		source.Rights.Status == "reviewed" && permittedDistributionDecision(source.Rights.Distribution) && source.Rights.AttributionRequired != nil && safeHTTPS(source.Rights.EvidenceURL) && strings.TrimSpace(source.Rights.ReviewBasis) != "" &&
 		(!*source.Rights.AttributionRequired || source.Rights.Attribution != nil) && (source.Rights.Attribution == nil || source.Rights.Attribution.Validate() == nil)
 }
 
@@ -242,13 +271,23 @@ func parseMRTCapturePayload(ctx context.Context, file *os.File, size int64, sour
 		var err error
 		proof, err = intelligence.ParseMRTSnapshot(ctx, input, intelligence.MRTLimits{Bytes: 3 << 30, FrameBytes: 8 << 20, Records: maxRecords / 2, Peers: 65535}, now, source.MaxAge, func(captured intelligence.MRTSnapshotRecord) error {
 			value := captured.Record
-			if !intelligence.IsPublicASN(value.Origin) || !value.Prefix.IsValid() || value.Prefix.Addr().Is4In6() || value.Prefix.Addr().Zone() != "" || value.ObservedAt.After(captured.CapturedAt.Add(24*time.Hour)) {
+			if !value.Prefix.IsValid() || value.Prefix.Addr().Is4In6() || value.Prefix.Addr().Zone() != "" || value.ObservedAt.After(captured.CapturedAt.Add(24*time.Hour)) {
 				return errors.New("unrepresentable MRT record or future originated time")
 			}
 			originated := value.ObservedAt
 			identity := &intelligence.MRTRouteIdentity{PeerKey: value.PeerKey, PeerIndex: value.PeerIndex, PeerTable: value.PeerTable, PathID: value.PathID, AddPath: value.AddPath, PeerAmbiguous: value.PeerAmbiguous, CapturedAt: captured.CapturedAt}
-			if err := sink(intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordOrigins, MRTOriginatedAt: &originated, MRT: identity, Origins: &intelligence.OriginMapping{Prefix: value.Prefix, Origins: []uint32{value.Origin}}}); err != nil {
+			origins := []uint32{}
+			if intelligence.IsPublicASN(value.Origin) {
+				origins = append(origins, value.Origin)
+			}
+			// A valid observed route with an unsupported scalar origin still
+			// shadows broader routes. Do not choose an AS_SET member or drop its
+			// prefix: either would invent an origin during longest-prefix lookup.
+			if err := sink(intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordOrigins, MRTOriginatedAt: &originated, MRT: identity, Origins: &intelligence.OriginMapping{Prefix: value.Prefix, Origins: origins}}); err != nil {
 				return err
+			}
+			if len(origins) == 0 {
+				return nil
 			}
 			return sink(intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordPath, MRTOriginatedAt: &originated, MRT: identity, Path: &intelligence.ScopedPath{Prefix: value.Prefix, Observation: intelligence.PathObservation{Origin: value.Origin, Segments: value.Segments, Family: source.Family, Current: true, OriginOutward: false}}})
 		})

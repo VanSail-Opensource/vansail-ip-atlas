@@ -1,0 +1,20 @@
+The CAIDA AS Relationships Dataset, 2026-11-01
+https://www.caida.org/catalog/datasets/as-relationships/
+Public Acceptable Use Agreement:
+https://www.caida.org/about/legal/aua/public_aua/
+
+The adjacent observed-caida-asrel2.txt.bz2 is a bounded parser excerpt of
+https://publicdata.caida.org/datasets/as-relationships/serial-2/20261101.as-rel2.txt.bz2
+captured 2026-11-15. It retains all 175 original header lines and five unchanged
+relationship lines covering each observed relation/provenance combination.
+The 173 topology headers include 170 dated BGP inputs and three dated
+looking-glass inputs. The earliest input date is 2026-11-01, not the capture
+date, archive filename's implied publication time, or HTTP Last-Modified.
+
+CAIDA's public agreement is limited, nontransferable and terminable and includes
+citation and publication-reporting obligations. Compatible onward redistribution
+permission is not established. The user's 2026-11-15 educational source-use
+decision is not a publisher grant and does not place this excerpt under the
+project's CC BY-SA license. No publisher was contacted or publication notice sent.
+Upstream material retains its own terms. This excerpt is outside the deployment
+tree and supplies observed parser coverage, not source activation or certification.

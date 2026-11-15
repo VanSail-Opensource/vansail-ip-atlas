@@ -93,6 +93,10 @@ func (e *Engine) certify(ctx context.Context, source Source, adapter adapter, no
 	// Review evidence is necessary, but not sufficient: the current adapter must
 	// still successfully parse the exact reviewed fixture on this run.
 	count := uint64(0)
+	if fixture.PayloadFormat == "rpki-client-excerpt" {
+		_, err = validateRPKIClientExcerpt(ctx, file, source, adapter, tested)
+		return err
+	}
 	if fixture.PayloadFormat == "decoded-csv" {
 		selected, supported := selectAdapter(source)
 		if !supported || selected != adapter || adapter != ipapiCityZIP && (adapter != bulkAdapter || !dbipProvider(source)) {

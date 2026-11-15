@@ -38,7 +38,7 @@ func TestRPKIClientFullProofPrivateExpiryAndAuthorizationASNs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if metadata.Rows != 3 || metadata.AcceptedRows != 3 || metadata.ExpiredRows != 0 || !metadata.BuiltAt.Equal(rpkiClientClock()) || !metadata.ContentValidUntil.Equal(rpkiClientClock().Add(time.Hour)) {
+	if metadata.Rows != 3 || metadata.RetainedRows != 3 || metadata.ExpiredAtIntakeRows != 0 || !metadata.BuiltAt.Equal(rpkiClientClock()) || !metadata.CoverageValidUntil.Equal(rpkiClientClock().Add(time.Hour)) {
 		t.Fatalf("wrong private completeness/expiry: %+v", metadata)
 	}
 	if len(records) != 3 || records[1].VRP.ASN != 65037 || records[2].VRP.ASN != 0 || !records[1].VRP.ValidUntil.Equal(rpkiClientClock().Add(2*time.Hour)) {
@@ -53,24 +53,27 @@ func TestRPKIClientFullProofPrivateExpiryAndAuthorizationASNs(t *testing.T) {
 	}
 }
 
-func TestRPKIClientExpiredRowsCannotRemainCurrentOrRenewTheClock(t *testing.T) {
-	now := rpkiClientClock().Add(90 * time.Minute)
-	count := 0
-	metadata, err := parseRPKIClientPayload(context.Background(), strings.NewReader(rpkiClientFixture()), rpkiClientLimits(), now, func(record intelligence.NormalizedRecord) error {
-		count++
-		if !now.Before(record.VRP.ValidUntil) {
-			t.Fatal("expired VRP emitted")
+func TestRPKIClientExpiredAuthorizationsRemainDatedSnapshotObservations(t *testing.T) {
+	for _, elapsed := range []time.Duration{90 * time.Minute, 4 * time.Hour} {
+		now := rpkiClientClock().Add(elapsed)
+		count := 0
+		metadata, err := parseRPKIClientPayload(context.Background(), strings.NewReader(rpkiClientFixture()), rpkiClientLimits(), now, func(record intelligence.NormalizedRecord) error {
+			count++
+			if !rpkiClientClock().Before(record.VRP.ValidUntil) {
+				t.Fatal("VRP was already expired at the actual publisher observation")
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if count != 2 || metadata.Rows != 3 || metadata.ExpiredRows != 1 || !metadata.ContentValidUntil.Equal(rpkiClientClock().Add(2*time.Hour)) || !metadata.BuiltAt.Equal(rpkiClientClock()) {
-		t.Fatal("row clock or aggregate validity incorrect")
-	}
-	if _, err = parseRPKIClientPayload(context.Background(), strings.NewReader(rpkiClientFixture()), rpkiClientLimits(), rpkiClientClock().Add(4*time.Hour), nil); err == nil {
-		t.Fatal("all-expired snapshot accepted")
+		expired := 1
+		if elapsed == 4*time.Hour {
+			expired = 3
+		}
+		if count != 3 || metadata.Rows != 3 || metadata.RetainedRows != 3 || metadata.ExpiredAtIntakeRows != expired || !metadata.CoverageValidUntil.Equal(rpkiClientClock().Add(time.Hour)) || !metadata.BuiltAt.Equal(rpkiClientClock()) {
+			t.Fatal("historical rows, original observation clock or authorization deadline changed")
+		}
 	}
 }
 
@@ -84,6 +87,7 @@ func TestRPKIClientRejectsUnknownDuplicateCorruptAndIncompleteProof(t *testing.T
 		"invalid-tals":         strings.Replace(base, `"invalidtals":0`, `"invalidtals":1`, 1),
 		"missing-clock":        strings.Replace(base, `"buildtime":`, `"time":`, 1),
 		"clock-case":           strings.Replace(base, `"buildtime":`, `"BuildTime":`, 1),
+		"expiry-at-build":      strings.Replace(base, fmt.Sprint(rpkiClientClock().Add(time.Hour).Unix()), fmt.Sprint(rpkiClientClock().Unix()), 1),
 		"future-clock":         strings.Replace(base, rpkiClientClock().Format(time.RFC3339), rpkiClientClock().Add(25*time.Hour).Format(time.RFC3339), 1),
 		"duplicate-metadata":   strings.Replace(base, `"vrps":4`, `"vrps":4,"VRPS":4`, 1),
 		"unknown-vrp":          strings.Replace(base, `"asn":13335`, `"new":1,"asn":13335`, 1),
@@ -214,10 +218,10 @@ func TestObservedRPKIClientCompletePayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if metadata.Rows != 1032481 || metadata.AcceptedRows != 1032481 || metadata.ExpiredRows != 0 || !metadata.ContentValidUntil.Equal(time.Date(2026, 11, 9, 4, 19, 22, 0, time.UTC)) {
+	if metadata.Rows != 1032481 || metadata.RetainedRows != 1032481 || metadata.ExpiredAtIntakeRows != 0 || !metadata.CoverageValidUntil.Equal(time.Date(2026, 11, 9, 4, 19, 22, 0, time.UTC)) {
 		t.Fatalf("observed source changed: %+v", metadata)
 	}
-	t.Logf("Observed complete publisher payload: %d bytes, %d rows, deadline %s", info.Size(), metadata.Rows, metadata.ContentValidUntil.Format(time.RFC3339))
+	t.Logf("Observed complete publisher payload: %d bytes, %d rows, deadline %s", info.Size(), metadata.Rows, metadata.CoverageValidUntil.Format(time.RFC3339))
 }
 
 func TestRPKIClientCompressedFixtureRetainsOriginalSchemaAndExpiry(t *testing.T) {
@@ -271,12 +275,12 @@ func FuzzRPKIClientPayload(f *testing.F) {
 		limits := intelligence.ParseLimits{Bytes: 2 << 20, Records: 10000, LineBytes: 1 << 20}
 		metadata, err := parseRPKIClientPayload(context.Background(), strings.NewReader(string(payload)), limits, rpkiClientClock(), func(record intelligence.NormalizedRecord) error {
 			count++
-			if record.VRP == nil || !rpkiClientClock().Before(record.VRP.ValidUntil) {
-				t.Fatal("invalid or expired record emitted")
+			if record.VRP == nil || record.VRP.ValidUntil.IsZero() {
+				t.Fatal("missing authorization expiry")
 			}
 			return record.Validate()
 		})
-		if err == nil && (metadata.BuiltAt.IsZero() || metadata.AcceptedRows != count || metadata.Rows < count || !rpkiClientClock().Before(metadata.ContentValidUntil)) {
+		if err == nil && (metadata.BuiltAt.IsZero() || metadata.RetainedRows != count || metadata.Rows != count || !metadata.BuiltAt.Before(metadata.CoverageValidUntil)) {
 			t.Fatal("successful parse lacks complete private proof")
 		}
 	})

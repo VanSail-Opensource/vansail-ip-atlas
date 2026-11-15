@@ -13,6 +13,7 @@ HEX = re.compile(r"^[0-9a-f]{64}$")
 UTC_TIMESTAMP = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?Z$")
 RELEASE_SCOPE = "release-scope-v6"
 OPTIONAL_ROUTING_CAPABILITIES = frozenset({"asn_prefix", "rpki", "bgp_origins_paths", "relationships", "tier1"})
+PERMITTED_DISTRIBUTION_DECISIONS = frozenset({"allow", "user_authorized_educational_use"})
 CREDIT_SECRET = re.compile(r"(?:vless|vmess|trojan|ss|ssr|hy|hy2|hysteria|hysteria2|tuic|anytls)://|-----BEGIN[^\r\n]*PRIVATE KEY-----|(?:gh[pousr]_|github_pat_)", re.IGNORECASE)
 
 
@@ -166,11 +167,40 @@ def attribution_issues(value):
     return []
 
 
+def reviewed_distribution_decision(rights):
+    """Check the recorded decision, without claiming a publisher license grant.
+
+    Educational use is an explicit user decision. It does not replace the
+    reviewed upstream terms, required notices or any source qualification gate.
+    """
+    from .config import safe_https
+    return (type(rights) is dict and rights.get("status") == "reviewed"
+            and isinstance(rights.get("distribution"), str)
+            and rights["distribution"] in PERMITTED_DISTRIBUTION_DECISIONS
+            and safe_https(rights.get("evidence_url"))
+            and isinstance(rights.get("review_basis"), str)
+            and bool(rights["review_basis"].strip()))
+
+
+def caida_discovery_supported(source):
+    index = "https://publicdata.caida.org/datasets/as-relationships/serial-2/"
+    download = source.get("download", {})
+    return (source.get("category") == "bgp" and source.get("scope") == "asn_edge"
+            and source.get("coverage") == {"kind": "mapping", "scope": "asn_edge"}
+            and source.get("parser") == {"id": "caida-relationships", "schema": "asn-asn-relation-pipe-v1", "version": 1}
+            and download.get("url") is None and not download.get("urls") and download.get("format") == "text-bz2"
+            and source.get("discovery") == {"mode": "latest-timestamped-asset", "index_url": index,
+                "filename_pattern": r"^[0-9]{8}\.as-rel2\.txt\.bz2$", "ordering": "filename-date-desc-then-url-bytes",
+                "requires_exact_file": True, "no_guessing": True}
+            and source.get("publication_proof") == {"kind": "embedded", "locator": index, "field": "topology_observation_date"}
+            and source.get("public_fields") == ["as_relationships"]
+            and source.get("field_mappings") == {"as_relationship": "as_relationships"})
+
+
 def static_issues(source, root: Path):
     issues = fixture_issues(source, root)
     rights, proof = source["license"], source["publication_proof"]
-    if (rights["status"] != "reviewed" or rights["distribution"] != "allow"
-            or not rights.get("evidence_url") or not rights.get("review_basis")):
+    if not reviewed_distribution_decision(rights):
         issues.append("reviewed_redistribution_rights_required")
     if type(rights.get("attribution_required")) is not bool:
         issues.append("explicit_attribution_requirement_required")
@@ -207,7 +237,7 @@ def static_issues(source, root: Path):
         and parser.get("id") == "city-range-csv" and parser.get("schema") == "dbip-city-eight-columns-v1"
         and download.get("format") == "csv-gz" and proof.get("kind") == "snapshot_metadata"
         and proof.get("locator") == discovery.get("index_url") and proof.get("field") == "csv.sha1-md5.month")
-    if not (download.get("url") or download.get("urls") or dynamic_dbip) or download.get("format", "unknown") == "unknown":
+    if not (download.get("url") or download.get("urls") or dynamic_dbip or caida_discovery_supported(source)) or download.get("format", "unknown") == "unknown":
         issues.append("exact_asset_and_parser_required")
     return sorted(set(issues))
 

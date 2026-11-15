@@ -1,0 +1,14 @@
+# ffraud confirmed-abusive IPs, from our own honeypot sensors and community reports. Each confirmed 2+ independent times, ffraud_score>=50.
+# category = worst observed threat (c2/malware/botnet/brute_force/web_attack/scanner/phishing/spam/abuse). For a Tor address it is the worst activity seen coming from it.
+# type = infrastructure when known (proxy/vpn/tor/datacenter/mobile), blank otherwise.
+# ffraud_score 0-100 is our own score; confirmations = how many independent times we observed the abuse. Rebuilt from the live engine every 30 minutes.
+ip,ffraud_score,confirmations,category,type
+192.42.116.51,100,56,brute_force,tor
+157.66.26.151,100,51,c2,proxy
+167.71.175.236,100,40,botnet,datacenter
+171.25.193.78,100,38,web_attack,tor
+114.111.53.214,100,32,malware,
+176.65.149.105,100,29,spam,tor
+71.6.233.150,100,20,scanner,datacenter
+176.65.148.216,100,20,abuse,datacenter
+51.158.205.203,100,40,c2,vpn

@@ -391,12 +391,50 @@ the exact candidate, configuration, state and original limits. Preview and
 promotion independently verify the joined evidence and original frozen candidate.
 No runtime, workload, resource or lookup gate changed.
 
-Ten observed parser fixtures were rerun and recertified at
-`2026-11-15T14:07:02Z` against internal implementation hash
+On the parallel ten-source release branch, observed parser fixtures were rerun
+and recertified at `2026-11-15T14:07:02Z` against internal implementation hash
 `63d9ddf18af054428cd1feb45e08ca8bbd170da0889859373cbf2f5fc203029f`.
 The next exact-head hosted run must still compile the actual full inputs and pass
 the individual 100,000-lookup p95 ceiling before merge. Separate work is reducing
 repeated verified Tier-1 discovery scans for the unchanged-build runtime gate.
+
+## Replacement intake integration prepared — 2026-11-15
+
+The isolated source branch merges the root checkpoint `27edf82`, including
+performance/orchestration through `6b1c617`, and the authenticated Tier-1
+verification fusion `3b439fe`. Native ASN prefix pages also reuse bounded
+canonical prefix text from `cb14b68` within the original cache/live budgets;
+optional text is reclaimed before required payload space. Semantic review retained
+schema-5 RPKI observation/coverage clocks, every original VRP,
+exact private-run logical byte budgets and schema-4 cache rejection. The fifteen
+original build benchmark cases remain required under the completed-run matrix.
+
+All five reviewed replacements are now `active` for attempted intake: FFraud,
+RouteViews WIDE, RIS RRC18, CAIDA serial-2 and rpki-client. The closed MRT controls
+enable exactly WIDE/RRC18, retaining two independent families and the unchanged
+1-GiB shared compressed ceiling. Publisher terms, exact notices/logos and the
+explicit educational-use decision remain recorded. No static activation grants
+permission, produces a runtime receipt or certifies current coverage.
+
+All fifteen exact observed fixtures were parsed and semantically validated before
+the certification ledger was refreshed at `2026-11-15T14:22:58Z`, then rerun
+successfully. The ledger binds internal implementation hash
+`996f229b77a7e09d4cd12a8404fbd9291209ddc638b1fbc8985d98cac092ddc6`.
+Any later internal Go edit requires another observed-fixture run and refresh.
+Local strict schemas, 157 Python contract tests, the full Go suite and vet,
+selected internal/source-sample races, focused source/schema/cache and
+maximum-memory-profile tests, and actionlint pass. All 72 hosted-helper tests pass
+using pinned age 1.3.0, including real encryption,
+wrong-key and corrupt-ciphertext rejection. This suite caught and repaired a
+stale schema-4 object check in the memory verifier, without changing its workload,
+framing checks or limits.
+
+No catalog or observed-fixture activation blocker remains. Actual hosted intake
+must still fetch and authenticate every complete current payload under the
+unchanged source/stream limits. The larger admitted corpus has no measured cold,
+changed-input, native lookup or browser acceptance result yet. No historical
+Tier-1 stability is fabricated; unavailable observations remain unknown. The
+website is still unreleased, and this local checkpoint does not authorize it.
 
 ## Resume next
 
@@ -411,11 +449,11 @@ repeated verified Tier-1 discovery scans for the unchanged-build runtime gate.
 3. Review Linux cgroup, tool/cache accounting, checkpoint transport, runtime
    source intake and all automatic stage transitions. Checkpoints carry no raw
    quarantine or logs. Keep source-rich diagnostics out of public artifacts.
-4. Removed routing feeds remain excluded on this release branch. Reintroduction
-   needs the user's reviewed educational-use decision, actual upstream notices,
-   and exact complete-payload/parser/publication proofs. Do not
-   invent approval or contact publishers without explicit instruction. Unknown
-   routing is approved for this release; all pages and honest unknown states stay.
+4. The replacement integration enables only the five reviewed replacements,
+   under their recorded publisher terms and explicit educational-use decision.
+   Current complete-payload/parser/publication proofs still govern inclusion;
+   no publisher grant is implied. Do not contact publishers without instruction.
+   Unavailable routing remains unknown; every product page remains available.
 5. The real compiler reuses authenticated materializations only when state,
    clock, policy, limits, implementation and derived Tier-1 identity all match.
    Changed inputs or clock still require full materialization. All five benchmark

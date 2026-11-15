@@ -8,9 +8,24 @@ and authorizes automatic gated publishing from the existing public repository on
 official GitHub runners. `AGENTS.md` is normative. Earlier dated reports remain
 historical evidence, not proof of current source or production qualification.
 
-Compiled data remains CC BY-SA 4.0. Every included source independently needs
-compatible rights, publication proof, an observed parser fixture and required
-credits. Source code and dependencies retain their separate licenses.
+The explicit educational source-use amendment (2026-11-15) permits the reviewed
+per-source decision `user_authorized_educational_use` alongside `allow`. It records
+the user's project-use authorization without claiming a publisher grant or
+CC BY-SA compatibility. Original compilation contributions retain their stated
+license; upstream material retains its own recorded terms. Every included source
+still needs terms evidence, a nonblank review basis, an explicit attribution
+decision, publication proof, an observed parser fixture and required credits.
+Source code and dependencies retain their separate licenses.
+
+The explicit RPKI amendment (2026-11-15) retains expired authorization results as
+publisher snapshot observations. Every original VRP is evaluated at the actual
+payload-bound publisher build clock and keeps its authorization expiry. Public
+schema 5 carries observed status, observation time and expiry together; the UI
+keeps expired results visible with a neutral as-of/expired indication. This does
+not assert current authorization or extend the snapshot's publication-based
+source freshness (at most 720 hours). All non-RPKI expiry and other gates remain.
+The proof/admission and schema/reader/UI halves must ship together before this
+observation semantics is enabled for a production source.
 
 ## Implementation contracts
 
@@ -21,7 +36,7 @@ credits. Source code and dependencies retain their separate licenses.
 - Root returns HTTP 302 to `/ip`. One input opens overview, quality, class-c, BGP
   and ASN routes. The quality route owns observed risk and retains its deep links.
   Each view has one canonical fact display; reserved diagnostics stay unimplemented.
-- VIA3 container version 3 carries public schema 4. Go and browser readers reject
+- VIA3 container version 3 carries public schema 5. Go and browser readers reject
   incompatible schemas and share golden answers and hostile corruption fixtures.
 - No source IDs, provenance, credentials, domains, ports, protocols, collectors,
   latency, timezone, postal or continent fields enter public facts. Only separate
@@ -38,7 +53,9 @@ lists are removed from the production catalog; useful parser regressions remain.
 
 Any future MRT path families, directed relationships and complete RPKI snapshot
 still require full qualification. A software license does not approve an upstream
-dataset. Unknown redistribution obligations block admission. Missing routing
+dataset. `deny`, pending `review`, `unknown` and unrecognized distribution decisions block admission;
+an educational exception must be explicit and retain the reviewed upstream terms.
+Missing routing
 coverage is explicitly unknown under v6; synthetic data or an allowlist cannot
 replace it or produce real routing claims. Keep all twelve detection categories implemented, but require
 available verified observations rather than twelve simultaneously active feeds.

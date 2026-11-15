@@ -157,7 +157,7 @@ func observeVerifiedCurrentTier1(ctx context.Context, root string, now time.Time
 		return nil, nil, err
 	}
 	binding := sha256.Sum256(append(append([]byte("intake-policy-v1\x00"), configHash[:]...), certification[:]...))
-	verified, state, err := intelligence.VerifyPrivateState(ctx, root, binding)
+	verified, state, err := intelligence.VerifyPrivateStateForTier1(ctx, root, binding)
 	if err != nil {
 		return nil, nil, err
 	}

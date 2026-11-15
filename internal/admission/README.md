@@ -13,13 +13,17 @@ must pass all policies and successful snapshots to `intelligence.Reconcile`,
 including when no payload changed. That step resolves dependencies and retracts
 sources that are retired, stale, unavailable or no longer reviewed.
 
-Before network IO, intake requires an active milestone, explicit reviewed
-redistribution rights and any required global credits, an implemented parser/schema/version, exact public-field
+Before network IO, intake requires an active milestone, an explicit reviewed
+source-use decision (`allow` or `user_authorized_educational_use`) and any required
+global credits, an implemented parser/schema/version, exact public-field
 mapping, the observed real-fixture controls, and the matching reviewed ledger
 entry. It verifies fixture bytes and the current sorted internal Go code hash,
 then reruns that exact fixture through the current parser. This module cannot
 create reviews or certifications. The checked-in ledger binds reviewed observed
 fixtures; active catalog entries still need fresh, hash-bound intake receipts.
+The educational decision records the user's project authorization; it neither
+grants publisher permission nor changes upstream terms. Unknown or denied
+decisions, missing terms evidence and unresolved attribution still fail closed.
 The catalog regression performs no fetch and cannot qualify production by itself.
 `CertificationFingerprint(ctx, workspace, sources)` binds the ledger, current
 internal Go bytes and active fixture bytes with a 64 MiB aggregate read cap.
@@ -76,6 +80,20 @@ the prefix entry's older originated time is private route history, not the RIB's
 publication clock. Plain/gzip/bzip2 inputs stream into bounded private record
 partitions. A malformed or unrepresentable route aborts the candidate rather than
 being truncated or assigned an invented origin.
+
+The optional `download.mrt_archive_policy: latest-complete-v1` is reviewed only
+for RouteViews WIDE's canonical bzip2 RIBs and RIS RRC18's canonical gzip RIBs.
+The configured dated URL remains the catalog's collector/codec anchor. Intake
+selects the newest scheduled slot at least 30 minutes old (two hours for WIDE,
+eight hours for RRC18), with only the immediately preceding slot allowed after
+a header-only HTTP 404. Other acquisition failures, invalid hashes, malformed
+archives and invalid capture clocks fail the pair; they never select older
+bytes. Every accepted frame clock must lie in the selected slot and at or before
+the original selection time. The private sealed proof records the actual URL
+and selection time alongside the full payload hash and capture clocks, so
+revalidation and replay preserve the actual base without mutating the catalog
+or renewing its publication age. An absent policy retains exact-URL acquisition.
+This support does not enable or certify any source.
 
 An optional `mrt_updates_fixture` has its own exact `source-id-updates` ledger
 certificate for `mrt-bgp4mp-unicast-v1`. Its encoded bytes and metadata participate

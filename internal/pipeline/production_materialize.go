@@ -338,8 +338,9 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 		aggregates.families = nil
 		riskPhase(true)
 		spatialPhase := spool.stage(ctx, StageSpatial)
+		observedAt, coverageValidUntil, completeVRP := inputs.Qualification.RPKIObservation()
 		spatial, err = spool.leaves(ctx, spatial, true, func(bucket *bulkBucket, part intelligence.BuildState) error {
-			return IntelligenceProducer(part, policy, clock, MaterializationInputs{VRPComplete: inputs.Qualification.VRPComplete(), verifiedEmptyVRP: inputs.Qualification.VRPComplete(), scope: bucket.prefix, contexts: contexts, resolver: relations, encodedLengths: bucket.recordBytes})(ctx, func(record via3.PublicRecord) error {
+			return IntelligenceProducer(part, policy, clock, MaterializationInputs{VRPComplete: completeVRP, RPKIObservedAt: observedAt, RPKICoverageValidUntil: coverageValidUntil, verifiedEmptyVRP: completeVRP, scope: bucket.prefix, contexts: contexts, resolver: relations, encodedLengths: bucket.recordBytes})(ctx, func(record via3.PublicRecord) error {
 				if record.Kind >= 8 && record.Kind != 9 {
 					return nil
 				}

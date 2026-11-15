@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import test from 'node:test'
 import { AtlasReader, parseShard, hash, answerJSONBytes, PathSegmentPool, prefixKeyValid, comparePrefixKeys } from '../../web/app/workers/atlas.ts'
 import { hasMapLocation } from '../../web/app/lib/via3.ts'
+import { rpkiSnapshotTiming, trackSnapshotTime } from '../../web/app/lib/rpkiSnapshot.ts'
 
 const golden = JSON.parse(readFileSync(new URL('../../fixtures/bin/synthetic-via3.json', import.meta.url), 'utf8'))
 const canonical = value => JSON.stringify(value, Object.keys(value).sort())
@@ -16,6 +17,41 @@ const response = (path, options) => {
   const bytes = files.get(path)
   return Promise.resolve(new Response(bytes, { status: bytes ? 200 : 404, headers: { 'content-length': String(bytes?.length ?? 0) } }))
 }
+
+test('RPKI snapshot timing keeps historical statuses distinct from unavailable at the expiry boundary', () => {
+  for (const status of ['valid', 'invalid', 'not_found']) {
+    const row = { origin: 13335, status, observedAt: 1_800_000_000, validUntil: 1_800_000_060 }
+    assert.equal(rpkiSnapshotTiming(row, row.validUntil - .001).expired, false)
+    assert.equal(rpkiSnapshotTiming(row, row.validUntil).expired, true)
+    assert.equal(rpkiSnapshotTiming(row, row.validUntil + 86_400).expired, true)
+    assert.equal(row.status, status, 'Passing a deadline does not change a recorded result')
+    assert.match(rpkiSnapshotTiming(row, row.validUntil).observedAt, / UTC$/)
+    assert.match(rpkiSnapshotTiming(row, row.validUntil).validUntil, / UTC$/)
+  }
+  assert.equal(rpkiSnapshotTiming({ origin: 13335, status: 'unavailable', observedAt: null, validUntil: null }, 1_800_000_000), null)
+  assert.match(rpkiSnapshotTiming({ origin: 13335, status: 'valid', observedAt: Number.MAX_SAFE_INTEGER - 1, validUntil: Number.MAX_SAFE_INTEGER }, 0).validUntil, /seconds since Unix epoch$/)
+})
+
+test('snapshot labels update on the timer and immediately after tab resume, and stop after cleanup', t => {
+  t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: 1_800_000_000_000 })
+  const target = new EventTarget(), states = []
+  const row = { origin: 13335, status: 'valid', observedAt: 1_799_999_900, validUntil: 1_800_000_002 }
+  const stop = trackSnapshotTime(now => states.push(rpkiSnapshotTiming(row, now).expired), target)
+  assert.deepEqual(states, [false])
+  t.mock.timers.tick(1_000)
+  assert.deepEqual(states, [false, false])
+  t.mock.timers.tick(1_000)
+  assert.equal(states.at(-1), true)
+  t.mock.timers.setTime(1_800_000_003_000)
+  const count = states.length
+  target.dispatchEvent(new Event('visibilitychange'))
+  assert.equal(states.length, count + 1, 'Resume does not wait for another timer interval')
+  assert.equal(states.at(-1), true)
+  stop()
+  t.mock.timers.tick(5_000)
+  target.dispatchEvent(new Event('visibilitychange'))
+  assert.equal(states.length, count + 1)
+})
 
 test('city and finer area coordinates can show a map while missing, coarse and anycast data remain unknown', () => {
   const answer = { geo: { latitude: 0, longitude: 0, precision: 'area' }, usage: null }
@@ -160,6 +196,25 @@ test('RPKI uses the selected announcement and origin despite unrelated more-spec
   }
 })
 
+test('RPKI snapshot expiry preserves observed results while whole-release expiry remains enforced', async () => {
+  let now = golden.clock
+  const reader = new AtlasReader(response, () => now)
+  try {
+    const before = await reader.lookup('203.0.113.1')
+    const known = before.bgp.rpki.filter(row => row.status !== 'unavailable')
+    assert(known.some(row => row.validUntil <= now), 'The shared fixture includes an expired known result')
+    assert(known.some(row => row.validUntil > now && row.validUntil < before.validUntil))
+    now = Math.max(...known.map(row => row.validUntil))
+    const after = await reader.lookup('203.0.113.1')
+    assert.deepEqual(after, before, 'RPKI expiry changes presentation, not recorded answers or other facts')
+    assert(after.bgp.rpki.every(row => rpkiSnapshotTiming(row, now).expired))
+    const unknown = await reader.lookup('203.0.114.1')
+    assert(unknown.bgp.rpki.every(row => row.status === 'unavailable' && row.observedAt === null && row.validUntil === null))
+    now = before.validUntil
+    await assert.rejects(reader.lookup('203.0.113.1'), { message: 'expired' })
+  } finally { reader.clear() }
+})
+
 test('Go and worker canonical lookup answers match exactly', async t => {
   const reader = new AtlasReader(response, () => golden.clock)
   for (const vector of golden.vectors) {
@@ -212,8 +267,10 @@ test('length, version, overflow and checksum failures remain closed', async () =
   const good = new Uint8Array(Buffer.from(golden.objects[0].base64, 'base64'))
   await assert.rejects(parseShard(good.subarray(0, 63)), { message: 'length' })
   await assert.rejects(parseShard(new Uint8Array(24 * 1024 * 1024)), { message: 'length' })
-  const version = good.slice(); version[6] = 3
-  await assert.rejects(parseShard(version), { message: 'version' })
+  for (const oldSchema of [3, 4]) {
+    const version = good.slice(); version[6] = oldSchema
+    await assert.rejects(parseShard(version), { message: 'version' })
+  }
   const reserved = good.slice(); reserved[45] = 1
   await assert.rejects(parseShard(reserved), { message: 'header' })
   const overflow = good.slice(); new DataView(overflow.buffer).setBigUint64(72, 0xffffffffffffffffn, true)

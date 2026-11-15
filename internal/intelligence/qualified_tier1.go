@@ -15,6 +15,54 @@ import (
 
 const maxQualifiedRelationshipEdges = 4_000_000
 
+// This discovery is built only while the private verifier decodes every exact
+// authenticated record. Its source positions are bound to that complete state;
+// neither caller statistics nor a catalog family can assert path absence.
+// The graph becomes read-only when verification returns. No path rows are kept.
+type tier1Discovery struct {
+	stateHash [32]byte
+	relations *RelationshipIndex
+	sources   []tier1SourceDiscovery
+	failed    bool
+}
+
+type tier1SourceDiscovery struct {
+	hasPaths, hasRelationships bool
+	err                        error
+}
+
+func discoverTier1Record(relations *RelationshipIndex, source *tier1SourceDiscovery, record NormalizedRecord) error {
+	switch record.Kind {
+	case RecordRelationship:
+		source.hasRelationships = true
+		v := record.Relationship
+		if err := relations.Add(v.From, v.To, v.Relation); err != nil {
+			return err
+		}
+		if len(relations.nodes) > 200_000 || len(relations.edges) > maxQualifiedRelationshipEdges {
+			return ErrGraphBudget
+		}
+	case RecordPath:
+		if !record.Path.Observation.Current || len(record.Path.Observation.Family) == 0 || len(record.Path.Observation.Family) > 256 {
+			return errors.New("noncurrent Tier-1 path receipt")
+		}
+		source.hasPaths = true
+	}
+	return nil
+}
+
+func (d *tier1Discovery) collect(index int, record NormalizedRecord) {
+	if d.failed {
+		return
+	}
+	source := &d.sources[index]
+	if source.err = discoverTier1Record(d.relations, source, record); source.err != nil {
+		// Preserve the first error's source position, and stop graph growth while
+		// the verifier independently finishes structural validation of all rows.
+		d.failed = true
+	}
+}
+
 // QualifyTier1State is the production compiler entry point. Its supplied state
 // must match the independently authenticated complete state/chunk identity.
 func QualifyTier1State(ctx context.Context, workspace string, state BuildState, binding [32]byte, now time.Time) (*QualifiedTier1, error) {
@@ -57,7 +105,7 @@ func (v *VerifiedPrivateState) ObserveTier1State(ctx context.Context, workspace 
 	if err != nil {
 		return nil, err
 	}
-	return observeTier1StateChecked(ctx, workspace, state, binding, now, 100_000_000, func() error { return v.recheckAuthentication(ctx) })
+	return observeTier1StateDiscovered(ctx, workspace, state, binding, now, 100_000_000, func() error { return v.recheckAuthentication(ctx) }, v.tier1)
 }
 
 // QualifiedTier1 is a read-only context derived from the exact sealed private
@@ -97,12 +145,19 @@ func observeTier1State(ctx context.Context, workspace string, state BuildState, 
 }
 
 func observeTier1StateChecked(ctx context.Context, workspace string, state BuildState, policyHash [32]byte, now time.Time, maxWork int, finalCheck func() error) (*QualifiedTier1, error) {
+	return observeTier1StateDiscovered(ctx, workspace, state, policyHash, now, maxWork, finalCheck, nil)
+}
+
+func observeTier1StateDiscovered(ctx context.Context, workspace string, state BuildState, policyHash [32]byte, now time.Time, maxWork int, finalCheck func() error, discovery *tier1Discovery) (*QualifiedTier1, error) {
 	if now.IsZero() || !state.EvaluatedAt.Equal(now) || maxWork <= 0 {
 		return nil, errors.New("same-clock qualified Tier-1 inputs required")
 	}
 	identity, err := stateIdentity(state)
 	if err != nil {
 		return nil, err
+	}
+	if discovery != nil && (discovery.stateHash != identity || len(discovery.sources) != len(state.Sources) || discovery.relations == nil) {
+		return nil, errors.New("Tier-1 discovery does not bind the authenticated state")
 	}
 	history, err := loadTier1History(ctx, workspace, policyHash)
 	if err != nil {
@@ -117,6 +172,9 @@ func observeTier1StateChecked(ctx context.Context, workspace string, state Build
 		return nil, err
 	}
 	qualified := &QualifiedTier1{stateHash: identity, policyHash: policyHash, clock: now, relations: NewRelationships(true)}
+	if discovery != nil {
+		qualified.relations = discovery.relations
+	}
 	var captured time.Time
 	var relevantExpiry time.Time
 	type relevantSource struct {
@@ -125,7 +183,7 @@ func observeTier1StateChecked(ctx context.Context, workspace string, state Build
 		Observed    time.Time
 	}
 	var relevant []relevantSource
-	for _, source := range state.Sources {
+	for index, source := range state.Sources {
 		receipt := source.Receipt
 		if receipt == nil || !receipt.PayloadVerified || !receipt.SchemaVerified || receipt.PayloadHash == ([32]byte{}) || receipt.PayloadHash != receipt.ProofPayloadHash || receipt.PublishedAt.IsZero() || receipt.PublishedAt.After(now.Add(24*time.Hour)) || !now.Before(source.ExpiresAt) || source.ExpiresAt.After(receipt.PublishedAt.Add(720*time.Hour)) {
 			return nil, errors.New("qualified Tier-1 requires current payload-bound source receipts")
@@ -141,33 +199,22 @@ func observeTier1StateChecked(ctx context.Context, workspace string, state Build
 		if qualified.expires.IsZero() || source.ExpiresAt.Before(qualified.expires) {
 			qualified.expires = source.ExpiresAt
 		}
-		hasPaths, hasRelationships := false, false
-		err = WalkStoredSource(ctx, workspace, source, func(record NormalizedRecord) error {
-			switch record.Kind {
-			case RecordRelationship:
-				hasRelationships = true
-				v := record.Relationship
-				if err := qualified.relations.Add(v.From, v.To, v.Relation); err != nil {
-					return err
-				}
-				if len(qualified.relations.nodes) > 200_000 || len(qualified.relations.edges) > maxQualifiedRelationshipEdges {
-					return ErrGraphBudget
-				}
-			case RecordPath:
-				if !record.Path.Observation.Current || len(record.Path.Observation.Family) == 0 || len(record.Path.Observation.Family) > 256 {
-					return errors.New("noncurrent Tier-1 path receipt")
-				}
-				hasPaths = true
-			}
-			return nil
-		})
+		found := tier1SourceDiscovery{}
+		if discovery != nil {
+			found = discovery.sources[index]
+			err = found.err
+		} else {
+			err = WalkStoredSource(ctx, workspace, source, func(record NormalizedRecord) error {
+				return discoverTier1Record(qualified.relations, &found, record)
+			})
+		}
 		if err != nil {
 			return nil, err
 		}
-		if hasPaths && (captured.IsZero() || observed.Before(captured)) {
+		if found.hasPaths && (captured.IsZero() || observed.Before(captured)) {
 			captured = observed
 		}
-		if hasPaths || hasRelationships {
+		if found.hasPaths || found.hasRelationships {
 			if source.Fingerprint == ([32]byte{}) {
 				return nil, errors.New("Tier-1 relevant source fingerprint missing")
 			}
@@ -208,7 +255,10 @@ func observeTier1StateChecked(ctx context.Context, workspace string, state Build
 		}
 	}
 	walk := func(visit func(PathObservation) error) error {
-		for _, source := range state.Sources {
+		for index, source := range state.Sources {
+			if discovery != nil && !discovery.sources[index].hasPaths {
+				continue
+			}
 			if err := WalkStoredSource(ctx, workspace, source, func(record NormalizedRecord) error {
 				if record.Kind == RecordPath {
 					return visit(record.Path.Observation)

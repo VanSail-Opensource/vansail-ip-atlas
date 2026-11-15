@@ -295,13 +295,13 @@ func Build(ctx context.Context, options Options, produce Producer) (Candidate, e
 		infos = append(infos, info)
 	}
 	sort.Slice(infos, func(i, j int) bool { return infos[i].SHA256 < infos[j].SHA256 })
-	result.Descriptor = via3.Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: options.Mode, Objects: infos, SchemaVersion: 4, ValidFrom: options.Clock, ValidUntil: options.ValidUntil}
+	result.Descriptor = via3.Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: options.Mode, Objects: infos, SchemaVersion: 5, ValidFrom: options.Clock, ValidUntil: options.ValidUntil}
 	descriptor, err := canonical(result.Descriptor)
 	if err != nil {
 		return result, err
 	}
 	id := via3.Hash(descriptor)
-	result.Manifest = via3.Manifest{Codec: "zstd-1", FormatVersion: 3, Mode: options.Mode, Objects: infos, ReleaseID: id, SchemaVersion: 4, ValidFrom: options.Clock, ValidUntil: options.ValidUntil}
+	result.Manifest = via3.Manifest{Codec: "zstd-1", FormatVersion: 3, Mode: options.Mode, Objects: infos, ReleaseID: id, SchemaVersion: 5, ValidFrom: options.Clock, ValidUntil: options.ValidUntil}
 	manifest, err := canonical(result.Manifest)
 	if err != nil {
 		return result, err

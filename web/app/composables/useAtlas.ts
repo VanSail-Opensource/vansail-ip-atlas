@@ -1,6 +1,7 @@
 import { AtlasClient, type LookupAnswer, type ClassCAnswer } from '~/lib/via3'
 import { resolve, validateOrigin } from '~/lib/query'
 import { loadDatasetCredits, type CreditDocument } from '~/lib/datasetCredits'
+import { trackSnapshotTime } from '~/lib/rpkiSnapshot'
 
 let atlas: AtlasClient | undefined
 export function useAtlas() {
@@ -14,9 +15,11 @@ export function useAtlas() {
   const current = ref('')
   const origin = ref<number | null>(null)
   const prefixBusy = ref(false)
+  const now = ref(Date.now() / 1000)
   let active: AbortController | undefined
   let serial = 0
   let interval: ReturnType<typeof setInterval> | undefined
+  let stopClock: (() => void) | undefined
   let ready = false
   function invalidate() {
     releaseInfo.value = null
@@ -29,14 +32,19 @@ export function useAtlas() {
     error.value = 'This atlas release is no longer eligible. A verified current release is required.'
   }
 
-  async function load() {
-    releaseInfo.value = null
-    verifiedCredits.value = null
+  async function load(background = false) {
+    // A time-label update or background verification must not unmount a valid
+    // page, resetting graph focus/pan or the selected ASN prefix page.
+    const retained = background && data.value && Date.now() / 1000 < data.value.validUntil ? data.value : null
+    if (!retained) {
+      releaseInfo.value = null
+      verifiedCredits.value = null
+      data.value = null
+      classC.value = null
+    }
     const run = ++serial
     active?.abort()
     active = new AbortController()
-    data.value = null
-    classC.value = null
     error.value = ''
     // Static prerender payloads have no query. Validate the actual raw URL after
     // hydration so repeated/empty parameters survive until the contract parser.
@@ -53,7 +61,7 @@ export function useAtlas() {
       return
     }
     current.value = state.q
-    loading.value = true
+    loading.value = !retained
     try {
       atlas ??= new AtlasClient()
       atlas.removeEventListener('invalidate', invalidate)
@@ -85,8 +93,10 @@ export function useAtlas() {
         verifiedCredits.value = credits
       }
       if (Date.now() / 1000 >= answer.validUntil) throw new Error('release_expired')
-      data.value = answer
-      classC.value = pendingClassC
+      if (!retained || retained.releaseId !== answer.releaseId || retained.q !== answer.q) {
+        data.value = answer
+        classC.value = pendingClassC
+      }
       releaseInfo.value = { releaseId: answer.releaseId, validUntil: answer.validUntil, synthetic: answer.synthetic }
     } catch (cause) {
       if (run !== serial || active.signal.aborted) return
@@ -94,10 +104,14 @@ export function useAtlas() {
       error.value = code.includes('origin_not_member') ? 'This origin does not announce the selected prefix.'
         : code.includes('expir') ? 'This release has expired. A current atlas is required.'
           : 'The atlas could not be verified. Please try again when a complete release is available.'
+      releaseInfo.value = null
+      verifiedCredits.value = null
+      data.value = null
+      classC.value = null
       atlas?.clear()
     } finally { if (run === serial) loading.value = false }
   }
-  function resume() { if (document.visibilityState === 'visible') { atlas?.clear(); void load() } }
+  function resume() { if (document.visibilityState === 'visible') { atlas?.clear(); void load(true) } }
   async function loadPrefixes(asn: number, cursor: number) {
     if (!atlas || !active || prefixBusy.value) return false
     const run = serial
@@ -115,16 +129,21 @@ export function useAtlas() {
   watch(() => route.fullPath, () => { if (import.meta.client && ready) void load() })
   onNuxtReady(() => {
     ready = true
+    stopClock = trackSnapshotTime(value => {
+      now.value = value
+      if (data.value && value >= data.value.validUntil) invalidate()
+    })
     void load()
-    interval = setInterval(() => void load(), 60_000)
+    interval = setInterval(() => void load(true), 60_000)
     document.addEventListener('visibilitychange', resume)
   })
   onBeforeUnmount(() => {
     serial++
     active?.abort()
     if (interval) clearInterval(interval)
+    stopClock?.()
     document.removeEventListener('visibilitychange', resume)
     atlas?.removeEventListener('invalidate', invalidate)
   })
-  return { data, classC, error, loading, current, origin, prefixBusy, loadPrefixes, reload: load }
+  return { data, classC, error, loading, current, origin, prefixBusy, now, loadPrefixes, reload: () => load() }
 }

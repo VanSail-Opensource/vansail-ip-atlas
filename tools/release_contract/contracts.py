@@ -146,7 +146,7 @@ def rollback_eligible(valid_from: int, valid_until: int, now: int, *, withdrawn:
 def validate_descriptor(descriptor: object) -> dict:
     value = _exact_keys(descriptor, {"format_version", "schema_version", "codec", "mode",
                                    "valid_from", "valid_until", "objects"}, "descriptor")
-    if value["format_version"] != 3 or value["schema_version"] != 4 or value["codec"] != "zstd-1":
+    if value["format_version"] != 3 or value["schema_version"] != 5 or value["codec"] != "zstd-1":
         _fail("unsupported release version or codec")
     if value["mode"] not in ("synthetic", "production"):
         _fail("unknown release mode")

@@ -140,7 +140,7 @@ function validPartition(value: string): boolean {
 }
 
 function schema(kind: number): { width: number; sections: number[] } {
-  const widths = [0, 16, 24, 16, 40, 8, 32, 24, 64, 16, 16, 24, 16, 16, 0]
+  const widths = [0, 16, 24, 16, 40, 8, 32, 24, 64, 32, 16, 24, 16, 16, 0]
   const sections = [[], [1, 2, 3, 4, 7], [1, 3, 7, 8], [1, 3, 8], [1, 3, 4, 7, 8], [1, 3, 8], [1, 3, 8], [1, 3, 7, 10], [2, 3, 7, 11, 12], [1, 3, 8], [1, 3, 4, 8], [2, 3, 4, 9], [2, 3, 4], [2, 3], [5, 6]]
   if (kind < 1 || kind > 14) return fail('schema')
   return { width: widths[kind]!, sections: sections[kind]! }
@@ -375,9 +375,12 @@ function validate(shard: Shard): void {
         if (has(row, 31) && !countryCodes.has(country(u16(row, 24))!)) fail('record')
         if (has(row, 23) && row[26] !== (u32(row, 28) >= 666667 ? 3 : u32(row, 28) >= 333334 ? 2 : 1)) fail('record')
         break
-      case 9:
-        if (!u32(row, 4) || row[8]! > 3 || row[9]! > 128 || !zero(row.subarray(10)) || (!has(row, 20) && (row[8] !== 0 || row[9] !== 0))) fail('record')
+      case 9: {
+        if (!u32(row, 4) || row[8]! > 3 || row[9]! > 128 || !zero(row.subarray(10, 16)) || (!has(row, 20) && (row[8] !== 0 || row[9] !== 0))) fail('record')
+        const observedAt = u32(row, 16) + u32(row, 20) * 4294967296, validUntil = u32(row, 24) + u32(row, 28) * 4294967296
+        if (!Number.isSafeInteger(observedAt) || !Number.isSafeInteger(validUntil) || (row[8] === 0 ? observedAt !== 0 || validUntil !== 0 : observedAt <= 0 || validUntil <= observedAt)) fail('record')
         break
+      }
       case 10: if (!zero(row.subarray(12)) || !asns(u32(row, 4), u32(row, 8)) || (!has(row, 19) && (u32(row, 4) !== 0 || u32(row, 8) !== 0))) fail('record'); if (u32(row, 8) > PUBLIC_ORIGINS) fail('resource_limit'); break
       case 11: {
         if (!u32(row, 4) || !has(row, 29) || u16(row, 12) === 0 || u16(row, 12) > 255 || row[14]! > 1 || row[15]! > 3 || !zero(row.subarray(16)) || !range(u32(row, 8), u16(row, 12), segments.length / 12)) fail('record')
@@ -417,7 +420,7 @@ function validate(shard: Shard): void {
 export async function parseShard(bytes: Uint8Array, signal?: AbortSignal): Promise<Shard> {
   checkAbort(signal)
   if (bytes.length < 64 || bytes.length >= MAX_FILE) return fail('length')
-  if (bytes[0] !== 86 || bytes[1] !== 73 || bytes[2] !== 65 || bytes[3] !== 51 || u16(bytes, 4) !== 3 || u16(bytes, 6) !== 4) return fail('version')
+  if (bytes[0] !== 86 || bytes[1] !== 73 || bytes[2] !== 65 || bytes[3] !== 51 || u16(bytes, 4) !== 3 || u16(bytes, 6) !== 5) return fail('version')
   if (u16(bytes, 8) !== 64 || u32(bytes, 12) !== 0 || bytes[44] !== 1 || !zero(bytes.subarray(45, 64))) return fail('header')
   if (view(bytes).getBigUint64(36, true) > BigInt(PUBLIC_OBJECT)) return fail('resource_limit')
   const kind = u16(bytes, 10); const expected = schema(kind)
@@ -474,7 +477,7 @@ class ObjectCache {
   private db(): Promise<IDBDatabase | null> {
     if (typeof indexedDB === 'undefined') return Promise.resolve(null)
     this.database ??= new Promise(resolve => {
-      const request = indexedDB.open('via3-schema4', 1)
+      const request = indexedDB.open('via3-schema5', 1)
       request.onupgradeneeded = () => { const db = request.result; db.createObjectStore('objects'); db.createObjectStore('meta', { keyPath: 'hash' }) }
       request.onsuccess = () => resolve(request.result)
       request.onerror = request.onblocked = () => resolve(null)
@@ -617,7 +620,7 @@ export class AtlasReader {
     const bytes = await this.read(pointer.manifest_path, 4 * 1024 * 1024, signal)
     if (await hash(bytes) !== pointer.manifest_sha256) return fail('integrity')
     const manifest = parseCanonical<Manifest>(bytes)
-    if (!manifest || !exactKeys(manifest, ['codec', 'format_version', 'mode', 'objects', 'release_id', 'schema_version', 'valid_from', 'valid_until']) || manifest.codec !== 'zstd-1' || manifest.format_version !== 3 || manifest.schema_version !== 4 || !['synthetic', 'production'].includes(manifest.mode) || manifest.release_id !== pointer.release_id || !Number.isSafeInteger(manifest.valid_from) || !Number.isSafeInteger(manifest.valid_until) || manifest.valid_from < 0 || manifest.valid_until <= manifest.valid_from || manifest.valid_until - manifest.valid_from > 720 * 3600 || !Array.isArray(manifest.objects) || manifest.objects.length === 0 || manifest.objects.length >= 18500) return fail('manifest')
+    if (!manifest || !exactKeys(manifest, ['codec', 'format_version', 'mode', 'objects', 'release_id', 'schema_version', 'valid_from', 'valid_until']) || manifest.codec !== 'zstd-1' || manifest.format_version !== 3 || manifest.schema_version !== 5 || !['synthetic', 'production'].includes(manifest.mode) || manifest.release_id !== pointer.release_id || !Number.isSafeInteger(manifest.valid_from) || !Number.isSafeInteger(manifest.valid_until) || manifest.valid_from < 0 || manifest.valid_until <= manifest.valid_from || manifest.valid_until - manifest.valid_from > 720 * 3600 || !Array.isArray(manifest.objects) || manifest.objects.length === 0 || manifest.objects.length >= 18500) return fail('manifest')
     const { release_id: _id, ...descriptor } = manifest
     if (await hash(new TextEncoder().encode(canonical(descriptor))) !== manifest.release_id) return fail('manifest')
     let previous = ''; let routerHash = ''
@@ -760,7 +763,7 @@ export class AtlasReader {
         let status = 'unavailable'
         const row = dest.get(9)?.rpki(input.canonical, asn, announcement)
         if (row) status = ['unavailable', 'valid', 'invalid', 'not_found'][row[8]!]!
-        answer.bgp.rpki.push({ origin: asn, status })
+        answer.bgp.rpki.push({ origin: asn, status, observedAt: row && row[8] !== 0 ? u64(row, 16, Number.MAX_SAFE_INTEGER) : null, validUntil: row && row[8] !== 0 ? u64(row, 24, Number.MAX_SAFE_INTEGER) : null })
       }
     }
     const pairs = new Map<string, [number, number]>()

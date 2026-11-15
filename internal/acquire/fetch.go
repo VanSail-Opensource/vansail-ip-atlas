@@ -28,6 +28,11 @@ import (
 
 var ErrFetch = errors.New("bulk asset acquisition failed")
 
+// ErrNotFound identifies a header-only HTTP 404, without exposing a URL or
+// response body. It remains an acquisition failure for errors.Is callers.
+// Only explicit archive policies may interpret it as publication lag.
+var ErrNotFound = errors.Join(ErrFetch, errors.New("bulk asset not found"))
+
 type Result struct {
 	SHA256 string
 	Bytes  int64
@@ -361,6 +366,9 @@ func (f *Fetcher) Fetch(ctx context.Context, raw, destination string, maxBytes i
 				retry, retryable = githubMetadataRetry(status, response.Header, time.Now())
 			}
 			response.Body.Close()
+			if status == http.StatusNotFound {
+				return Result{}, ErrNotFound
+			}
 			if retryable && attempt+1 < f.attempts && f.delay(ctx, retry) == nil {
 				continue
 			}

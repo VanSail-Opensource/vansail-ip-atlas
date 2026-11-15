@@ -7,31 +7,29 @@ with explicit incomplete coverage. All categories and product views remain
 supported. Production requires verified positive observations, not a feed for
 every category; missing categories and unlisted addresses remain unknown.
 Complete negative assessment is never inferred. Prior v2 optional numeric-quality
-rules are superseded by this versioned model; v3 global credits and v4 CC BY-SA
-4.0 compiled-data redistribution remain in force.
+rules are superseded by this versioned model. Global credits remain required;
+the educational source-use amendment below supersedes blanket compiled-data
+license compatibility as an admission prerequisite.
 
-Each dataset still needs reviewed redistribution and derivative-license
-compatibility, actual publication proof and an observed parser fixture. The
-product license does not approve a source. V5 additionally permits required
+Each dataset needs an explicit reviewed source-use decision, actual publication
+proof and an observed parser fixture. The product license does not approve a
+source or replace upstream terms. V5 additionally permits required
 publisher logos in the single global credit display, with no per-IP attribution.
-The source config is schema3/contract revision4, public VIA3 schema4, private
+The source config is schema3/contract revision5, public VIA3 schema5, private
 normalized records schema3. Credit documents use format2 and their index format1.
 The private capability report remains schema3 with release-scope-v6.
 
 ## Static Admission States
 
-- `candidate`: cataloged but not fixture-tested.
+- `candidate`: cataloged but not enabled for intake; an observed fixture may already be tested while exact-code certification or final integration remains pending.
 - `fixture_tested`: observed payload and parser fixture passed.
-- `rights_approved`: a recorded redistribution decision permits the proposed derived product. This peer milestone alone does not establish attribution compliance or fixture certification.
+- `rights_approved`: a recorded source-use decision permits project admission under this policy. This milestone does not assert a publisher grant, attribution compliance or fixture certification.
 - `active`: fixture-tested and rights-approved, with controls permitting attempted intake; current build eligibility still requires actual runtime proof.
 - `retired`: withdrawn or legally excluded.
 
 Runtime state is not stored in YAML. A source may be statically `active` but dynamically `stale`, `missing`, `invalid`, or `quarantined`.
 
-The November 15 v6 release catalog has ten active intake candidates; four
-unqualified routing entries were removed. Active entries are the eight previously
-reviewed sources plus timestamped Tor exits and contextual Ipverse ASN usage.
-Static status cannot establish current production coverage. See SOURCES_AUDIT.md.
+The November 15 v6 release catalog has fifteen reviewed sources enabled for attempted intake, including five replacements. The replacements are complete WIDE and RRC18 collector snapshots, CAIDA serial-2 relationships, complete RPKI publisher snapshots, and FFraud observations. Their exact observed fixtures and required global legal assets are present; implementation-bound certification is refreshed only after the integrated Go code is frozen and all fifteen observed fixtures rerun. Active status permits attempted acquisition; facts, coverage and credits require independent admission from complete current source bytes. Static status cannot establish current production coverage. See SOURCES_AUDIT.md.
 
 ## Required Source Fields
 
@@ -45,10 +43,10 @@ Every entry declares:
 - publication proof;
 - coverage kind and evidence scope;
 - canonical public fields;
-- redistribution decision and rights evidence;
+- explicit distribution decision, reviewed terms evidence and review basis;
 - dependency list.
 
-Unknown fields are rejected. A source cannot be active without a validated fixture, current publication proof, and redistribution permission.
+Unknown fields are rejected. A source cannot be active without a validated fixture, current publication proof and a permitted reviewed source-use decision.
 
 ## Contract revision 1: executable admission
 
@@ -58,7 +56,7 @@ Unknown fields are rejected. A source cannot be active without a validated fixtu
 
 Source scopes are exactly `exact_ip`, `prefix`, `asn`, `asn_edge`, `path`. Historical `exact`, `exact-ip` and `asn-edge` spellings are rejected after this explicit catalog normalization. Public relationship classes are exactly `transit_upstream`, `peer`, `customer`, `sibling`, `unknown`; `provider_transit` is rejected. Internal `c2`, `scanner`, and `cloudflare_proxyip` signals map to `command_control`, `scanning`, and `proxy` reason bits, respectively. Assignment is `assignment_mode`; it is independent of anycast and `ipv4_directed_broadcast`.
 
-An active source requires all of: nonempty parser ID/schema/version, an observed real fixture under `fixtures/source-certification/`, matching parser/schema and SHA-256, UTC test time, explicit field mappings, exact asset/discovery, explicit evidence family/coverage, and reviewed distribution permission. Attribution must be explicitly resolved: `attribution_required: false` records that no public credit is required; `true` requires valid reviewed `license.attribution` metadata and a global display that satisfies its obligations; `null` remains unresolved and blocks admission. A `missing` fixture cannot carry a hash, observation claim or test date. Synthetic contract fixtures and `fixtures/source-samples/` never certify a source. This scope amendment promotes no admission state. Rights/fixture milestones are peers and are independently checked on activation.
+An active source requires all of: nonempty parser ID/schema/version, an observed real fixture under `fixtures/source-certification/`, matching parser/schema and SHA-256, UTC test time, explicit field mappings, exact asset/discovery, explicit evidence family/coverage, and a permitted reviewed source-use decision. Attribution must be explicitly resolved: `attribution_required: false` records that no public credit is required; `true` requires valid reviewed `license.attribution` metadata and a global display that satisfies its obligations; `null` remains unresolved and blocks admission. A `missing` fixture cannot carry a hash, observation claim or test date. Synthetic contract fixtures and `fixtures/source-samples/` never certify a source. This scope amendment promotes no admission state. Rights/fixture milestones are peers and are independently checked on activation.
 
 Source contract revision 2 adds the closed `license.attribution` object with
 required `name`, `text`, `url` and optional `license_url`. Name is 1–128 characters,
@@ -69,7 +67,7 @@ without controls, formatting controls or invalid surrogates. Subscription URIs,
 private-key headers and credential-token markers remain forbidden in all fields.
 HTML-looking literal text is escaped for display and never interpreted as markup.
 Metadata requires a
-reviewed allowed license, rights evidence URL and recorded review basis. Terms
+permitted reviewed distribution decision, terms evidence URL and recorded review basis. Terms
 requiring more notice/link obligations than this display can satisfy remain
 ineligible until a reviewed compatible representation exists. Exact credit bytes
 participate in private policy/source fingerprints and candidate approval; a changed
@@ -119,6 +117,8 @@ The dedicated MRT coordinator enforces two reviewed independent families, sequen
 
 For the explicit embedded proof field `mrt_frame_capture_timestamp`, every MRT common header must pass complete framing and the 720-hour age/future-clock checks before the earliest capture establishes publication. SHA-256 binds that clock to the exact bytes, and retained identical bytes keep the earliest verified clock. TABLE_DUMP_V2 entry originated time is retained privately and does not expire an otherwise fresh captured RIB merely because a route was first heard more than 720 hours ago.
 
+The explicit optional `download.mrt_archive_policy: latest-complete-v1` permits rotation only for canonical RouteViews WIDE bzip2 RIBs and RIS RRC18 gzip RIBs. The configured dated URL and publication locator remain stable collector/codec anchors in the catalog hash. At intake, subtract a 30-minute publication allowance and select the newest scheduled two-hour WIDE or eight-hour RRC18 slot. Only a header-only HTTP 404 permits one attempt at the immediately preceding slot; transport, authentication, rate-limit, size, hash, parser or capture-clock failures cannot select an older archive. Successful downloads still require complete framing and EOF within every existing byte/record limit. All capture clocks must fall within the selected slot and no later than the original selection time. The private state seal binds the actual archive URL and selection time, payload hash and capture interval; receipt revalidation and UPDATE replay use that actual base while preserving its original publication deadline. An absent policy retains fixed-URL acquisition. The reviewed catalog amendment enables only WIDE and RRC18, with matching closed collector controls. This implementation alone cannot activate another source or refresh its observed-parser certificate.
+
 Incremental replay additionally requires a separately reviewed, code-bound `mrt_updates_fixture` for the BGP4MP schema. Its optional presence never waives the primary RIB certificate or rights checks. A sealed RIB can advance only through complete contiguous same-collector archives and an unambiguous RIB peer-to-transport-session join. Replay is bounded to one million logical update events / 180 seconds across both families and a 128 MiB changed-route working estimate. Missing proofs, unsupported sessions, gaps or exhausted replay limits trigger cold acquisition using the remaining shared budget; they never manufacture current paths. A replayed snapshot keeps the base RIB's original publication deadline and records the actual contiguous logical capture-through clock privately.
 
 CAIDA serial-2 discovery chooses the newest matching `YYYYMMDD.as-rel2.txt.bz2` filename, with canonical URL bytes breaking equal-date ties, from its fixed directory. The filename/date and directory mtime select a candidate only; neither is a publication proof. The hardcoded dated download was removed without asserting that a fresh redistributable payload exists. See `docs/bgp-tier1.md` for independent path-family qualification and deterministic derivation.
@@ -162,13 +162,43 @@ Only literal public IPs are accepted. Credentials, ports, protocols, transports,
 
 ## Rights
 
-Public hosting of a derived database can constitute redistribution. Sources
-prohibiting the proposed redistribution remain excluded. Under `release-scope-v6`,
-public attribution is permitted through the reviewed global dataset credits when
-that placement and content satisfy the actual license and upstream obligations.
-Compiled database material uses the owner-approved CC BY-SA 4.0 license; each
-included source must permit that distribution. Attribution does not waive
-redistribution, share-alike or other applicable terms.
+### User-approved educational source-use amendment — 2026-11-15
+
+The user explicitly authorized educational project use without requiring compatible
+publisher redistribution permission. `license.distribution` records the exact
+decision: `allow` preserves the existing reviewed permission path;
+`user_authorized_educational_use` is a distinct user-authorized project decision.
+It does not assert that educational purpose grants legal permission, that the
+publisher agreed, or that upstream material can be relicensed under CC BY-SA.
+`deny`, pending `review`, `unknown` and every unrecognized value still block admission. No global
+boolean enables sources, and this amendment activates no catalog entry.
+
+Both permitted decisions require `status: reviewed`, a public HTTPS `evidence_url`
+for the reviewed terms, a nonblank `review_basis`, an explicit boolean
+`attribution_required`, and valid exact notices whenever required. Retain the
+publisher's identifier, terms and obligations as evidence; never replace them
+with a fabricated permission or mark unresolved attribution as unnecessary.
+For an educational decision, the review basis records the user's project-use
+authorization separately from what the publisher terms establish.
+
+The global contracts name the policy accurately:
+`publish_only_reviewed_distribution_decisions`,
+`active_requires_reviewed_distribution_decision`, and
+`requires_reviewed_distribution_decision` remain true. The public source-rights
+policy is `reviewed-distribution-decision-with-required-global-dataset-credits`.
+Source schema3 and `release-scope-v6` remain unchanged because no normalized or
+public record shape changes. Config/catalog/policy hashes bind the new decisions;
+rights digests independently include distribution, terms evidence, review basis
+and exact credit bytes. A changed decision or notice invalidates prior
+qualification. Withdrawal, expiry or missing required credits retracts data.
+
+Public hosting can constitute redistribution. This amendment changes the
+project's admission decision, not upstream obligations. Original compilation
+contributions retain their stated license; upstream material retains its own
+terms. The frozen data-terms notice and reviewed global credits preserve that
+distinction. Attribution does not waive redistribution, share-alike or other
+applicable terms. Freshness, certification, parser safety, source independence,
+performance and exact-candidate publishing gates remain unchanged.
 The renderer escapes plain text and renders only reviewed safe links; it executes
 no downloaded HTML or script. Credits make no per-IP provenance assertion and
 cause no automatic request to a publisher. OpenStreetMap tile attribution remains
@@ -228,3 +258,42 @@ Direct IP/prefix usage wins; more-specific origin boundaries apply and mixed or
 missing MOAS classification stays unknown. networkRole never establishes Tier-1.
 File-specific commit proof downloads the complete immutable payload and matches
 its SHA-256 and size; a fresh wrapper cannot renew an old category observation.
+
+Source contract revision 5 records the educational-use decision and explicit
+reviewed-distribution policy names. Normalized schema, VIA3 and public schema
+versions are unchanged; exact configuration hashes invalidate older qualification.
+
+## User-approved RPKI snapshot observations — 2026-11-15
+
+RPKI results describe the complete exporter snapshot at its authenticated embedded
+publisher build time. They do not assert the current global authorization state.
+The user explicitly requested keeping expired results visible. Retain all VRPs,
+including those whose authorizations expire between publisher build and intake;
+require each original authorization deadline to follow the actual publisher build
+time. Preserve AS0 and reserved/private authorization ASNs for correct observed
+invalid/not-found classification. Never replace the clock with intake time or
+remove still-valid short-lived rows to create a longer apparent lifetime.
+
+The version-2 private proof binds the full original body, all five trust anchors,
+exact original/retained row counts, observation time, intake evaluation time and
+the earliest authorization expiry of the complete snapshot. The source content
+expiry field remains zero for this explicit proof kind: snapshot eligibility is
+still bounded by the original verified publication time plus its configured
+maximum age, never more than 720 hours. Old version-1 proofs retain their original
+strict expiry behavior and cannot establish a complete historical publisher epoch.
+
+Observed valid results retain the latest deadline among matching authorizations;
+observed invalid/not-found results carry the conservative complete-snapshot
+coverage deadline. The public schema carries the real observation time and this
+deadline alongside the observed result. Passing the deadline changes its visible
+as-of/expired indication, not the historical result. No interface may present it
+as current authorization. A single observed clock cannot describe a union of
+different publisher epochs or unauthenticated partial rows; reject that cohort.
+The rest of the website does not expire because one authorization did.
+
+Expired authorizations remain eligible only as dated observations within a fresh,
+rights-approved snapshot. Publication-age expiry or withdrawal still retracts
+that source and its dependent output under the existing retention and garbage
+collection rules. Retained generations and no-change cache hits preserve original
+clocks, proofs and exact policy bindings; they never renew observation age. This
+amendment is RPKI-specific and changes no subscription or other item expiry.

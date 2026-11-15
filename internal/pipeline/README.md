@@ -102,8 +102,11 @@ This path requires the same reconciliation clock and nonexpired receipts, keeps
 the 96-MiB/200,000-record input ceiling, and caps its change-boundary radix at one
 million nodes. It still buffers a bounded complete state and is not full-source
 streamed production ingestion. Missing/partial VRPs are unavailable; the explicit
-`VRPComplete` engineering assertion plus retained nonempty VRP data is necessary
-to compute valid/invalid/not-found. No ASN identity is inferred from a path,
+`VRPComplete` engineering assertion, explicit publisher observation/coverage
+clocks and retained dated VRP data are necessary to compute historical
+valid/invalid/not-found. Production obtains these clocks only from the opaque
+source qualification. Authorization expiry remains visible in the result and
+does not extend or shorten the independent source/release publication deadline. No ASN identity is inferred from a path,
 address or relationship. This state schema has no certified Tier-1 history,
 so positive Tier-1 classification remains unavailable and the entry
 point rejects production unconditionally. ASN identities now use an explicit

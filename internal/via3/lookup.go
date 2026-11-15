@@ -120,8 +120,10 @@ type TierAnswer struct {
 	Stability    string `json:"stability"`
 }
 type RPKIAnswer struct {
-	Origin uint32 `json:"origin"`
-	Status string `json:"status"`
+	Origin     uint32 `json:"origin"`
+	Status     string `json:"status"`
+	ObservedAt *int64 `json:"observedAt"`
+	ValidUntil *int64 `json:"validUntil"`
 }
 type BGPAnswer struct {
 	Origins       []uint32             `json:"origins"`
@@ -193,10 +195,16 @@ func (r *Release) prefixPage(ctx context.Context, s *Shard, row []byte, asn, cur
 		return answer, fail("record")
 	}
 	answer.Prefixes = make([]string, total)
-	for k := first; k < first+total; k++ {
-		key := rows[k*24 : (k+1)*24]
-		ip, _ := keyAddr(key)
-		answer.Prefixes[k-first] = netip.PrefixFrom(ip, int(key[1])).String()
+	if target.lookup != nil && len(target.lookup.prefixLabels) == len(rows)/24 {
+		// Strings are immutable metadata; callers always own their slice and
+		// its mutable headers. No decoded shard bytes back these strings.
+		copy(answer.Prefixes, target.lookup.prefixLabels[first:first+total])
+	} else {
+		for k := first; k < first+total; k++ {
+			key := rows[k*24 : (k+1)*24]
+			ip, _ := keyAddr(key)
+			answer.Prefixes[k-first] = netip.PrefixFrom(ip, int(key[1])).String()
+		}
 	}
 	if cursor+1 < count {
 		next := cursor + 1
@@ -272,18 +280,21 @@ type Release struct {
 // The metadata is owned by its shard and is released with it on cache eviction.
 // Directory strings reuse canonical manifest hash strings; no mutable answer
 // or caller-owned scalar is retained here.
-// No decoded payload is copied. Prefix search adds one u32 ordinal per 32-byte
+// Prefix search adds one u32 ordinal per 32-byte
 // prefix row (at most 4 MiB for a 32 MiB decoded object), plus fixed family bounds.
 // These are native index metadata, not extra decoded bytes in the shared Go/TS
 // payload profile. They are owned and evicted with the shard; measured process
 // RSS includes their allocation. Reference pointers cost one word per directory
 // row; all metadata/slot populations remain bounded by the validated inventory.
+// Optional canonical prefix strings are limited to 256 rows per page and are
+// charged to the same cache/live budgets as their owning decoded shard.
 type shardLookup struct {
-	rows       [13][]byte
-	widths     [13]int
-	depths     [2][3]uint64
-	references []*objectReference
-	prefixes   [2]prefixLookup
+	rows         [13][]byte
+	widths       [13]int
+	depths       [2][3]uint64
+	references   []*objectReference
+	prefixes     [2]prefixLookup
+	prefixLabels []string
 }
 
 type prefixLookup struct {
@@ -295,6 +306,7 @@ type objectReference struct {
 	info                 ObjectInfo
 	shard                *Shard
 	size                 int
+	prefixLabelBytes     int
 	query, cache, router bool
 	previous, next       *objectReference // bounded intrusive FIFO cache links
 }
@@ -410,10 +422,10 @@ func NewRelease(pointerBytes, manifestBytes []byte, load func(string) ([]byte, e
 	if strictJSON(pointerBytes, &pointer) != nil || strictJSON(manifestBytes, &manifest) != nil {
 		return nil, fail("manifest")
 	}
-	if len(pointerBytes) > 4096 || len(manifestBytes) > 4<<20 || !validHash(pointer.ReleaseID) || !validHash(pointer.ManifestSHA256) || pointer.FormatVersion != 3 || manifest.FormatVersion != 3 || manifest.SchemaVersion != 4 || manifest.Codec != "zstd-1" || (manifest.Mode != "synthetic" && manifest.Mode != "production") || len(manifest.Objects) == 0 || len(manifest.Objects) >= 18500 || pointer.ManifestPath != "/_atlas/releases/"+manifest.ReleaseID+"/manifest.json" || pointer.ReleaseID != manifest.ReleaseID || Hash(manifestBytes) != pointer.ManifestSHA256 || manifest.ValidFrom < 0 || manifest.ValidUntil <= manifest.ValidFrom || manifest.ValidUntil-manifest.ValidFrom > 720*3600 || manifest.ValidUntil > 9007199254740991 {
+	if len(pointerBytes) > 4096 || len(manifestBytes) > 4<<20 || !validHash(pointer.ReleaseID) || !validHash(pointer.ManifestSHA256) || pointer.FormatVersion != 3 || manifest.FormatVersion != 3 || manifest.SchemaVersion != 5 || manifest.Codec != "zstd-1" || (manifest.Mode != "synthetic" && manifest.Mode != "production") || len(manifest.Objects) == 0 || len(manifest.Objects) >= 18500 || pointer.ManifestPath != "/_atlas/releases/"+manifest.ReleaseID+"/manifest.json" || pointer.ReleaseID != manifest.ReleaseID || Hash(manifestBytes) != pointer.ManifestSHA256 || manifest.ValidFrom < 0 || manifest.ValidUntil <= manifest.ValidFrom || manifest.ValidUntil-manifest.ValidFrom > 720*3600 || manifest.ValidUntil > 9007199254740991 {
 		return nil, fail("manifest")
 	}
-	desc := Descriptor{Codec: manifest.Codec, FormatVersion: 3, Mode: manifest.Mode, Objects: manifest.Objects, SchemaVersion: 4, ValidFrom: manifest.ValidFrom, ValidUntil: manifest.ValidUntil}
+	desc := Descriptor{Codec: manifest.Codec, FormatVersion: 3, Mode: manifest.Mode, Objects: manifest.Objects, SchemaVersion: 5, ValidFrom: manifest.ValidFrom, ValidUntil: manifest.ValidUntil}
 	if Hash(canonical(desc)) != manifest.ReleaseID {
 		return nil, fail("manifest")
 	}
@@ -614,9 +626,44 @@ func (r *Release) objectReference(ctx context.Context, reference *objectReferenc
 		}
 	}
 	s.lookup = shardLookupMetadata(&s, references)
+	r.preparePrefixLabels(reference, &s)
 	reference.shard = &s
 	r.cacheReference(reference)
 	return &s, nil
+}
+
+// Prefix pages normally contain at most 256 rows. Preformat only this bounded
+// case, after complete payload validation, and charge the allocation before it
+// is made. Larger valid objects or a full live arena retain ordinary formatting.
+// Individual strings avoid keeping an entire page alive for a one-prefix answer.
+func (r *Release) preparePrefixLabels(reference *objectReference, shard *Shard) {
+	if shard.Kind != 8 || shard.lookup == nil {
+		return
+	}
+	rows, _ := shard.Rows(11)
+	count := len(rows) / 24
+	if count == 0 || count > 256 {
+		return
+	}
+	// A string header occupies at most 16 bytes on supported Go architectures;
+	// canonical IPv6 prefix text is at most 43 bytes, including /128.
+	reserved := count * (16 + 43)
+	if !r.reservePrefixMetadata(reference, reserved) {
+		return
+	}
+	labels := make([]string, count)
+	used := count * 16
+	for i := range labels {
+		row := rows[i*24 : (i+1)*24]
+		address, _ := keyAddr(row)
+		labels[i] = netip.PrefixFrom(address, int(row[1])).String()
+		used += len(labels[i])
+	}
+	reference.size -= reserved - used
+	r.residentBytes -= reserved - used
+	r.activeBytes -= reserved - used
+	reference.prefixLabelBytes = used
+	shard.lookup.prefixLabels = labels
 }
 func (r *Release) reference(ctx context.Context, from *Shard, index uint32) (*Shard, error) {
 	if from.lookup != nil {
@@ -1060,16 +1107,20 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 			}
 		}
 		if input.Kind == "ip" {
-			status := "unavailable"
+			observation := RPKIAnswer{Origin: asn, Status: "unavailable"}
 			if s := dest[9]; s != nil {
 				if row, ok := s.FindRPKI(addr, asn, announcement); ok {
-					status = []string{"unavailable", "valid", "invalid", "not_found"}[row[8]]
+					observation.Status = []string{"unavailable", "valid", "invalid", "not_found"}[row[8]]
+					if row[8] != 0 {
+						observedAt, validUntil := int64(u64(row, 16)), int64(u64(row, 24))
+						observation.ObservedAt, observation.ValidUntil = &observedAt, &validUntil
+					}
 				}
 			}
 			if cap(answer.BGP.RPKI) == 0 {
 				answer.BGP.RPKI = make([]RPKIAnswer, 0, len(answer.BGP.Origins))
 			}
-			answer.BGP.RPKI = append(answer.BGP.RPKI, RPKIAnswer{Origin: asn, Status: status})
+			answer.BGP.RPKI = append(answer.BGP.RPKI, observation)
 		}
 	}
 	// Only actual consecutive retained path hops are queried. Relationship runs

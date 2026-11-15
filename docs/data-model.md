@@ -1,4 +1,4 @@
-# Data model - public schema 4, contract revision 2
+# Data model - public schema 5, contract revision 3
 
 `docs/binary-format-via3.md` fixes serialized widths; this document fixes their
 meaning. The initial unimplemented schema is frozen here without pretending
@@ -127,7 +127,7 @@ assessment remains incomplete. No support IDs or source counts are public.
 Four contributions encode the unchanged weighted terms, not a distribution
 rescaled to 100%. Store integer millionths, half-up once after the full-precision
 calculation. The score uses the unrounded formula independently. Unknown layers
-are null with unset presence bits. Public schema 4 must be decoded atomically
+are null with unset presence bits. Public schema 5 must be decoded atomically
 with its same-version manifest and reader; old schema 3 is rejected and cached
 objects use a separate namespace.
 
@@ -172,8 +172,13 @@ misleading point. `/ip/overview` is the single geographic/map owner.
 
 Origins are ascending, unique ASN sets. A network with multiple origins never
 selects a primary origin by accident. RPKI validates each `(prefix,origin)`;
-valid, invalid and not_found require a current complete VRP snapshot. An
-unavailable snapshot remains unavailable. ASN-wide risk stays contextual and
+valid, invalid and not_found require a complete VRP snapshot and retain its
+actual publisher `observedAt` and evidence `validUntil` clocks (whole UTC Unix
+seconds). Expired snapshot results remain visible with both clocks; they do not
+assert current authorization. A valid result uses the latest matching
+authorization expiry, while negative results use the complete snapshot's
+earliest expiry. Missing/partial observations remain unavailable with null
+clocks. Independent source publication/release expiry still retracts the data. ASN-wide risk stays contextual and
 capped; no customer's risk is copied from its provider.
 
 Original BGP ASN segments retain ordered hops/prepends and nonlinear markers.
@@ -221,12 +226,14 @@ contract owns inventory, cache identity and exact approval binding.
 
 ## Compiled database license — `release-scope-v4`, 2026-11-09
 
-Compiled database material is distributed under the owner-approved CC BY-SA 4.0
-license. The exact static data-license notice and reviewed credits for included
+Original compilation contributions are offered under the owner-approved CC BY-SA
+4.0 license; third-party material retains its upstream terms. The exact static data-license notice and reviewed credits for included
 datasets are bound into the frozen inventory and approval digest. Source code and
 software dependencies retain their separate licensing terms. Each contributing
-source still needs compatible redistribution and derivative-use rights; selecting
-this product license does not certify a source or waive its conditions.
+source needs reviewed terms and an explicit distribution decision. The owner
+amendment of 2026-11-15 permits `user_authorized_educational_use` despite unresolved
+compatibility; it is not a verified publisher grant. Selecting this product license
+does not certify a source or waive its conditions.
 
 The license notice and global credits are separate legal assets. They add no
 VIA3 section, per-query provenance, lookup-answer field or scoring input and do
@@ -237,7 +244,7 @@ when full notices are collapsed.
 ## Typed compilation boundary
 
 `internal/via3.PublicRecord` retains private input union version 3 while its output
-uses public schema 4. It is a tagged union of the twelve public fact
+uses public schema 5. It is a tagged union of the twelve public fact
 kinds. `CompilePartition` derives dictionaries/pages; `Build` derives the router
 and immutable manifest. It accepts at most 32768 records and 32 MiB estimated
 input per partition, then enforces the deployed object profile. A production

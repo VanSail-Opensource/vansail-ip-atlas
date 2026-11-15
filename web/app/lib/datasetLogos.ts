@@ -14,6 +14,7 @@ export async function verifyDatasetLogo(data: Uint8Array, digest: string, signal
   if (hash !== digest || ![137, 80, 78, 71, 13, 10, 26, 10].every((v, i) => data[i] === v)) return fail()
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
   let pos = 8, stage = 0, width = 0, height = 0, channels = 0, compressedSize = 0
+  let physicalDensity = false
   const pieces: Uint8Array[] = []
   while (pos + 12 <= data.length) {
     const size = view.getUint32(pos), kind = String.fromCharCode(...data.subarray(pos + 4, pos + 8))
@@ -24,6 +25,11 @@ export async function verifyDatasetLogo(data: Uint8Array, digest: string, signal
       channels = ({ 0: 1, 2: 3, 4: 2, 6: 4 } as Record<number, number>)[data[pos + 17]!] ?? 0
       if (!width || !height || width > 512 || height > 512 || data[pos + 16] !== 8 || !channels || data[pos + 18] || data[pos + 19] || data[pos + 20]) return fail()
       stage = 1
+    } else if (kind === 'pHYs') {
+      if (stage !== 1 || physicalDensity || size !== 9) return fail()
+      const density = view.getUint32(pos + 8)
+      if (density < 1 || density > 40000 || density !== view.getUint32(pos + 12) || data[pos + 16] !== 1) return fail()
+      physicalDensity = true
     } else if (kind === 'IDAT') {
       if (stage !== 1 && stage !== 2) return fail()
       pieces.push(data.subarray(pos + 8, pos + 8 + size)); compressedSize += size; stage = 2

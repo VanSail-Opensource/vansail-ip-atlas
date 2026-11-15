@@ -137,7 +137,7 @@ type layoutCorpus struct {
 func TestFrozenBinaryLayoutCorpus(t *testing.T) {
 	var data layoutCorpus
 	readFixture(t, "via3-layouts.json", &data)
-	if data.Format != 3 || data.Schema != 4 || data.Revision != 2 || !data.Synthetic || len(data.Shards) != 14 {
+	if data.Format != 3 || data.Schema != 5 || data.Revision != 3 || !data.Synthetic || len(data.Shards) != 14 {
 		t.Fatal("wrong contract version or missing shard layout")
 	}
 	if data.FileLimit != 24<<20 || data.SectionLimit != 64<<20 || data.TotalLimit != 256<<20 || data.WindowLimit != 8<<20 {

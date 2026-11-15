@@ -22,7 +22,7 @@ func TestTypedCompilerAllFactFamiliesAndProductionGate(t *testing.T) {
 		{Version: 3, Kind: 6, Prefix: netip.MustParsePrefix("203.0.113.1/32"), Exact: true, Quality: &QualityData{Score: &score, Confidence: 2, Reasons: 1, Exact: &positive, Prefix: &zero, ASN: &zero, Neighbors: &zero}},
 		{Version: 3, Kind: 7, Prefix: prefix, Profile: &ProfileData{Cells: []CellData{{Address: netip.MustParseAddr("203.0.113.1"), Usage: 1, Score: &score, Confidence: 2, Reasons: 1, ExactRisk: &exactRisk, AttachNetwork: true}}}},
 		{Version: 3, Kind: 8, ASN: 13335, ASNAggregate: &ASNData{Name: "Example Network", Country: "US", Risk: &zero, Confidence: 2, Prefixes: []netip.Prefix{prefix}, CustomerCone: &cone, NetworkClass: 2, Stability: 2}},
-		{Version: 3, Kind: 9, Prefix: prefix, ASN: 13335, RPKI: &RPKIData{Status: 1, MaximumLength: 24}},
+		{Version: 3, Kind: 9, Prefix: prefix, ASN: 13335, RPKI: &RPKIData{Status: 1, MaximumLength: 24, ObservedAt: 1699990000, ValidUntil: 1699993600}},
 		{Version: 3, Kind: 10, Prefix: prefix, Origins: &OriginsData{ASNs: []uint32{13335}}},
 		{Version: 3, Kind: 11, ASN: 13335, Path: &PathData{GraphEligible: true, Visibility: 2, Segments: []SegmentData{{Type: 1, ASNs: []uint32{13335, 3356}}}}},
 		{Version: 3, Kind: 12, ASN: 13335, Relationship: &RelationshipData{To: 3356, Relation: 1, Observed: true, Inferred: true}},

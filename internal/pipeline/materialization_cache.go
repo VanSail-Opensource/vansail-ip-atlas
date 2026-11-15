@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"vansail-ip-atlas/internal/intelligence"
 	"vansail-ip-atlas/internal/via3"
@@ -67,16 +68,18 @@ func openMaterializationCache(ctx context.Context, options Options, state intell
 			return nil, err
 		}
 	}
+	observedAt, coverageValidUntil, completeVRP := inputs.Qualification.RPKIObservation()
 	identity, err := json.Marshal(struct {
-		Version               int
-		Implementation, Tier1 [32]byte
-		State                 intelligence.BuildState
-		Policy                intelligence.Policy
-		Clock, ValidUntil     int64
-		Mode                  string
-		Limits                Limits
-		VRPComplete           bool
-	}{materializationCacheVersion, implementation, tier1, state, policy, options.Clock, options.ValidUntil, options.Mode, options.Limits, inputs.Qualification.VRPComplete()})
+		Version                                int
+		Implementation, Tier1                  [32]byte
+		State                                  intelligence.BuildState
+		Policy                                 intelligence.Policy
+		Clock, ValidUntil                      int64
+		Mode                                   string
+		Limits                                 Limits
+		VRPComplete                            bool
+		RPKIObservedAt, RPKICoverageValidUntil time.Time
+	}{materializationCacheVersion, implementation, tier1, state, policy, options.Clock, options.ValidUntil, options.Mode, options.Limits, completeVRP, observedAt, coverageValidUntil})
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +124,14 @@ func openMaterializationCache(ctx context.Context, options Options, state intell
 		return nil, errMaterializationCache
 	}
 	expected := cacheMAC(c.key, index)
-	if !hmac.Equal(expected[:], index.MAC[:]) || !validCacheDescriptor(index.Descriptor, DefaultLimits()) {
+	// A known schema4 generation may be removed after the same authenticated,
+	// bounded closed-inventory checks. It can never be a schema5 cache hit.
+	legacySchema := index.Descriptor.SchemaVersion == 4
+	descriptor := index.Descriptor
+	if legacySchema {
+		descriptor.SchemaVersion = 5
+	}
+	if !hmac.Equal(expected[:], index.MAC[:]) || !validCacheDescriptor(descriptor, DefaultLimits()) {
 		return nil, errMaterializationCache
 	}
 	// Closed inventory: bounded regular files only, with no symlinks, extra
@@ -154,7 +164,7 @@ func openMaterializationCache(ctx context.Context, options Options, state intell
 		}
 	}
 	if index.Identity == c.identity {
-		if c.bytes > c.maximum {
+		if legacySchema || c.bytes > c.maximum {
 			return nil, errMaterializationCache
 		}
 		c.index = &index
@@ -170,7 +180,7 @@ func openMaterializationCache(ctx context.Context, options Options, state intell
 }
 
 func validCacheDescriptor(d via3.Descriptor, limits Limits) bool {
-	if d.Codec != "zstd-1" || d.FormatVersion != 3 || d.SchemaVersion != 4 || (d.Mode != "synthetic" && d.Mode != "engineering" && d.Mode != "production") || d.ValidFrom < 0 || d.ValidUntil <= d.ValidFrom || d.ValidUntil-d.ValidFrom > 720*3600 || len(d.Objects) == 0 || len(d.Objects) > limits.MaxObjects {
+	if d.Codec != "zstd-1" || d.FormatVersion != 3 || d.SchemaVersion != 5 || (d.Mode != "synthetic" && d.Mode != "engineering" && d.Mode != "production") || d.ValidFrom < 0 || d.ValidUntil <= d.ValidFrom || d.ValidUntil-d.ValidFrom > 720*3600 || len(d.Objects) == 0 || len(d.Objects) > limits.MaxObjects {
 		return false
 	}
 	last := ""

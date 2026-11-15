@@ -197,12 +197,26 @@ type VerifiedPrivateState struct {
 	rootInfo   os.FileInfo
 	policyHash [32]byte
 	identity   privateStateIdentity
+	tier1      *tier1Discovery
 }
 
 // VerifyPrivateState performs the same complete semantic verification as
 // VerifyPrivateStateSeal, then returns a handle scoped to that root and exact
 // authenticated identity. The returned state is independently owned by callers.
 func VerifyPrivateState(ctx context.Context, workspace string, policyHash [32]byte) (*VerifiedPrivateState, BuildState, error) {
+	return newVerifiedPrivateState(ctx, workspace, policyHash, nil)
+}
+
+// VerifyPrivateStateForTier1 performs the same complete semantic verification,
+// also collecting bounded relationship/path discovery for a later observation.
+// Discovery grants no eligibility and has no history side effects. Tier-1-only
+// errors remain deferred until the authenticated observation records its attempt.
+// General source verification does not allocate or retain this graph.
+func VerifyPrivateStateForTier1(ctx context.Context, workspace string, policyHash [32]byte) (*VerifiedPrivateState, BuildState, error) {
+	return newVerifiedPrivateState(ctx, workspace, policyHash, &tier1Discovery{relations: NewRelationships(true)})
+}
+
+func newVerifiedPrivateState(ctx context.Context, workspace string, policyHash [32]byte, discovery *tier1Discovery) (*VerifiedPrivateState, BuildState, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, BuildState{}, err
 	}
@@ -218,11 +232,17 @@ func VerifyPrivateState(ctx context.Context, workspace string, policyHash [32]by
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return nil, BuildState{}, errors.New("verified private state root invalid")
 	}
-	state, identity, err := verifyPrivateState(ctx, root, policyHash, nil)
+	state, identity, err := verifyPrivateStateCollect(ctx, root, policyHash, nil, discovery)
 	if err != nil {
 		return nil, BuildState{}, err
 	}
-	verified := &VerifiedPrivateState{root: root, rootInfo: info, policyHash: policyHash, identity: identity}
+	if discovery != nil {
+		discovery.stateHash, err = stateIdentity(state)
+		if err != nil {
+			return nil, BuildState{}, err
+		}
+	}
+	verified := &VerifiedPrivateState{root: root, rootInfo: info, policyHash: policyHash, identity: identity, tier1: discovery}
 	if !verified.sameRoot() {
 		return nil, BuildState{}, errors.New("verified private state root changed")
 	}
@@ -340,6 +360,10 @@ func readAuthenticatedPrivateState(ctx context.Context, workspace string, policy
 }
 
 func verifyPrivateState(ctx context.Context, workspace string, policyHash [32]byte, expected *privateStateIdentity) (BuildState, privateStateIdentity, error) {
+	return verifyPrivateStateCollect(ctx, workspace, policyHash, expected, nil)
+}
+
+func verifyPrivateStateCollect(ctx context.Context, workspace string, policyHash [32]byte, expected *privateStateIdentity, discovery *tier1Discovery) (BuildState, privateStateIdentity, error) {
 	fail := func() (BuildState, privateStateIdentity, error) {
 		return BuildState{}, privateStateIdentity{}, errors.New("private state seal invalid; reviewed intake required")
 	}
@@ -361,7 +385,7 @@ func verifyPrivateState(ctx context.Context, workspace string, policyHash [32]by
 	if err = decoder.Decode(new(json.RawMessage)); err != io.EOF || state.Version != 2 || state.PolicyHash != policyHash {
 		return fail()
 	}
-	for _, source := range state.Sources {
+	for index, source := range state.Sources {
 		// Preserve LoadPrivateState's descriptor, attribution and inline-union
 		// checks as well as the source receipt binding on every verification.
 		if len(source.RecordPartitions) > maxRecordPartitions || len(source.Records) > 0 && len(source.RecordPartitions) > 0 || source.Receipt == nil || source.Receipt.NormalizationPolicyHash != policyHash {
@@ -381,7 +405,17 @@ func verifyPrivateState(ctx context.Context, workspace string, policyHash [32]by
 			}
 		}
 		if expected == nil {
-			err = WalkStoredSource(ctx, workspace, source, func(NormalizedRecord) error { return nil })
+			if discovery != nil {
+				discovery.sources = append(discovery.sources, tier1SourceDiscovery{})
+			}
+			err = WalkStoredSource(ctx, workspace, source, func(record NormalizedRecord) error {
+				if discovery != nil {
+					discovery.collect(index, record)
+				}
+				// The full authenticated structural scan must continue even after a
+				// Tier-1-specific error. No history exists until this scan succeeds.
+				return nil
+			})
 		} else {
 			err = VerifyStoredSourceObjects(ctx, workspace, source)
 		}

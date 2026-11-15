@@ -198,7 +198,7 @@ func TestSplitSkipsOnlyProvenEmptyScopes(t *testing.T) {
 					}
 					counts[i]++
 					measured.records++
-					measured.bytes += int64(len(r.row.data)) + 512
+					measured.bytes += r.row.logicalBytes + 512
 					if tc.name == "ancestor coverage" && r.record.Prefix == tc.root.prefix && !r.record.Inherited {
 						t.Fatal("broad prefix lost inherited coverage")
 					}
@@ -255,7 +255,7 @@ func TestClassifyTotalsMatchCompletedFrames(t *testing.T) {
 				t.Fatal(err)
 			}
 			measured.records++
-			measured.bytes += int64(len(r.row.data)) + 512
+			measured.bytes += r.row.logicalBytes + 512
 		}
 		r.file.Close()
 		if c.partitionSizes[path] != measured {

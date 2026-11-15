@@ -5,7 +5,6 @@ package pipeline
 
 import (
 	"bufio"
-	"bytes"
 	"container/heap"
 	"context"
 	"crypto/sha256"
@@ -420,8 +419,10 @@ func (c *compiler) write(path string, data []byte) error {
 }
 
 type encoded struct {
-	key  string
-	data []byte
+	key          string
+	data         []byte
+	logicalBytes int64
+	sparse       bool
 }
 
 func normalize(record via3.PublicRecord) (via3.PublicRecord, error) {
@@ -494,12 +495,7 @@ func (c *compiler) sort(produce Producer) ([]string, error) {
 		if len(batch) == 0 {
 			return nil
 		}
-		sort.Slice(batch, func(i, j int) bool {
-			if batch[i].key != batch[j].key {
-				return batch[i].key < batch[j].key
-			}
-			return bytes.Compare(batch[i].data, batch[j].data) < 0
-		})
+		sort.Slice(batch, func(i, j int) bool { return lessEncoded(batch[i], batch[j]) })
 		path := c.next()
 		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 		if err != nil {
@@ -512,7 +508,7 @@ func (c *compiler) sort(produce Producer) ([]string, error) {
 		}
 		defer writer.Close()
 		for _, row := range batch {
-			if err := c.writeRecord(writer, row.data); err != nil {
+			if err := c.writeRow(writer, row); err != nil {
 				return err
 			}
 		}
@@ -539,14 +535,14 @@ func (c *compiler) sort(produce Producer) ([]string, error) {
 		if err != nil {
 			return err
 		}
-		data, err := json.Marshal(r)
+		row, err := encodeRunRecord(r, true)
 		if err != nil {
 			return err
 		}
-		if int64(len(data)) > c.options.Limits.RecordBytes {
+		if row.logicalBytes > c.options.Limits.RecordBytes {
 			return errors.New("single fact exceeds bounded record size")
 		}
-		cost := int64(len(data) + 128)
+		cost := row.logicalBytes + 128
 		if cost > c.options.Limits.SortBytes {
 			return errors.New("single fact exceeds sort buffer")
 		}
@@ -555,7 +551,7 @@ func (c *compiler) sort(produce Producer) ([]string, error) {
 				return err
 			}
 		}
-		batch = append(batch, encoded{identity(r), data})
+		batch = append(batch, row)
 		size += cost
 		c.stats.InputRecords++
 		if uint64(size) > c.stats.SortBufferPeak {
@@ -573,21 +569,20 @@ func (c *compiler) sort(produce Producer) ([]string, error) {
 }
 
 func (c *compiler) writeRecord(w io.Writer, data []byte) error {
+	return c.writeRow(w, encoded{data: data, logicalBytes: int64(len(data))})
+}
+
+func (c *compiler) writeRow(w io.Writer, row encoded) error {
 	if err := c.ctx.Err(); err != nil {
 		return err
 	}
 	if _, compressed := w.(*privateRunWriter); !compressed {
-		if err := c.reserve(uint64(4 + len(data))); err != nil {
+		if err := c.reserve(uint64(row.frameBytes())); err != nil {
 			return err
 		}
+
 	}
-	var head [4]byte
-	binary.LittleEndian.PutUint32(head[:], uint32(len(data)))
-	if _, err := w.Write(head[:]); err != nil {
-		return err
-	}
-	_, err := w.Write(data)
-	return err
+	return writeRunFrame(w, row)
 }
 
 type runReader struct {
@@ -629,18 +624,18 @@ func (r *runReader) next() error {
 		return err
 	}
 	n := int64(binary.LittleEndian.Uint32(head[:]))
-	if n <= 0 || n > r.limit {
+	if n <= 0 || n > r.limit+int64(len(sparseRunMarker)) {
 		return errors.New("private sort frame exceeds limit")
 	}
 	data := make([]byte, n)
 	if _, err := io.ReadFull(r.reader, data); err != nil {
 		return err
 	}
-	record, err := decode(data)
+	row, record, err := decodeRunPayload(data, r.limit)
 	if err != nil {
 		return err
 	}
-	r.row = encoded{identity(record), data}
+	r.row = row
 	r.record = record
 	return nil
 }
@@ -649,10 +644,7 @@ type mergeHeap []*runReader
 
 func (h mergeHeap) Len() int { return len(h) }
 func (h mergeHeap) Less(i, j int) bool {
-	if h[i].row.key != h[j].row.key {
-		return h[i].row.key < h[j].row.key
-	}
-	return bytes.Compare(h[i].row.data, h[j].row.data) < 0
+	return lessEncoded(h[i].row, h[j].row)
 }
 func (h mergeHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
 func (h *mergeHeap) Push(x any)   { *h = append(*h, x.(*runReader)) }
@@ -687,11 +679,11 @@ func (c *compiler) mergeGroup(paths []string) (string, error) {
 	for h.Len() > 0 {
 		r := heap.Pop(&h).(*runReader)
 		if previous.key == r.row.key {
-			if !bytes.Equal(previous.data, r.row.data) {
+			if !equalEncoded(previous, r.row) {
 				return "", errors.New("conflicting fused fact identity")
 			}
 		} else {
-			if err := c.writeRecord(w, r.row.data); err != nil {
+			if err := c.writeRow(w, r.row); err != nil {
 				return "", err
 			}
 			previous = r.row
@@ -787,11 +779,11 @@ func (c *compiler) classify(path string) ([3]string, error) {
 				return paths, err
 			}
 		}
-		if err := c.writeRecord(writers[i], r.row.data); err != nil {
+		if err := c.writeRow(writers[i], r.row); err != nil {
 			return paths, err
 		}
 		sizes[i].records++
-		sizes[i].bytes += int64(len(r.row.data)) + 512
+		sizes[i].bytes += r.row.logicalBytes + 512
 		c.stats.UniqueRecords++
 	}
 	for i, f := range files {
@@ -887,7 +879,7 @@ func (c *compiler) partition(path string, s scope) error {
 				r.file.Close()
 				return err
 			}
-			cost := int64(len(r.row.data) + 512)
+			cost := r.row.logicalBytes + 512
 			if len(records) >= c.options.Limits.PartitionRecords || size+cost > c.options.Limits.PartitionBytes {
 				overflow = true
 				break
@@ -1065,9 +1057,9 @@ func (c *compiler) split(path string, children *[2]scope) ([2]string, error) {
 			// Most rows only move to a narrower run. Their validated frame
 			// already has the canonical bytes; only a newly inherited overlay
 			// changes the record and needs encoding again.
-			data := r.row.data
+			row := r.row
 			if copy.Inherited != record.Inherited {
-				data, err = json.Marshal(copy)
+				row, err = encodeRunRecord(copy, r.row.sparse)
 				if err != nil {
 					return paths, err
 				}
@@ -1083,11 +1075,11 @@ func (c *compiler) split(path string, children *[2]scope) ([2]string, error) {
 					return paths, err
 				}
 			}
-			if err := c.writeRecord(writers[i], data); err != nil {
+			if err := c.writeRow(writers[i], row); err != nil {
 				return paths, err
 			}
 			sizes[i].records++
-			sizes[i].bytes += int64(len(data)) + 512
+			sizes[i].bytes += row.logicalBytes + 512
 		}
 	}
 	for i, f := range files {

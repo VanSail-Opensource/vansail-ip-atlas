@@ -94,7 +94,8 @@ jobs:
           retention-days: 7
 
   source-intake:
-    needs: contracts
+    # Intake repeats config/certification validation before any fetch. All four
+    # independent jobs must still succeed before production trusts this run.
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:

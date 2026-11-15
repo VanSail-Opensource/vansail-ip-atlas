@@ -88,7 +88,7 @@ count is zero, linear history and conversation resolution are required.
   The remaining pipeline race regressions retain external sorting, resource
   guards, cancellation, cross-partition context and withdrawal coverage.
 - Local full Go tests/vet, seven fuzz targets, strict contracts, 132 Python
-  contract tests, 31 hosted Python tests, actual age roundtrip/wrong-key/corruption
+  contract tests, 35 hosted Python tests, actual age roundtrip/wrong-key/corruption
   tests, frontend typecheck and 217 Node/TypeScript tests passed. Chrome passed
   21 synthetic UI scenarios and all three actual worker boundary workloads.
 - Local synthetic LCP p95 was 2.904 seconds against the unchanged 2.5-second
@@ -134,6 +134,23 @@ count is zero, linear history and conversation resolution are required.
   pass. The emitted local workload peak fell another approximately 24 MiB, to
   444 MiB PSS. The maximum workload slowed from approximately 3.8 to 7.5 seconds;
   this measured CPU/memory tradeoff still requires exact-head hosted acceptance.
+
+## Post-merge verification and clock repair
+
+PR #1 merged as `2fb38d95fd762c9421be40340507e014bbe67199`. Required PR and
+exact-main checks passed; main Chrome peaked at 382.13 MiB with no limit/OOM
+events. Authenticated intake run 43686153011 retained all ten active sources,
+encrypted and uploaded its checkpoint, and removed plaintext state. The candidate
+restored that checkpoint successfully but exposed an orchestration clock mismatch:
+compilation requires the sealed intake's evaluation time, not the later job time.
+
+The follow-up repair reads the bounded restored state clock only for compilation,
+then immediately verifies production eligibility at current time before corpus
+generation or packaging. Invalid/future clocks and current-time verification
+failures stop the stage. Source intake now runs alongside the other independent
+integration jobs; all four checks still have to pass before production proceeds.
+The earlier candidate failure must not be described as a demonstrated
+routing-qualification rejection.
 
 The four routing-source qualifications below remain unresolved. No production
 release or publisher permission is implied by these implementation fixes.

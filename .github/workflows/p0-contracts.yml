@@ -67,10 +67,12 @@ jobs:
         # These measured populations do not replace full-data capacity or the
         # 2-microsecond lookup gate. Keep allocation/RSS/scratch/percentile evidence.
         run: |
-          go version > reports/go-benchmarks.log
-          python -c "import json,os,platform,shutil; print(json.dumps({'host':platform.platform(),'logical_cpus':os.cpu_count(),'physical_memory_bytes':os.sysconf('SC_PAGE_SIZE')*os.sysconf('SC_PHYS_PAGES'),'disk_free_bytes':shutil.disk_usage('.').free,'GOMAXPROCS':os.environ.get('GOMAXPROCS'),'GOMEMLIMIT':os.environ.get('GOMEMLIMIT'),'scope':'synthetic-not-full-dataset-capacity'}))" >> reports/go-benchmarks.log
-          go test ./internal/via3 -run '^$' -bench '^BenchmarkLookup$' -benchtime=2s -count=3 -benchmem >> reports/go-benchmarks.log
-          go test ./internal/pipeline -run '^$' -bench '^BenchmarkDiskBackedCompile$' -benchtime=12x -count=1 -benchmem >> reports/go-benchmarks.log
+          {
+            go version
+            python -c "import json,os,platform,shutil; print(json.dumps({'host':platform.platform(),'logical_cpus':os.cpu_count(),'physical_memory_bytes':os.sysconf('SC_PAGE_SIZE')*os.sysconf('SC_PHYS_PAGES'),'disk_free_bytes':shutil.disk_usage('.').free,'GOMAXPROCS':os.environ.get('GOMAXPROCS'),'GOMEMLIMIT':os.environ.get('GOMEMLIMIT'),'scope':'synthetic-not-full-dataset-capacity'}))"
+            go test ./internal/via3 -run '^$' -bench '^BenchmarkLookup$' -benchtime=2s -count=3 -benchmem
+            go test ./internal/pipeline -run '^$' -bench '^BenchmarkDiskBackedCompile$' -benchtime=12x -count=1 -benchmem
+          } > reports/go-benchmarks.log
       - name: Explain evidence boundary
         run: python tools/hosted/evidence-status.py
       - uses: actions/upload-artifact@v7.0.0

@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
@@ -21,7 +22,8 @@ const privateRunStoredMax = privateRunBlockBytes + 1024
 const privateRunSegmentHeader = 40
 
 type privateRunWriter struct {
-	c                *compiler
+	ctx              context.Context
+	reserve          func(uint64) error
 	output           io.Writer
 	encoder          *zstd.Encoder
 	pending, encoded []byte
@@ -30,11 +32,15 @@ type privateRunWriter struct {
 }
 
 func newPrivateRunWriter(c *compiler, output io.Writer) (*privateRunWriter, error) {
+	return newPrivateRunWriterWithBudget(c.ctx, c.reserve, output)
+}
+
+func newPrivateRunWriterWithBudget(ctx context.Context, reserve func(uint64) error, output io.Writer) (*privateRunWriter, error) {
 	encoder, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1), zstd.WithEncoderLevel(zstd.SpeedFastest), zstd.WithWindowSize(privateRunBlockBytes), zstd.WithEncoderCRC(true), zstd.WithSingleSegment(true))
 	if err != nil {
 		return nil, err
 	}
-	w := &privateRunWriter{c: c, output: output, encoder: encoder}
+	w := &privateRunWriter{ctx: ctx, reserve: reserve, output: output, encoder: encoder}
 	if err := w.store([]byte(privateRunMagic)); err != nil {
 		w.Close()
 		return nil, err
@@ -43,10 +49,10 @@ func newPrivateRunWriter(c *compiler, output io.Writer) (*privateRunWriter, erro
 }
 
 func (w *privateRunWriter) store(p []byte) error {
-	if err := w.c.ctx.Err(); err != nil {
+	if err := w.ctx.Err(); err != nil {
 		return err
 	}
-	if err := w.c.reserve(uint64(len(p))); err != nil {
+	if err := w.reserve(uint64(len(p))); err != nil {
 		return err
 	}
 	n, err := w.output.Write(p)
@@ -63,7 +69,7 @@ func (w *privateRunWriter) Write(p []byte) (int, error) {
 	if w.finished {
 		return 0, errors.New("private compressed run closed")
 	}
-	if err := w.c.ctx.Err(); err != nil {
+	if err := w.ctx.Err(); err != nil {
 		return 0, err
 	}
 	original := len(p)
@@ -95,10 +101,10 @@ func (w *privateRunWriter) segment() error {
 	digest := sha256.Sum256(w.pending)
 	copy(header[8:], digest[:])
 	// Reserve the entire segment before writing either its header or body.
-	if err := w.c.ctx.Err(); err != nil {
+	if err := w.ctx.Err(); err != nil {
 		return err
 	}
-	if err := w.c.reserve(uint64(len(header) + len(w.encoded))); err != nil {
+	if err := w.reserve(uint64(len(header) + len(w.encoded))); err != nil {
 		return err
 	}
 	for _, p := range [][]byte{header[:], w.encoded} {

@@ -166,7 +166,7 @@ func (c *compiler) scatterPartition(path string, s scope) (runs []scatteredRun, 
 	if tree.children[0] == nil {
 		return nil, false, nil
 	}
-	r, err := openRun(path, c.options.Limits.RecordBytes)
+	r, err := c.openCompiledRun(path)
 	if err != nil {
 		return nil, false, err
 	}
@@ -282,7 +282,7 @@ func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scat
 			}
 		}
 	}()
-	r, err := openRun(path, c.options.Limits.RecordBytes)
+	r, err := c.openCompiledRun(path)
 	if err != nil {
 		return runs, false, err
 	}

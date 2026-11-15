@@ -62,11 +62,16 @@ type Options struct {
 	ObserveCounters         func(context.Context, Stage, Counters)
 	// InputGate binds source/config/state inputs throughout a build in either
 	// mode. It is independent of the mandatory production capability gate.
-	InputGate            func(context.Context) error
-	externalScratch      func() uint64
-	scratchUsage         func(uint64)
-	prefixProvider       via3.ASNPrefixProvider
-	materializationCache *materializationCache
+	InputGate             func(context.Context) error
+	externalScratch       func() uint64
+	scratchUsage          func(uint64)
+	prefixProvider        via3.ASNPrefixProvider
+	materializationCache  *materializationCache
+	materializationTap    func(encoded) error
+	prepareSpatialCache   func(context.Context) error
+	commitSpatialCache    func(context.Context) error
+	compiledReuse         *spatialCache
+	partitionDependencies func(context.Context) ([32]byte, error)
 }
 
 // Stats account this compiler's files and process, not unrelated processes or
@@ -101,6 +106,7 @@ type compiler struct {
 	routes                []route
 	routerBytes           uint64
 	encoder               via3.PublicEncoder
+	compiledCaptures      []*compiledPartitionCapture
 }
 
 type partitionSize struct {
@@ -331,10 +337,15 @@ func Build(ctx context.Context, options Options, produce Producer) (Candidate, e
 	if err := c.retainMaterialization(result, c.output); err != nil {
 		return Candidate{}, err
 	}
+	if options.prepareSpatialCache != nil {
+		if err := options.prepareSpatialCache(workCtx); err != nil {
+			return Candidate{}, err
+		}
+	}
 	if err := gate(workCtx); err != nil {
 		return result, err
 	}
-	if reused {
+	if reused || options.prepareSpatialCache != nil {
 		if err := options.materializationCache.verifyInputs(workCtx); err != nil {
 			return result, err
 		}
@@ -350,6 +361,11 @@ func Build(ctx context.Context, options Options, produce Producer) (Candidate, e
 	}
 	if err := os.Rename(c.output, output); err != nil {
 		return result, err
+	}
+	if options.commitSpatialCache != nil {
+		if err := options.commitSpatialCache(workCtx); err != nil {
+			return Candidate{}, errors.Join(err, os.RemoveAll(output))
+		}
 	}
 	published = true
 	c.stats.ProcessRSSMeasured = measured.Load()
@@ -386,6 +402,9 @@ func (c *compiler) reserve(n uint64) error {
 	return nil
 }
 func (c *compiler) remove(path string) error {
+	if err := c.checkCompiledRunRemoval(path); err != nil {
+		return err
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return err
@@ -546,6 +565,11 @@ func (c *compiler) sort(produce Producer) ([]string, error) {
 		if row.logicalBytes > c.options.Limits.RecordBytes {
 			return errors.New("single fact exceeds bounded record size")
 		}
+		if c.options.materializationTap != nil {
+			if err := c.options.materializationTap(row); err != nil {
+				return err
+			}
+		}
 		cost := row.logicalBytes + 128
 		if cost > c.options.Limits.SortBytes {
 			return errors.New("single fact exceeds sort buffer")
@@ -590,19 +614,34 @@ func (c *compiler) writeRow(w io.Writer, row encoded) error {
 }
 
 type runReader struct {
-	file   *privateRunFile
-	reader io.Reader
-	limit  int64
-	row    encoded
-	record via3.PublicRecord
+	file      *privateRunFile
+	reader    io.Reader
+	limit     int64
+	row       encoded
+	record    via3.PublicRecord
+	verifyEOF func() error
 }
 
 func openRun(path string, limit int64) (*runReader, error) {
+	return openRunBound(path, limit, nil)
+}
+
+func openRunBound(path string, limit int64, binding *compiledRunBinding) (*runReader, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	input := bufio.NewReaderSize(f, 64<<10)
+	var source io.Reader = f
+	if binding != nil {
+		info, err := f.Stat()
+		if err != nil || binding.info == nil || !os.SameFile(info, binding.info) || info.Size() != binding.expectedBytes {
+			_ = f.Close()
+			return nil, errSpatialCache
+		}
+		binding.input = f
+		source = binding
+	}
+	input := bufio.NewReaderSize(source, 64<<10)
 	owned := &privateRunFile{File: f}
 	var reader io.Reader = input
 	prefix, peekErr := input.Peek(len(privateRunMagic))
@@ -620,11 +659,20 @@ func openRun(path string, limit int64) (*runReader, error) {
 		owned.compressed = compressed
 		reader = compressed
 	}
-	return &runReader{file: owned, reader: reader, limit: limit}, nil
+	run := &runReader{file: owned, reader: reader, limit: limit}
+	if binding != nil {
+		run.verifyEOF = binding.verifyEOF
+	}
+	return run, nil
 }
 func (r *runReader) next() error {
 	var head [4]byte
 	if _, err := io.ReadFull(r.reader, head[:]); err != nil {
+		if err == io.EOF && r.verifyEOF != nil {
+			if verifyErr := r.verifyEOF(); verifyErr != nil {
+				return verifyErr
+			}
+		}
 		return err
 	}
 	n := int64(binary.LittleEndian.Uint32(head[:]))
@@ -861,7 +909,7 @@ func (s scope) children() (scope, scope, error) {
 	return scope{prefix: left}, scope{prefix: netip.PrefixFrom(right, n)}, nil
 }
 
-func (c *compiler) partition(path string, s scope) error {
+func (c *compiler) partitionFresh(path string, s scope) error {
 	var err error
 	var records []via3.PublicRecord
 	var size int64
@@ -872,7 +920,7 @@ func (c *compiler) partition(path string, s scope) error {
 	total := c.partitionSizes[path]
 	overflow := total.records > int64(c.options.Limits.PartitionRecords) || total.bytes > c.options.Limits.PartitionBytes
 	if !overflow {
-		r, err := openRun(path, c.options.Limits.RecordBytes)
+		r, err := c.openCompiledRun(path)
 		if err != nil {
 			return err
 		}
@@ -972,18 +1020,9 @@ func (c *compiler) partition(path string, s scope) error {
 	} else {
 		route.prefix = s.prefix
 	}
-	charge := uint64(16 + 4*len(route.destinations))
-	if route.prefix.IsValid() {
-		charge += 32
-	} else {
-		charge += 8 * uint64(len(route.asns))
+	if err := c.registerCompiledRoute(route); err != nil {
+		return err
 	}
-	if charge > via3.PublicObjectDecoded-c.routerBytes || uint64(len(c.objects))*40+charge+c.routerBytes > via3.PublicObjectDecoded {
-		return &via3.Error{Code: "resource_limit"}
-	}
-	c.routerBytes += charge
-	c.routes = append(c.routes, route)
-	c.stats.Partitions++
 	return c.remove(path)
 }
 func compact(values []uint32) []uint32 {
@@ -1016,7 +1055,7 @@ func (c *compiler) split(path string, children *[2]scope) ([2]string, error) {
 			}
 		}
 	}()
-	r, err := openRun(path, c.options.Limits.RecordBytes)
+	r, err := c.openCompiledRun(path)
 	if err != nil {
 		return paths, err
 	}
@@ -1143,6 +1182,7 @@ func (c *compiler) rememberPartitionSize(path string, size partitionSize) {
 }
 
 func (c *compiler) object(object via3.BuiltObject) error {
+	c.captureCompiledObject(object.Info)
 	if uint64(len(object.Bytes)) > c.options.Limits.ObjectBytes {
 		return &via3.Error{Code: "resource_limit"}
 	}

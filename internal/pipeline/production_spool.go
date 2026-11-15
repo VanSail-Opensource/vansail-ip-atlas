@@ -54,6 +54,10 @@ type bulkSpool struct {
 	hasASNDirect bool
 	usage        asnUsageIndex
 	observe      func(context.Context, Stage) func(bool)
+	reuse        *spatialCache
+	publicStream *spatialStreamWriter
+	publicRows   uint64
+	started      bool
 }
 
 func (s *bulkSpool) stage(ctx context.Context, stage Stage) func(bool) {
@@ -398,40 +402,8 @@ func (s *bulkSpool) splitSpatial(ctx context.Context, b *bulkBucket) (left, righ
 		if err := s.refresh(); err != nil {
 			return nil, nil, err
 		}
-		writers := make([]*intelligence.RecordWriter, len(terminal))
-		for i := range writers {
-			writers[i] = s.store.Writer(ctx)
-			defer writers[i].Abort()
-		}
-		if err := s.walkOwned(ctx, b.parts, func(record intelligence.NormalizedRecord, frame intelligence.CanonicalRecordFrame) error {
-			p, err := spatialPrefix(record)
-			if err != nil {
-				return err
-			}
-			for i, node := range terminal {
-				if p.Contains(node.prefix.Addr()) || node.prefix.Contains(p.Addr()) {
-					node.cover = bulkPrefixCover(node.cover, p)
-					var err error
-					if frame.EncodedBytes() != 0 {
-						err = frame.AppendTo(writers[i])
-					} else {
-						err = writers[i].Append(record)
-					}
-					if err != nil {
-						return err
-					}
-				}
-			}
-			return nil
-		}); err != nil {
+		if err := s.scatterTerminals(ctx, b, terminal); err != nil {
 			return nil, nil, err
-		}
-		for i, writer := range writers {
-			parts, err := s.finish(writer)
-			if err != nil {
-				return nil, nil, err
-			}
-			terminal[i].parts = parts
 		}
 		var group func(*bulkBucket) error
 		group = func(node *bulkBucket) error {
@@ -634,7 +606,218 @@ func (s *bulkSpool) addEdge(edge intelligence.ASNEdge, observed bool) error {
 	}
 	return nil
 }
+
+// Seed category streams end at every original input partition boundary. A
+// changed normalized object therefore cannot shift the packing identity of
+// unrelated objects. The full source walker still validates its aggregate
+// storage shape, every frame and the final object counts/hashes.
+func (s *bulkSpool) seedStable(ctx context.Context, workspace string, state intelligence.BuildState) ([]*bulkBucket, *bulkBucket, error) {
+	if err := s.refresh(); err != nil {
+		return nil, nil, err
+	}
+	s.usage = asnUsageIndex{}
+	var categories [6][]intelligence.RecordPartition
+	for _, source := range state.Sources {
+		type seedGroup struct {
+			entry spatialCacheEntry
+			hit   bool
+		}
+		var groups []seedGroup
+		var current *seedGroup
+		var writers [6]*intelligence.RecordWriter
+		abort := func() {
+			for _, writer := range writers {
+				if writer != nil {
+					_ = writer.Abort()
+				}
+			}
+		}
+		partIndex := 0
+		remaining := uint64(len(source.Records))
+		if len(source.RecordPartitions) > 0 {
+			remaining = source.RecordPartitions[0].Records
+		}
+		appendRecord := func(category int, record intelligence.NormalizedRecord) error {
+			if current.hit {
+				return nil
+			}
+			if writers[category] == nil {
+				writers[category] = s.store.Writer(ctx)
+			}
+			return writers[category].Append(record)
+		}
+		err := intelligence.WalkStoredSource(ctx, workspace, source, func(record intelligence.NormalizedRecord) error {
+			if remaining == 0 {
+				return errors.New("seed input partition count differs")
+			}
+			if current == nil {
+				current = &seedGroup{entry: spatialCacheEntry{Domain: "seed", Seed: &spatialCacheSeed{}}}
+				if s.reuse != nil && len(source.RecordPartitions) > 0 {
+					key, err := spatialReuseKey("seed", source.RecordPartitions[partIndex])
+					if err != nil {
+						return err
+					}
+					current.entry.Key = key
+					entry, hit, err := s.reuse.Lookup(ctx, "seed", key)
+					if err != nil {
+						return err
+					}
+					if hit {
+						current.entry, current.hit = entry, true
+					}
+				}
+			}
+			if err := s.seedRecord(record, appendRecord); err != nil {
+				return err
+			}
+			remaining--
+			if remaining != 0 {
+				return nil
+			}
+			for i, writer := range writers {
+				if writer == nil {
+					continue
+				}
+				parts, err := s.finish(writer)
+				if err != nil {
+					return err
+				}
+				current.entry.Seed.Parts[i] = parts
+				writers[i] = nil
+			}
+			groups = append(groups, *current)
+			current = nil
+			partIndex++
+			if partIndex < len(source.RecordPartitions) {
+				remaining = source.RecordPartitions[partIndex].Records
+			}
+			return nil
+		})
+		abort()
+		if err != nil {
+			return nil, nil, err
+		}
+		if remaining != 0 {
+			return nil, nil, errors.New("seed source record count differs")
+		}
+		// Cache adoption follows the complete strict source walk, including every
+		// final framing/count/hash check. Side effects were reconstructed above
+		// for hits and misses alike; no stored flag substitutes for source data.
+		for _, group := range groups {
+			for i, parts := range group.entry.Seed.Parts {
+				if group.hit {
+					if err := s.importCachedParts(ctx, parts); err != nil {
+						return nil, nil, err
+					}
+				}
+				categories[i] = append(categories[i], parts...)
+			}
+			if s.reuse != nil && group.entry.Key != ([32]byte{}) {
+				if _, err := s.reuse.Retain(ctx, group.entry, s.cachePartFiles(group.entry.Seed.Parts[:]...)); err != nil {
+					return nil, nil, err
+				}
+			}
+		}
+	}
+	spatial := []*bulkBucket{{prefix: netip.PrefixFrom(netip.AddrFrom4([4]byte{}), 0), active: true}, {prefix: netip.PrefixFrom(netip.AddrFrom16([16]byte{}), 0), active: true}}
+	asn := &bulkBucket{asn: true, first: 0, last: ^uint32(0), active: true}
+	for i, b := range []*bulkBucket{spatial[0], spatial[1], asn} {
+		b.parts = categories[i]
+		s.all = append(s.all, b)
+	}
+	s.coverage, s.pathParts, s.prefixParts = categories[3], categories[4], categories[5]
+	return spatial, asn, nil
+}
+
+func (s *bulkSpool) seedRecord(record intelligence.NormalizedRecord, appendRecord func(int, intelligence.NormalizedRecord) error) error {
+	if err := boundedNormalizedRecord(record); err != nil {
+		return err
+	}
+	switch record.Kind {
+	case intelligence.RecordUsage:
+		if record.Usage.ASN != 0 {
+			return s.usage.add(record.Usage)
+		}
+	case intelligence.RecordASNIdentity:
+		if err := s.addASN(record.ASNIdentity.ASN); err != nil {
+			return err
+		}
+		return appendRecord(2, record)
+	case intelligence.RecordRelationship:
+		v := record.Relationship
+		if v.From == v.To || v.Relation < intelligence.TransitUpstream || v.Relation > intelligence.Sibling {
+			return errors.New("invalid normalized relationship")
+		}
+		if s.relations != nil {
+			if err := s.relations.Add(v.From, v.To, v.Relation); err != nil {
+				return err
+			}
+		}
+		if err := s.addEdge(intelligence.ASNEdge{From: v.From, To: v.To}, false); err != nil {
+			return err
+		}
+		return s.addEdge(intelligence.ASNEdge{From: v.To, To: v.From}, false)
+	case intelligence.RecordPath:
+		if err := s.addASN(record.Path.Observation.Origin); err != nil {
+			return err
+		}
+		value := *record.Path
+		value.Prefix = netip.PrefixFrom(netip.AddrFrom4([4]byte{}), 0)
+		record.Path = &value
+		record.MRTOriginatedAt = nil
+		record.MRT = nil
+		return appendRecord(4, record)
+	case intelligence.RecordEvidence:
+		if record.Evidence.Scope == intelligence.Exact {
+			s.hasExact = true
+		}
+		if record.Evidence.Scope == intelligence.ASN {
+			s.hasASNDirect = true
+			if err := s.addASN(record.Evidence.ASN); err != nil {
+				return err
+			}
+			return appendRecord(2, record)
+		}
+	case intelligence.RecordCoverage:
+		if record.Coverage.Layer == intelligence.ASN {
+			if err := s.addASN(record.Coverage.ASN); err != nil {
+				return err
+			}
+			return appendRecord(3, record)
+		}
+	case intelligence.RecordOrigins:
+		// Peer/capture identity stays in authenticated source storage. The
+		// derived prefix/ASN union must not count duplicate peer rows.
+		record.MRTOriginatedAt = nil
+		record.MRT = nil
+		for _, asn := range record.Origins.Origins {
+			if err := s.addASN(asn); err != nil {
+				return err
+			}
+		}
+		if err := appendRecord(5, record); err != nil {
+			return err
+		}
+	}
+	prefix, err := spatialPrefix(record)
+	if err != nil {
+		return err
+	}
+	index := 0
+	if prefix.Addr().Is6() {
+		index = 1
+	}
+	return appendRecord(index, record)
+}
+
 func (s *bulkSpool) seed(ctx context.Context, workspace string, state intelligence.BuildState) ([]*bulkBucket, *bulkBucket, error) {
+	if s.reuse != nil && canReuseSpatialState(state) {
+		return s.seedStable(ctx, workspace, state)
+	}
+	return s.seedCold(ctx, workspace, state)
+}
+
+func (s *bulkSpool) seedCold(ctx context.Context, workspace string, state intelligence.BuildState) ([]*bulkBucket, *bulkBucket, error) {
 	if err := s.refresh(); err != nil {
 		return nil, nil, err
 	}
@@ -645,84 +828,9 @@ func (s *bulkSpool) seed(ctx context.Context, workspace string, state intelligen
 	s.usage = asnUsageIndex{}
 	for _, source := range state.Sources {
 		if err := intelligence.WalkStoredSource(ctx, workspace, source, func(record intelligence.NormalizedRecord) error {
-			if err := boundedNormalizedRecord(record); err != nil {
-				return err
-			}
-			switch record.Kind {
-			case intelligence.RecordUsage:
-				if record.Usage.ASN != 0 {
-					return s.usage.add(record.Usage)
-				}
-			case intelligence.RecordASNIdentity:
-				if err := s.addASN(record.ASNIdentity.ASN); err != nil {
-					return err
-				}
-				return writers[2].Append(record)
-			case intelligence.RecordRelationship:
-				v := record.Relationship
-				if v.From == v.To || v.Relation < intelligence.TransitUpstream || v.Relation > intelligence.Sibling {
-					return errors.New("invalid normalized relationship")
-				}
-				if s.relations != nil {
-					if err := s.relations.Add(v.From, v.To, v.Relation); err != nil {
-						return err
-					}
-				}
-				if err := s.addEdge(intelligence.ASNEdge{From: v.From, To: v.To}, false); err != nil {
-					return err
-				}
-				return s.addEdge(intelligence.ASNEdge{From: v.To, To: v.From}, false)
-			case intelligence.RecordPath:
-				if err := s.addASN(record.Path.Observation.Origin); err != nil {
-					return err
-				}
-				value := *record.Path
-				value.Prefix = netip.PrefixFrom(netip.AddrFrom4([4]byte{}), 0)
-				record.Path = &value
-				record.MRTOriginatedAt = nil
-				record.MRT = nil
-				return writers[4].Append(record)
-			case intelligence.RecordEvidence:
-				if record.Evidence.Scope == intelligence.Exact {
-					s.hasExact = true
-				}
-				if record.Evidence.Scope == intelligence.ASN {
-					s.hasASNDirect = true
-					if err := s.addASN(record.Evidence.ASN); err != nil {
-						return err
-					}
-					return writers[2].Append(record)
-				}
-			case intelligence.RecordCoverage:
-				if record.Coverage.Layer == intelligence.ASN {
-					if err := s.addASN(record.Coverage.ASN); err != nil {
-						return err
-					}
-					return writers[3].Append(record)
-				}
-			case intelligence.RecordOrigins:
-				// Peer/capture identity stays in authenticated source storage. The
-				// derived prefix/ASN union must not count duplicate peer rows.
-				record.MRTOriginatedAt = nil
-				record.MRT = nil
-				for _, asn := range record.Origins.Origins {
-					if err := s.addASN(asn); err != nil {
-						return err
-					}
-				}
-				if err := writers[5].Append(record); err != nil {
-					return err
-				}
-			}
-			prefix, err := spatialPrefix(record)
-			if err != nil {
-				return err
-			}
-			index := 0
-			if prefix.Addr().Is6() {
-				index = 1
-			}
-			return writers[index].Append(record)
+			return s.seedRecord(record, func(category int, value intelligence.NormalizedRecord) error {
+				return writers[category].Append(value)
+			})
 		}); err != nil {
 			return nil, nil, err
 		}

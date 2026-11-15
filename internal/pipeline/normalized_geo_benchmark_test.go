@@ -59,8 +59,10 @@ func BenchmarkNormalizedGeoMaterialization(b *testing.B) {
 					b.ReportAllocs()
 					for i := 0; i < b.N; i++ {
 						b.StopTimer()
-						if err := os.RemoveAll(filepath.Join(root, ".atlas-private", "materialization-cache-v1")); err != nil {
-							b.Fatal(err)
+						for _, cache := range []string{"materialization-cache-v1", "spatial-cache-v1"} {
+							if err := os.RemoveAll(filepath.Join(root, ".atlas-private", cache)); err != nil {
+								b.Fatal(err)
+							}
 						}
 						options := Options{Workspace: root, Output: filepath.Join(root, "build-private", fmt.Sprintf("%s-%d", phase, i)), Mode: "synthetic", Clock: clock.Unix(), ValidUntil: clock.Add(time.Hour).Unix(), Limits: DefaultLimits()}
 						options.ObserveStage = func(_ context.Context, stage Stage) func(bool) {

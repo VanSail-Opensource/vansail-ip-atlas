@@ -48,8 +48,10 @@ test('a compressed block cannot emit beyond a forged small content size', async 
   const forged = new Uint8Array(original.length + 1)
   forged.set([0x28, 0xb5, 0x2f, 0xfd, 0x84, 0x68, 16, 0, 0, 0])
   forged.set(original.subarray(9), 10)
+  const unchanged = forged.slice()
   inspectZstdFrame(forged, 16)
   await assert.rejects(decodeZstd(forged, 16), (error) => error instanceof ZstdError && error.code === 'limit')
+  assert.deepEqual(forged, unchanged, 'Failure cleanup must not detach or modify the caller input')
 })
 
 test('checksums, truncation, dictionary IDs and reserved flags are checked', async () => {
@@ -141,4 +143,21 @@ test('XXH64 limb arithmetic matches the BigInt specification at block and carry 
       assert.equal(zstdChecksum(input), referenceChecksum(input), `fill=${fill}, length=${length}, nonzero byteOffset`)
     }
   }
+})
+
+test('streamed blocks retain history at the 8 MiB window limit without consuming caller input', async () => {
+  const vector = vectors.find((item: { name: string }) => item.name === 'maximum-window-multiblock')
+  const encoded = bytes(vector)
+  const unchanged = encoded.slice()
+  assert.equal(inspectZstdFrame(encoded, vector.decoded_bytes).window, 8 * 1024 * 1024)
+  for (let repeat = 0; repeat < 2; repeat++) {
+    const decoded = await decodeZstd(encoded, vector.decoded_bytes)
+    assert.equal(decoded.length, 8 * 1024 * 1024)
+    assert.equal(createHash('sha256').update(decoded).digest('hex'), vector.decoded_sha256)
+    assert.deepEqual(encoded, unchanged)
+  }
+  encoded[encoded.length - 1] ^= 1
+  const invalid = encoded.slice()
+  await assert.rejects(decodeZstd(encoded, vector.decoded_bytes), (error) => error instanceof ZstdError && error.code === 'integrity')
+  assert.deepEqual(encoded, invalid, 'Checksum failure cleanup leaves caller input intact')
 })

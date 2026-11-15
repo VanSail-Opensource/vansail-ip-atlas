@@ -88,14 +88,32 @@ count is zero, linear history and conversation resolution are required.
   The remaining pipeline race regressions retain external sorting, resource
   guards, cancellation, cross-partition context and withdrawal coverage.
 - Local full Go tests/vet, seven fuzz targets, strict contracts, 132 Python
-  contract tests, 26 hosted Python tests, actual age roundtrip/wrong-key/corruption
-  tests, frontend typecheck and 206 Node/TypeScript tests passed. Chrome passed
+  contract tests, 29 hosted Python tests, actual age roundtrip/wrong-key/corruption
+  tests, frontend typecheck and 214 Node/TypeScript tests passed. Chrome passed
   21 synthetic UI scenarios and all three actual worker boundary workloads.
 - Local synthetic LCP p95 was 2.904 seconds against the unchanged 2.5-second
   ceiling during concurrent validation; other measured local comparisons passed.
   Local intake could not reach upstream data. Use the PR's exact-commit hosted
   checks for intake, browser timing and systemd memory evidence; these local
   results do not establish production acceptance.
+- Official hosted run 43678756537 subsequently passed full current intake for
+  all ten active sources, contracts, codec and synthetic UI/timing checks. Its
+  maximum-profile Chrome process tree exceeded the unchanged 384 MiB ceiling.
+  Run 43681804844 completed the 8 MiB answer and repeated lookup, then hit the
+  same ceiling while loading the 96 MiB live-decoded case. Required exact-head
+  checks on PR #1 remain authoritative; these earlier runs do not authorize merge.
+- Browser allocation fixes preserve every route, serialized answer and profile
+  boundary: fixed-size XXH64 arithmetic, exact bounded answer-size counting,
+  bounded sharing of identical path segments, and explicit release of owned
+  decoded/compressed buffers after their final use. Streamed decoder blocks are
+  released only after their history copy; checksum and actual-output guards stay
+  intact. The harness uses bounded encoding scratch and disables only Chrome
+  background services, retaining complete process-tree accounting from birth.
+- The combined emitted worker passed all three local maximum-profile cases and
+  repeats, including the retained 8 MiB answer. Local sampled peak PSS decreased
+  from approximately 569 MiB to 480 MiB; PSS is diagnostic and cannot substitute
+  for the official cgroup peak. CI runs this memory gate before the longer UI and
+  timing suite so a failed maximum workload produces evidence promptly.
 
 The four routing-source qualifications below remain unresolved. No production
 release or publisher permission is implied by these implementation fixes.

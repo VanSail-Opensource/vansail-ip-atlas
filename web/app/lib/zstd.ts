@@ -178,26 +178,31 @@ export async function decodeZstd(input: Uint8Array, expectedLength: number): Pro
   // All header-driven bounds above precede both this allocation and the decoder.
   const output = new Uint8Array(expectedLength)
   let written = 0
+  let previous: ArrayBuffer | null = null
   try {
     const decoder = new Decompress((chunk) => {
+      // fzstd@0.1.1 allocates each streamed block separately from input and its
+      // history window, but copies it into that window AFTER this callback.
+      // Release only the preceding block, whose history copy is complete.
+      if (previous && previous !== chunk.buffer && previous.byteLength) previous.transfer(0)
+      previous = chunk.buffer as ArrayBuffer
       if (chunk.length > expectedLength - written) fail('limit', 'Decoder emitted more than declared output')
       output.set(chunk, written)
       written += chunk.length
     })
     decoder.push(input, true)
+    if (written !== expectedLength) fail('integrity', 'Decoded section length mismatch')
+    const checksum = new DataView(input.buffer, input.byteOffset + checksumOffset, 4).getUint32(0, true)
+    if (zstdChecksum(output) !== checksum) fail('integrity', 'Frame content checksum mismatch')
+    return output
   } catch (error) {
     output.fill(0)
+    output.buffer.transfer(0)
     if (error instanceof ZstdError) throw error
-    fail('input', 'Malformed compressed section')
+    return fail('input', 'Malformed compressed section')
+  } finally {
+    // push has returned or unwound; its last block is no longer borrowed.
+    const remaining = previous as ArrayBuffer | null
+    if (remaining && remaining.byteLength) remaining.transfer(0)
   }
-  if (written !== expectedLength) {
-    output.fill(0)
-    fail('integrity', 'Decoded section length mismatch')
-  }
-  const checksum = new DataView(input.buffer, input.byteOffset + checksumOffset, 4).getUint32(0, true)
-  if (zstdChecksum(output) !== checksum) {
-    output.fill(0)
-    fail('integrity', 'Frame content checksum mismatch')
-  }
-  return output
 }

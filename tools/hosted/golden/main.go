@@ -38,6 +38,7 @@ func main() {
 		{"empty", []byte{}},
 		{"utf8", []byte("VIA3 synthetic codec corpus 香港\n")},
 		{"bounded", bytes.Repeat([]byte("VIA3"), 256*1024)},
+		{"maximum-window-multiblock", bytes.Repeat([]byte("VIA3"), 2*1024*1024)},
 	}
 	vectors := make([]vector, 0, len(inputs))
 	for _, input := range inputs {

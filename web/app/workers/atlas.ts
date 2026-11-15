@@ -57,6 +57,28 @@ class AnswerBudget {
   path(count: number): void { if (count > PUBLIC_PATH_ASNS - this.paths) fail('resource_limit'); this.paths += count; this.charge(count * 16 + 128) }
   cellOrigins(count: number): void { if (count > PUBLIC_ORIGINS - this.origins) fail('resource_limit'); this.origins += count; this.charge(count * 16) }
 }
+
+/** Per-answer sharing for identical immutable segment values. Public routes are
+ * still materialized individually; JSON and structured-clone values are unchanged. */
+export class PathSegmentPool {
+  private values = new Map<string, BGPAnswer['paths'][number]['segments']>()
+  keyBytes = 0
+  get size(): number { return this.values.size }
+  intern(segments: BGPAnswer['paths'][number]['segments']): BGPAnswer['paths'][number]['segments'] {
+    let key = ''
+    for (const segment of segments) key += `${segment.type}:${segment.asns.join(',')};`
+    const found = this.values.get(key)
+    if (found) { this.values.delete(key); this.values.set(key, found); return found }
+    const bytes = key.length * 2
+    if (bytes > 128 * 1024) return segments
+    while (this.values.size >= 256 || this.keyBytes + bytes > 128 * 1024) {
+      const oldest = this.values.keys().next().value!
+      this.values.delete(oldest); this.keyBytes -= oldest.length * 2
+    }
+    this.values.set(key, segments); this.keyBytes += bytes
+    return segments
+  }
+}
 /** Exact JSON UTF-8 size for the reader's plain JSON answers, without an
  * answer-sized temporary string and encoded buffer alongside the live answer. */
 export function answerJSONBytes(value: unknown, maximum = PUBLIC_ANSWER): number {
@@ -602,37 +624,43 @@ export class AtlasReader {
     const info = this.inventory.get(key); if (!info) return fail('missing_object')
     const stored = await this.persistent.get(key, info.bytes)
     const bytes = stored ?? await this.read(`/_atlas/objects/${key}.via3`, MAX_FILE - 1, signal)
-    if (bytes.length !== info.bytes || await hash(bytes) !== key) { if (stored) await this.persistent.evict(key); return fail('integrity') }
-    checkAbort(signal); this.current()
-    if (bytes.length < 64 || view(bytes).getBigUint64(36, true) > BigInt(PUBLIC_OBJECT)) return fail('resource_limit')
-    this.admit(key, Number(view(bytes).getBigUint64(36, true)))
-    const shard = await parseShard(bytes, signal)
-    const resident = this.residents.get(key)
-    if (!resident) { releaseDecoded(shard.sections); return fail('expired') }
-    resident.shard = shard
-    checkAbort(signal); this.current()
-    if (shard.kind !== info.kind) return fail('schema')
-    const references = shard.rows(7)
-    for (let p = 0; p < references.length; p += 40) { const target = hex(references.subarray(p + 8, p + 40)); const object = this.inventory.get(target); if (!object || object.kind !== u16(references, p) || object.bytes !== u32(references, p + 4) || target === key) return fail('record') }
-    if (info.partition.startsWith('4:') || info.partition.startsWith('6:')) {
-      const [address, length] = info.partition.slice(2).split('/'); const partition = new Uint8Array(32); partition[0] = info.partition[0] === '4' ? 4 : 6; partition[1] = Number(length); partition.set(unhex(address!), 4)
-      if (!validKey(partition)) return fail('manifest')
-      const overlay = shard.rows(8)
-      for (let p = 0; p < overlay.length; p += 32) { const row = overlay.subarray(p, p + 32); if (row[0] !== partition[0] || row[1]! > partition[1]!) return fail('record'); const candidate = keyFor(prefixText(partition).split('/')[0]!, row[1]!, false); if (compareKey(candidate, row) !== 0) return fail('record') }
-      const local = shard.rows(1)
-      for (let p = 0; p < local.length; p += 32) { const row = local.subarray(p, p + 32); if (row[0] !== partition[0] || row[1]! < partition[1]!) return fail('record'); const candidate = keyFor(prefixText(row).split('/')[0]!, partition[1]!, false); if (compareKey(candidate, partition) !== 0) return fail('record') }
+    try {
+      if (bytes.length !== info.bytes || await hash(bytes) !== key) { if (stored) await this.persistent.evict(key); return fail('integrity') }
+      checkAbort(signal); this.current()
+      if (bytes.length < 64 || view(bytes).getBigUint64(36, true) > BigInt(PUBLIC_OBJECT)) return fail('resource_limit')
+      this.admit(key, Number(view(bytes).getBigUint64(36, true)))
+      const shard = await parseShard(bytes, signal)
+      const resident = this.residents.get(key)
+      if (!resident) { releaseDecoded(shard.sections); return fail('expired') }
+      resident.shard = shard
+      checkAbort(signal); this.current()
+      if (shard.kind !== info.kind) return fail('schema')
+      const references = shard.rows(7)
+      for (let p = 0; p < references.length; p += 40) { const target = hex(references.subarray(p + 8, p + 40)); const object = this.inventory.get(target); if (!object || object.kind !== u16(references, p) || object.bytes !== u32(references, p + 4) || target === key) return fail('record') }
+      if (info.partition.startsWith('4:') || info.partition.startsWith('6:')) {
+        const [address, length] = info.partition.slice(2).split('/'); const partition = new Uint8Array(32); partition[0] = info.partition[0] === '4' ? 4 : 6; partition[1] = Number(length); partition.set(unhex(address!), 4)
+        if (!validKey(partition)) return fail('manifest')
+        const overlay = shard.rows(8)
+        for (let p = 0; p < overlay.length; p += 32) { const row = overlay.subarray(p, p + 32); if (row[0] !== partition[0] || row[1]! > partition[1]!) return fail('record'); const candidate = keyFor(prefixText(partition).split('/')[0]!, row[1]!, false); if (compareKey(candidate, row) !== 0) return fail('record') }
+        const local = shard.rows(1)
+        for (let p = 0; p < local.length; p += 32) { const row = local.subarray(p, p + 32); if (row[0] !== partition[0] || row[1]! < partition[1]!) return fail('record'); const candidate = keyFor(prefixText(row).split('/')[0]!, partition[1]!, false); if (compareKey(candidate, partition) !== 0) return fail('record') }
+      }
+      if (info.partition.startsWith('asn:')) { const [, first, last] = info.partition.split(':'); const index = shard.rows(2); for (let p = 0; p < index.length; p += 8) if (u32(index, p) < Number(first) || u32(index, p) > Number(last)) return fail('record') }
+      if (!stored) await this.persistent.put(key, bytes)
+      checkAbort(signal); this.current()
+      const size = [...shard.sections.values()].reduce((sum, bytes) => sum + bytes.length, 0)
+      if (size <= 32 * 1024 * 1024) {
+        while (this.cacheBytes + size > 32 * 1024 * 1024 && this.cache.size) this.evictCache(this.cache.keys().next().value!)
+        this.cache.set(key, shard); this.cacheBytes += size
+        this.residents.get(key)!.cache = true
+      }
+      this.active.set(key, shard)
+      checkAbort(signal); this.current(); return shard
+    } finally {
+      // read() and IndexedDB get() provide owned buffers. Decoded sections
+      // never alias these bytes; put() above waits for its transaction to end.
+      ;(bytes.buffer as ArrayBuffer).transfer(0)
     }
-    if (info.partition.startsWith('asn:')) { const [, first, last] = info.partition.split(':'); const index = shard.rows(2); for (let p = 0; p < index.length; p += 8) if (u32(index, p) < Number(first) || u32(index, p) > Number(last)) return fail('record') }
-    if (!stored) await this.persistent.put(key, bytes)
-    checkAbort(signal); this.current()
-    const size = [...shard.sections.values()].reduce((sum, bytes) => sum + bytes.length, 0)
-    if (size <= 32 * 1024 * 1024) {
-      while (this.cacheBytes + size > 32 * 1024 * 1024 && this.cache.size) this.evictCache(this.cache.keys().next().value!)
-      this.cache.set(key, shard); this.cacheBytes += size
-      this.residents.get(key)!.cache = true
-    }
-    this.active.set(key, shard)
-    checkAbort(signal); this.current(); return shard
   }
   private async reference(shard: Shard, index: number, signal?: AbortSignal): Promise<Shard> { const objects = shard.rows(7); if (index >= objects.length / 40) return fail('record'); return this.object(hex(objects.subarray(index * 40 + 8, index * 40 + 40)), signal) }
   private async label(shard: Shard, row: Uint8Array, p: number, signal?: AbortSignal): Promise<string | null> {
@@ -655,6 +683,7 @@ export class AtlasReader {
   }
   private async lookupInput(input: Input, signal?: AbortSignal): Promise<LookupAnswer> {
     const budget = new AnswerBudget(); await this.ready(signal); const manifest = this.current(); const dest = await this.destinations(input, signal)
+    const pathSegments = new PathSegmentPool()
     const answer: LookupAnswer = { q: input.canonical, kind: input.kind, releaseId: manifest.release_id, synthetic: manifest.mode === 'synthetic', validUntil: manifest.valid_until, geo: null, network: null, usage: null, observedRisk: null, asns: [], bgp: { origins: [], paths: [], relationships: [], tier1: [], rpki: [] } }
     let announcement: string | null = null
     if (input.kind === 'ip') {
@@ -700,6 +729,7 @@ export class AtlasReader {
             path.segments[index] = { type: ['', 'sequence', 'set', 'confederation_sequence', 'confederation_set'][segment[0]!]!, asns }
             total += length
           }
+          path.segments = pathSegments.intern(path.segments)
           // A single segment already is the complete path. Sharing this array
           // also survives structured clone, avoiding a second array per route.
           if (count === 1) path.asns = path.segments[0]!.asns

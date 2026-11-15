@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { AtlasReader, parseShard, hash, answerJSONBytes } from '../../web/app/workers/atlas.ts'
+import { AtlasReader, parseShard, hash, answerJSONBytes, PathSegmentPool } from '../../web/app/workers/atlas.ts'
 
 const golden = JSON.parse(readFileSync(new URL('../../fixtures/bin/synthetic-via3.json', import.meta.url), 'utf8'))
 const canonical = value => JSON.stringify(value, Object.keys(value).sort())
@@ -34,6 +34,33 @@ test('bounded answer byte counting matches JSON UTF-8 without materializing the 
   assert.equal(answerJSONBytes(maximum), 8 * 1024 * 1024)
   maximum.text += 'x'
   assert.throws(() => answerJSONBytes(maximum), { message: 'resource_limit' })
+})
+
+test('path sharing preserves exact segment types, sequence order and serialized answer bytes', () => {
+  const pool = new PathSegmentPool()
+  const sequences = [
+    [{ type: 'sequence', asns: [13335, 3356] }],
+    [{ type: 'sequence', asns: [13335, 3356] }],
+    [{ type: 'set', asns: [13335, 3356] }],
+    [{ type: 'sequence', asns: [3356, 13335] }],
+    [{ type: 'sequence', asns: [1, 23] }],
+    [{ type: 'sequence', asns: [12, 3] }],
+    [{ type: 'sequence', asns: [13335] }, { type: 'set', asns: [3356] }],
+    [{ type: 'set', asns: [3356] }, { type: 'sequence', asns: [13335] }],
+  ]
+  const before = JSON.stringify(sequences)
+  const shared = sequences.map(segments => pool.intern(segments))
+  assert.equal(JSON.stringify(shared), before)
+  assert.equal(shared[0], shared[1])
+  for (let i = 2; i < shared.length; i++) assert.notEqual(shared[0], shared[i])
+  assert.notEqual(shared[4], shared[5])
+  assert.notEqual(shared[6], shared[7])
+  const clone = structuredClone(shared)
+  assert.equal(clone[0], clone[1], 'The consumer shares exact sequences without losing any paths')
+  for (let i = 0; i < 1024; i++) pool.intern([{ type: 'sequence', asns: [i + 1] }])
+  assert.equal(JSON.stringify(shared), before, 'Eviction cannot change a previously materialized answer')
+  assert(pool.size <= 256)
+  assert(pool.keyBytes <= 128 * 1024)
 })
 
 test('every frozen VIA3 shard kind decodes its Go-produced compressed bytes', async () => {
@@ -291,4 +318,53 @@ test('corrupt cached values cannot become allocation lengths or array-like buffe
     if (previous) Object.defineProperty(globalThis, 'indexedDB', previous)
     else delete globalThis.indexedDB
   }
+})
+
+test('owned compressed objects remain valid until asynchronous cache writes complete', async () => {
+  const reader = new AtlasReader(response, () => golden.clock)
+  const stored = []
+  reader.persistent = {
+    get: async () => null,
+    put: async (key, bytes) => {
+      const expected = files.get(`/_atlas/objects/${key}.via3`)
+      assert.deepEqual(bytes, expected)
+      await new Promise(resolve => setImmediate(resolve))
+      assert.deepEqual(bytes, expected, 'Do not detach while the cache transaction borrows its input')
+      stored.push(bytes)
+    },
+  }
+  try {
+    const answer = await reader.lookup('203.0.113.1')
+    assert(stored.length > 0)
+    assert(stored.every(bytes => bytes.buffer.byteLength === 0), 'Compressed inputs are released after the write finishes')
+    assert.deepEqual(await reader.lookup('203.0.113.1'), answer, 'Decoded cache entries survive compressed-input cleanup')
+  } finally { reader.clear() }
+})
+
+test('owned cached compressed bytes are released after success, corruption and cancellation', async () => {
+  for (const outcome of ['success', 'corrupt', 'cancelled']) {
+    const controller = new AbortController()
+    const reader = new AtlasReader(response, () => golden.clock)
+    const inputs = []
+    const evicted = []
+    reader.persistent = {
+      get: async key => {
+        const bytes = files.get(`/_atlas/objects/${key}.via3`).slice()
+        if (outcome === 'corrupt') bytes[bytes.length - 1] ^= 1
+        if (outcome === 'cancelled') controller.abort()
+        inputs.push(bytes)
+        return bytes
+      },
+      evict: async key => { assert(inputs.at(-1).byteLength > 0); evicted.push(key) },
+      put: async () => assert.fail('Cached objects should not be written again'),
+    }
+    try {
+      if (outcome === 'success') await reader.lookup('203.0.113.1', controller.signal)
+      else await assert.rejects(reader.lookup('203.0.113.1', controller.signal), outcome === 'corrupt' ? { message: 'integrity' } : { name: 'AbortError' })
+      assert(inputs.length > 0)
+      assert(inputs.every(bytes => bytes.buffer.byteLength === 0))
+      assert.equal(evicted.length, outcome === 'corrupt' ? 1 : 0)
+    } finally { reader.clear() }
+  }
+  for (const object of golden.objects) assert.equal(await hash(files.get(`/_atlas/objects/${object.info.sha256}.via3`)), object.info.sha256)
 })

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { AtlasReader, parseShard, hash, answerJSONBytes, PathSegmentPool } from '../../web/app/workers/atlas.ts'
+import { AtlasReader, parseShard, hash, answerJSONBytes, PathSegmentPool, prefixKeyValid, comparePrefixKeys } from '../../web/app/workers/atlas.ts'
 
 const golden = JSON.parse(readFileSync(new URL('../../fixtures/bin/synthetic-via3.json', import.meta.url), 'utf8'))
 const canonical = value => JSON.stringify(value, Object.keys(value).sort())
@@ -61,6 +61,48 @@ test('path sharing preserves exact segment types, sequence order and serialized 
   assert.equal(JSON.stringify(shared), before, 'Eviction cannot change a previously materialized answer')
   assert(pool.size <= 256)
   assert(pool.keyBytes <= 128 * 1024)
+})
+
+test('offset prefix validation preserves the prior key rules at hostile boundaries', () => {
+  const u16 = (row, p) => new DataView(row.buffer, row.byteOffset, row.byteLength).getUint16(p, true)
+  const zero = bytes => bytes.every(value => value === 0)
+  const priorValid = row => {
+    const width = row[0] === 4 ? 32 : row[0] === 6 ? 128 : 0
+    if (!width || row[1] > width || u16(row, 2) > 1 || (row.length >= 32 && !zero(row.subarray(24, 32)))) return false
+    if (width === 32 && !zero(row.subarray(4, 16))) return false
+    if (width === 128 && zero(row.subarray(4, 14)) && row[14] === 255 && row[15] === 255) return false
+    if (u16(row, 2) === 1 && row[1] !== width) return false
+    const offset = width === 32 ? 16 : 4
+    for (let bit = row[1]; bit < width; bit++) if (row[offset + Math.floor(bit / 8)] & (1 << (7 - bit % 8))) return false
+    return true
+  }
+  const priorCompare = (a, b) => {
+    if (a[0] !== b[0]) return a[0] - b[0]
+    for (let i = 4; i < 20; i++) if (a[i] !== b[i]) return a[i] - b[i]
+    return a[1] !== b[1] ? a[1] - b[1] : u16(a, 2) - u16(b, 2)
+  }
+  const rows = []
+  for (const family of [4, 6]) for (let bits = 0; bits <= (family === 4 ? 32 : 128); bits++) {
+    const row = new Uint8Array(32), offset = family === 4 ? 16 : 4, width = family === 4 ? 32 : 128
+    row[0] = family; row[1] = bits
+    for (let i = offset; i < 20; i++) row[i] = (i * 37 + bits * 13) & 255
+    for (let bit = bits; bit < width; bit++) row[offset + Math.floor(bit / 8)] &= ~(1 << (7 - bit % 8))
+    rows.push(row)
+    for (const [position, value] of [[0, 5], [1, width + 1], [2, 1], [2, 2], [3, 1], [24, 1], [31, 1]]) {
+      const hostile = row.slice(); hostile[position] = value; rows.push(hostile)
+    }
+    if (bits < width) { const hostBits = row.slice(); hostBits[19] |= 1; rows.push(hostBits) }
+    if (family === 4) { const leading = row.slice(); leading[4] = 1; rows.push(leading) }
+  }
+  const mapped = new Uint8Array(32); mapped[0] = 6; mapped[1] = 128; mapped[14] = mapped[15] = 255; rows.push(mapped)
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i], next = rows[(i * 37 + 11) % rows.length]
+    const storage = new Uint8Array(103); storage.set(row, 7); storage.set(next, 61)
+    assert.equal(prefixKeyValid(storage, 7, 32), priorValid(row))
+    assert.equal(prefixKeyValid(storage, 7, 24), priorValid(row.subarray(0, 24)))
+    assert.equal(comparePrefixKeys(storage, 7, storage, 61), priorCompare(row, next))
+    assert.equal(comparePrefixKeys(storage, 61, storage, 7), priorCompare(next, row))
+  }
 })
 
 test('every frozen VIA3 shard kind decodes its Go-produced compressed bytes', async () => {

@@ -88,8 +88,8 @@ count is zero, linear history and conversation resolution are required.
   The remaining pipeline race regressions retain external sorting, resource
   guards, cancellation, cross-partition context and withdrawal coverage.
 - Local full Go tests/vet, seven fuzz targets, strict contracts, 132 Python
-  contract tests, 29 hosted Python tests, actual age roundtrip/wrong-key/corruption
-  tests, frontend typecheck and 214 Node/TypeScript tests passed. Chrome passed
+  contract tests, 31 hosted Python tests, actual age roundtrip/wrong-key/corruption
+  tests, frontend typecheck and 216 Node/TypeScript tests passed. Chrome passed
   21 synthetic UI scenarios and all three actual worker boundary workloads.
 - Local synthetic LCP p95 was 2.904 seconds against the unchanged 2.5-second
   ceiling during concurrent validation; other measured local comparisons passed.
@@ -102,6 +102,9 @@ count is zero, linear history and conversation resolution are required.
   Run 43681804844 completed the 8 MiB answer and repeated lookup, then hit the
   same ceiling while loading the 96 MiB live-decoded case. Required exact-head
   checks on PR #1 remain authoritative; these earlier runs do not authorize merge.
+- Run 43682513705 passed contracts, codec and all ten current source intakes.
+  Its Chrome workload completed every case and repeat without an OOM, but its
+  raw peak reached exactly 384 MiB and correctly failed the strict ceiling.
 - Browser allocation fixes preserve every route, serialized answer and profile
   boundary: fixed-size XXH64 arithmetic, exact bounded answer-size counting,
   bounded sharing of identical path segments, and explicit release of owned
@@ -114,6 +117,15 @@ count is zero, linear history and conversation resolution are required.
   from approximately 569 MiB to 480 MiB; PSS is diagnostic and cannot substitute
   for the official cgroup peak. CI runs this memory gate before the longer UI and
   timing suite so a failed maximum workload produces evidence promptly.
+- Subsequent prefix validation uses offsets to avoid millions of temporary
+  array views. The frozen pnpm lock now also binds a small ESM/CommonJS patch to
+  fzstd 0.1.1 that releases private scratch/history buffers after their final use;
+  upstream registry integrity and the MIT notice remain unchanged. Independent
+  original-versus-patched parity checks, all thirty maximum-profile sections,
+  split/concatenated streams and the exact emitted bundle license audit passed.
+  The final local profile retains every boundary and answer, with sampled PSS
+  approximately 467 MiB. Bounded source-free cgroup sampling aids diagnosis;
+  acceptance still uses the unchanged raw peak from Chrome process birth.
 
 The four routing-source qualifications below remain unresolved. No production
 release or publisher permission is implied by these implementation fixes.

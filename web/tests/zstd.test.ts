@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
+import { createRequire } from 'node:module'
 import { test } from 'node:test'
+import { Decompress, decompress } from 'fzstd'
 import { decodeZstd, inspectZstdFrame, zstdChecksum, ZstdError } from '../app/lib/zstd.ts'
 
 const vectors = JSON.parse(readFileSync(new URL('../../tools/hosted/fixtures/zstd.json', import.meta.url), 'utf8'))
@@ -160,4 +162,31 @@ test('streamed blocks retain history at the 8 MiB window limit without consuming
   const invalid = encoded.slice()
   await assert.rejects(decodeZstd(encoded, vector.decoded_bytes), (error) => error instanceof ZstdError && error.code === 'integrity')
   assert.deepEqual(encoded, invalid, 'Checksum failure cleanup leaves caller input intact')
+})
+
+test('patched decoder entry points preserve retained blocks across split and concatenated frames', () => {
+  const commonjs = createRequire(import.meta.url)('fzstd') as { Decompress: typeof Decompress; decompress: typeof decompress }
+  const input = new Uint8Array(Buffer.concat(vectors.map(bytes)))
+  const unchanged = input.slice()
+  const expected = createHash('sha256')
+  let expectedLength = 0
+  for (const vector of vectors) {
+    const decoded = decompress(bytes(vector))
+    assert.equal(createHash('sha256').update(decoded).digest('hex'), vector.decoded_sha256)
+    expected.update(decoded); expectedLength += decoded.length
+  }
+  const expectedHash = expected.digest('hex')
+  for (const decoder of [{ Decompress, decompress }, commonjs]) {
+    assert.equal(createHash('sha256').update(decoder.decompress(input)).digest('hex'), expectedHash)
+    for (const step of [1, 2, 3, 7, 64, 65536]) {
+      const chunks: Uint8Array[] = []
+      const stream = new decoder.Decompress(chunk => { chunks.push(chunk) })
+      for (let offset = 0; offset < input.length; offset += step)
+        stream.push(input.subarray(offset, offset + step), offset + step >= input.length)
+      const retained = Buffer.concat(chunks)
+      assert.equal(retained.length, expectedLength)
+      assert.equal(createHash('sha256').update(retained).digest('hex'), expectedHash)
+      assert.deepEqual(input, unchanged, 'Only decoder-owned backing stores may be detached')
+    }
+  }
 })

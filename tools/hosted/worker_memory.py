@@ -1,6 +1,7 @@
 """Measure a fresh complete Chrome process tree from birth with cgroup v2 peak."""
 from __future__ import annotations
 import argparse
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -10,6 +11,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.request
 import uuid
@@ -30,11 +32,11 @@ BACKGROUND_FLAGS=(
     '--disable-features=MediaRouter,OptimizationHints,NetworkTimeServiceQuerying,AimEnabled,PreconnectToSearch',
     '--enable-features=SkipListAccountsWithoutGaiaCookies',
 )
+MEMORY_STAT_FIELDS=frozenset({'anon','file','kernel','shmem','file_mapped','pagetables','sock','slab'})
 
 def memory_snapshot(root: Path) -> dict:
-    allowed={'anon','file','kernel','shmem','file_mapped','pagetables','sock','slab'}
     counters={name:int(value) for name,value in
-              (line.split() for line in (root/'memory.stat').read_text().splitlines()) if name in allowed}
+              (line.split() for line in (root/'memory.stat').read_text().splitlines()) if name in MEMORY_STAT_FIELDS}
     return {'current_bytes':int((root/'memory.current').read_text()),
             'peak_bytes':int((root/'memory.peak').read_text()),'stat_bytes':counters}
 
@@ -51,6 +53,43 @@ def safe_progress(path: Path) -> dict | None:
         or type(value['completed_cases']) is not int or not 0<=value['completed_cases']<=3):
         return None
     return value
+
+def record_memory_sample(summary: dict, snapshot: dict, progress: dict | None, elapsed_ms: float) -> None:
+    # Retain two observations only, even during a long or stuck workload.
+    observation={'elapsed_ms':elapsed_ms,'current_bytes':snapshot['current_bytes'],
+        'peak_bytes':snapshot['peak_bytes'],
+        'stat_bytes':{key:value for key,value in snapshot['stat_bytes'].items() if key in MEMORY_STAT_FIELDS},
+        'workload_progress':progress}
+    summary['sample_count']+=1
+    highest=summary.get('highest_sampled_current')
+    if highest is None or observation['current_bytes']>highest['current_bytes']:
+        summary['highest_sampled_current']=observation
+    latest=summary.get('latest_observed_peak_increase')
+    if latest is None or observation['peak_bytes']>latest['peak_bytes']:
+        summary['latest_observed_peak_increase']=observation
+
+@contextmanager
+def sample_workload_memory(root: Path, case_report: Path):
+    summary={'scope':'diagnostic-only-sampled-cgroup-memory','poll_ms':50,'sample_count':0,'read_error_count':0,
+        'blind_spots':'polling gaps; cgroup counters and workload phase are read non-atomically'}
+    stop=threading.Event();started=time.monotonic()
+    def sample():
+        while not stop.is_set():
+            try:
+                record_memory_sample(summary,memory_snapshot(root),safe_progress(case_report),
+                                     (time.monotonic()-started)*1000)
+            except (OSError,ValueError):
+                summary['read_error_count']+=1
+            stop.wait(.05)
+    sampler=threading.Thread(target=sample,name='atlas-memory-diagnostics',daemon=True)
+    sampler.start()
+    try:
+        yield summary
+    finally:
+        stop.set()
+        # Never hide a workload timeout/failure behind diagnostic teardown.
+        sampler.join(timeout=1)
+        summary['sampling_stopped']=not sampler.is_alive()
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
@@ -121,7 +160,9 @@ def main():
             environment={**os.environ,'ATLAS_MEMORY_CDP':endpoint,'ATLAS_MEMORY_PUBLIC':str(args.public.resolve()),
                          'ATLAS_MEMORY_PROFILE':str(profile),'ATLAS_MEMORY_CASE_REPORT':str(case_report)}
             report['phase']='workload'
-            result=subprocess.run(['node','tools/hosted/worker-memory.mjs'],cwd=ROOT,env=environment,stdout=log,stderr=log,timeout=900)
+            with sample_workload_memory(group_root,case_report) as sampled:
+                report['sampled_memory']=sampled
+                result=subprocess.run(['node','tools/hosted/worker-memory.mjs'],cwd=ROOT,env=environment,stdout=log,stderr=log,timeout=900)
             report['peak_bytes']=int((group_root/'memory.peak').read_text())
             report['memory_events']={k:int(v) for k,v in (line.split() for line in (group_root/'memory.events').read_text().splitlines())}
             if result.returncode or report['memory_events'].get('oom_kill') or report['memory_events'].get('oom'):

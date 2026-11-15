@@ -1,0 +1,80 @@
+diff --git a/esm/index.mjs b/esm/index.mjs
+index 5d3c01b4130fdc4cdba432b9643bbd2a1ee04226..81f9fadcf94c8f0bf53c41c9dd5bfb624e67ec27 100644
+--- a/esm/index.mjs
++++ b/esm/index.mjs
+@@ -571,8 +571,12 @@ var rzb = function (dat, st, out) {
+                 oubt = buf.length;
+             if (out)
+                 st.y += oubt;
+-            else
++            else {
++                // This branch owns its scratch array; slc makes an independent copy.
++                var scratch = buf;
+                 buf = slc(buf, 0, oubt);
++                scratch.buffer.transfer(0);
++            }
+         }
+         else if (out) {
+             st.y += lss;
+@@ -582,8 +586,11 @@ var rzb = function (dat, st, out) {
+                 }
+             }
+         }
+-        else if (spl)
++        else if (spl) {
++            var scratch = buf;
+             buf = slc(buf, spl);
++            scratch.buffer.transfer(0);
++        }
+         st.b = ebt;
+         return buf;
+     }
+@@ -739,6 +746,8 @@ var Decompress = /*#__PURE__*/ (function () {
+                 }
+                 if (this.s.l) {
+                     var rest = chunk.subarray(this.s.b);
++                    // The final block has entered history; no later frame borrows it.
++                    this.s.w.buffer.transfer(0);
+                     this.s = this.s.c * 4;
+                     this.push(rest, final);
+                     return;
+diff --git a/lib/index.js b/lib/index.js
+index fc3a45d5dbf22d7512203c714019b0a8eb130ee6..0644db7b8af5c3c2b4a6c03715c57ec40dc8ba37 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -572,8 +572,12 @@ var rzb = function (dat, st, out) {
+                 oubt = buf.length;
+             if (out)
+                 st.y += oubt;
+-            else
++            else {
++                // This branch owns its scratch array; slc makes an independent copy.
++                var scratch = buf;
+                 buf = slc(buf, 0, oubt);
++                scratch.buffer.transfer(0);
++            }
+         }
+         else if (out) {
+             st.y += lss;
+@@ -583,8 +587,11 @@ var rzb = function (dat, st, out) {
+                 }
+             }
+         }
+-        else if (spl)
++        else if (spl) {
++            var scratch = buf;
+             buf = slc(buf, spl);
++            scratch.buffer.transfer(0);
++        }
+         st.b = ebt;
+         return buf;
+     }
+@@ -741,6 +748,8 @@ var Decompress = /*#__PURE__*/ (function () {
+                 }
+                 if (this.s.l) {
+                     var rest = chunk.subarray(this.s.b);
++                    // The final block has entered history; no later frame borrows it.
++                    this.s.w.buffer.transfer(0);
+                     this.s = this.s.c * 4;
+                     this.push(rest, final);
+                     return;

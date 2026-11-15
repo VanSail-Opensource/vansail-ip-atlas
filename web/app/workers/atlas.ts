@@ -143,22 +143,32 @@ function schema(kind: number): { width: number; sections: number[] } {
   return { width: widths[kind]!, sections: sections[kind]! }
 }
 const sectionWidth = (id: number, recordWidth: number) => [0, 32, 8, recordWidth, 4, 4, 1, 40, 32, 12, 32, 24, 16][id]!
-function compareKey(a: Uint8Array, b: Uint8Array): number {
-  if (a[0] !== b[0]) return a[0]! - b[0]!
-  for (let p = 4; p < 20; p++) if (a[p] !== b[p]) return a[p]! - b[p]!
-  if (a[1] !== b[1]) return a[1]! - b[1]!
-  return u16(a, 2) - u16(b, 2)
+export function comparePrefixKeys(a: Uint8Array, aOffset: number, b: Uint8Array, bOffset: number): number {
+  if (a[aOffset] !== b[bOffset]) return a[aOffset]! - b[bOffset]!
+  for (let p = 4; p < 20; p++) if (a[aOffset + p] !== b[bOffset + p]) return a[aOffset + p]! - b[bOffset + p]!
+  if (a[aOffset + 1] !== b[bOffset + 1]) return a[aOffset + 1]! - b[bOffset + 1]!
+  return u16(a, aOffset + 2) - u16(b, bOffset + 2)
 }
-function validKey(row: Uint8Array): boolean {
-  const width = row[0] === 4 ? 32 : row[0] === 6 ? 128 : 0
-  if (width === 0 || row[1]! > width || u16(row, 2) > 1 || (row.length >= 32 && !zero(row.subarray(24, 32)))) return false
-  if (width === 32 && !zero(row.subarray(4, 16))) return false
-  if (width === 128 && zero(row.subarray(4, 14)) && row[14] === 255 && row[15] === 255) return false
-  if (u16(row, 2) === 1 && row[1] !== width) return false
-  const offset = width === 32 ? 16 : 4
-  for (let bit = row[1]!; bit < width; bit++) if ((row[offset + Math.floor(bit / 8)]! & (1 << (7 - bit % 8))) !== 0) return false
+function compareKey(a: Uint8Array, b: Uint8Array): number { return comparePrefixKeys(a, 0, b, 0) }
+const zeroRange = (bytes: Uint8Array, first: number, end: number) => {
+  for (let p = first; p < end; p++) if (bytes[p] !== 0) return false
   return true
 }
+// Validate directly inside the index: a maximum-sized shard has over a million
+// keys, so even temporary subarray views would create substantial heap churn.
+export function prefixKeyValid(bytes: Uint8Array, offset: number, recordBytes: number): boolean {
+  if (!Number.isInteger(offset) || offset < 0 || (recordBytes !== 24 && recordBytes !== 32) || offset > bytes.length - recordBytes) return false
+  const width = bytes[offset] === 4 ? 32 : bytes[offset] === 6 ? 128 : 0
+  const bits = bytes[offset + 1]!; const flags = u16(bytes, offset + 2)
+  if (width === 0 || bits > width || flags > 1 || (recordBytes === 32 && !zeroRange(bytes, offset + 24, offset + 32))) return false
+  if (width === 32 && !zeroRange(bytes, offset + 4, offset + 16)) return false
+  if (width === 128 && zeroRange(bytes, offset + 4, offset + 14) && bytes[offset + 14] === 255 && bytes[offset + 15] === 255) return false
+  if (flags === 1 && bits !== width) return false
+  const address = offset + (width === 32 ? 16 : 4)
+  for (let bit = bits; bit < width; bit++) if ((bytes[address + Math.floor(bit / 8)]! & (1 << (7 - bit % 8))) !== 0) return false
+  return true
+}
+function validKey(row: Uint8Array): boolean { return prefixKeyValid(row, 0, row.length) }
 function addressBytes(canonical: string): { family: number; bytes: Uint8Array } {
   const bytes = new Uint8Array(16)
   if (!canonical.includes(':')) { bytes.set(canonical.split('.').map(Number), 12); return { family: 4, bytes } }
@@ -285,12 +295,12 @@ function validate(shard: Shard): void {
   for (const id of [1, 8]) {
     const index = shard.rows(id)
     for (let p = 0; p < index.length; p += 32) {
-      const key = index.subarray(p, p + 32)
-      if (!validKey(key) || u32(key, 20) >= count || (shard.kind === 7 && (key[0] !== 4 || key[1] !== 24 || u16(key, 2) !== 0))) fail('record')
-      if ((shard.kind === 9 || shard.kind === 10) && u16(key, 2) !== 0) fail('record')
-      if (shard.kind === 6 && key[0] === 6) { const row = shard.record(u32(key, 20)); if (has(row, 13) || (row[11]! & 24)) fail('record') }
-      if (shard.kind === 9) { const row = shard.record(u32(key, 20)); if (row[9]! > (key[0] === 4 ? 32 : 128) || (row[8] === 1 && row[9]! < key[1]!) || ((row[8] === 0 || row[8] === 3) && row[9] !== 0)) fail('record') }
-      if (p) { const comparison = compareKey(index.subarray(p - 32, p), key); if (comparison > 0 || (comparison === 0 && (shard.kind !== 9 || u32(shard.record(u32(index, p - 12)), 4) >= u32(shard.record(u32(key, 20)), 4)))) fail('record') }
+      const record = u32(index, p + 20)
+      if (!prefixKeyValid(index, p, 32) || record >= count || (shard.kind === 7 && (index[p] !== 4 || index[p + 1] !== 24 || u16(index, p + 2) !== 0))) fail('record')
+      if ((shard.kind === 9 || shard.kind === 10) && u16(index, p + 2) !== 0) fail('record')
+      if (shard.kind === 6 && index[p] === 6) { const row = shard.record(record); if (has(row, 13) || (row[11]! & 24)) fail('record') }
+      if (shard.kind === 9) { const row = shard.record(record); if (row[9]! > (index[p] === 4 ? 32 : 128) || (row[8] === 1 && row[9]! < index[p + 1]!) || ((row[8] === 0 || row[8] === 3) && row[9] !== 0)) fail('record') }
+      if (p) { const comparison = comparePrefixKeys(index, p - 32, index, p); if (comparison > 0 || (comparison === 0 && (shard.kind !== 9 || u32(shard.record(u32(index, p - 12)), 4) >= u32(shard.record(record), 4)))) fail('record') }
     }
   }
   const local = shard.rows(1); const overlay = shard.rows(8)
@@ -369,10 +379,10 @@ function validate(shard: Shard): void {
       case 11: {
         if (!u32(row, 4) || !has(row, 29) || u16(row, 12) === 0 || u16(row, 12) > 255 || row[14]! > 1 || row[15]! > 3 || !zero(row.subarray(16)) || !range(u32(row, 8), u16(row, 12), segments.length / 12)) fail('record')
         let total = 0
-        const seen = new Set<number>(); let previous = 0
+        const seen = row[14]! & 1 ? new Set<number>() : null; let previous = 0
         for (let j = u32(row, 8); j < u32(row, 8) + u16(row, 12); j++) {
           const seg = segments.subarray(j * 12, (j + 1) * 12); if (seg[0]! < 1 || seg[0]! > 4 || !zero(seg.subarray(1, 4)) || !u32(seg, 8) || !range(u32(seg, 4), u32(seg, 8), ints.length / 4) || ((row[14]! & 1) && seg[0] !== 1) || ((seg[0] === 2 || seg[0] === 4) && !asns(u32(seg, 4), u32(seg, 8)))) fail('record')
-          for (let k = 0; k < u32(seg, 8); k++) { const asn = u32(ints, (u32(seg, 4) + k) * 4); if (!asn) fail('record'); if (row[14]! & 1) { if (!publicASN(asn) || (total === 0 && k === 0 && asn !== u32(row, 4)) || (asn !== previous && seen.has(asn))) fail('record'); seen.add(asn); previous = asn } }
+          for (let k = 0; k < u32(seg, 8); k++) { const asn = u32(ints, (u32(seg, 4) + k) * 4); if (!asn) fail('record'); if (seen) { if (!publicASN(asn) || (total === 0 && k === 0 && asn !== u32(row, 4)) || (asn !== previous && seen.has(asn))) fail('record'); seen.add(asn); previous = asn } }
           total += u32(seg, 8)
         }
         if (total > 4096) fail('record')
@@ -384,7 +394,7 @@ function validate(shard: Shard): void {
   }
   for (let p = 0; p < pages.length; p += 16) if (u32(pages, p) >= objects.length / 40 || u16(objects, u32(pages, p) * 40) !== 8 || !u32(pages, p + 8) || u32(pages, p + 8) > 256 || u32(pages, p + 12)) fail('record')
   const prefixes = shard.rows(11)
-  for (let p = 0; p < prefixes.length; p += 24) { const key = prefixes.subarray(p, p + 24); if (!validKey(key) || u16(key, 2) || u32(key, 20) || (p > 0 && compareKey(prefixes.subarray(p - 24, p), key) >= 0)) fail('record') }
+  for (let p = 0; p < prefixes.length; p += 24) if (!prefixKeyValid(prefixes, p, 24) || u16(prefixes, p + 2) || u32(prefixes, p + 20) || (p > 0 && comparePrefixKeys(prefixes, p - 24, prefixes, p) >= 0)) fail('record')
   if (shard.kind === 14) {
     const offsets = shard.rows(5); const bytes = shard.rows(6)
     if (offsets.length < 4 || u32(offsets, 0) !== 0 || u32(offsets, offsets.length - 4) !== bytes.length) fail('record')

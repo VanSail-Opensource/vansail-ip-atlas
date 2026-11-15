@@ -97,7 +97,7 @@ build:
     source_provenance_internal_only: true
   storage:
     format: VIA3
-    schema_version: 4
+    schema_version: 5
     checksum: sha256
     byte_order: little
     compression: zstd

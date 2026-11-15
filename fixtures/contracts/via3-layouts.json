@@ -1,7 +1,7 @@
 {
   "format_version": 3,
-  "schema_version": 4,
-  "contract_revision": 2,
+  "schema_version": 5,
+  "contract_revision": 3,
   "synthetic": true,
   "max_file_exclusive": 25165824,
   "max_decoded_section": 67108864,
@@ -496,7 +496,7 @@
         3,
         8
       ],
-      "record_bytes": 16,
+      "record_bytes": 32,
       "fields": [
         {
           "name": "presence",
@@ -522,10 +522,20 @@
           "name": "reserved",
           "offset": 10,
           "bytes": 6
+        },
+        {
+          "name": "observed_at",
+          "offset": 16,
+          "bytes": 8
+        },
+        {
+          "name": "valid_until",
+          "offset": 24,
+          "bytes": 8
         }
       ],
-      "record_hex": "00001000173400000118000000000000",
-      "section3_hex": "010000001000000000001000173400000118000000000000"
+      "record_hex": "00001000173400000118000000000000f0c953650000000000d8536500000000",
+      "section3_hex": "010000002000000000001000173400000118000000000000f0c953650000000000d8536500000000"
     },
     {
       "id": 10,

@@ -40,6 +40,67 @@ func TestMaterializationCacheReusesExactStateAndRunsBothGates(t *testing.T) {
 	}
 }
 
+func TestMaterializationCacheSchema4MigrationRequiresAuthenticatedClosedMiss(t *testing.T) {
+	for _, scenario := range []string{"old_generation", "same_identity", "bad_mac", "extra_file", "unknown_schema"} {
+		t.Run(scenario, func(t *testing.T) {
+			state, policy, _, _, _ := intelligenceFixture(t)
+			options := testOptions(t)
+			options.Limits = DefaultLimits()
+			if _, err := BuildStreamedIntelligence(context.Background(), options, state, policy); err != nil {
+				t.Fatal(err)
+			}
+			cache := filepath.Join(options.Workspace, ".atlas-private", "materialization-cache-v1")
+			indexPath := filepath.Join(cache, "index.json")
+			data, err := os.ReadFile(indexPath)
+			var index materializationCacheIndex
+			if err != nil || json.Unmarshal(data, &index) != nil {
+				t.Fatal("cache fixture unavailable", err)
+			}
+			key, err := os.ReadFile(filepath.Join(options.Workspace, ".atlas-private", "materialization-cache-v1.key"))
+			if err != nil || len(key) != 32 {
+				t.Fatal("cache key unavailable", err)
+			}
+			index.Descriptor.SchemaVersion = 4
+			if scenario != "same_identity" {
+				index.Identity[0] ^= 1
+			}
+			if scenario == "unknown_schema" {
+				index.Descriptor.SchemaVersion = 3
+			}
+			index.MAC = cacheMAC([32]byte(key), index)
+			if scenario == "bad_mac" {
+				index.MAC[0] ^= 1
+			}
+			data, err = json.Marshal(index)
+			if err != nil || os.WriteFile(indexPath, data, 0600) != nil {
+				t.Fatal("cache migration fixture failed", err)
+			}
+			if scenario == "extra_file" {
+				if err := os.WriteFile(filepath.Join(cache, "unexpected"), []byte("private"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			options.Output = filepath.Join(options.Workspace, "build-private", "schema5-migration")
+			candidate, err := BuildStreamedIntelligence(context.Background(), options, state, policy)
+			if scenario == "old_generation" {
+				if err != nil || candidate.Manifest.SchemaVersion != 5 || candidate.Stats.MaterializationCacheHits != 0 || candidate.Stats.SortRuns == 0 {
+					t.Fatal("authenticated schema4 miss did not rebuild", err)
+				}
+			} else {
+				if err == nil {
+					t.Fatal("legacy cache bypassed hit/authentication/inventory guards")
+				}
+				if _, err := os.Lstat(options.Output); !os.IsNotExist(err) {
+					t.Fatal("invalid old cache published output")
+				}
+				if _, err := os.Lstat(indexPath); err != nil {
+					t.Fatal("invalid old cache was deleted before validation", err)
+				}
+			}
+		})
+	}
+}
+
 func TestMaterializationCacheSemanticChangesMiss(t *testing.T) {
 	for _, change := range []string{"state", "record", "withdrawal", "policy", "clock", "deadline", "limits", "mode"} {
 		t.Run(change, func(t *testing.T) {

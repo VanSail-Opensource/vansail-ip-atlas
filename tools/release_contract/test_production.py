@@ -21,7 +21,7 @@ class ProductionQualificationTests(unittest.TestCase):
         catalog = {"sources": [source]}
         (root / "configs/sources.yaml").write_text(json.dumps(catalog), encoding="utf-8")
         (root / "SOURCES_AUDIT.md").write_text("Fixture rights decision", encoding="utf-8")
-        descriptor = {"format_version": 3, "schema_version": 4, "codec": "zstd-1", "mode": "production",
+        descriptor = {"format_version": 3, "schema_version": 5, "codec": "zstd-1", "mode": "production",
             "valid_from": 100, "valid_until": 200,
             "objects": [{"sha256": "a" * 64, "bytes": 128, "kind": 1, "partition": "all"}]}
         manifest, _ = make_manifest(descriptor)

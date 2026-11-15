@@ -36,7 +36,7 @@ observation semantics is enabled for a production source.
 - Root returns HTTP 302 to `/ip`. One input opens overview, quality, class-c, BGP
   and ASN routes. The quality route owns observed risk and retains its deep links.
   Each view has one canonical fact display; reserved diagnostics stay unimplemented.
-- VIA3 container version 3 carries public schema 4. Go and browser readers reject
+- VIA3 container version 3 carries public schema 5. Go and browser readers reject
   incompatible schemas and share golden answers and hostile corruption fixtures.
 - No source IDs, provenance, credentials, domains, ports, protocols, collectors,
   latency, timezone, postal or continent fields enter public facts. Only separate

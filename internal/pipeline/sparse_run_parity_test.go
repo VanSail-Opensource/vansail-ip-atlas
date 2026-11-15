@@ -16,9 +16,10 @@ import (
 	"vansail-ip-atlas/internal/via3"
 )
 
-// These public bytes are captured from the dense private-run implementation at
-// 34ebd97fae5129c2c64ddb2c7a582baddc549b9e. The fixture uses baseline-stable APIs
-// so the same test can independently run against that implementation.
+// This fixture originally froze dense private-run parity at 34ebd97. The
+// public bytes are re-frozen for the explicit schema5 RPKI clock migration.
+// Counts/partition peaks remain unchanged; the added logical JSON clock fields
+// also change sort-buffer packing, whose exact bound remains asserted below.
 type sparseRunParityGolden struct {
 	Release, Manifest, Inventory, Answers string
 	Files, SortRuns, Partitions           int64
@@ -27,14 +28,14 @@ type sparseRunParityGolden struct {
 
 var sparseRunParityGoldens = map[string]sparseRunParityGolden{
 	"count": {
-		Release: "e88fa258330f656c5fb241b44023e2b33ce120d32ad9108314b62e3931d2f5bd", Manifest: "7fcd9874c41b1ed3c061052526a5998a28db6ab22a76d241338cce255c18b4bc",
-		Inventory: "73c1a93d1a1b1d738e2b083557ae6122ff44c1113d51376126045a3b0e9e4c76", Answers: "fbf7510a505d535d41f68e183fd442980bedf151ffd1dc5d64d71671e6750784",
-		Files: 138, SortRuns: 43, Partitions: 84, SortPeak: 8176, PartitionPeak: 15360,
+		Release: "ee8abcd35e20e164c518e9fc05741aeb3554728595bb9d8b53e49c5acf0ac864", Manifest: "f7ab98113a1c41b6a1f789228adab58624d3f15fa6df27b770b90d154d504f60",
+		Inventory: "ad85b942bd217d299df3fc2e12a21f72f866bd1ea61a8b52d8f6faa9435e212a", Answers: "ad752a466bc848b3bd063484fb1037a1566920b607d08a48ecf509c5bb8385b3",
+		Files: 138, SortRuns: 43, Partitions: 84, SortPeak: 8115, PartitionPeak: 15360,
 	},
 	"bytes": {
-		Release: "6968f644a5d519894e4395cb4e1e202dffa8ed12238a3930758436d8780ff42d", Manifest: "7d59add09a44d266685c7cef481d515b5f4e4ea064dc6b72fc7c202bbfd7a406",
-		Inventory: "16ab961a70b7f3363e0c514e1f4f2d59f75dce410e0b6eb89ab3dc514eba788c", Answers: "c39e2f5251e1032a13b02a05e3dc687c7de37680249024e894b2888fa8775d8a",
-		Files: 154, SortRuns: 43, Partitions: 100, SortPeak: 8176, PartitionPeak: 9432,
+		Release: "9b9b0f9f5512288abdb66e05ec84b6caf2b31c81aab7cdbc7e43fc970bbe72f7", Manifest: "0fca65d219e0c6a9039f63c27ea18861da9730e909899870c15d2bbcc9c844eb",
+		Inventory: "80e744b3b0c697b3090208c2be4e286305dcc784612e538e539ee3e71f6bd5a3", Answers: "0ee045b7a941f2e1d9c215068648852e0f75e6697b71a0c4fc249caba7eb017c",
+		Files: 154, SortRuns: 43, Partitions: 100, SortPeak: 8115, PartitionPeak: 9432,
 	},
 }
 
@@ -50,7 +51,7 @@ func sparseRunParityRows() []via3.PublicRecord {
 		{Version: 3, Kind: 6, Prefix: netip.MustParsePrefix("203.0.113.1/32"), Exact: true, Quality: &via3.QualityData{Score: &score, Confidence: 2, Reasons: 1, Exact: &positive, Prefix: &zero, ASN: &zero, Neighbors: &zero}},
 		{Version: 3, Kind: 7, Prefix: prefix, Profile: &via3.ProfileData{Cells: []via3.CellData{{Address: netip.MustParseAddr("203.0.113.1"), Usage: 1, Score: &score, Confidence: 2, Reasons: 1, ExactRisk: &exactRisk, AttachNetwork: true}}}},
 		{Version: 3, Kind: 8, ASN: 13335, ASNAggregate: &via3.ASNData{Name: "Example Network", Country: "US", Risk: &zero, Confidence: 2, Prefixes: []netip.Prefix{prefix}, CustomerCone: &cone, NetworkClass: 2, Stability: 2}},
-		{Version: 3, Kind: 9, Prefix: prefix, ASN: 13335, RPKI: &via3.RPKIData{Status: 1, MaximumLength: 24}},
+		{Version: 3, Kind: 9, Prefix: prefix, ASN: 13335, RPKI: &via3.RPKIData{Status: 1, MaximumLength: 24, ObservedAt: 1699990000, ValidUntil: 1699993600}},
 		{Version: 3, Kind: 10, Prefix: prefix, Origins: &via3.OriginsData{ASNs: []uint32{13335}}},
 		{Version: 3, Kind: 11, ASN: 13335, Path: &via3.PathData{GraphEligible: true, Visibility: 2, Segments: []via3.SegmentData{{Type: 1, ASNs: []uint32{13335, 3356}}}}},
 		{Version: 3, Kind: 12, ASN: 13335, Relationship: &via3.RelationshipData{To: 3356, Relation: 1, Observed: true, Inferred: true}},
@@ -179,7 +180,7 @@ func TestSparseRunPublicReleaseParity(t *testing.T) {
 				}
 				want := sparseRunParityGoldens[mode]
 				if reversed {
-					want.SortPeak = 8163
+					want.SortPeak = 8096
 				}
 				if got != want {
 					t.Fatalf("public release or original logical partitioning changed:\n got %+v\nwant %+v", got, want)

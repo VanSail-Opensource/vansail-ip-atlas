@@ -15,7 +15,7 @@ Each dataset needs an explicit reviewed source-use decision, actual publication
 proof and an observed parser fixture. The product license does not approve a
 source or replace upstream terms. V5 additionally permits required
 publisher logos in the single global credit display, with no per-IP attribution.
-The source config is schema3/contract revision4, public VIA3 schema4, private
+The source config is schema3/contract revision4, public VIA3 schema5, private
 normalized records schema3. Credit documents use format2 and their index format1.
 The private capability report remains schema3 with release-scope-v6.
 

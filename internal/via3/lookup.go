@@ -120,8 +120,10 @@ type TierAnswer struct {
 	Stability    string `json:"stability"`
 }
 type RPKIAnswer struct {
-	Origin uint32 `json:"origin"`
-	Status string `json:"status"`
+	Origin     uint32 `json:"origin"`
+	Status     string `json:"status"`
+	ObservedAt *int64 `json:"observedAt"`
+	ValidUntil *int64 `json:"validUntil"`
 }
 type BGPAnswer struct {
 	Origins       []uint32             `json:"origins"`
@@ -410,10 +412,10 @@ func NewRelease(pointerBytes, manifestBytes []byte, load func(string) ([]byte, e
 	if strictJSON(pointerBytes, &pointer) != nil || strictJSON(manifestBytes, &manifest) != nil {
 		return nil, fail("manifest")
 	}
-	if len(pointerBytes) > 4096 || len(manifestBytes) > 4<<20 || !validHash(pointer.ReleaseID) || !validHash(pointer.ManifestSHA256) || pointer.FormatVersion != 3 || manifest.FormatVersion != 3 || manifest.SchemaVersion != 4 || manifest.Codec != "zstd-1" || (manifest.Mode != "synthetic" && manifest.Mode != "production") || len(manifest.Objects) == 0 || len(manifest.Objects) >= 18500 || pointer.ManifestPath != "/_atlas/releases/"+manifest.ReleaseID+"/manifest.json" || pointer.ReleaseID != manifest.ReleaseID || Hash(manifestBytes) != pointer.ManifestSHA256 || manifest.ValidFrom < 0 || manifest.ValidUntil <= manifest.ValidFrom || manifest.ValidUntil-manifest.ValidFrom > 720*3600 || manifest.ValidUntil > 9007199254740991 {
+	if len(pointerBytes) > 4096 || len(manifestBytes) > 4<<20 || !validHash(pointer.ReleaseID) || !validHash(pointer.ManifestSHA256) || pointer.FormatVersion != 3 || manifest.FormatVersion != 3 || manifest.SchemaVersion != 5 || manifest.Codec != "zstd-1" || (manifest.Mode != "synthetic" && manifest.Mode != "production") || len(manifest.Objects) == 0 || len(manifest.Objects) >= 18500 || pointer.ManifestPath != "/_atlas/releases/"+manifest.ReleaseID+"/manifest.json" || pointer.ReleaseID != manifest.ReleaseID || Hash(manifestBytes) != pointer.ManifestSHA256 || manifest.ValidFrom < 0 || manifest.ValidUntil <= manifest.ValidFrom || manifest.ValidUntil-manifest.ValidFrom > 720*3600 || manifest.ValidUntil > 9007199254740991 {
 		return nil, fail("manifest")
 	}
-	desc := Descriptor{Codec: manifest.Codec, FormatVersion: 3, Mode: manifest.Mode, Objects: manifest.Objects, SchemaVersion: 4, ValidFrom: manifest.ValidFrom, ValidUntil: manifest.ValidUntil}
+	desc := Descriptor{Codec: manifest.Codec, FormatVersion: 3, Mode: manifest.Mode, Objects: manifest.Objects, SchemaVersion: 5, ValidFrom: manifest.ValidFrom, ValidUntil: manifest.ValidUntil}
 	if Hash(canonical(desc)) != manifest.ReleaseID {
 		return nil, fail("manifest")
 	}
@@ -1060,16 +1062,20 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 			}
 		}
 		if input.Kind == "ip" {
-			status := "unavailable"
+			observation := RPKIAnswer{Origin: asn, Status: "unavailable"}
 			if s := dest[9]; s != nil {
 				if row, ok := s.FindRPKI(addr, asn, announcement); ok {
-					status = []string{"unavailable", "valid", "invalid", "not_found"}[row[8]]
+					observation.Status = []string{"unavailable", "valid", "invalid", "not_found"}[row[8]]
+					if row[8] != 0 {
+						observedAt, validUntil := int64(u64(row, 16)), int64(u64(row, 24))
+						observation.ObservedAt, observation.ValidUntil = &observedAt, &validUntil
+					}
 				}
 			}
 			if cap(answer.BGP.RPKI) == 0 {
 				answer.BGP.RPKI = make([]RPKIAnswer, 0, len(answer.BGP.Origins))
 			}
-			answer.BGP.RPKI = append(answer.BGP.RPKI, RPKIAnswer{Origin: asn, Status: status})
+			answer.BGP.RPKI = append(answer.BGP.RPKI, observation)
 		}
 	}
 	// Only actual consecutive retained path hops are queried. Relationship runs

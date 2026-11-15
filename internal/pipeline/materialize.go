@@ -17,13 +17,14 @@ import (
 // positive VRP row. It is an engineering input, never source certification.
 // Missing or partial VRP snapshots must leave VRPComplete false.
 type MaterializationInputs struct {
-	VRPComplete      bool
-	scope            netip.Prefix
-	contexts         map[uint32]intelligence.ASNContext
-	prepare          func(*intelligence.Engine) error
-	prepareOnly      bool
-	resolver         intelligence.RelationResolver
-	verifiedEmptyVRP bool
+	VRPComplete                            bool
+	RPKIObservedAt, RPKICoverageValidUntil time.Time
+	scope                                  netip.Prefix
+	contexts                               map[uint32]intelligence.ASNContext
+	prepare                                func(*intelligence.Engine) error
+	prepareOnly                            bool
+	resolver                               intelligence.RelationResolver
+	verifiedEmptyVRP                       bool
 }
 
 // BuildIntelligence connects all nine normalized record kinds to the bounded
@@ -290,14 +291,16 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 			}
 		}
 		completeVRP := len(inputs) == 1 && inputs[0].VRPComplete && (len(vrps) > 0 || inputs[0].verifiedEmptyVRP)
-		vrpIndex, err := intelligence.NewVRPIndex(vrps, completeVRP)
+		var vrpIndex *intelligence.VRPIndex
+		if completeVRP && !inputs[0].RPKIObservedAt.IsZero() && !inputs[0].RPKICoverageValidUntil.IsZero() {
+			vrpIndex, err = intelligence.NewVRPObservationIndex(vrps, inputs[0].RPKIObservedAt, inputs[0].RPKICoverageValidUntil)
+		} else {
+			// Incomplete/legacy snapshots remain unavailable, but their retained
+			// records still undergo the same structural VRP validation.
+			vrpIndex, err = intelligence.NewVRPIndex(vrps, false)
+		}
 		if err != nil {
 			return err
-		}
-		vrpsByPrefix := map[netip.Prefix][]intelligence.VRP{}
-		for _, vrp := range vrps {
-			key := vrp.Prefix.Masked()
-			vrpsByPrefix[key] = append(vrpsByPrefix[key], vrp)
 		}
 		var resolver intelligence.RelationResolver = relations
 		if len(inputs) == 1 && inputs[0].resolver != nil {
@@ -436,23 +439,20 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 			sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
 			for _, asn := range keys {
 				status := uint8(0)
-				maximumLength := uint8(0)
-				switch vrpIndex.Validate(p, asn) {
+				observation := vrpIndex.Observe(p, asn)
+				switch observation.Status {
 				case intelligence.RPKIValid:
 					status = 1
-					for bits := p.Bits(); bits >= 0; bits-- {
-						for _, vrp := range vrpsByPrefix[netip.PrefixFrom(p.Addr(), bits).Masked()] {
-							if vrp.ASN == asn && int(vrp.MaxLength) >= p.Bits() && vrp.MaxLength > maximumLength {
-								maximumLength = vrp.MaxLength
-							}
-						}
-					}
 				case intelligence.RPKIInvalid:
 					status = 2
 				case intelligence.RPKINotFound:
 					status = 3
 				}
-				if err := emit(via3.PublicRecord{Version: 3, Kind: 9, Prefix: p, ASN: asn, RPKI: &via3.RPKIData{Status: status, MaximumLength: maximumLength}}); err != nil {
+				data := via3.RPKIData{Status: status, MaximumLength: observation.MaximumLength}
+				if status != 0 {
+					data.ObservedAt, data.ValidUntil = observation.ObservedAt.Unix(), observation.ValidUntil.Unix()
+				}
+				if err := emit(via3.PublicRecord{Version: 3, Kind: 9, Prefix: p, ASN: asn, RPKI: &data}); err != nil {
 					return err
 				}
 			}

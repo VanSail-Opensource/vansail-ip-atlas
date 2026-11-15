@@ -5,7 +5,7 @@ This contract freezes C07/C08; its executable vectors are
 a real dataset, a complete binary scanner, a hosted preview or a production release.
 
 Current `release-scope-v6` licenses original compilation contributions under CC BY-SA 4.0 while
-adding public schema 4 observed risk, verified global publisher logos, encrypted
+adding public schema 5 dated RPKI snapshots and observed risk, verified global publisher logos, encrypted
 private-state transport and automatic promotion under reviewed policy. Source terms and explicit distribution decisions
 remain individually reviewed and current; no license or policy revision activates
 a source. Source code and dependency licenses stay separate.
@@ -28,7 +28,7 @@ The descriptor has exactly these keys:
 
 | Key | Encoding |
 |---|---|
-| `format_version`, `schema_version` | Integer `3`, integer `4` respectively |
+| `format_version`, `schema_version` | Integer `3`, integer `5` respectively |
 | `codec` | `zstd-1` |
 | `mode` | Public candidates: `synthetic` or `production`; synthetic cannot be approved. Private `engineering` artifacts are never publishable. |
 | `valid_from` | Nonnegative UTC Unix seconds; evaluation clock, not an upstream clock |

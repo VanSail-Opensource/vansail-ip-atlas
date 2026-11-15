@@ -336,11 +336,16 @@ func Synthetic(ctx context.Context, clock int64) (BuiltRelease, error) {
 		return BuiltRelease{}, err
 	}
 	rpkiRow := func(asn uint32, status byte) []byte {
-		r := make([]byte, 16)
+		r := make([]byte, 32)
 		p32(r, 0, bits(20))
 		p32(r, 4, asn)
 		r[8] = status
 		r[9] = 24
+		p64(r, 16, uint64(clock-3600))
+		p64(r, 24, uint64(clock-60))
+		if status == 1 {
+			p64(r, 24, uint64(clock+3600))
+		}
 		return r
 	}
 	rpki := newShard(9, rpkiRow(13335, 1), rpkiRow(15169, 2))
@@ -455,9 +460,9 @@ func Synthetic(ctx context.Context, clock int64) (BuiltRelease, error) {
 	for i, o := range objects {
 		infos[i] = o.Info
 	}
-	descriptor := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: infos, SchemaVersion: 4, ValidFrom: clock, ValidUntil: clock + 720*3600}
+	descriptor := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: infos, SchemaVersion: 5, ValidFrom: clock, ValidUntil: clock + 720*3600}
 	id := Hash(canonical(descriptor))
-	manifest := Manifest{Codec: descriptor.Codec, FormatVersion: 3, Mode: descriptor.Mode, Objects: infos, ReleaseID: id, SchemaVersion: 4, ValidFrom: clock, ValidUntil: descriptor.ValidUntil}
+	manifest := Manifest{Codec: descriptor.Codec, FormatVersion: 3, Mode: descriptor.Mode, Objects: infos, ReleaseID: id, SchemaVersion: 5, ValidFrom: clock, ValidUntil: descriptor.ValidUntil}
 	pointer := Pointer{FormatVersion: 3, ManifestPath: "/_atlas/releases/" + id + "/manifest.json", ManifestSHA256: Hash(canonical(manifest)), ReleaseID: id}
 	return BuiltRelease{Descriptor: descriptor, Manifest: manifest, Pointer: pointer, Objects: objects}, nil
 }
@@ -576,9 +581,9 @@ func SyntheticGraph24(ctx context.Context, clock int64) (BuiltRelease, error) {
 	for i, object := range objects {
 		infos[i] = object.Info
 	}
-	descriptor := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: infos, SchemaVersion: 4, ValidFrom: clock, ValidUntil: clock + 720*3600}
+	descriptor := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: infos, SchemaVersion: 5, ValidFrom: clock, ValidUntil: clock + 720*3600}
 	id := Hash(canonical(descriptor))
-	manifest := Manifest{Codec: descriptor.Codec, FormatVersion: 3, Mode: descriptor.Mode, Objects: infos, ReleaseID: id, SchemaVersion: 4, ValidFrom: clock, ValidUntil: descriptor.ValidUntil}
+	manifest := Manifest{Codec: descriptor.Codec, FormatVersion: 3, Mode: descriptor.Mode, Objects: infos, ReleaseID: id, SchemaVersion: 5, ValidFrom: clock, ValidUntil: descriptor.ValidUntil}
 	pointer := Pointer{FormatVersion: 3, ManifestPath: "/_atlas/releases/" + id + "/manifest.json", ManifestSHA256: Hash(canonical(manifest)), ReleaseID: id}
 	return BuiltRelease{Descriptor: descriptor, Manifest: manifest, Pointer: pointer, Objects: objects}, nil
 }

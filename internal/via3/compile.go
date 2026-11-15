@@ -85,7 +85,10 @@ type ASNData struct {
 	CustomerCone, TransitDegree *uint32
 	NetworkClass, Stability     uint8
 }
-type RPKIData struct{ Status, MaximumLength uint8 }
+type RPKIData struct {
+	Status, MaximumLength  uint8
+	ObservedAt, ValidUntil int64
+}
 type OriginsData struct{ ASNs []uint32 }
 type SegmentData struct {
 	Type uint8
@@ -882,6 +885,8 @@ func CompilePartition(ctx context.Context, input PartitionInput) (CompiledPartit
 				p32(row, 4, r.ASN)
 				row[8] = r.RPKI.Status
 				row[9] = r.RPKI.MaximumLength
+				p64(row, 16, uint64(r.RPKI.ObservedAt))
+				p64(row, 24, uint64(r.RPKI.ValidUntil))
 			case 10:
 				values, err := normalizedASNs(r.Origins.ASNs)
 				if err != nil {
@@ -1166,9 +1171,9 @@ func Build(ctx context.Context, input CompileInput) (BuiltRelease, error) {
 	for i, object := range objects {
 		infos[i] = object.Info
 	}
-	descriptor := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: input.Mode, Objects: infos, SchemaVersion: 4, ValidFrom: input.Clock, ValidUntil: input.ValidUntil}
+	descriptor := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: input.Mode, Objects: infos, SchemaVersion: 5, ValidFrom: input.Clock, ValidUntil: input.ValidUntil}
 	id := Hash(canonical(descriptor))
-	manifest := Manifest{Codec: descriptor.Codec, FormatVersion: 3, Mode: descriptor.Mode, Objects: infos, ReleaseID: id, SchemaVersion: 4, ValidFrom: input.Clock, ValidUntil: input.ValidUntil}
+	manifest := Manifest{Codec: descriptor.Codec, FormatVersion: 3, Mode: descriptor.Mode, Objects: infos, ReleaseID: id, SchemaVersion: 5, ValidFrom: input.Clock, ValidUntil: input.ValidUntil}
 	pointer := Pointer{FormatVersion: 3, ManifestPath: "/_atlas/releases/" + id + "/manifest.json", ManifestSHA256: Hash(canonical(manifest)), ReleaseID: id}
 	if input.Mode == "production" {
 		if err := input.ProductionGate(ctx); err != nil {

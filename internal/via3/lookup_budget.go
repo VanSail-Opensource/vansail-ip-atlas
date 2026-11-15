@@ -5,7 +5,7 @@ import "math"
 // lookupJSONBound conservatively counts the complete canonical answer without
 // creating a second serialized copy. Fixed per-record allowances exceed all
 // field names, punctuation, booleans, nulls and finite numeric encodings in the
-// frozen schema-4 answer. Strings allow six bytes per input byte, covering JSON
+// frozen schema-5 answer. Strings allow six bytes per input byte, covering JSON
 // escapes, HTML escapes and invalid UTF-8 replacement. Audit this bound when
 // changing LookupAnswer or any nested answer schema.
 //
@@ -73,7 +73,7 @@ func lookupJSONBound(a LookupAnswer) int {
 		b.text(tier.Stability)
 	}
 	for _, rpki := range a.BGP.RPKI {
-		b.add(64)
+		b.add(128)
 		b.text(rpki.Status)
 	}
 	return b.n

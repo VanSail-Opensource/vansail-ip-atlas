@@ -6,6 +6,7 @@ import (
 	"os"
 	"reflect"
 	"testing"
+	"time"
 
 	"vansail-ip-atlas/internal/intelligence"
 	"vansail-ip-atlas/internal/via3"
@@ -57,7 +58,7 @@ func TestVerifiedGlobalVRPAbsenceSurvivesEmptySpatialBucket(t *testing.T) {
 	state.Sources[0].Records = records
 	for _, verified := range []bool{false, true} {
 		seen := 0
-		err := IntelligenceProducer(state, policy, state.EvaluatedAt, MaterializationInputs{VRPComplete: true, verifiedEmptyVRP: verified})(context.Background(), func(record via3.PublicRecord) error {
+		err := IntelligenceProducer(state, policy, state.EvaluatedAt, MaterializationInputs{VRPComplete: true, RPKIObservedAt: state.EvaluatedAt, RPKICoverageValidUntil: state.EvaluatedAt.Add(time.Hour), verifiedEmptyVRP: verified})(context.Background(), func(record via3.PublicRecord) error {
 			if record.Kind == 9 {
 				seen++
 				want := uint8(0)

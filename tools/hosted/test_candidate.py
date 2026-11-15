@@ -14,7 +14,7 @@ class CandidateTests(unittest.TestCase):
     def fixture(self, root, mode="synthetic"):
         obj = b"VIA3" + bytes(124)
         digest = sha256(obj)
-        manifest, pointer = make_manifest({"format_version": 3, "schema_version": 4,
+        manifest, pointer = make_manifest({"format_version": 3, "schema_version": 5,
             "codec": "zstd-1", "mode": mode, "valid_from": 100, "valid_until": 200,
             "objects": [{"sha256": digest, "bytes": len(obj), "kind": 1, "partition": "all"}]})
         release = parse_canonical(pointer)["release_id"]

@@ -358,9 +358,9 @@ func BuildMemoryProfile(ctx context.Context, clock int64) (BuiltRelease, MemoryP
 		infos[i] = object.Info
 		byHash[object.Info.SHA256] = object.Bytes
 	}
-	descriptor := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: infos, SchemaVersion: 4, ValidFrom: clock, ValidUntil: clock + 720*3600}
+	descriptor := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: infos, SchemaVersion: 5, ValidFrom: clock, ValidUntil: clock + 720*3600}
 	releaseID := Hash(canonical(descriptor))
-	manifest := Manifest{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: infos, ReleaseID: releaseID, SchemaVersion: 4, ValidFrom: clock, ValidUntil: descriptor.ValidUntil}
+	manifest := Manifest{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: infos, ReleaseID: releaseID, SchemaVersion: 5, ValidFrom: clock, ValidUntil: descriptor.ValidUntil}
 	pointer := Pointer{FormatVersion: 3, ManifestPath: "/_atlas/releases/" + releaseID + "/manifest.json", ManifestSHA256: Hash(canonical(manifest)), ReleaseID: releaseID}
 	out = BuiltRelease{Descriptor: descriptor, Manifest: manifest, Pointer: pointer, Objects: objects}
 	reader, err := NewRelease(canonical(pointer), canonical(manifest), func(hash string) ([]byte, error) {

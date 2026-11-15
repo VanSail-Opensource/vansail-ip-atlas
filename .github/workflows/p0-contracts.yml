@@ -40,7 +40,7 @@ jobs:
       - name: Focused contract regressions
         run: python -m unittest discover -s tools -p 'test_*.py' -v
       - name: Frozen candidate and hosted measurement regressions
-        run: python -m unittest tools.hosted.test_candidate tools.hosted.test_production_build tools.hosted.test_source_intake -v
+        run: python -m unittest discover -s tools/hosted -p 'test_*.py' -v
       - name: Actual checkpoint encryption regression
         run: |
           go install filippo.io/age/cmd/age@v1.3.0 filippo.io/age/cmd/age-keygen@v1.3.0

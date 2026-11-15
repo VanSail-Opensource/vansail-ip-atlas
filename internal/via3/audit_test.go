@@ -91,6 +91,24 @@ func auditCases() []auditCase {
 	s.set(1, prefixRows(key("203.0.113.0/24", false, 0)))
 	s.set(10, Vector(32, cell))
 	out = append(out, auditCase{"cell_score_without_confidence", s, "203.0.113.1"})
+	for _, score := range []byte{0, 17} {
+		row, unsupportedCell := make([]byte, 24), make([]byte, 32)
+		p32(row, 0, bits(21, 22))
+		p16(row, 8, 1)
+		p16(row, 14, 1)
+		row[20], row[21] = score, 1
+		unsupportedCell[0], unsupportedCell[1], unsupportedCell[8], unsupportedCell[9] = 1, 8, score, 1
+		p32(unsupportedCell, 16, None)
+		p32(unsupportedCell, 20, None)
+		s = newShard(7, row)
+		s.set(1, prefixRows(key("203.0.113.0/24", false, 0)))
+		s.set(10, Vector(32, unsupportedCell))
+		name := "cell_score_without_reasons"
+		if score == 0 {
+			name = "cell_rounded_zero_without_reasons"
+		}
+		out = append(out, auditCase{name, s, "203.0.113.1"})
+	}
 	aggregate := make([]byte, 64)
 	p32(aggregate, 0, bits(23))
 	p32(aggregate, 4, 13335)

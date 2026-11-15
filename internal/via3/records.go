@@ -410,7 +410,7 @@ func Validate(s Shard) error {
 				}
 				previous = int(c[0])
 				if c[1]&8 != 0 {
-					if c[9] == 0 {
+					if c[9] == 0 || u32(c, 4) == 0 {
 						return fail("record")
 					}
 					scored++

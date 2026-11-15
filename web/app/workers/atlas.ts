@@ -266,7 +266,7 @@ function validate(shard: Shard): void {
           const c = cells.subarray(j * 32, (j + 1) * 32)
           if (c[0]! <= previous || c[2]! > 7 || c[3]! > 2 || u32(c, 4) > 0x3fff || c[8]! > 100 || c[9]! > 3 || c[10]! > 1 || c[11] !== 0 || u32(c, 12) > 1000000 || c[24]! > 3 || !zero(c.subarray(25))) fail('record')
           previous = c[0]!
-          if (c[1]! & 8) { if (c[9] === 0) fail('record'); scored++; sum += c[8]!; minimumConfidence = Math.min(minimumConfidence,c[9]!) } else if (c[8] !== 0 || c[9] !== 0) fail('record')
+          if (c[1]! & 8) { if (c[9] === 0 || u32(c, 4) === 0) fail('record'); scored++; sum += c[8]!; minimumConfidence = Math.min(minimumConfidence,c[9]!) } else if (c[8] !== 0 || c[9] !== 0) fail('record')
           if (u32(c, 4)) positive++
           if (c[10] === 1) assessed++
           for (const [bit, position, size] of [[0, 2, 1], [1, 3, 1], [2, 4, 4], [4, 12, 4]]) if (!(c[1]! & (1 << bit!)) && !zero(c.subarray(position!, position! + size!))) fail('record')

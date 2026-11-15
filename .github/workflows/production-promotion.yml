@@ -42,7 +42,7 @@ jobs:
         id: context
         run: python tools/hosted/production_workflow.py context --kind promotion
       - name: Restore authenticated encrypted state
-        run: python tools/hosted/checkpoint.py restore --kind preview --run-id "$ATLAS_UPSTREAM_RUN"
+        run: python tools/hosted/runner_budget.py --report reports/checkpoint-restore-budget.json -- python tools/hosted/checkpoint.py restore --kind preview --run-id "$ATLAS_UPSTREAM_RUN"
       - name: Resolve original frozen candidate
         id: candidate
         run: |
@@ -71,7 +71,7 @@ jobs:
           ATLAS_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
         run: python tools/hosted/runner_budget.py -- python tools/hosted/production_workflow.py promotion
       - name: Encrypt immutable state for the next trusted job
-        run: python tools/hosted/checkpoint.py pack --kind promotion
+        run: python tools/hosted/runner_budget.py --report reports/checkpoint-pack-budget.json -- python tools/hosted/checkpoint.py pack --kind promotion
       - uses: actions/upload-artifact@v7.0.0
         with:
           name: atlas-promotion-checkpoint

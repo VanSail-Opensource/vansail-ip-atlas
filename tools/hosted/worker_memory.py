@@ -18,6 +18,7 @@ ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT))
 from tools.release_contract.contracts import ContractError
 from tools.hosted.memory_profile import verify_memory_profile
+from tools.hosted.runner_budget import cgroup, effective, require_descendant, slice_cgroup
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
@@ -34,6 +35,10 @@ def main():
             raise ContractError('worker peak proof requires official Linux runner')
         import pwd
         user=pwd.getpwuid(os.getuid()).pw_name
+        budget_slice=os.environ.get('ATLAS_RUNNER_SLICE','')
+        budget_group=slice_cgroup(budget_slice)
+        require_descendant(cgroup(),budget_group)
+        effective(budget_group)
         private=ROOT/'.atlas-private';private.mkdir(exist_ok=True,mode=0o700)
         profile=private/'worker-memory-profile.json'
         with tempfile.TemporaryFile(dir=private) as log:
@@ -51,7 +56,8 @@ def main():
             sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
         with tempfile.TemporaryDirectory(prefix='chrome-memory-',dir=ROOT/'build-private') as temporary, tempfile.TemporaryFile(dir=private) as log:
             argv=['sudo','-E','systemd-run','--scope','--quiet','--unit',unit,
-                '-p','CPUQuota=200%','-p','MemoryMax=384M','-p','MemorySwapMax=0',
+                '--slice',budget_slice,
+                '-p','CPUQuota=200%','-p','CPUQuotaPeriodSec=100ms','-p','MemoryMax=384M','-p','MemorySwapMax=0',
                 'runuser','--user',user,'--preserve-environment','--',
                 '/opt/google/chrome/chrome','--headless=new','--no-sandbox','--disable-dev-shm-usage',
                 '--disable-background-networking','--no-first-run','--no-default-browser-check',
@@ -70,6 +76,7 @@ def main():
             group=subprocess.check_output(['systemctl','show',unit+'.scope','--property=ControlGroup','--value'],text=True).strip()
             if not group.startswith('/') or '..' in group.split('/'): raise ContractError('invalid Chrome cgroup')
             group_root=Path('/sys/fs/cgroup')/group.lstrip('/')
+            require_descendant(group_root,budget_group)
             if (group_root/'memory.max').read_text().strip()!=str(384*1024**2):
                 raise ContractError('Chrome memory limit unavailable')
             environment={**os.environ,'ATLAS_MEMORY_CDP':endpoint,'ATLAS_MEMORY_PUBLIC':str(args.public.resolve()),
@@ -85,7 +92,7 @@ def main():
                           browser=cases['browser'],worker_sha256=cases['worker_sha256'])
             if not 0<report['peak_bytes']<384*1024**2:
                 raise ContractError('worker memory gate failed')
-    except (ContractError,OSError,ValueError,KeyError,subprocess.SubprocessError):
+    except (ContractError,OSError,RuntimeError,ValueError,KeyError,subprocess.SubprocessError):
         report['errors'].append('worst-case-worker-memory-proof-failed')
     finally:
         if process is not None:

@@ -61,6 +61,11 @@ report sampling blind spots. Linux `resource.getrusage(RUSAGE_CHILDREN)` alone i
 simultaneous process-group peak RSS. Set Go memory target to 5120 MiB but enforce the
 whole-group RSS abort independently; `GOMEMLIMIT` is not an RSS bound.
 
+The runner and independently measured Chrome scope share one transient systemd
+slice. Its aggregate CPU, memory and swap limits apply before task processes
+start; both scopes must prove their membership. The runner records that slice's
+peak before removing it, so the browser cannot escape the whole-task envelope.
+
 Record physical disk high-water and free-space low-water, including checkout,
 toolchains, dependency stores, downloads, expansion, sort runs, eligible/private
 caches, current/previous objects and upload staging. Scratch and output ceilings
@@ -68,6 +73,9 @@ are not independent reservations within 14 GiB. Abort before physical free space
 falls below 1024 MiB and before either RSS/scratch ceiling. Polling is a safety
 signal, not permission to allocate an unbounded archive between samples. Stream
 expanded inputs, cap concurrent decoders and reclaim sort scratch before packaging.
+Temporary files and package caches stay in the accounted workspace. Installed
+stable Chrome under `/opt/google/chrome` also counts toward the task storage
+ceiling. Count hardlinked package files once by inode, as physical allocation does.
 
 ## Lookup and browser protocol
 

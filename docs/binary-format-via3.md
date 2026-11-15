@@ -263,6 +263,8 @@ references require kind 4. Cells within a `/24` range sort by unique suffix.
 Absent suffixes stay unknown. Positive count counts nonzero reason flags;
 assessed count counts cells with complete_assessment=1; scored count independently
 counts score presence. No source/family counts exist.
+A scored cell requires nonzero supported reason flags and confidence, including
+when its positive observed risk rounds to score zero.
 
 ## Indexing, precedence and determinism
 

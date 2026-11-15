@@ -15,11 +15,14 @@ runs:
         node-version: '26.13.1'
     - shell: bash
       run: |
-        mkdir -p build-private/bin build-private/cache reports
+        mkdir -p build-private/bin build-private/cache build-private/tmp reports
         echo "GOCACHE=$GITHUB_WORKSPACE/build-private/cache/go-build" >> "$GITHUB_ENV"
         echo "GOMODCACHE=$GITHUB_WORKSPACE/build-private/cache/go-mod" >> "$GITHUB_ENV"
         echo "npm_config_cache=$GITHUB_WORKSPACE/build-private/cache/npm" >> "$GITHUB_ENV"
         echo "PIP_CACHE_DIR=$GITHUB_WORKSPACE/build-private/cache/pip" >> "$GITHUB_ENV"
+        echo "npm_config_store_dir=$GITHUB_WORKSPACE/build-private/cache/pnpm" >> "$GITHUB_ENV"
+        echo "XDG_CACHE_HOME=$GITHUB_WORKSPACE/build-private/cache/xdg" >> "$GITHUB_ENV"
+        echo "TMPDIR=$GITHUB_WORKSPACE/build-private/tmp" >> "$GITHUB_ENV"
         echo "$GITHUB_WORKSPACE/build-private/bin" >> "$GITHUB_PATH"
     - shell: bash
       run: |

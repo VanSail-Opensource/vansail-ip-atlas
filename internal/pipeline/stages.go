@@ -25,6 +25,8 @@ const (
 type Counters struct {
 	InputRecords, UniqueRecords, SortRuns, Partitions, BinaryByteRepacks uint64
 	SortBufferPeak, PartitionBufferPeak, OutputBytes, ScratchPeak        uint64
+	// ObjectsByKind[kind-1] includes all object kinds, including dictionary 14.
+	ObjectsByKind [14]uint64
 }
 
 func (c *compiler) observeBuildStage(stage Stage) func(bool) {
@@ -32,6 +34,12 @@ func (c *compiler) observeBuildStage(stage Stage) func(bool) {
 	return func(ok bool) {
 		finish(ok)
 		if observe := c.options.ObserveCounters; observe != nil {
+			var objectsByKind [14]uint64
+			for _, object := range c.objects {
+				if object.Kind >= 1 && object.Kind <= 14 {
+					objectsByKind[object.Kind-1]++
+				}
+			}
 			// Build owns these counters and invokes observers synchronously. The
 			// observer receives no mutable reference to compiler state or output.
 			observe(c.ctx, stage, Counters{
@@ -44,6 +52,7 @@ func (c *compiler) observeBuildStage(stage Stage) func(bool) {
 				PartitionBufferPeak: c.stats.PartitionBufferPeak,
 				OutputBytes:         c.stats.OutputBytes,
 				ScratchPeak:         c.stats.ScratchPeak,
+				ObjectsByKind:       objectsByKind,
 			})
 		}
 	}

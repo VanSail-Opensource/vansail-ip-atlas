@@ -207,7 +207,7 @@ class CompileCounterDiagnosticsTests(unittest.TestCase):
         return {'phase': 'pipeline-sort', 'input_records': 123, 'unique_records': 100,
                 'sort_runs': 17, 'partitions': 2, 'binary_byte_repacks': 3,
                 'sort_buffer_peak': 4096, 'partition_buffer_peak': 1024,
-                'output_bytes': 2048, 'scratch_peak': 8192, **changes}
+                'output_bytes': 2048, 'scratch_peak': 8192, 'objects_by_kind': [0] * 14, **changes}
 
     def encode(self, row):
         return b'ATLAS_COMPILE_COUNTERS ' + json.dumps(row).encode() + b'\n'
@@ -220,6 +220,38 @@ class CompileCounterDiagnosticsTests(unittest.TestCase):
             path = Path(directory) / 'stage.log'
             path.write_bytes(b''.join(map(self.encode, rows)))
             self.assertEqual(workflow.compile_counter_diagnostics(path, 0), rows)
+
+    def test_object_vector_accepts_exact_total_and_each_kind_boundary(self):
+        vectors = [[0] * 14, [17, 0, 18482] + [0] * 11, [1423] * 13 + [0]]
+        for kind in range(14):
+            vector = [0] * 14
+            vector[kind] = 18499
+            vectors.append(vector)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'stage.log'
+            for vector in vectors:
+                with self.subTest(vector=vector):
+                    row = self.row(objects_by_kind=vector)
+                    path.write_bytes(self.encode(row))
+                    self.assertEqual(workflow.compile_counter_diagnostics(path, 0), [row])
+
+    def test_object_vector_rejects_wrong_shape_types_range_and_total(self):
+        invalid = [None, 0, True, 'PRIVATE_SOURCE', {}, [], [0] * 13, [0] * 15,
+                   [18499, 1] + [0] * 12, [1424] * 13 + [0]]
+        for kind in range(14):
+            for value in (-1, 18500, True, False, 1.0, 'PRIVATE_SOURCE', None, [], {}, [0]):
+                vector = [0] * 14
+                vector[kind] = value
+                invalid.append(vector)
+        rows = [self.row(objects_by_kind=vector) for vector in invalid]
+        rows.append({key: value for key, value in self.row().items() if key != 'objects_by_kind'})
+        rows.append(self.row(objects_by_kind=[0] * 14, kind_names=['PRIVATE_SOURCE']))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'stage.log'
+            for row in rows:
+                with self.subTest(row=row):
+                    path.write_bytes(self.encode(row) + self.encode(self.row()))
+                    self.assertEqual(workflow.compile_counter_diagnostics(path, 0), [self.row()])
 
     def test_invalid_types_ranges_schema_and_private_fields_are_omitted(self):
         invalid = [[], None, True, 1, 'PRIVATE_SOURCE', {},
@@ -239,7 +271,8 @@ class CompileCounterDiagnosticsTests(unittest.TestCase):
     def test_duplicate_keys_trailing_data_and_malformed_frames_are_omitted(self):
         encoded = json.dumps(self.row()).encode()
         malformed = [b'{"phase":"PRIVATE_SOURCE",' + encoded[1:],
-                     b'{"sort_runs":0,' + encoded[1:], encoded + b' {}', encoded + b' PRIVATE_SOURCE',
+                     b'{"sort_runs":0,' + encoded[1:], b'{"objects_by_kind":[],' + encoded[1:],
+                     encoded + b' {}', encoded + b' PRIVATE_SOURCE',
                      encoded.replace(b'"phase"', b'"\xffphase"'), b'{', b'[' * 1000,
                      b' ' * 1024 + encoded]
         with tempfile.TemporaryDirectory() as directory:

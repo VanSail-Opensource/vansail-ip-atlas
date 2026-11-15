@@ -20,6 +20,7 @@ type compileCounterRecord struct {
 	PartitionBufferPeak uint64       `json:"partition_buffer_peak"`
 	OutputBytes         uint64       `json:"output_bytes"`
 	ScratchPeak         uint64       `json:"scratch_peak"`
+	ObjectsByKind       [14]uint64   `json:"objects_by_kind"`
 }
 
 func reportPipelineCounters(ctx context.Context, stage pipeline.Stage, counters pipeline.Counters) {
@@ -50,11 +51,19 @@ func reportPipelineCounters(ctx context.Context, stage pipeline.Stage, counters 
 			return
 		}
 	}
+	var objects uint64
+	for _, count := range counters.ObjectsByKind {
+		if count > 18499-objects {
+			return
+		}
+		objects += count
+	}
 	record := compileCounterRecord{
 		Phase: phase, InputRecords: counters.InputRecords, UniqueRecords: counters.UniqueRecords,
 		SortRuns: counters.SortRuns, Partitions: counters.Partitions, BinaryByteRepacks: counters.BinaryByteRepacks,
 		SortBufferPeak: counters.SortBufferPeak, PartitionBufferPeak: counters.PartitionBufferPeak,
 		OutputBytes: counters.OutputBytes, ScratchPeak: counters.ScratchPeak,
+		ObjectsByKind: counters.ObjectsByKind,
 	}
 	logger.mu.Lock()
 	defer logger.mu.Unlock()

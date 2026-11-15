@@ -90,7 +90,8 @@ class ActualLookupGateTests(unittest.TestCase):
             row = {'phase': 'pipeline-partition', 'input_records': 200, 'unique_records': 150,
                    'sort_runs': 17, 'partitions': 4, 'binary_byte_repacks': 2,
                    'sort_buffer_peak': 4096, 'partition_buffer_peak': 1024,
-                   'output_bytes': 2048, 'scratch_peak': 8192}
+                   'output_bytes': 2048, 'scratch_peak': 8192,
+                   'objects_by_kind': [0, 0, 0, 18498] + [0] * 9 + [1]}
             encode = lambda value: 'ATLAS_COMPILE_COUNTERS ' + json.dumps(value) + '\n'
             log.write_text(encode({**row, 'phase': 'pipeline-publish'}))
             def run(_):

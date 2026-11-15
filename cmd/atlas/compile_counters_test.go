@@ -18,7 +18,7 @@ func TestCompileCountersAreClosedAndSurviveCancellation(t *testing.T) {
 	cancel()
 	counters := pipeline.Counters{InputRecords: 1, UniqueRecords: 2, SortRuns: 3,
 		Partitions: 4, BinaryByteRepacks: 5, SortBufferPeak: 6, PartitionBufferPeak: 7,
-		OutputBytes: 8, ScratchPeak: 9}
+		OutputBytes: 8, ScratchPeak: 9, ObjectsByKind: [14]uint64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}}
 	stages := []pipeline.Stage{pipeline.StageSort, pipeline.StageMerge, pipeline.StageClassify, pipeline.StagePartition, pipeline.StagePublish}
 	labels := []compilePhase{phaseSort, phaseMerge, phaseClassify, phasePartition, phasePublish}
 	for _, stage := range stages {
@@ -39,7 +39,8 @@ func TestCompileCountersAreClosedAndSurviveCancellation(t *testing.T) {
 		}
 		want := map[string]any{"phase": string(labels[i]), "input_records": float64(1), "unique_records": float64(2),
 			"sort_runs": float64(3), "partitions": float64(4), "binary_byte_repacks": float64(5),
-			"sort_buffer_peak": float64(6), "partition_buffer_peak": float64(7), "output_bytes": float64(8), "scratch_peak": float64(9)}
+			"sort_buffer_peak": float64(6), "partition_buffer_peak": float64(7), "output_bytes": float64(8), "scratch_peak": float64(9),
+			"objects_by_kind": []any{float64(1), float64(2), float64(3), float64(4), float64(5), float64(6), float64(7), float64(8), float64(9), float64(10), float64(11), float64(12), float64(13), float64(14)}}
 		if !reflect.DeepEqual(row, want) {
 			t.Fatal("counter record contains nonfixed keys or values")
 		}
@@ -55,11 +56,22 @@ func TestCompileCountersAreOptionalBoundedAndIndependentOfPhases(t *testing.T) {
 	}
 	for field := 0; field < reflect.TypeFor[pipeline.Counters]().NumField(); field++ {
 		var counters pipeline.Counters
-		reflect.ValueOf(&counters).Elem().Field(field).SetUint(9007199254740992)
+		value := reflect.ValueOf(&counters).Elem().Field(field)
+		if value.Kind() != reflect.Uint64 {
+			continue
+		}
+		value.SetUint(9007199254740992)
 		reportPipelineCounters(ctx, pipeline.StageSort, counters)
+	}
+	for _, counts := range [][14]uint64{{18499, 1}, {0, 18500}, {^uint64(0)}} {
+		reportPipelineCounters(ctx, pipeline.StageSort, pipeline.Counters{ObjectsByKind: counts})
 	}
 	if output.Len() != 0 {
 		t.Fatal("unknown stage or unsafe integer reached diagnostics")
+	}
+	reportPipelineCounters(ctx, pipeline.StageSort, pipeline.Counters{ObjectsByKind: [14]uint64{18499}})
+	if !strings.Contains(output.String(), `"objects_by_kind":[18499,`) {
+		t.Fatal("exact object limit was omitted")
 	}
 	for i := 0; i < 100; i++ {
 		reportPipelineCounters(ctx, pipeline.StageSort, pipeline.Counters{})

@@ -90,10 +90,13 @@ def compile_counter_diagnostics(path, start):
             if not line.startswith(prefix) or len(line)>1024: continue
             try: row=json.loads(line[len(prefix):],object_pairs_hook=unique_object)
             except (ValueError,UnicodeDecodeError,RecursionError): continue
-            if (type(row) is not dict or set(row)!=COMPILE_COUNTER_FIELDS|{'phase'}
+            if (type(row) is not dict or set(row)!=COMPILE_COUNTER_FIELDS|{'phase','objects_by_kind'}
                     or type(row['phase']) is not str or row['phase'] not in COMPILE_COUNTER_PHASES
                     or any(type(row[key]) is not int or not 0<=row[key]<=2**53-1
-                           for key in COMPILE_COUNTER_FIELDS)):
+                           for key in COMPILE_COUNTER_FIELDS)
+                    or type(row['objects_by_kind']) is not list or len(row['objects_by_kind'])!=14
+                    or any(type(value) is not int or not 0<=value<=18499 for value in row['objects_by_kind'])
+                    or sum(row['objects_by_kind'])>18499):
                 continue
             records.append(row)
             if len(records)>8: return []

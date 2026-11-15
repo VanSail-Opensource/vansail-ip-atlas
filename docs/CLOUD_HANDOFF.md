@@ -210,6 +210,14 @@ The PR remains unmerged. Repeated semantic source scans are being optimized
 without removing independent byte/authentication or current-time checks.
 The integration driver now retains failed-compile elapsed time and accepts only
 bounded, fixed-schema compiler phase diagnostics; raw child output stays private.
+Optional `ATLAS_COMPILE_COUNTERS` snapshots report nine aggregate numeric work
+counters at sort, merge, classify, partition and publication boundaries, including
+failed stages. Their `objects_by_kind` array has exactly fourteen entries for
+VIA3 kinds 1–14, including the shared label dictionary (kind 14); ASN aggregates
+and prefix pages both count as kind 8. Counts come from the current object
+registry, total at most 18,499, and carry no object paths or source identifiers.
+The driver accepts only this closed bounded schema. These observations never
+approve a candidate or relax a release gate.
 
 The follow-up uses process-local verified-state and qualification handles to
 reduce fourteen full normalized semantic scans outside materialization to three.

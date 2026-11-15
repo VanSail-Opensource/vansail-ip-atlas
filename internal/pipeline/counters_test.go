@@ -21,6 +21,7 @@ func TestBuildCountersMirrorWorkWithoutChangingRelease(t *testing.T) {
 	options.ObserveCounters = func(_ context.Context, stage Stage, counters Counters) {
 		seen = append(seen, counterObservation{stage, counters})
 		counters.InputRecords = 0 // This independent copy cannot change Build.
+		counters.ObjectsByKind[0] = ^uint64(0)
 	}
 	records := fusedFixture()
 	records = append(records, records[5])
@@ -43,11 +44,20 @@ func TestBuildCountersMirrorWorkWithoutChangingRelease(t *testing.T) {
 		t.Fatal("snapshot did not describe the work completed at its boundary")
 	}
 	stats := candidate.Stats
-	want := Counters{uint64(stats.InputRecords), uint64(stats.UniqueRecords), uint64(stats.SortRuns),
-		uint64(stats.Partitions), uint64(stats.BinaryByteRepacks), stats.SortBufferPeak,
-		stats.PartitionBufferPeak, stats.OutputBytes, stats.ScratchPeak}
+	var objectsByKind [14]uint64
+	for _, object := range candidate.Manifest.Objects {
+		objectsByKind[object.Kind-1]++
+	}
+	want := Counters{InputRecords: uint64(stats.InputRecords), UniqueRecords: uint64(stats.UniqueRecords),
+		SortRuns: uint64(stats.SortRuns), Partitions: uint64(stats.Partitions),
+		BinaryByteRepacks: uint64(stats.BinaryByteRepacks), SortBufferPeak: stats.SortBufferPeak,
+		PartitionBufferPeak: stats.PartitionBufferPeak, OutputBytes: stats.OutputBytes,
+		ScratchPeak: stats.ScratchPeak, ObjectsByKind: objectsByKind}
 	if seen[len(seen)-1].counters != want {
 		t.Fatal("final counters differ from the completed compiler statistics")
+	}
+	if seen[2].counters.ObjectsByKind != ([14]uint64{}) || objectsByKind[0] == 0 || objectsByKind[13] == 0 {
+		t.Fatal("object kinds were not taken from the current registry at each boundary")
 	}
 	other, err := Build(context.Background(), testOptions(t), producer(records))
 	if err != nil || !reflect.DeepEqual(candidate.Pointer, other.Pointer) {
@@ -79,6 +89,27 @@ func TestBuildCountersReportCanceledWorkWithoutPublishing(t *testing.T) {
 	}
 	if _, err := os.Stat(options.Output); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("failed output was published")
+	}
+	assertClean(t, options.Workspace)
+}
+
+func TestBuildCountersDescribeObjectBudgetFailure(t *testing.T) {
+	options := testOptions(t)
+	options.Limits.MaxObjects = 2
+	var final counterObservation
+	options.ObserveCounters = func(_ context.Context, stage Stage, counters Counters) {
+		final = counterObservation{stage, counters}
+	}
+	_, err := Build(context.Background(), options, producer(fusedFixture()))
+	var objects uint64
+	for _, count := range final.counters.ObjectsByKind {
+		objects += count
+	}
+	if via3.ErrorCode(err) != "partition_budget" || final.stage != StagePartition || objects != 2 {
+		t.Fatalf("object-cap failure did not retain its bounded kind distribution: %v, %+v", err, final)
+	}
+	if _, err := os.Stat(options.Output); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("object-budget diagnostics published failed output")
 	}
 	assertClean(t, options.Workspace)
 }

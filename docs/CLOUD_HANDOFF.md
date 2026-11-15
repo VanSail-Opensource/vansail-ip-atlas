@@ -209,6 +209,18 @@ without removing independent byte/authentication or current-time checks.
 The integration driver now retains failed-compile elapsed time and accepts only
 bounded, fixed-schema compiler phase diagnostics; raw child output stays private.
 
+The follow-up uses process-local verified-state and qualification handles to
+reduce fourteen full normalized semantic scans outside materialization to three.
+Every reused boundary still authenticates the actual objects, state, seal and
+key; compile controls, rights, deadlines, fixtures and exact archived bindings
+are rechecked. Initial semantic validation and independent current-time
+verification remain strict. Tier-1 failure history ordering is preserved.
+Independent review, focused race tests, full Go tests/vet, 136 contract tests
+and 44 hosted-workflow tests passed. All ten observed fixtures were rerun and
+recertified against implementation hash
+`239240293b7acfadaccaf703d0cbd07a83caf8c091e63523bf7edfc4b598f7e5`.
+The next hosted actual-data measurement remains required before merge.
+
 ## Resume next
 
 1. Verify the branch and clean checkout. Run strict schemas, Go tests/vet, Python

@@ -182,6 +182,21 @@ def reviewed_distribution_decision(rights):
             and bool(rights["review_basis"].strip()))
 
 
+def caida_discovery_supported(source):
+    index = "https://publicdata.caida.org/datasets/as-relationships/serial-2/"
+    download = source.get("download", {})
+    return (source.get("category") == "bgp" and source.get("scope") == "asn_edge"
+            and source.get("coverage") == {"kind": "mapping", "scope": "asn_edge"}
+            and source.get("parser") == {"id": "caida-relationships", "schema": "asn-asn-relation-pipe-v1", "version": 1}
+            and download.get("url") is None and not download.get("urls") and download.get("format") == "text-bz2"
+            and source.get("discovery") == {"mode": "latest-timestamped-asset", "index_url": index,
+                "filename_pattern": r"^[0-9]{8}\.as-rel2\.txt\.bz2$", "ordering": "filename-date-desc-then-url-bytes",
+                "requires_exact_file": True, "no_guessing": True}
+            and source.get("publication_proof") == {"kind": "embedded", "locator": index, "field": "topology_observation_date"}
+            and source.get("public_fields") == ["as_relationships"]
+            and source.get("field_mappings") == {"as_relationship": "as_relationships"})
+
+
 def static_issues(source, root: Path):
     issues = fixture_issues(source, root)
     rights, proof = source["license"], source["publication_proof"]
@@ -222,7 +237,7 @@ def static_issues(source, root: Path):
         and parser.get("id") == "city-range-csv" and parser.get("schema") == "dbip-city-eight-columns-v1"
         and download.get("format") == "csv-gz" and proof.get("kind") == "snapshot_metadata"
         and proof.get("locator") == discovery.get("index_url") and proof.get("field") == "csv.sha1-md5.month")
-    if not (download.get("url") or download.get("urls") or dynamic_dbip) or download.get("format", "unknown") == "unknown":
+    if not (download.get("url") or download.get("urls") or dynamic_dbip or caida_discovery_supported(source)) or download.get("format", "unknown") == "unknown":
         issues.append("exact_asset_and_parser_required")
     return sorted(set(issues))
 

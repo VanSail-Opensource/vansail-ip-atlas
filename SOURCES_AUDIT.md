@@ -2,12 +2,14 @@
 
 ## Current shortlist - 2026-11-15
 
-The v6 release catalog contains ten reviewed active intake candidates. The four
-unqualified routing entries were removed after the user explicitly approved
-verified-data release with unavailable routing facts shown as unknown. Active permits attempted intake; it is
-not a current authenticated source receipt or production approval. Public data
-uses release-scope-v6, observed risk and CC BY-SA 4.0 compiled-data distribution.
-There is no per-IP source catalog or public provenance section.
+The v6 catalog contains fifteen entries: ten active intake candidates and five
+reviewed replacements that remain `candidate` during final integration. Active
+permits attempted intake; it is not a current authenticated receipt or production
+approval. Public data uses release-scope-v6 and observed risk. Original compilation
+contributions retain CC BY-SA 4.0; upstream material retains its recorded terms,
+including explicit user-authorized educational-use decisions where compatible
+redistribution permission is unresolved. There is no per-IP source catalog or
+public provenance section.
 
 | Entries | Reviewed meaning and rights | Publication/parser evidence |
 |---|---|---|
@@ -31,19 +33,28 @@ and [data notice](https://metrics.torproject.org/about.html). Ipverse's
 [license/category documentation](https://github.com/ipverse/as-metadata/blob/master/README.md)
 makes categories contextual defaults; networkRole never establishes Tier-1.
 
-## Excluded routing sources; qualification remains unresolved
+## Reviewed replacement candidates — not yet activated
 
-| Candidate | Remaining conditions |
+| Candidate | Observed complete payload and exact integration boundary |
 |---|---|
-| ripe-mrt-rrc01 | Current commercial-use/CC BY-SA compatibility review; required logo/link/acknowledgement legal assets; exact current full RIB, capture clocks and observed fixture. |
-| routeviews-rib | Explicit current data redistribution grant review; independent complete current RIB and capture/schema certificate within shared MRT budget. |
-| caida-asrel2 | Public acceptable-use citation/date/publication-reporting review and CC BY-SA compatibility. No external notification sent. Exact serial2 body and publication binding; filename date alone is not proof. |
-| rpki-client-vrps | Actual RPKI data/relying-party redistribution rights, not software license alone. Complete current JSON/expiry/completeness certificate. Prior payload had approximately 101 minutes validity: measure headroom without omitting valid short-lived authorizations. |
+| routeviews-wide-rib | Complete dual-stack 2026-11-15 12:00 RIB: 4,010,726 route observations, 294,930,007 decoded bytes. Explicit scheduled archive rotation retains the embedded frame clocks; unsupported origins keep empty LPM boundaries. RouteViews is one original path family. CC BY 4.0 data grant, publisher boilerplate and exact logo are retained; additional terms and logo restrictions use the recorded educational decision. |
+| ripe-mrt-rrc18 | Complete dual-stack 2026-11-15 08:00 RIB: 1,351,173 route observations, 126,487,987 decoded bytes. Same finite full-snapshot, EOF and capture-clock requirements, a distinct original RIS family, and exact reviewed scheduled rotation. Required RIPE NCC boilerplate, link and publisher PNG are retained; revocation and general-logo conditions remain accurately recorded. |
+| caida-asrel2 | Complete serial-2 body: 680,178 inferred directed relationships. Exact monthly index selection and the earliest dated topology input bind freshness; the observed dates span November 1–5. Filename/HTTP time never renews age. Data derives from RouteViews/RIS and looking-glass inputs, not another independent path vote. Input-clique annotations are not Tier-1 membership. Public AUA/citation/reporting conditions remain recorded under the educational decision; no publisher notification was sent. |
+| rpki-client-vrps | Complete original 1,034,924-row publisher snapshot with every VRP and original expiry retained. Validation uses the payload-bound publisher build time. Schema-5 results expose observation and deadline, keeping expired results as historical snapshot observations. Source freshness still ends at original publication plus 720h. The 21-row fixture retains original metadata totals and emits no runtime proof. Underlying trust-anchor terms are recorded separately from the software license. |
+| ffraud-ip | Complete 1,651,503-row original CSV bound to its immutable file and same-commit metadata; two nonpublic literals are excluded. The earlier generated_utc is 2026-11-03T21:30:44Z, not a new download clock. Eight observed categories yield six distinct threat reasons in this capture, with no phishing/fraud rows. One correlated original family; scores/counts never become calibrated probability or independent votes. The full original MIT data notice is included in the global credit. |
 
-These feeds are excluded from the production catalog. Their facts remain unknown;
-no origin, relationship, RPKI not-found result or Tier-1 membership is inferred.
-Reintroduction requires the rights, full-payload and fixture conditions above.
-Parser implementation and source labels cannot substitute for that qualification.
+These five entries have observed parser fixtures and reviewed global notices;
+they remain candidates until final implementation-bound certification and
+explicit activation. Current production eligibility still requires complete
+fresh input bytes, authenticated receipts, semantic validation and every measured
+gate. Source status does not fabricate global routing coverage, negative RPKI
+coverage, historical Tier-1 stability, or missing detection observations.
+
+MRT downloads share the unchanged 1 GiB compressed budget and validate complete
+archives within 3 GiB decoded per source. WIDE/RRC18 rotation permits a 30-minute
+publication lag and exactly one previous archive only after HTTP 404. Corrupt,
+truncated, stale or mismatched successful responses cannot fall back. Actual
+archive URLs and clocks remain sealed privately and are preserved by replay.
 
 ## Removed production entries; retained independent tests
 

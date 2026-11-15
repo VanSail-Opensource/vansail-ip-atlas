@@ -15,13 +15,13 @@ Each dataset needs an explicit reviewed source-use decision, actual publication
 proof and an observed parser fixture. The product license does not approve a
 source or replace upstream terms. V5 additionally permits required
 publisher logos in the single global credit display, with no per-IP attribution.
-The source config is schema3/contract revision4, public VIA3 schema5, private
+The source config is schema3/contract revision5, public VIA3 schema5, private
 normalized records schema3. Credit documents use format2 and their index format1.
 The private capability report remains schema3 with release-scope-v6.
 
 ## Static Admission States
 
-- `candidate`: cataloged but not fixture-tested.
+- `candidate`: cataloged but not enabled for intake; an observed fixture may already be tested while exact-code certification or final integration remains pending.
 - `fixture_tested`: observed payload and parser fixture passed.
 - `rights_approved`: a recorded source-use decision permits project admission under this policy. This milestone does not assert a publisher grant, attribution compliance or fixture certification.
 - `active`: fixture-tested and rights-approved, with controls permitting attempted intake; current build eligibility still requires actual runtime proof.
@@ -29,10 +29,7 @@ The private capability report remains schema3 with release-scope-v6.
 
 Runtime state is not stored in YAML. A source may be statically `active` but dynamically `stale`, `missing`, `invalid`, or `quarantined`.
 
-The November 15 v6 release catalog has ten active intake candidates; four
-unqualified routing entries were removed. Active entries are the eight previously
-reviewed sources plus timestamped Tor exits and contextual Ipverse ASN usage.
-Static status cannot establish current production coverage. See SOURCES_AUDIT.md.
+The November 15 v6 release catalog has fifteen entries: ten active intake candidates and five reviewed replacements still marked `candidate`. The replacements are complete WIDE and RRC18 collector snapshots, CAIDA serial-2 relationships, complete RPKI publisher snapshots, and FFraud observations. Their exact observed fixtures and required global legal assets are present; implementation-bound certification is refreshed only after the integrated Go code is frozen. No candidate contributes facts, coverage or credits until activated and independently admitted from complete source bytes. Static status cannot establish current production coverage. See SOURCES_AUDIT.md.
 
 ## Required Source Fields
 

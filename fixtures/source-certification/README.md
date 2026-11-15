@@ -82,3 +82,13 @@ does not establish Tier-1 membership. Tests cover every observed row-provenance
 combination, original relationship direction, bounded monthly discovery and full
 archive EOF. This candidate fixture has no certification ledger entry and does
 not activate the source.
+
+`routeviews-wide-20261115-1200.mrt.bz2` and
+`ris-rrc18-20261115-0800.mrt.gz` retain each observed capture's complete original
+peer table and sixteen unchanged RIB frames (eight per address family). Their
+bounded envelopes are recompressed; frame contents and capture timestamps are
+unchanged. Full original payloads were separately consumed through archive EOF.
+These excerpts certify schema only, not global route completeness or historical
+Tier-1 stability. Adjacent RouteViews and RIPE notices retain original terms and
+the educational decision. Exact publisher logo bytes are stored by SHA-256 under
+`logos/`; the RouteViews density chunk is preserved without altering pixels.

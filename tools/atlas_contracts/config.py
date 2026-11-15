@@ -251,7 +251,8 @@ def validate_sources(config):
     if bgp["max_mrt_sources_per_run"] < 2:
         raise ContractError("cold build cannot acquire two independent path families")
     caida = by_id.get("caida-asrel2")
-    if caida is not None and (caida["download"].get("url") is not None or not isinstance(caida.get("discovery"), dict)):
+    from .policy import caida_discovery_supported
+    if caida is not None and not caida_discovery_supported(caida):
         raise ContractError("CAIDA requires deterministic current-snapshot discovery")
 
 

@@ -376,11 +376,27 @@ WIDE/RRC18 complete-RIB rotation are being integrated independently. All new
 sources still need final exact-code certification, actual intake and production
 capacity gates before inclusion. No publisher contact occurred.
 
-Cold compiler optimization continues in `/tmp/vansail-private-frame` and
-`/tmp/vansail-spatial-performance`. A separate completed-run benchmark matrix is
-being implemented to execute all fifteen original build scenarios in parallel
-without weakening timers, budgets, independent run/artifact binding or promotion
-checks. Do not confuse that orchestration repair with a measured runtime pass.
+The compiler now encodes closed private run metadata without repeated JSON
+reflection and reuses owned canonical record frames during materialization.
+Every input walk retains chunk integrity, strict JSON decoding and semantic
+validation. Actual logical byte limits and legacy imported-record behavior remain.
+The combined local 400,200-record diagnostic took 24.797 seconds, versus 35.065
+seconds before these changes, with identical 602,000 public records, 49 partitions
+and 1,745,029 output bytes. This is not actual hosted capacity acceptance.
+
+All fifteen original production benchmark cases now run in separate hosted jobs.
+A checked dispatch relay resets GitHub's workflow-run depth; a completed-run join
+independently binds all fifteen successful jobs and digest-verified artifacts to
+the exact candidate, configuration, state and original limits. Preview and
+promotion independently verify the joined evidence and original frozen candidate.
+No runtime, workload, resource or lookup gate changed.
+
+Ten observed parser fixtures were rerun and recertified at
+`2026-11-15T14:07:02Z` against internal implementation hash
+`63d9ddf18af054428cd1feb45e08ca8bbd170da0889859373cbf2f5fc203029f`.
+The next exact-head hosted run must still compile the actual full inputs and pass
+the individual 100,000-lookup p95 ceiling before merge. Separate work is reducing
+repeated verified Tier-1 discovery scans for the unchanged-build runtime gate.
 
 ## Resume next
 
@@ -395,8 +411,9 @@ checks. Do not confuse that orchestration repair with a measured runtime pass.
 3. Review Linux cgroup, tool/cache accounting, checkpoint transport, runtime
    source intake and all automatic stage transitions. Checkpoints carry no raw
    quarantine or logs. Keep source-rich diagnostics out of public artifacts.
-4. Removed routing feeds remain excluded. Future reintroduction needs compatible
-   reviewed rights and exact complete-payload/parser/publication proofs. Do not
+4. Removed routing feeds remain excluded on this release branch. Reintroduction
+   needs the user's reviewed educational-use decision, actual upstream notices,
+   and exact complete-payload/parser/publication proofs. Do not
    invent approval or contact publishers without explicit instruction. Unknown
    routing is approved for this release; all pages and honest unknown states stay.
 5. The real compiler reuses authenticated materializations only when state,

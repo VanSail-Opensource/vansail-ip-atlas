@@ -1,0 +1,1 @@
+{"automatic_promotion":true,"contract_revision":1,"maximum_checkpoint_age_seconds":604800,"maximum_rollback_age_seconds":172800,"repository":"VanSail-Opensource/vansail-ip-atlas","require_all_measured_gates":true,"require_current_source_qualification":true,"require_exact_head_integration":true,"require_protected_main":true,"scope":"release-scope-v5"}

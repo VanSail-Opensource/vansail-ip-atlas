@@ -239,12 +239,10 @@ func Synthetic(ctx context.Context, clock int64) (BuiltRelease, error) {
 	}
 	qualityRow := func(score byte, reasons uint32, contributions [4]uint32, assessed bool) []byte {
 		r := make([]byte, 32)
-		mask := bits(10, 11, 12, 13, 14)
+		mask := bits(9, 10, 11, 12, 13, 14)
+		r[8], r[9], r[10] = 1, score, 2
 		if assessed {
-			mask |= bits(9)
-			r[8] = 1
-			r[9] = score
-			r[10] = 2
+			r[11] = 31
 		}
 		p32(r, 0, mask)
 		p32(r, 4, reasons)
@@ -253,9 +251,9 @@ func Synthetic(ctx context.Context, clock int64) (BuiltRelease, error) {
 		}
 		return r
 	}
-	quality6 := qualityRow(0, bits(9), [4]uint32{100000, 0, 0, 0}, false)
-	p32(quality6, 0, bits(10, 14)) // IPv6 has positive exact evidence; unassessed layers remain unknown.
-	quality := newShard(6, qualityRow(86, bits(9, 12, 13), [4]uint32{110000, 18000, 9000, 3000}, true), qualityRow(0, bits(0, 1, 2, 3), [4]uint32{550000, 180000, 150000, 120000}, true), quality6)
+	quality6 := qualityRow(10, bits(9), [4]uint32{100000, 0, 0, 0}, false)
+	p32(quality6, 0, bits(9, 10, 14)) // IPv6 retains observed risk; unsupported layers remain unknown.
+	quality := newShard(6, qualityRow(14, bits(9, 12, 13), [4]uint32{110000, 18000, 9000, 3000}, true), qualityRow(100, bits(0, 1, 2, 3), [4]uint32{550000, 180000, 150000, 120000}, true), quality6)
 	quality.set(1, prefixRows(key("203.0.113.1/32", true, 0), key("203.0.113.200/32", true, 1), key("2001:db8::1/128", true, 2)))
 	qualObj, err := add(quality, "all")
 	if err != nil {
@@ -267,10 +265,10 @@ func Synthetic(ctx context.Context, clock int64) (BuiltRelease, error) {
 		r[1] = 0xf7
 		r[2] = 1
 		r[3] = 1
+		r[1] |= 8
+		r[8], r[9] = score, 2
 		if assessed {
-			r[1] |= 8
-			r[8] = score
-			r[9] = 2
+			r[10] = 1
 		}
 		p32(r, 4, reasons)
 		p32(r, 12, risk)
@@ -279,15 +277,17 @@ func Synthetic(ctx context.Context, clock int64) (BuiltRelease, error) {
 		return r
 	}
 	profileRow := make([]byte, 24)
-	p32(profileRow, 0, bits(21))
+	p32(profileRow, 0, bits(21, 22))
 	p16(profileRow, 8, 3)
 	p16(profileRow, 10, 2)
 	p16(profileRow, 12, 3)
+	p16(profileRow, 14, 3)
+	profileRow[20], profileRow[21] = 42, 2
 	profile := newShard(7, profileRow)
 	netDir, _ := makeObjectDir(netObj)
 	profile.set(7, netDir)
 	profile.set(1, prefixRows(key("203.0.113.0/24", false, 0)))
-	profile.set(10, Vector(32, cell(1, 86, true, bits(9, 12, 13), 200000), cell(2, 0, false, bits(9), 200000), cell(200, 0, true, bits(0, 1, 2, 3), 1000000)))
+	profile.set(10, Vector(32, cell(1, 14, true, bits(9, 12, 13), 200000), cell(2, 11, false, bits(9), 200000), cell(200, 100, true, bits(0, 1, 2, 3), 1000000)))
 	profileObj, err := add(profile, "all")
 	if err != nil {
 		return BuiltRelease{}, err
@@ -455,9 +455,9 @@ func Synthetic(ctx context.Context, clock int64) (BuiltRelease, error) {
 	for i, o := range objects {
 		infos[i] = o.Info
 	}
-	descriptor := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: infos, SchemaVersion: 3, ValidFrom: clock, ValidUntil: clock + 720*3600}
+	descriptor := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: infos, SchemaVersion: 4, ValidFrom: clock, ValidUntil: clock + 720*3600}
 	id := Hash(canonical(descriptor))
-	manifest := Manifest{Codec: descriptor.Codec, FormatVersion: 3, Mode: descriptor.Mode, Objects: infos, ReleaseID: id, SchemaVersion: 3, ValidFrom: clock, ValidUntil: descriptor.ValidUntil}
+	manifest := Manifest{Codec: descriptor.Codec, FormatVersion: 3, Mode: descriptor.Mode, Objects: infos, ReleaseID: id, SchemaVersion: 4, ValidFrom: clock, ValidUntil: descriptor.ValidUntil}
 	pointer := Pointer{FormatVersion: 3, ManifestPath: "/_atlas/releases/" + id + "/manifest.json", ManifestSHA256: Hash(canonical(manifest)), ReleaseID: id}
 	return BuiltRelease{Descriptor: descriptor, Manifest: manifest, Pointer: pointer, Objects: objects}, nil
 }
@@ -576,9 +576,9 @@ func SyntheticGraph24(ctx context.Context, clock int64) (BuiltRelease, error) {
 	for i, object := range objects {
 		infos[i] = object.Info
 	}
-	descriptor := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: infos, SchemaVersion: 3, ValidFrom: clock, ValidUntil: clock + 720*3600}
+	descriptor := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: infos, SchemaVersion: 4, ValidFrom: clock, ValidUntil: clock + 720*3600}
 	id := Hash(canonical(descriptor))
-	manifest := Manifest{Codec: descriptor.Codec, FormatVersion: 3, Mode: descriptor.Mode, Objects: infos, ReleaseID: id, SchemaVersion: 3, ValidFrom: clock, ValidUntil: descriptor.ValidUntil}
+	manifest := Manifest{Codec: descriptor.Codec, FormatVersion: 3, Mode: descriptor.Mode, Objects: infos, ReleaseID: id, SchemaVersion: 4, ValidFrom: clock, ValidUntil: descriptor.ValidUntil}
 	pointer := Pointer{FormatVersion: 3, ManifestPath: "/_atlas/releases/" + id + "/manifest.json", ManifestSHA256: Hash(canonical(manifest)), ReleaseID: id}
 	return BuiltRelease{Descriptor: descriptor, Manifest: manifest, Pointer: pointer, Objects: objects}, nil
 }

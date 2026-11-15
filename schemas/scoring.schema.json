@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:vansail:contract:scoring:3:1",
+  "$id": "urn:vansail:contract:scoring:3:2",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -10,11 +10,11 @@
     },
     "contract_revision": {
       "type": "integer",
-      "const": 1
+      "const": 2
     },
     "model_id": {
       "type": "string",
-      "const": "via-risk-v3-contract-1"
+      "const": "via-observed-risk-v1"
     },
     "contract": {
       "type": "string",
@@ -22,7 +22,7 @@
     },
     "contract_vectors": {
       "type": "string",
-      "const": "fixtures/scoring/contract-v1.json"
+      "const": "fixtures/scoring/observed-risk-v1.json"
     },
     "range": {
       "type": "array",
@@ -35,7 +35,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "quality_100_is_better": {
+        "observed_risk_100_is_worse": {
           "type": "boolean",
           "const": true
         },
@@ -59,15 +59,15 @@
           "type": "boolean",
           "const": true
         },
-        "public_score_requires_adequate_coverage": {
+        "public_score_requires_positive_weighted_evidence": {
           "type": "boolean",
           "const": true
         },
-        "explicit_authoritative_risk_can_be_shown_with_unrated_quality": {
+        "explicit_authoritative_risk_reasons_survive_null_score": {
           "type": "boolean",
           "const": true
         },
-        "numeric_quality_requires_all_contributing_layers_assessed": {
+        "assessment_coverage_independent_of_score": {
           "type": "boolean",
           "const": true
         },
@@ -77,15 +77,15 @@
         }
       },
       "required": [
-        "quality_100_is_better",
+        "observed_risk_100_is_worse",
         "risk_1_is_worse",
         "unknown_is_not_clean",
         "classification_is_not_abuse_proof",
         "uncalibrated_risk_is_not_probability",
         "public_reasons_without_source_metadata",
-        "public_score_requires_adequate_coverage",
-        "explicit_authoritative_risk_can_be_shown_with_unrated_quality",
-        "numeric_quality_requires_all_contributing_layers_assessed",
+        "public_score_requires_positive_weighted_evidence",
+        "explicit_authoritative_risk_reasons_survive_null_score",
+        "assessment_coverage_independent_of_score",
         "family_key"
       ]
     },
@@ -517,7 +517,7 @@
         },
         "classification_penalty_note": {
           "type": "string",
-          "const": "Proxy, Tor, VPN and datacenter carry modest configurable quality adjustments; never equate them to abuse."
+          "const": "Proxy, Tor, VPN and datacenter carry modest configurable observed-risk contributions; never equate them to abuse."
         },
         "indicator_specificity": {
           "type": "object",
@@ -603,9 +603,9 @@
           "type": "string",
           "const": "R=clamp(0,1,0.55*R_exact+0.18*R_prefix+0.15*C_asn*R_asn+0.12*C24*R24)"
         },
-        "quality": {
+        "observed_risk": {
           "type": "string",
-          "const": "Q=round(100*(1-R)) if coverage_eligible else null"
+          "const": "S=floor(100*R+0.5) if R>0 else null"
         },
         "normalization": {
           "type": "string",
@@ -629,13 +629,13 @@
         },
         "required_layer_status": {
           "type": "string",
-          "const": "assessed"
+          "const": "positive_observed_or_authoritatively_assessed"
         }
       },
       "required": [
         "weights",
         "formula",
-        "quality",
+        "observed_risk",
         "normalization",
         "unknown_layers",
         "preserve_layer_presence_mask",
@@ -813,16 +813,16 @@
             "dominant_asn",
             "subdivision_known",
             "ip_cell_reason_flags",
-            "aggregate_quality"
+            "mean_observed_risk"
           ]
         },
         "no_unobserved_host_imputation": {
           "type": "boolean",
           "const": true
         },
-        "aggregate_quality": {
+        "mean_observed_risk": {
           "type": "string",
-          "const": "null_unless_all_256_cells_quality_eligible_then_half_up_mean"
+          "const": "null_unless_scored_observed_cells_then_half_up_mean"
         },
         "classful_boundary_is_visual_label_only": {
           "type": "boolean",
@@ -847,7 +847,7 @@
         "support_formula",
         "output",
         "no_unobserved_host_imputation",
-        "aggregate_quality",
+        "mean_observed_risk",
         "classful_boundary_is_visual_label_only",
         "ipv6_equivalent"
       ]
@@ -864,7 +864,7 @@
           "type": "integer",
           "const": 2
         },
-        "numeric_quality_requires_all_layers": {
+        "complete_assessment_requires_all_layers": {
           "type": "boolean",
           "const": true
         },
@@ -872,9 +872,9 @@
           "type": "string",
           "const": "intersection_of_complete_families_across_all_required_scopes"
         },
-        "numeric_quality_address_family": {
+        "numeric_risk_address_family": {
           "type": "string",
-          "const": "ipv4_only"
+          "const": "ipv4_and_ipv6_no_neighbor_renormalization"
         },
         "positive_only_absence_is_unknown": {
           "type": "boolean",
@@ -894,7 +894,7 @@
         },
         "data_quality_flag": {
           "type": "string",
-          "const": "unrated_when_insufficient"
+          "const": "incomplete_coverage_is_explicit"
         },
         "confidence_bands": {
           "type": "object",
@@ -902,7 +902,7 @@
           "properties": {
             "low_min_families": {
               "type": "integer",
-              "const": 2
+              "const": 1
             },
             "medium_min_families": {
               "type": "integer",
@@ -912,7 +912,7 @@
               "type": "integer",
               "const": 4
             },
-            "unrated_when_incomplete": {
+            "unrated_without_positive_weighted_evidence": {
               "type": "boolean",
               "const": true
             }
@@ -921,7 +921,7 @@
             "low_min_families",
             "medium_min_families",
             "high_min_families",
-            "unrated_when_incomplete"
+            "unrated_without_positive_weighted_evidence"
           ]
         },
         "calibration": {
@@ -959,15 +959,15 @@
         },
         "confidence_public": {
           "type": "string",
-          "const": "confidence_band_only"
+          "const": "weakest_positive_contributing_layer_band_only"
         }
       },
       "required": [
         "family_key",
         "min_independent_assessment_families",
-        "numeric_quality_requires_all_layers",
+        "complete_assessment_requires_all_layers",
         "qualifying_families",
-        "numeric_quality_address_family",
+        "numeric_risk_address_family",
         "positive_only_absence_is_unknown",
         "authoritative_positive_emits_reasons_even_if_score_null",
         "min_current_source_age_hours",
@@ -1049,7 +1049,7 @@
           "type": "string",
           "const": "binary64_canonical_order_no_intermediate_rounding"
         },
-        "quality_integer": {
+        "observed_risk_integer": {
           "type": "string",
           "const": "half_up"
         },
@@ -1060,7 +1060,7 @@
       },
       "required": [
         "internal",
-        "quality_integer",
+        "observed_risk_integer",
         "serialization"
       ]
     },

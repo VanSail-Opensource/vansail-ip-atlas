@@ -42,5 +42,5 @@ func (p Policy) AggregateASNContext(mass float64, count uint64, families int, ex
 	diversity := math.Min(1, float64(families)/3)
 	confidence := diversity * math.Min(1, float64(count)/64)
 	risk := math.Max(explicitRisk, (1-math.Exp(-mass/256))*diversity)
-	return ASNContext{risk, confidence, p.Weights[2] * confidence * risk, true}
+	return ASNContext{risk, confidence, p.Weights[2] * confidence * risk, true, uint8(min(families, 4))}
 }

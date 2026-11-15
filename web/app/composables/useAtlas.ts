@@ -59,6 +59,7 @@ export function useAtlas() {
       atlas.removeEventListener('invalidate', invalidate)
       atlas.addEventListener('invalidate', invalidate)
       const answer = await atlas.lookup(state.q, active.signal)
+      let pendingClassC: ClassCAnswer | null = null
       if (run !== serial) return
       if (Date.now() / 1000 >= answer.validUntil) throw new Error('release_expired')
       origin.value = null
@@ -71,9 +72,9 @@ export function useAtlas() {
         if (run !== serial) return
         if (!cells && state.kind === 'ip' && !state.q.includes(':')) {
           const base = state.q.split('.').slice(0, 3).join('.')
-          classC.value = { prefix: `${base}.0/24`, observedCount: 0, assessedCount: 0, positiveCount: 0, aggregateScore: null,
-            cells: Array.from({ length: 256 }, (_, suffix) => ({ ip: `${base}.${suffix}`, observed: false, score: null, confidence: 'unrated', reasons: [], usage: 'unknown', origins: [] })) }
-        } else classC.value = cells
+          pendingClassC = { prefix: `${base}.0/24`, observedCount: 0, assessedCount: 0, scoredCount: 0, positiveCount: 0, meanObservedRisk: null,
+            cells: Array.from({ length: 256 }, (_, suffix) => ({ ip: `${base}.${suffix}`, observed: false, observedRiskScore: null, confidence: 'unrated', coverage: 'incomplete', reasons: [], usage: 'unknown', origins: [] })) }
+        } else pendingClassC = cells
       }
       // Reviewed credits are part of a production release. Verify their exact
       // release document before showing facts that depend on those datasets.
@@ -85,6 +86,7 @@ export function useAtlas() {
       }
       if (Date.now() / 1000 >= answer.validUntil) throw new Error('release_expired')
       data.value = answer
+      classC.value = pendingClassC
       releaseInfo.value = { releaseId: answer.releaseId, validUntil: answer.validUntil, synthetic: answer.synthetic }
     } catch (cause) {
       if (run !== serial || active.signal.aborted) return

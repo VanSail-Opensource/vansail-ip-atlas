@@ -102,10 +102,10 @@ def queries():
 
 
 def layouts():
-    names = ["router", "geo", "coordinates", "network", "usage", "quality", "subnet24", "asn", "rpki", "bgp_origins", "bgp_paths", "bgp_relationships", "tier1", "dictionary"]
+    names = ["router", "geo", "coordinates", "network", "usage", "observed_risk", "subnet24", "asn", "rpki", "bgp_origins", "bgp_paths", "bgp_relationships", "tier1", "dictionary"]
     widths = [16, 24, 16, 40, 8, 32, 24, 64, 16, 16, 24, 16, 16, 0]
     sections = [[1, 2, 3, 4, 7], [1, 3, 7, 8], [1, 3, 8], [1, 3, 4, 7, 8], [1, 3, 8], [1, 3, 8], [1, 3, 7, 10], [2, 3, 7, 11, 12], [1, 3, 8], [1, 3, 4, 8], [2, 3, 4, 9], [2, 3, 4], [2, 3], [5, 6]]
-    pres_names = ["physical_country", "registration_country", "region", "city", "coordinates", "usage_type", "assignment_mode", "anycast", "ipv4_directed_broadcast", "quality", "exact_contribution", "prefix_contribution", "asn_contribution", "neighbor_contribution", "reason_flags", "network", "as_name", "organization", "isp", "origins", "rpki_status", "ipv4_24_profile", "aggregate_quality", "asn_risk", "prefix_pages", "customer_cone", "transit_degree", "network_class", "stability", "bgp_paths", "as_relationships", "asn_country"]
+    pres_names = ["physical_country", "registration_country", "region", "city", "coordinates", "usage_type", "assignment_mode", "anycast", "ipv4_directed_broadcast", "observed_risk", "exact_contribution", "prefix_contribution", "asn_contribution", "neighbor_contribution", "reason_flags", "network", "as_name", "organization", "isp", "origins", "rpki_status", "ipv4_24_profile", "mean_observed_risk", "asn_risk", "prefix_pages", "customer_cone", "transit_degree", "network_class", "stability", "bgp_paths", "as_relationships", "asn_country"]
     reason_names = ["malware", "botnet", "command_control", "abuse", "fraud", "scanning", "spam", "tor", "vpn", "proxy", "datacenter", "hosting", "asn_context", "subnet_context"]
     def mask(*bits):
         return sum(1 << bit for bit in bits)
@@ -116,8 +116,8 @@ def layouts():
         struct.pack("<IiiB3x", mask(4), 0, 0, 3),
         struct.pack("<IIIIIIIIII", mask(15, 16, 17, 18, 19), 0, 2, 0, 0, 0, 0, 1, 0, 2),
         struct.pack("<IBBBB", mask(5, 6, 7, 8), 1, 1, 0, 0),
-        struct.pack("<IIBBBBIIIII", mask(9, 10, 11, 12, 13, 14), mask(*range(14)), 1, 0, 3, 0, 550000, 180000, 150000, 120000, 0),
-        struct.pack("<IIHHHHIBBH", mask(21), 0, 1, 1, 1, 0, 13335, 0, 0, 0),
+        struct.pack("<IIBBBBIIIII", mask(9, 10, 11, 12, 13, 14), mask(*range(14)), 1, 100, 3, 31, 550000, 180000, 150000, 120000, 0),
+        struct.pack("<IIHHHHIBBH", mask(21, 22), 0, 1, 1, 1, 1, 13335, 0, 3, 0),
         struct.pack("<IIIIIIHBBIIIIIIBB10x", mask(14, 16, 17, 23, 24, 25, 26, 27, 28, 31), 13335, 0, 0, 0, 1, 539, 2, 2, 500000, 1 << 12, 0, 1, 10, 2, 2, 2),
         struct.pack("<IIBB6x", mask(20), 13335, 1, 24),
         struct.pack("<IIII", mask(19), 0, 2, 0),
@@ -131,8 +131,8 @@ def layouts():
         [("presence", 4), ("latitude", 4), ("longitude", 4), ("precision", 1), ("reserved", 3)],
         [("presence", 4), ("origins_first", 4), ("origins_count", 4), ("reserved", 4), ("as_name", 8), ("organization", 8), ("isp", 8)],
         [("presence", 4), ("usage_type", 1), ("assignment_mode", 1), ("bools", 1), ("reserved", 1)],
-        [("presence", 4), ("reason_flags", 4), ("status", 1), ("score", 1), ("confidence", 1), ("reserved", 1), ("exact_contribution", 4), ("prefix_contribution", 4), ("asn_contribution", 4), ("neighbor_contribution", 4), ("reserved", 4)],
-        [("presence", 4), ("cells_first", 4), ("cells_count", 2), ("assessed_count", 2), ("positive_count", 2), ("reserved", 2), ("dominant_asn", 4), ("aggregate_score", 1), ("confidence", 1), ("reserved", 2)],
+        [("presence", 4), ("reason_flags", 4), ("status", 1), ("score", 1), ("confidence", 1), ("coverage_flags", 1), ("exact_contribution", 4), ("prefix_contribution", 4), ("asn_contribution", 4), ("neighbor_contribution", 4), ("reserved", 4)],
+        [("presence", 4), ("cells_first", 4), ("cells_count", 2), ("assessed_count", 2), ("positive_count", 2), ("scored_count", 2), ("dominant_asn", 4), ("mean_observed_risk", 1), ("confidence", 1), ("reserved", 2)],
         [("presence", 4), ("asn", 4), ("as_name", 8), ("organization", 8), ("country", 2), ("risk_band", 1), ("confidence", 1), ("risk", 4), ("reason_flags", 4), ("prefix_pages_first", 4), ("prefix_pages_count", 4), ("customer_cone", 4), ("transit_degree", 4), ("network_class", 1), ("stability", 1), ("reserved", 10)],
         [("presence", 4), ("origin_asn", 4), ("status", 1), ("maximum_length", 1), ("reserved", 6)],
         [("presence", 4), ("origins_first", 4), ("origins_count", 4), ("reserved", 4)],
@@ -158,10 +158,10 @@ def layouts():
         ip = ipaddress.ip_address(addr)
         encoded = ip.packed if ip.version == 6 else b"\0" * 12 + ip.packed
         keys.append({"address": addr, "bits": bits, "flags": flags, "hex": struct.pack("<BBH", ip.version, bits, flags).hex() + encoded.hex() + struct.pack("<IQ", 0, 0).hex()})
-    cell = struct.pack("<BBBBIBBHIIIB7x", 1, 0xff, 1, 1, 1, 0, 3, 0, 1000000, 0, 0, 0)
+    cell = struct.pack("<BBBBIBBHIIIB7x", 1, 0xff, 1, 1, 1, 0, 3, 1, 0, 0, 0, 0)
     assert len(cell) == 32
     put("via3-layouts.json", {
-        "format_version": 3, "schema_version": 3, "contract_revision": 1, "synthetic": True,
+        "format_version": 3, "schema_version": 4, "contract_revision": 2, "synthetic": True,
         "max_file_exclusive": 24 * 1024 * 1024, "max_decoded_section": 64 * 1024 * 1024,
         "max_decoded_total": 256 * 1024 * 1024, "max_window": 8 * 1024 * 1024,
         "presence_bits": dict(zip(pres_names, range(32))), "reason_bits": dict(zip(reason_names, range(14))),

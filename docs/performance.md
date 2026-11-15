@@ -1,4 +1,4 @@
-# Performance and capacity contract v3.2 (visible graph population)
+# Performance and capacity contract v5 (official hosted workload envelope)
 
 This freezes C06/C11 before collecting a baseline. No budget is raised. Synthetic
 contract tests measure correctness only; they do not establish full-dataset capacity.
@@ -7,7 +7,7 @@ contract tests measure correctness only; they do not establish full-dataset capa
 
 | Gate | Requirement |
 |---|---:|
-| Standard private hosted runner | 2 vCPU, 8 GiB RAM, 14 GiB physical disk |
+| Official hosted workload envelope | Enforced 2 CPUs, 8 GiB RAM, 14 GiB writable task storage |
 | Cold full build | Under 35 minutes |
 | Warm changed build | Under 8 minutes |
 | Warm unchanged build including expiry checks | Under 3 minutes |
@@ -32,9 +32,9 @@ tree cap. An absent metric or idle page is `unmeasured`, never passed.
 
 Build scenarios each run three times before the first production baseline:
 
-1. Cold full: empty eligible cache and scratch, identical pinned fresh inputs.
-2. Warm changed: fixed one-percent source-record mutation with deterministic dirty
-   partition set and unchanged evaluation clock.
+1. Cold full engineering replay: empty compiler output/cache, identical authenticated normalized inputs.
+2. Warm changed: max(1,ceil(N/100)) transformed records in an isolated engineering
+   copy of the authentic baseline; unchanged evaluation clock. Never publish this copy.
 3. Warm no-change: identical inputs, but all freshness/withdrawal/config checks run.
 4. Clock advance: cross snapshot and subscription-item expiry without changing bytes.
 5. Withdrawal: remove one contributing source and regenerate every dependent layer.
@@ -61,6 +61,11 @@ report sampling blind spots. Linux `resource.getrusage(RUSAGE_CHILDREN)` alone i
 simultaneous process-group peak RSS. Set Go memory target to 5120 MiB but enforce the
 whole-group RSS abort independently; `GOMEMLIMIT` is not an RSS bound.
 
+The runner and independently measured Chrome scope share one transient systemd
+slice. Its aggregate CPU, memory and swap limits apply before task processes
+start; both scopes must prove their membership. The runner records that slice's
+peak before removing it, so the browser cannot escape the whole-task envelope.
+
 Record physical disk high-water and free-space low-water, including checkout,
 toolchains, dependency stores, downloads, expansion, sort runs, eligible/private
 caches, current/previous objects and upload staging. Scratch and output ceilings
@@ -68,6 +73,12 @@ are not independent reservations within 14 GiB. Abort before physical free space
 falls below 1024 MiB and before either RSS/scratch ceiling. Polling is a safety
 signal, not permission to allocate an unbounded archive between samples. Stream
 expanded inputs, cap concurrent decoders and reclaim sort scratch before packaging.
+Temporary files and package caches stay in the accounted workspace. Installed
+stable Chrome under `/opt/google/chrome` and the active Python, Go and Node
+installation roots also count toward the task storage ceiling when they reside
+outside the workspace. Do not count unrelated versions in the host tool cache;
+deduplicate overlapping installation roots. Count hardlinked package files once
+by inode, as physical allocation does.
 
 ## Lookup and browser protocol
 
@@ -166,12 +177,15 @@ contiguous copies, native hashing copies, the <=8 MiB decoder window, temporary
 decoder blocks, IndexedDB serialization, JS table/view/object overhead, the answer
 and its structured clone, and the module/runtime baseline. The 32/96/8 MiB sublimits
 provide technical admission bounds; they are not a measurement proving whole-worker
-RSS stays below 384 MiB. Actual stable-Chrome peak memory at the accepted worst-case
-profile remains an unverified blocking gate until measured. No limit is raised to
+RSS stays below 384 MiB. The whole Chrome tree is launched inside a fresh cgroup before its first allocation.
+Its kernel memory.peak is a conservative worker upper bound; OOM or a peak at/above
+384 MiB fails. The accepted fixture drives actual decode, residency and materialized
+answer paths through the exact emitted worker. Profile existence is not proof of
+a successful hosted measurement. No limit is raised to
 make a failing measurement pass.
 
-No whole-dataset benchmark, deployed-page metric, process-memory high-water proof or
-hosted browser test has been measured by these contract amendments.
+New harness code does not establish a passing hosted result. Report exact revision,
+raw profile, populations, measured failures and remaining unverified assumptions.
 
 ## Synthetic diagnostic harness
 

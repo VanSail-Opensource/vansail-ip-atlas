@@ -90,8 +90,16 @@ func LoadPolicy(r io.Reader) (Policy, error) {
 	if err := yamlField(root, "schema_version").Decode(&version); err != nil || version != 3 {
 		return Policy{}, errors.New("unsupported scoring schema")
 	}
-	if err := yamlField(root, "model_id").Decode(&model); err != nil || model != "via-risk-v3-contract-1" {
+	if err := yamlField(root, "model_id").Decode(&model); err != nil || model != "via-observed-risk-v1" {
 		return Policy{}, errors.New("unsupported scoring model")
+	}
+	var revision int
+	var observedFormula string
+	if err := yamlField(root, "contract_revision").Decode(&revision); err != nil || revision != 2 {
+		return Policy{}, errors.New("unsupported observed-risk contract")
+	}
+	if err := yamlField(yamlField(root, "layers"), "observed_risk").Decode(&observedFormula); err != nil || observedFormula != "S=floor(100*R+0.5) if R>0 else null" {
+		return Policy{}, errors.New("unsupported observed-risk formula")
 	}
 	p := Policy{Signals: make(map[Signal]SignalPolicy), MaxAge: 720 * time.Hour, SubscriptionAge: 168 * time.Hour}
 	category := yamlField(root, "category_evidence")
@@ -309,12 +317,15 @@ type LayerResult struct {
 type ASNContext struct {
 	Risk, Confidence, Contribution float64
 	Present                        bool
+	Support                        uint8 // independent positive families, saturated at four; private
 }
 type QualityResult struct {
-	Score         *uint8
-	Confidence    string
-	Reasons       uint32
-	Contributions [4]*float64
+	Score            *uint8
+	Confidence       string
+	Reasons          uint32
+	Contributions    [4]*float64
+	Assessed         [4]bool
+	CoverageComplete bool
 }
 type exactFact struct {
 	layer            LayerResult
@@ -717,7 +728,7 @@ func (e *Engine) NeighborContext(addr netip.Addr) ASNContext {
 	}
 	risk := 1 - math.Exp(-16*mass/255)
 	confidence := math.Min(1, float64(count)/16) * math.Min(1, float64(len(families))/3)
-	return ASNContext{risk, confidence, e.policy.Weights[3] * confidence * risk, count > 0}
+	return ASNContext{risk, confidence, e.policy.Weights[3] * confidence * risk, count > 0, uint8(min(len(families), 4))}
 }
 func (e *Engine) ASNContext(asn uint32) ASNContext {
 	if e.globalASN != nil {
@@ -749,11 +760,12 @@ func (e *Engine) Lookup(addr netip.Addr) (QualityResult, error) {
 		return result, err
 	}
 	result.Reasons = exact.Reasons | prefix.Reasons
-	if exact.Observed || len(exactFamilies) > 0 {
+	support := [4]int{len(exact.Families), len(prefix.Families), 0, 0}
+	if exact.Risk > 0 || len(exactFamilies) > 0 {
 		v := e.policy.Weights[0] * exact.Risk
 		result.Contributions[0] = &v
 	}
-	if prefix.Observed || len(prefixFamilies) > 0 {
+	if prefix.Risk > 0 || len(prefixFamilies) > 0 {
 		v := e.policy.Weights[1] * prefix.Risk
 		result.Contributions[1] = &v
 	}
@@ -763,8 +775,12 @@ func (e *Engine) Lookup(addr netip.Addr) (QualityResult, error) {
 	asnPresent := false
 	for _, asn := range origins {
 		context := e.ASNContext(asn)
-		maxContribution = math.Max(maxContribution, context.Contribution)
-		asnPresent = asnPresent || context.Present
+		if context.Contribution > maxContribution {
+			maxContribution, support[2] = context.Contribution, int(context.Support)
+		} else if context.Contribution == maxContribution && context.Contribution > 0 {
+			support[2] = min(support[2], int(context.Support))
+		}
+		asnPresent = asnPresent || context.Present && context.Risk > 0
 		asnSets = append(asnSets, e.asnCoverage[asn])
 	}
 	asnFamilies := intersect(asnSets...)
@@ -775,6 +791,7 @@ func (e *Engine) Lookup(addr netip.Addr) (QualityResult, error) {
 		}
 	}
 	neighbor := e.NeighborContext(addr)
+	support[3] = int(neighbor.Support)
 	if addr.Is4() && (neighbor.Present || len(neighborFamilies) > 0) {
 		v := neighbor.Contribution
 		result.Contributions[3] = &v
@@ -783,21 +800,24 @@ func (e *Engine) Lookup(addr netip.Addr) (QualityResult, error) {
 		}
 	}
 	families := intersect(exactFamilies, prefixFamilies, asnFamilies, neighborFamilies)
-	if !addr.Is4() || len(origins) == 0 || len(families) < e.policy.MinimumFamilies {
+	result.Assessed = [4]bool{len(exactFamilies) > 0, len(prefixFamilies) > 0, len(asnFamilies) > 0, addr.Is4() && len(neighborFamilies) > 0}
+	result.CoverageComplete = addr.Is4() && len(origins) > 0 && len(families) >= e.policy.MinimumFamilies
+	risk := 0.0
+	minimumSupport := 4
+	for i, contribution := range result.Contributions {
+		if contribution != nil && *contribution > 0 {
+			risk += *contribution
+			minimumSupport = min(minimumSupport, support[i])
+		}
+	}
+	if risk <= 0 {
 		return result, nil
 	}
-	risk := 0.0
-	for _, contribution := range result.Contributions {
-		if contribution == nil {
-			return result, nil
-		}
-		risk += *contribution
-	}
-	score := uint8(math.Floor(100*(1-clamp(risk)) + .5))
+	score := uint8(math.Floor(100*clamp(risk) + .5))
 	result.Score = &score
-	if len(families) >= 4 {
+	if minimumSupport >= 4 {
 		result.Confidence = "high"
-	} else if len(families) == 3 {
+	} else if minimumSupport == 3 {
 		result.Confidence = "medium"
 	} else {
 		result.Confidence = "low"

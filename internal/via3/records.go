@@ -230,7 +230,7 @@ func Validate(s Shard) error {
 			}
 			if s.Kind == 6 && key[0] == 6 {
 				r := s.Record(u32(key, 20))
-				if present(r, 9) || present(r, 13) {
+				if present(r, 13) || r[11]&24 != 0 {
 					return fail("record")
 				}
 			}
@@ -356,10 +356,10 @@ func Validate(s Shard) error {
 				return fail("record")
 			}
 		case 6:
-			if u32(r, 4) > 0x3fff || r[8] > 1 || r[9] > 100 || r[10] > 3 || r[11] != 0 || !zero(r[28:]) || (!present(r, 14) && u32(r, 4) != 0) {
+			if u32(r, 4) > 0x3fff || r[8] > 1 || r[9] > 100 || r[10] > 3 || r[11] > 31 || !zero(r[28:]) || (!present(r, 14) && u32(r, 4) != 0) || (r[11]&16 != 0 && r[11]&15 != 15) {
 				return fail("record")
 			}
-			if (r[8] == 1) != present(r, 9) || (!present(r, 9) && (r[9] != 0 || r[10] != 0)) || (r[8] == 1 && (r[10] == 0 || u32(r, 0)&bits(10, 11, 12, 13) != bits(10, 11, 12, 13))) {
+			if (r[8] == 1) != present(r, 9) || (!present(r, 9) && (r[9] != 0 || r[10] != 0)) || (r[8] == 1 && (r[10] == 0 || u32(r, 4) == 0 || u32(r, 0)&bits(10, 11, 12, 13) == 0)) {
 				return fail("record")
 			}
 			caps := []uint32{550000, 180000, 150000, 120000}
@@ -367,7 +367,7 @@ func Validate(s Shard) error {
 			for i, cap := range caps {
 				v := u32(r, 12+i*4)
 				contributionSum += v
-				if v > cap || (!present(r, uint(10+i)) && v != 0) {
+				if v > cap || (!present(r, uint(10+i)) && (v != 0 || r[11]&(1<<i) != 0)) {
 					return fail("record")
 				}
 			}
@@ -380,39 +380,47 @@ func Validate(s Shard) error {
 				if highRisk > 1000000 {
 					highRisk = 1000000
 				}
-				lowScore := (1000000 - highRisk + 5000) / 10000
-				highScore := (1000000 - lowRisk + 5000) / 10000
+				lowScore := (lowRisk + 5000) / 10000
+				highScore := (highRisk + 5000) / 10000
 				if uint32(r[9]) < lowScore || uint32(r[9]) > highScore {
 					return fail("record")
 				}
+			} else if contributionSum > 0 {
+				return fail("record")
 			}
 		case 7:
-			if !zero(r[14:16]) || !zero(r[22:]) || !rangeOK(u32(r, 4), uint32(u16(r, 8)), len(cells)/32) || u16(r, 8) > 256 || u16(r, 10) > u16(r, 8) || u16(r, 12) > u16(r, 8) || r[20] > 100 || r[21] > 3 {
+			if !zero(r[22:]) || !rangeOK(u32(r, 4), uint32(u16(r, 8)), len(cells)/32) || u16(r, 8) > 256 || u16(r, 10) > u16(r, 8) || u16(r, 12) > u16(r, 8) || u16(r, 14) > u16(r, 8) || r[20] > 100 || r[21] > 3 {
 				return fail("record")
 			}
 			if present(r, 22) {
-				if u16(r, 8) != 256 || u16(r, 10) != 256 || r[21] == 0 {
+				if u16(r, 14) == 0 || r[21] == 0 {
 					return fail("record")
 				}
-			} else if r[20] != 0 || r[21] != 0 {
+			} else if r[20] != 0 || r[21] != 0 || u16(r, 14) != 0 {
 				return fail("record")
 			}
 			start, count := u32(r, 4), u32(r, 4)+uint32(u16(r, 8))
 			var previous int = -1
-			var assessed, positive uint16
+			var assessed, positive, scored uint16
+			sum, minimumConfidence := 0, byte(3)
 			for j := start; j < count; j++ {
 				c := cells[j*32 : (j+1)*32]
-				if int(c[0]) <= previous || u32(c, 4) > 0x3fff || c[2] > 7 || c[3] > 2 || c[8] > 100 || c[9] > 3 || u16(c, 10) != 0 || u32(c, 12) > 1000000 || c[24] > 3 || !zero(c[25:]) {
+				if int(c[0]) <= previous || u32(c, 4) > 0x3fff || c[2] > 7 || c[3] > 2 || c[8] > 100 || c[9] > 3 || c[10] > 1 || c[11] != 0 || u32(c, 12) > 1000000 || c[24] > 3 || !zero(c[25:]) {
 					return fail("record")
 				}
 				previous = int(c[0])
 				if c[1]&8 != 0 {
-					if c[9] == 0 {
+					if c[9] == 0 || u32(c, 4) == 0 {
 						return fail("record")
 					}
-					assessed++
+					scored++
+					sum += int(c[8])
+					minimumConfidence = min(minimumConfidence, c[9])
 				} else if c[8] != 0 || c[9] != 0 {
 					return fail("record")
+				}
+				if c[10] == 1 {
+					assessed++
 				}
 				if u32(c, 4) > 0 {
 					positive++
@@ -440,7 +448,10 @@ func Validate(s Shard) error {
 					return fail("record")
 				}
 			}
-			if assessed != u16(r, 10) || positive != u16(r, 12) {
+			if assessed != u16(r, 10) || positive != u16(r, 12) || scored != u16(r, 14) {
+				return fail("record")
+			}
+			if scored > 0 && (int(r[20]) != (2*sum+int(scored))/(2*int(scored)) || r[21] != minimumConfidence) {
 				return fail("record")
 			}
 		case 8:

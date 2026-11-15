@@ -28,7 +28,7 @@ from tools.hosted.candidate import check_candidate, verify_preview
 from tools.release_contract.contracts import ContractError, parse_canonical, rollback_eligible, sha256, tree_inventory
 from tools.release_contract.production import qualify_public, read_private
 from tools.release_contract.prepare_static import inspect_binary, known_private_values, scan_frontend, verify_atlas
-from tools.release_contract.promotion import approve, json_object
+from tools.release_contract.promotion import approve, automatic, json_object
 
 API = "https://api.cloudflare.com/client/v4"
 
@@ -178,6 +178,7 @@ def main() -> int:
     parser.add_argument("--qualification-receipt", type=Path, action="append", required=True)
     parser.add_argument("--evidence", type=Path)
     parser.add_argument("--approval", type=Path)
+    parser.add_argument("--automatic", action="store_true")
     parser.add_argument("--deployment-id")
     parser.add_argument("--account", required=True)
     parser.add_argument("--project", required=True)
@@ -199,12 +200,16 @@ def main() -> int:
             raise ContractError("Pages candidate binary scanner did not inspect all objects")
         scan_frontend(args.public, private_values)
         def authorization():
-            if not args.evidence or not args.approval:
+            if not args.evidence or not (args.approval or args.automatic):
                 raise ContractError("production promotion requires exact evidence and explicit approval")
             from tools.atlas_contracts.config import load_yaml
             evidence = read_private(args.evidence)
             if parse_canonical(evidence)["head_sha"] != args.head:
                 raise ContractError("deployment revision differs from approved evidence")
+            if args.automatic:
+                if args.approval:
+                    raise ContractError('automatic and manual authorization cannot be combined')
+                return automatic(args.public, args.qualification_receipt, evidence, int(time.time()), rollback=args.operation == 'rollback')
             return approve(args.public, args.qualification_receipt, evidence, load_yaml(args.approval), int(time.time()))
         if args.operation != "preview":
             authorization()

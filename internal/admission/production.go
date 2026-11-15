@@ -203,17 +203,27 @@ func CanonicalPrivateJSON(value any) ([]byte, error) {
 }
 
 type canonicalCredit struct {
-	LicenseURL string `json:"license_url,omitempty"`
-	Name       string `json:"name"`
-	Text       string `json:"text"`
-	URL        string `json:"url"`
+	LicenseURL string         `json:"license_url,omitempty"`
+	Logo       *canonicalLogo `json:"logo,omitempty"`
+	Name       string         `json:"name"`
+	Text       string         `json:"text"`
+	URL        string         `json:"url"`
+}
+type canonicalLogo struct {
+	Alt    string `json:"alt"`
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
 }
 
 func creditCanonical(a *intelligence.DatasetAttribution) *canonicalCredit {
 	if a == nil {
 		return nil
 	}
-	return &canonicalCredit{a.LicenseURL, a.Name, a.Text, a.URL}
+	result := &canonicalCredit{LicenseURL: a.LicenseURL, Name: a.Name, Text: a.Text, URL: a.URL}
+	if a.Logo != nil {
+		result.Logo = &canonicalLogo{a.Logo.Alt, a.Logo.Path, a.Logo.SHA256}
+	}
+	return result
 }
 func RightsDigests(s Source) (string, *string, error) {
 	r := s.Rights
@@ -292,6 +302,9 @@ func RevalidateStoredSources(ctx context.Context, root string, catalog []Source,
 		}
 		if s.Rights.Status != "reviewed" || s.Rights.Distribution != "allow" || s.Rights.AttributionRequired == nil || !safeHTTPS(s.Rights.EvidenceURL) || strings.TrimSpace(s.Rights.ReviewBasis) == "" || *s.Rights.AttributionRequired && s.Rights.Attribution == nil || s.Rights.Attribution != nil && s.Rights.Attribution.Validate() != nil {
 			return report, nil, errors.New("production source rights or credits incomplete")
+		}
+		if s.Rights.Attribution != nil && intelligence.ValidateDatasetLogoFile(root, s.Rights.Attribution.Logo) != nil {
+			return report, nil, errors.New("production source logo missing or changed")
 		}
 		if s.MaxAge <= 0 || s.MaxAge > 720*time.Hour || r.PublishedAt.IsZero() || r.PublishedAt.After(state.EvaluatedAt.Add(24*time.Hour)) || !now.Before(v.ExpiresAt) || v.ExpiresAt.After(r.PublishedAt.Add(s.MaxAge)) || v.ExpiresAt.After(r.PublishedAt.Add(720*time.Hour)) || r.Subscription && v.ExpiresAt.After(r.PublishedAt.Add(168*time.Hour)) {
 			return report, nil, errors.New("production source receipt expired or extended")
@@ -413,6 +426,9 @@ func RevalidateStoredSources(ctx context.Context, root string, catalog []Source,
 				if !x.Current || !contains(s.PublicFields, "usage_type") {
 					return errors.New("production usage binding invalid")
 				}
+				if observed := record.Usage.ObservedAt; !observed.IsZero() && (!now.Before(observed.Add(s.MaxAge)) || v.ExpiresAt.After(observed.Add(s.MaxAge))) {
+					return errors.New("production usage item expiry extended")
+				}
 				stat.Usage = stat.Usage || x.Type != "" && x.Type != "unknown"
 			case intelligence.RecordOrigins:
 				if !contains(s.PublicFields, "origins") && !contains(s.PublicFields, "bgp_origins") {
@@ -489,7 +505,7 @@ func deriveCapabilities(stats []SourceStatistics, clock time.Time) CapabilityRep
 		sort.Strings(values)
 		return values
 	}
-	report := CapabilityReport{EvaluatedAt: clock.Unix(), IncludedSources: len(stats), ReleaseScope: "release-scope-v4", SchemaVersion: 1}
+	report := CapabilityReport{EvaluatedAt: clock.Unix(), IncludedSources: len(stats), ReleaseScope: "release-scope-v5", SchemaVersion: 1}
 	add := func(name string, minimum int, match func(SourceStatistics) bool) {
 		fs := families(match)
 		report.Capabilities = append(report.Capabilities, Capability{Capability: name, Families: fs, Qualified: len(fs) >= minimum, Required: true})
@@ -517,10 +533,10 @@ func deriveCapabilities(stats []SourceStatistics, clock time.Time) CapabilityRep
 			allSignals[signal] = true
 		}
 	}
-	risk := true
-	for _, signal := range []intelligence.Signal{"malware", "botnet", "c2", "abuse", "fraud", "scanner", "spam", "tor", "vpn", "proxy", "datacenter", "hosting"} {
-		risk = risk && allSignals[signal]
-	}
+	// Detection support is not a claim that every category is present in every
+	// snapshot. One or more actual positive observations establish this release
+	// capability; absent categories and unlisted addresses remain unknown.
+	risk := len(allSignals) > 0
 	report.Capabilities = append(report.Capabilities, Capability{Capability: "risk_reasons", Families: families(func(s SourceStatistics) bool { return len(s.Signals) > 0 }), Qualified: risk, Required: true})
 	sort.Slice(report.Capabilities, func(i, j int) bool { return report.Capabilities[i].Capability < report.Capabilities[j].Capability })
 	return report

@@ -1,4 +1,4 @@
-// Package via3 implements the frozen, source-free VIA3 schema-3 container.
+// Package via3 implements the frozen, source-free VIA3 schema-4 container.
 package via3
 
 import (
@@ -154,7 +154,7 @@ func Write(ctx context.Context, shard Shard) ([]byte, error) {
 	b := make([]byte, offset)
 	copy(b, "VIA3")
 	p16(b, 4, 3)
-	p16(b, 6, 3)
+	p16(b, 6, 4)
 	p16(b, 8, 64)
 	p16(b, 10, shard.Kind)
 	p32(b, 16, uint32(count))
@@ -243,7 +243,7 @@ func Read(ctx context.Context, b []byte) (Shard, error) {
 	if len(b) < 64 || len(b) >= MaxFile {
 		return Shard{}, fail("length")
 	}
-	if string(b[:4]) != "VIA3" || u16(b, 4) != 3 || u16(b, 6) != 3 {
+	if string(b[:4]) != "VIA3" || u16(b, 4) != 3 || u16(b, 6) != 4 {
 		return Shard{}, fail("version")
 	}
 	if u16(b, 8) != 64 || u32(b, 12) != 0 || b[44] != 1 || !zero(b[45:64]) {

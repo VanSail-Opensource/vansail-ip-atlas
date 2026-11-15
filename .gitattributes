@@ -4,4 +4,5 @@ web/public/licenses/*.txt -text -whitespace
 # Reviewed source fixtures bind exact captured bytes, including line endings.
 fixtures/source-certification/*.csv -text -whitespace
 fixtures/source-certification/observed-*.txt -text -whitespace
+fixtures/source-certification/observed-*.json -text -whitespace
 fixtures/source-certification/notices/*.txt -text -whitespace

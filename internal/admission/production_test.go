@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,6 +84,25 @@ func TestCapabilityReportRequiresActualFacts(t *testing.T) {
 		}
 	}
 }
+
+func TestPositiveRiskCapabilityDoesNotInventAbsentCategories(t *testing.T) {
+	stats := []SourceStatistics{{ID: "positive", Family: "one", Exact: true, Signals: map[intelligence.Signal]bool{"tor": true}}}
+	report := deriveCapabilities(stats, time.Unix(1800000000, 0))
+	if report.ReleaseScope != "release-scope-v5" {
+		t.Fatal(report.ReleaseScope)
+	}
+	for _, v := range report.Capabilities {
+		if v.Capability == "risk_reasons" && !v.Qualified {
+			t.Fatal("verified positive observation blocked by absent categories")
+		}
+	}
+	stats[0].Signals = nil
+	for _, v := range deriveCapabilities(stats, time.Unix(1800000000, 0)).Capabilities {
+		if v.Capability == "risk_reasons" && v.Qualified {
+			t.Fatal("empty observations qualified risk")
+		}
+	}
+}
 func TestRightsDigestCanonicalUTF8(t *testing.T) {
 	no := false
 	s := Source{Rights: Rights{Identifier: "CC0-1.0", Status: "reviewed", Distribution: "allow", EvidenceURL: "https://example.com/LICENSE", ReviewBasis: "reviewed Å & text", AttributionRequired: &no}}
@@ -96,6 +116,20 @@ func TestRightsDigestCanonicalUTF8(t *testing.T) {
 	}
 }
 func digestTest(hash [32]byte) string { return hashString(hash) }
+
+func TestRightsDigestIncludesExactLogoNotice(t *testing.T) {
+	yes := true
+	source := Source{Rights: Rights{Identifier: "CC0-1.0", Status: "reviewed", Distribution: "allow", EvidenceURL: "https://example.com/LICENSE", ReviewBasis: "synthetic review", AttributionRequired: &yes, Attribution: &intelligence.DatasetAttribution{Name: "Synthetic", Text: "Required credit", URL: "https://example.com", Logo: &intelligence.DatasetLogo{Alt: "Publisher", Path: "/_atlas/legal/" + strings.Repeat("a", 64) + ".png", SHA256: strings.Repeat("a", 64)}}}}
+	first, credit, err := RightsDigests(source)
+	if err != nil || credit == nil {
+		t.Fatal(err)
+	}
+	source.Rights.Attribution.Logo.Alt = "Changed publisher logo"
+	next, nextCredit, err := RightsDigests(source)
+	if err != nil || next == first || nextCredit == nil || *nextCredit == *credit {
+		t.Fatal("logo change did not invalidate rights digest", err)
+	}
+}
 
 func TestCanonicalPrivateJSONUnicodeAndLiteralEscapes(t *testing.T) {
 	value := struct {

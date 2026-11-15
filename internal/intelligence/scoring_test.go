@@ -61,15 +61,15 @@ func TestScoringConfigAndPositiveOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Score != nil || result.Confidence != "unrated" || result.Reasons&ReasonMalware == 0 {
-		t.Fatalf("positive-only must retain reason and unrated quality: %+v", result)
+	if result.Score == nil || *result.Score != 48 || result.Confidence != "low" || result.CoverageComplete || result.Reasons&ReasonMalware == 0 {
+		t.Fatalf("positive-only must retain observed risk and incomplete coverage: %+v", result)
 	}
 	closeRisk(t, *result.Contributions[0], .55*(1-math.Exp(-2)))
 	if result.Contributions[1] != nil {
 		t.Fatal("unobserved prefix must remain absent")
 	}
 	other, _ := engine.Lookup(netip.MustParseAddr("192.0.2.2"))
-	if other.Reasons&ReasonMalware != 0 || other.Score != nil {
+	if other.Reasons&ReasonMalware != 0 || other.Contributions[0] != nil {
 		t.Fatal("one host contaminated another exact host")
 	}
 }
@@ -100,18 +100,18 @@ func TestFamilyOrderAliasAndMonotonicity(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, _ := e.Lookup(addr)
-	if *result.Score > *expected.Score {
-		t.Fatal("added independent risk improved quality")
+	if *result.Score < *expected.Score {
+		t.Fatal("added independent risk reduced observed risk")
 	}
 }
-func TestCompleteCoverageMOASAndIPv6(t *testing.T) {
+func TestCompleteCoverageIsIndependentOfObservedRisk(t *testing.T) {
 	p := testPolicy(t)
 	e, err := NewEngine(p, nil, coverage(), mapping(), clock())
 	if err != nil {
 		t.Fatal(err)
 	}
 	q, _ := e.Lookup(netip.MustParseAddr("192.0.2.1"))
-	if q.Score == nil || *q.Score != 100 || q.Confidence != "low" {
+	if q.Score != nil || q.Confidence != "unrated" || !q.CoverageComplete {
 		t.Fatalf("authoritatively assessed negatives: %+v", q)
 	}
 	moas := mapping()
@@ -121,12 +121,12 @@ func TestCompleteCoverageMOASAndIPv6(t *testing.T) {
 		t.Fatal(err)
 	}
 	q, _ = e.Lookup(netip.MustParseAddr("192.0.2.1"))
-	if q.Score != nil {
-		t.Fatal("unassessed MOAS origin yielded score")
+	if q.Score != nil || q.CoverageComplete {
+		t.Fatal("unassessed MOAS origin claimed complete assessment")
 	}
 	q, _ = e.Lookup(netip.MustParseAddr("2001:db8::1"))
 	if q.Score != nil {
-		t.Fatal("IPv6 must remain unrated")
+		t.Fatal("unobserved IPv6 address gained a score")
 	}
 }
 func TestExpiryRetractionNeighborSelfExclusionAndASNCap(t *testing.T) {
@@ -186,7 +186,7 @@ func TestSparseProfileDoesNotImputeCleanAndLPM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(profile.Cells) != 1 || profile.AggregateScore != nil || profile.PositiveCount != 1 {
+	if len(profile.Cells) != 1 || profile.AggregateScore == nil || *profile.AggregateScore != 48 || profile.ScoredCount != 1 || profile.AssessedCount != 0 || profile.PositiveCount != 1 {
 		t.Fatalf("sparse profile imputed facts: %+v", profile)
 	}
 }
@@ -252,11 +252,11 @@ func TestPartialNeighborCoverageExcludesOnlyQueryAndMappedPrefixes(t *testing.T)
 		t.Fatal(err)
 	}
 	q, _ := e.Lookup(netip.MustParseAddr("::ffff:192.0.2.1"))
-	if q.Score == nil || *q.Score != 100 {
+	if q.Score != nil || !q.CoverageComplete {
 		t.Fatal("255 assessed neighbors incorrectly require queried cell")
 	}
 	q, _ = e.Lookup(netip.MustParseAddr("192.0.2.2"))
-	if q.Score != nil {
+	if q.Score != nil || q.CoverageComplete {
 		t.Fatal("an actually unassessed neighbor became clean")
 	}
 }
@@ -278,7 +278,7 @@ func TestResidentialMobileAndProviderBiasSentinels(t *testing.T) {
 		}
 		q, _ := e.Lookup(netip.MustParseAddr("192.0.2.1"))
 		usage := FuseUsage([]UsageEvidence{{Family: "classification", Type: usageType, Current: true}})
-		if usage.Type != usageType || q.Score == nil || *q.Score != 100 || q.Reasons&(ReasonMalware|ReasonAbuse|ReasonSubnetContext|ReasonASNContext) != 0 {
+		if usage.Type != usageType || q.Score != nil || !q.CoverageComplete || q.Reasons&(ReasonMalware|ReasonAbuse|ReasonSubnetContext|ReasonASNContext) != 0 {
 			t.Fatalf("%s/provider context contamination: %+v", usageType, q)
 		}
 		if e.NeighborContext(netip.MustParseAddr("192.0.2.1")).Present {

@@ -16,7 +16,7 @@ watch(() => route.fullPath, () => { if (ready) applyQuery() })
     <motion.div :initial="false" :animate="{ opacity: 1, y: 0 }" :transition="{ duration: 0.45 }" class="hero-inner">
       <p class="eyebrow">A clearer view of the network</p>
       <h1>Every address.<br><span>A little more context.</span></h1>
-      <p class="hero-copy">Explore an IP address or ASN. Geography, quality, and the routes between.</p>
+      <p class="hero-copy">Explore an IP address or ASN. Geography, observed risk, and the routes between.</p>
       <SearchInput />
       <p class="hero-footnote">Synthetic preview · IPv4 &amp; IPv6 · private by design</p>
     </motion.div>

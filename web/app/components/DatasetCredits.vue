@@ -40,7 +40,7 @@ onBeforeUnmount(() => { serial++; request?.abort() })
 <template>
   <div class="dataset-credit-group">
   <p v-if="document?.mode === 'production' && document.entries.length" class="dataset-credit-links" aria-label="Included dataset credits" data-testid="visible-dataset-credits">
-    <a v-for="entry in document.entries" :key="JSON.stringify(entry)" :href="entry.url" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">{{ entry.name }}</a>
+    <a v-for="entry in document.entries" :key="JSON.stringify(entry)" :href="entry.url" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer"><img v-if="entry.logo && document.verifiedLogos?.[entry.logo.sha256]" :src="document.verifiedLogos[entry.logo.sha256]" :alt="entry.logo.alt" class="dataset-logo" decoding="async">{{ entry.name }}</a>
   </p>
   <details ref="details" class="dataset-credits" data-testid="dataset-credits" @toggle="toggle">
     <summary>Dataset credits</summary>
@@ -65,6 +65,8 @@ onBeforeUnmount(() => { serial++; request?.abort() })
 .dataset-credit-group { color:var(--secondary); max-width:38rem; text-align:left; }
 .dataset-credit-group:has(details[open]) { flex:1 0 100%; max-width:100%; order:3; }
 .dataset-credit-links { display:flex; flex-wrap:wrap; gap:.4rem 1rem; margin-bottom:.6rem; }
+.dataset-credit-links a { display:inline-flex; align-items:center; gap:.45rem; }
+.dataset-logo { max-width:8rem; max-height:2.5rem; width:auto; height:auto; object-fit:contain; }
 summary { cursor:pointer; width:fit-content; color:var(--ink); border-radius:.3rem; }
 summary:focus-visible { outline:2px solid var(--accent); outline-offset:.3rem; }
 .credits-content { margin-top:1rem; padding:1.2rem; border:1px solid var(--line); border-radius:1rem; background:var(--surface); line-height:1.65; overflow-wrap:anywhere; }

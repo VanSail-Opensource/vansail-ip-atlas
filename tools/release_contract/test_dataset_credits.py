@@ -1,4 +1,5 @@
 import copy
+import base64
 import json
 from pathlib import Path
 import tempfile
@@ -9,6 +10,8 @@ from tools.release_contract.dataset_credits import (
     build_credit_document,
     validate_credit_tree,
     write_synthetic_credit_tree,
+    write_credit_tree,
+    validate_logo,
 )
 
 
@@ -19,6 +22,47 @@ CREDIT = {"name": "Reviewed Dataset", "text": "Data copyright Reviewed Publisher
 
 
 class DatasetCreditTests(unittest.TestCase):
+    def logo_corpus(self):
+        return json.loads((Path(__file__).resolve().parents[2] / "fixtures/contracts/dataset-logos-v1.json").read_text())["cases"]
+
+    def test_shared_logo_bytes_match_go_and_browser(self):
+        for row in self.logo_corpus():
+            with self.subTest(name=row["name"]):
+                if row["valid"]:
+                    validate_logo(base64.b64decode(row["base64"]), row["sha256"])
+                else:
+                    with self.assertRaises(ContractError):
+                        validate_logo(base64.b64decode(row["base64"]), row["sha256"])
+
+    def test_logo_inventory_binding_missing_mutation_and_immutable_conflict(self):
+        row = self.logo_corpus()[0]
+        logo = {"path": "/_atlas/legal/" + row["sha256"] + ".png", "sha256": row["sha256"], "alt": "Synthetic publisher"}
+        entry = dict(CREDIT, logo=logo)
+        for mutation in ("missing", "hash", "orphan", "symlink"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                base = Path(directory); public = base / "public"; public.mkdir(); private = base / "private"; private.mkdir()
+                raw = base64.b64decode(row["base64"])
+                (private / (row["sha256"] + ".png")).write_bytes(raw)
+                modes, entries = {CURRENT: "production"}, {CURRENT: [entry]}
+                paths = write_credit_tree(public, CURRENT, modes, entries, logo_root=private)
+                self.assertIn(logo["path"][1:], paths)
+                from tools.release_contract.contracts import tree_inventory
+                inventory, _ = tree_inventory(public)
+                self.assertEqual({item[0] for item in inventory}, paths)
+                before = (public / "dataset-credits.json").read_bytes()
+                target = public / logo["path"][1:]
+                if mutation == "missing": target.unlink()
+                elif mutation == "hash": target.write_bytes(b"changed")
+                elif mutation == "orphan": (target.parent / ("d" * 64 + ".png")).write_bytes(raw)
+                else:
+                    target.unlink()
+                    try: target.symlink_to(private / (row["sha256"] + ".png"))
+                    except OSError: continue
+                with self.assertRaises(ContractError): validate_credit_tree(public, CURRENT, modes)
+                if mutation in ("hash", "orphan", "symlink"):
+                    with self.assertRaises(ContractError): write_credit_tree(public, CURRENT, modes, entries, logo_root=private)
+                    self.assertEqual((public / "dataset-credits.json").read_bytes(), before)
+
     def production(self, root, entries=None):
         data = build_credit_document(CURRENT, "production", [CREDIT] if entries is None else entries)
         digest = sha256(data)
@@ -32,7 +76,7 @@ class DatasetCreditTests(unittest.TestCase):
 
     def test_production_document_has_only_reviewed_shaped_entries(self):
         document = parse_canonical(build_credit_document(CURRENT, "production", [CREDIT, CREDIT]))
-        self.assertEqual(document, {"format_version": 1, "release_id": CURRENT,
+        self.assertEqual(document, {"format_version": 2, "release_id": CURRENT,
                                    "mode": "production", "entries": [CREDIT]})
         changed = dict(CREDIT, text="Updated required credit")
         self.assertNotEqual(sha256(build_credit_document(CURRENT, "production", [CREDIT])),

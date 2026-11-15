@@ -1,20 +1,20 @@
 # VanSail IP Atlas: evidence-based quality, ASN context and /24 context.
 schema_version: 3
-contract_revision: 1
-model_id: via-risk-v3-contract-1
+contract_revision: 2
+model_id: via-observed-risk-v1
 contract: docs/scoring.md
-contract_vectors: fixtures/scoring/contract-v1.json
+contract_vectors: fixtures/scoring/observed-risk-v1.json
 range: [0, 100]
 semantics:
-  quality_100_is_better: true
+  observed_risk_100_is_worse: true
   risk_1_is_worse: true
   unknown_is_not_clean: true
   classification_is_not_abuse_proof: true
   uncalibrated_risk_is_not_probability: true
   public_reasons_without_source_metadata: true
-  public_score_requires_adequate_coverage: true
-  explicit_authoritative_risk_can_be_shown_with_unrated_quality: true
-  numeric_quality_requires_all_contributing_layers_assessed: true
+  public_score_requires_positive_weighted_evidence: true
+  explicit_authoritative_risk_reasons_survive_null_score: true
+  assessment_coverage_independent_of_score: true
   family_key: evidence_family
 category_evidence:
   formula: "e(d,f)=max_{i in independent family f}(reliability_i*severity_i*specificity_i*2^(-age_hours_i/half_life_hours_d))"
@@ -39,7 +39,7 @@ category_evidence:
     cloudflare_proxyip: { beta: 0.28, half_life_hours: 72, severity: 1.0, public_reason: proxy, merge_into: proxy }
     datacenter:      { beta: 0.12, half_life_hours: 720, severity: 1.0, public_reason: datacenter }
     hosting:         { beta: 0.10, half_life_hours: 720, severity: 1.0, public_reason: hosting }
-  classification_penalty_note: Proxy, Tor, VPN and datacenter carry modest configurable quality adjustments; never equate them to abuse.
+  classification_penalty_note: Proxy, Tor, VPN and datacenter carry modest configurable observed-risk contributions; never equate them to abuse.
   indicator_specificity:
     exact: 1.0
     prefix: 0.65
@@ -49,13 +49,13 @@ category_evidence:
 layers:
   weights: { exact: 0.55, explicit_prefix: 0.18, asn: 0.15, neighbors24: 0.12 }
   formula: "R=clamp(0,1,0.55*R_exact+0.18*R_prefix+0.15*C_asn*R_asn+0.12*C24*R24)"
-  quality: "Q=round(100*(1-R)) if coverage_eligible else null"
+  observed_risk: "S=floor(100*R+0.5) if R>0 else null"
   normalization: do_not_renormalize_missing_layers_to_zero-risk
   unknown_layers: null
   preserve_layer_presence_mask: true
   max_asn_contribution_to_total_risk: 0.15
   max_neighbor24_contribution_to_total_risk: 0.12
-  required_layer_status: assessed
+  required_layer_status: positive_observed_or_authoritatively_assessed
 asn_wide:
   enabled: true
   direct_asn_indicators_priority: true
@@ -95,34 +95,34 @@ ipv4_24:
     - dominant_asn
     - subdivision_known
     - ip_cell_reason_flags
-    - aggregate_quality
+    - mean_observed_risk
   no_unobserved_host_imputation: true
-  aggregate_quality: null_unless_all_256_cells_quality_eligible_then_half_up_mean
+  mean_observed_risk: null_unless_scored_observed_cells_then_half_up_mean
   classful_boundary_is_visual_label_only: true
   ipv6_equivalent: separate_ipv6_prefix_profile_not_class_c
 coverage:
   family_key: evidence_family
   min_independent_assessment_families: 2
-  numeric_quality_requires_all_layers: true
+  complete_assessment_requires_all_layers: true
   qualifying_families: intersection_of_complete_families_across_all_required_scopes
-  numeric_quality_address_family: ipv4_only
+  numeric_risk_address_family: ipv4_and_ipv6_no_neighbor_renormalization
   positive_only_absence_is_unknown: true
   authoritative_positive_emits_reasons_even_if_score_null: true
   min_current_source_age_hours: 0
   max_source_age_hours: 720
-  data_quality_flag: unrated_when_insufficient
+  data_quality_flag: incomplete_coverage_is_explicit
   confidence_bands:
-    low_min_families: 2
+    low_min_families: 1
     medium_min_families: 3
     high_min_families: 4
-    unrated_when_incomplete: true
+    unrated_without_positive_weighted_evidence: true
   calibration:
     require_holdout_labels_for_probability: true
     monitor_fpr_per_usage_type: true
     monitor_residential_fpr: true
     monitor_asn_and_subnet_bias: true
     thresholds_are_hypotheses_not_measured: true
-  confidence_public: confidence_band_only
+  confidence_public: weakest_positive_contributing_layer_band_only
 geo_fusion:
   family_vote: highest_reliability_current_lpm_then_unknown_on_equal_weight_conflict
   winning_margin_denominator: all_nonmissing_family_vote_weights_at_same_hierarchy_level
@@ -137,7 +137,7 @@ geo_fusion:
   coordinate_winner: reliability_desc_precision_desc_canonical_value_bytes_asc
 rounding:
   internal: binary64_canonical_order_no_intermediate_rounding
-  quality_integer: half_up
+  observed_risk_integer: half_up
   serialization: follow_binary_format_quantization
 usage_fusion:
   direct_evidence_only: true

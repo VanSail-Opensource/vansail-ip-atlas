@@ -16,7 +16,7 @@ concurrency:
 env:
   GOMAXPROCS: '2'
   GOMEMLIMIT: 5GiB
-  PNPM_VERSION: 12.18.0
+  PNPM_VERSION: 11.28.12
 
 jobs:
   contracts:
@@ -28,7 +28,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@v7.0.0
         with:
-          go-version: '1.27.3'
+          go-version: '1.27.4'
           cache: true
       - uses: actions/setup-python@v7.0.0
         with:
@@ -40,7 +40,11 @@ jobs:
       - name: Focused contract regressions
         run: python -m unittest discover -s tools -p 'test_*.py' -v
       - name: Frozen candidate and hosted measurement regressions
-        run: python -m unittest tools.hosted.test_candidate tools.hosted.test_production_build tools.hosted.test_source_intake -v
+        run: python -m unittest discover -s tools/hosted -p 'test_*.py' -v
+      - name: Actual checkpoint encryption regression
+        run: |
+          go install filippo.io/age/cmd/age@v1.3.0 filippo.io/age/cmd/age-keygen@v1.3.0
+          python -m unittest tools.hosted.test_checkpoint -v
       - name: Go regressions
         run: go test ./...
       - name: Go static checks
@@ -48,7 +52,10 @@ jobs:
       - name: Workflow syntax and expression checks
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
       - name: Selected race tests
-        run: go test -race ./internal/... ./tools/source_samples
+        # The full 200,005-prefix capacity regression runs unchanged in Go
+        # regressions above. Race instrumentation exceeds its package timeout;
+        # retain the remaining pipeline/resource/retraction regressions here.
+        run: go test -race ./internal/... ./tools/source_samples -skip '^TestStreamedOneASNMoreThanTwoHundredThousandPrefixes$'
       - name: Production subscription decoder fuzz smoke
         run: go test ./internal/subscription -run '^$' -fuzz '^FuzzLiteralDecoder$' -fuzztime 10s -parallel 2
       - name: MRT parser fuzz smoke
@@ -96,7 +103,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@v7.0.0
         with:
-          go-version: '1.27.3'
+          go-version: '1.27.4'
           cache: true
       - uses: actions/setup-python@v7.0.0
         with:
@@ -124,18 +131,18 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '26.13.0'
+          node-version: '26.13.1'
       - name: Install locked harness
         working-directory: tools/hosted
-        run: npm exec --yes --package pnpm@12.18.0 -- pnpm install --frozen-lockfile --ignore-scripts
+        run: npm exec --yes --package pnpm@11.28.12 -- pnpm install --frozen-lockfile --ignore-scripts
       - name: Install actual current stable Chrome
         working-directory: tools/hosted
-        run: npm exec --yes --package pnpm@12.18.0 -- pnpm exec playwright install --with-deps chrome
+        run: npm exec --yes --package pnpm@11.28.12 -- pnpm exec playwright install --with-deps chrome
       - name: Install locked product decoder
         working-directory: web
-        run: npm exec --yes --package pnpm@12.18.0 -- pnpm install --frozen-lockfile --ignore-scripts
+        run: npm exec --yes --package pnpm@11.28.12 -- pnpm install --frozen-lockfile --ignore-scripts
       - name: Bundled Zstandard TypeScript regression
-        run: node --test tools/query_contract/query.test.mjs tools/query_contract/via3.test.mjs web/tests/zstd.test.ts web/tests/bgpGraph.test.ts web/tests/datasetCredits.test.ts tools/hosted/performance-gates.test.mjs tools/release_contract/bundle_licenses.test.mjs
+        run: node --test tools/query_contract/query.test.mjs tools/query_contract/via3.test.mjs web/tests/zstd.test.ts web/tests/bgpGraph.test.ts web/tests/datasetCredits.test.ts tools/hosted/performance-gates.test.mjs tools/hosted/memory-json-bytes.test.mjs tools/release_contract/bundle_licenses.test.mjs
       - name: Native support diagnostic (mechanism replaced by explicit amendment)
         continue-on-error: true
         run: node tools/hosted/codec-probe.mjs
@@ -149,7 +156,9 @@ jobs:
           retention-days: 7
 
   synthetic-browser:
-    needs: [contracts, bundled-codec]
+    # Independent frontend evidence can run alongside the Go contracts. The
+    # complete workflow and every required PR check must still pass to release.
+    needs: bundled-codec
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -158,29 +167,33 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@v7.0.0
         with:
-          go-version: '1.27.3'
+          go-version: '1.27.4'
       - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '26.13.0'
+          node-version: '26.13.1'
       - uses: actions/setup-python@v7.0.0
         with:
           python-version: '3.13.7'
       - name: Install locked tools and product
         run: |
           python -m pip install -r tools/requirements.txt
-          npm exec --yes --package pnpm@12.18.0 -- pnpm --dir web install --frozen-lockfile --ignore-scripts
-          npm exec --yes --package pnpm@12.18.0 -- pnpm --dir tools/hosted install --frozen-lockfile --ignore-scripts
-          npm exec --yes --package pnpm@12.18.0 -- pnpm --dir tools/hosted exec playwright install --with-deps chrome
+          npm exec --yes --package pnpm@11.28.12 -- pnpm --dir web install --frozen-lockfile --ignore-scripts
+          npm exec --yes --package pnpm@11.28.12 -- pnpm --dir tools/hosted install --frozen-lockfile --ignore-scripts
+          npm exec --yes --package pnpm@11.28.12 -- pnpm --dir tools/hosted exec playwright install --with-deps chrome
       - name: Typecheck and generate immutable synthetic candidate
         run: |
           mkdir -p build-private
-          npm exec --yes --package pnpm@12.18.0 -- pnpm --dir web licenses list --prod --json > build-private/software-license-metadata.json
+          npm exec --yes --package pnpm@11.28.12 -- pnpm --dir web licenses list --prod --json > build-private/software-license-metadata.json
           python tools/release_contract/software_licenses.py
-          npm exec --yes --package pnpm@12.18.0 -- pnpm --dir web typecheck
-          npm exec --yes --package pnpm@12.18.0 -- pnpm --dir web generate
+          npm exec --yes --package pnpm@11.28.12 -- pnpm --dir web typecheck
+          npm exec --yes --package pnpm@11.28.12 -- pnpm --dir web generate
           python tools/release_contract/software_licenses.py --bundle-audit build-private/software-bundle-audit.json --require-runtime-review
           go run ./cmd/atlas synthetic -graph24 -out build-private/ci-atlas
           python tools/release_contract/prepare_static.py --atlas build-private/ci-atlas --public web/.output/public
+      - name: Measure actual emitted worker at accepted maximum profile
+        run: |
+          go build -o build-private/atlas ./cmd/atlas
+          python tools/hosted/runner_budget.py --report reports/worker-runner-budget.json -- python tools/hosted/worker_memory.py --public web/.output/public --preview-url http://127.0.0.1:4173
       - name: Synthetic static HTTP browser regression (not Pages acceptance)
         run: |
           python tools/hosted/static-server.py --directory web/.output/public --port 4173 &
@@ -202,6 +215,8 @@ jobs:
             reports/ui-regression.json
             reports/performance-local.json
             reports/software-licenses.json
+            reports/worker-memory.json
+            reports/worker-runner-budget.json
           if-no-files-found: error
           retention-days: 7
       - uses: actions/upload-artifact@v7.0.0

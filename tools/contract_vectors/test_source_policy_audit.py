@@ -120,47 +120,33 @@ class SourcePolicyAuditTests(unittest.TestCase):
         with self.assertRaises(ContractError):
             validate_sources(invalid)
 
-    def test_numeric_quality_rejects_asn_scope_relabelled_as_all_layers(self):
-        sources = []
-        for family in ("family-a", "family-b"):
-            for layer in ("exact", "explicit_prefix", "asn", "neighbors24"):
-                source = self.source(f"{family}-{layer}", category="abuse", fields=("reason_flags",),
-                                     scope="asn", coverage="complete")
-                source.update(evidence_family=family, assessment_layers=[layer], signals=["abuse"])
-                sources.append(source)
-        report = self.report(sources)
-        self.assertEqual(self.capability(report, "numeric_quality"), "unrated")
-        row = next(row for row in report["capabilities"] if row["capability"] == "numeric_quality")
-        self.assertFalse(row["required"])
-        self.assertEqual(row["families"], [])
+    def test_declared_complete_layers_do_not_invent_positive_risk(self):
+        source = self.source("empty-assessment", category="abuse", fields=("reason_flags",),
+                             scope="asn", coverage="complete")
+        source["assessment_layers"] = ["asn"]
+        report = self.report([source])
+        self.assertEqual(self.capability(report, "risk_reasons"), "blocked")
+        self.assertEqual(self.capability(report, "class_c"), "blocked")
 
-    def test_optional_numeric_quality_still_qualifies_only_two_complete_families(self):
-        sources = []
-        for family in ("family-a", "family-b"):
-            for layer, scope in (("exact", "exact_ip"), ("neighbors24", "exact_ip"), ("explicit_prefix", "prefix"), ("asn", "asn")):
-                source = self.source(f"{family}-{layer}", category="abuse", fields=("reason_flags",), scope=scope, coverage="complete")
-                source.update(evidence_family=family, assessment_layers=[layer], signals=["abuse"])
-                sources.append(source)
-        report = self.report(sources)
-        row = next(row for row in report["capabilities"] if row["capability"] == "numeric_quality")
-        self.assertEqual(row["status"], "qualified")
-        self.assertFalse(row["required"])
-        self.assertEqual(row["families"], ["family-a", "family-b"])
-        # Optional scoring cannot waive unrelated data or Pages evidence.
+    def test_positive_evidence_cannot_waive_routing_or_pages(self):
+        source = self.source("positive-only", category="abuse", fields=("reason_flags",),
+                             scope="exact_ip", coverage="positive_only")
+        source["signals"] = ["abuse"]
+        report = self.report([source])
+        self.assertEqual(self.capability(report, "risk_reasons"), "qualified")
         self.assertFalse(report["production_eligible"])
         self.assertEqual(self.capability(report, "rpki"), "blocked")
         self.assertEqual(self.capability(report, "pages_release"), "blocked")
-
-    def test_positive_only_risk_does_not_become_clean_or_a_release_requirement(self):
-        source = self.source("positive-only", category="abuse", fields=("reason_flags",), scope="exact_ip", coverage="positive_only")
-        source["signals"] = ["abuse"]
-        report = self.report([source])
-        row = next(row for row in report["capabilities"] if row["capability"] == "numeric_quality")
-        self.assertEqual(row["status"], "unrated")
-        self.assertEqual(row["families"], [])
-        self.assertFalse(row["required"])
         self.assertNotIn("abuse", report["missing_reason_evidence"])
+        self.assertIn("fraud", report["missing_reason_evidence"])
         self.assertEqual(report["required_capability_count"], 12)
+
+    def test_current_mrt_paths_supply_origin_and_path_capabilities(self):
+        sources = [self.source(f"mrt-{i}", category="bgp", fields=("bgp_origins", "bgp_paths"), scope="path") for i in range(2)]
+        report = self.report(sources)
+        self.assertEqual(self.capability(report, "asn_prefix"), "qualified")
+        self.assertEqual(self.capability(report, "bgp_origins_paths"), "qualified")
+        self.assertEqual(self.capability(report, "relationships"), "blocked")
 
 
 if __name__ == "__main__":

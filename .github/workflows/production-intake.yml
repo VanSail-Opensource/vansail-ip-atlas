@@ -1,0 +1,82 @@
+name: Atlas authenticated source checkpoint
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: atlas-production-intake
+  cancel-in-progress: false
+
+jobs:
+  intake:
+    if: github.repository == 'VanSail-Opensource/vansail-ip-atlas' && github.ref == 'refs/heads/main' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-24.04
+    environment: atlas-private-build
+    timeout-minutes: 360
+    env:
+      GOMAXPROCS: '2'
+      GOMEMLIMIT: 5GiB
+      RUNNER_TOOL_CACHE: ${{ github.workspace }}/build-private/toolcache
+      GH_TOKEN: ${{ github.token }}
+      ATLAS_STATE_AGE_IDENTITY: ${{ secrets.ATLAS_STATE_AGE_IDENTITY }}
+      ATLAS_STATE_AGE_RECIPIENT: ${{ vars.ATLAS_STATE_AGE_RECIPIENT }}
+    steps:
+      - uses: actions/checkout@v7.0.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/atlas-setup
+      - name: Verify trusted exact-head upstream
+        id: context
+        run: python tools/hosted/production_workflow.py context --kind intake
+      - name: Restore authenticated encrypted state
+        run: python tools/hosted/runner_budget.py --report reports/checkpoint-restore-budget.json -- python tools/hosted/checkpoint.py restore --kind intake
+      - name: Run bounded production stage
+        run: python tools/hosted/runner_budget.py -- python tools/hosted/production_workflow.py intake
+      - name: Encrypt immutable state for the next trusted job
+        run: python tools/hosted/runner_budget.py --report reports/checkpoint-pack-budget.json -- python tools/hosted/checkpoint.py pack --kind intake
+      - uses: actions/upload-artifact@v7.0.0
+        with:
+          name: atlas-intake-checkpoint
+          path: |
+            build-private/checkpoint/checkpoint.tar.gz.age
+            build-private/checkpoint/envelope.json
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7.0.0
+        if: always()
+        with:
+          name: source-free-intake-status
+          path: |
+            reports/source-intake.json
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v7.0.0
+        with:
+          name: atlas-intake-checkpoint-index
+          path: build-private/checkpoint/envelope.json
+          retention-days: 7
+          if-no-files-found: error
+      - name: Delete expired checkpoint ciphertext
+        run: python tools/hosted/checkpoint.py prune
+      - name: Remove plaintext state
+        if: always()
+        run: |
+          python - <<'PY'
+          import os, shutil
+          from pathlib import Path
+          root=Path(os.environ['GITHUB_WORKSPACE']).resolve()
+          target=root/'.atlas-private'
+          if target.exists():
+              if target.is_symlink() or not target.resolve().is_relative_to(root):
+                  raise SystemExit('unsafe state cleanup path')
+              shutil.rmtree(target)
+          PY

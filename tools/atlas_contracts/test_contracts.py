@@ -20,32 +20,31 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_actual_catalog_is_blocked_and_has_shared_family(self):
         report = capability_report(self.configs["sources"], utc("2026-11-08T00:00:00Z"), ROOT)
-        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (91, 8, 0))
+        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (14, 10, 0))
         self.assertEqual({s["id"] for s in self.configs["sources"]["sources"] if s["admission"] == "active"}, {
             "sapics-user-country-v4", "sapics-user-country-v6", "sapics-server-country-v4", "ipverse-as-metadata",
-            "dbip-lite-direct", "ipapi-free-geo-v4", "ipapi-free-geo-v6", "x4b-vpn-v4"})
+            "dbip-lite-direct", "ipapi-free-geo-v4", "ipapi-free-geo-v6", "x4b-vpn-v4", "tor-exits", "ipverse-asn-usage"})
         self.assertFalse(report["production_eligible"])
         self.assertEqual(report["schema_version"], 3)
-        self.assertEqual(report["release_scope"], "release-scope-v4")
+        self.assertEqual(report["release_scope"], "release-scope-v5")
         self.assertEqual(report["dataset_attributions"], [])
-        self.assertEqual(len(report["capabilities"]), 13)
+        self.assertEqual(len(report["capabilities"]), 12)
         required = [row for row in report["capabilities"] if row["required"]]
         optional = [row for row in report["capabilities"] if not row["required"]]
         self.assertEqual(len(required), 12)
         self.assertTrue(all(row["status"] == "blocked" for row in required))
-        self.assertEqual([(row["capability"], row["status"]) for row in optional], [("numeric_quality", "unrated")])
+        self.assertEqual(optional, [])
         self.assertEqual(report["required_capability_count"], 12)
         self.assertEqual(report["blocked_required_capability_count"], 12)
         subscriptions = [s for s in self.configs["sources"]["sources"] if s["category"] == "proxy_subscription_ip"]
-        self.assertEqual(len(subscriptions), 21)
-        self.assertEqual({s["evidence_family"] for s in subscriptions}, {"public-subscription-aggregators"})
+        self.assertEqual(subscriptions, [])
 
     def test_cli_counts_only_required_capabilities_and_preserves_other_release_blocks(self):
         result = subprocess.run([sys.executable, str(ROOT / "tools/validate_blueprint.py"), "--now", "2026-11-08T00:00:00Z", "--require-production"],
                                 cwd=ROOT, capture_output=True, text=True, check=False)
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn("12/12 required capabilities", result.stdout)
-        self.assertIn("Optional numeric quality: unrated", result.stdout)
+        self.assertIn("Observed risk: positive evidence only", result.stdout)
         production_line = next(line for line in result.stdout.splitlines() if line.startswith("Production BLOCKED"))
         self.assertNotIn("numeric_quality", production_line)
         self.assertIn("pages_release", production_line)
@@ -204,6 +203,19 @@ class AdmissionClockTests(unittest.TestCase):
         report = capability_report({"sources": [right, left]}, self.now, self.root, snapshots)
         city = next(row for row in report["capabilities"] if row["capability"] == "region_city")
         self.assertEqual(city["status"], "qualified")
+
+    def test_positive_risk_does_not_require_every_reason_category(self):
+        source = copy.deepcopy(self.source)
+        source.update(category="proxy", scope="exact_ip", signals=["tor"], public_fields=["reason_flags"])
+        source["coverage"]["kind"] = "positive_only"
+        report = capability_report({"sources": [source]}, self.now, self.root, {source["id"]: self.snapshot})
+        risk = next(row for row in report["capabilities"] if row["capability"] == "risk_reasons")
+        self.assertEqual(risk["status"], "qualified")
+        self.assertIn("fraud", report["missing_reason_evidence"])
+        self.assertNotIn("tor", report["missing_reason_evidence"])
+        source["signals"] = []
+        report = capability_report({"sources": [source]}, self.now, self.root, {source["id"]: self.snapshot})
+        self.assertEqual(next(row for row in report["capabilities"] if row["capability"] == "risk_reasons")["status"], "blocked")
 
     def test_publication_expiry_boundary_and_future_tolerance(self):
         self.assertEqual(self.state(), "current")

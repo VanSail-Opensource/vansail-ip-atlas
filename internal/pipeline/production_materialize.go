@@ -21,6 +21,44 @@ type ProductionInputs struct {
 	Tier1         *intelligence.QualifiedTier1
 }
 
+// BuildEngineeringBenchmark exercises the production materializer with isolated
+// benchmark records. The original authenticated baseline qualifies routing
+// completeness; transformed inputs can never create a production artifact or
+// receipt. With empty inputs, expiry/withdrawal scenarios retain unknown routing
+// completeness. Callers must separately prove their measured record transition.
+func BuildEngineeringBenchmark(ctx context.Context, options Options, baseline, state intelligence.BuildState, policy intelligence.Policy, inputs ProductionInputs) (Candidate, error) {
+	if options.Mode != "engineering" || options.ProductionGate != nil {
+		return Candidate{}, &via3.Error{Code: "production_blocked"}
+	}
+	clock := time.Unix(options.Clock, 0).UTC()
+	if (state.Version != 1 && state.Version != 2) || state.PolicyHash == ([32]byte{}) || !state.EvaluatedAt.Equal(clock) {
+		return Candidate{}, errors.New("same-clock benchmark state required")
+	}
+	if err := policy.Validate(); err != nil {
+		return Candidate{}, err
+	}
+	if inputs.Qualification != nil || inputs.Tier1 != nil {
+		if inputs.Qualification == nil || inputs.Tier1 == nil || !baseline.EvaluatedAt.Equal(clock) {
+			return Candidate{}, errors.New("qualified baseline pair required")
+		}
+		if err := inputs.Qualification.Validate(baseline, clock); err != nil {
+			return Candidate{}, err
+		}
+		if err := inputs.Tier1.Validate(baseline, clock); err != nil {
+			return Candidate{}, err
+		}
+		if time.Unix(options.ValidUntil, 0).After(inputs.Tier1.ValidUntil()) {
+			return Candidate{}, errors.New("benchmark outlives baseline routing qualification")
+		}
+	}
+	for _, source := range state.Sources {
+		if source.ID == "" || source.Fingerprint == ([32]byte{}) || !clock.Before(source.ExpiresAt) || time.Unix(options.ValidUntil, 0).After(source.ExpiresAt) {
+			return Candidate{}, errors.New("invalid or expired benchmark source")
+		}
+	}
+	return buildStreamedCandidate(ctx, options, state, policy, inputs)
+}
+
 // BuildStreamedIntelligence is an explicitly synthetic engineering entry for
 // full partitioned private state. It cannot assert complete VRP coverage or
 // create source-qualified Tier-1 history and never accepts production mode.
@@ -125,7 +163,7 @@ func buildStreamedCandidate(ctx context.Context, options Options, state intellig
 type globalASNSummary struct {
 	mass        float64
 	count       uint64
-	families    [3]string
+	families    [4]string
 	familyCount int
 	explicit    float64
 	present     bool
@@ -147,7 +185,7 @@ func (g *globalASNAggregates) value(asn uint32) (*globalASNSummary, error) {
 	return v, nil
 }
 func (g *globalASNAggregates) family(v *globalASNSummary, family string) error {
-	if v.familyCount >= 3 {
+	if v.familyCount >= 4 {
 		return nil
 	}
 	for i := 0; i < v.familyCount; i++ {

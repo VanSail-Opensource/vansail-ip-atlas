@@ -7,8 +7,8 @@
       "schema": "dbip-city-eight-columns-v1",
       "version": 1,
       "fixture_sha256": "9f1d79394ceedd24445922f84d17325c0f1809cadac60da410a5c7610bbf57ef",
-      "tested_at": "2026-11-15T03:21:13Z",
-      "implementation_sha256": "8e6d57c1b5e8d8c3fc82c6612e1fa97ec3910eaf00cd3ca4bf46a5128d011c03"
+      "tested_at": "2026-11-15T04:47:08Z",
+      "implementation_sha256": "0cd606a4b22809469da64594f5fb2bae98e35d6b43a7e19d1120033507f83f11"
     },
     {
       "source_id": "ipapi-free-geo-v4",
@@ -16,8 +16,8 @@
       "schema": "ipapi-free-fourteen-columns-v1",
       "version": 1,
       "fixture_sha256": "4df74d3dbe3a08c3bc7e6a63d4c3912f7bf4932fc203a69f566656f1f71e2836",
-      "tested_at": "2026-11-15T03:21:13Z",
-      "implementation_sha256": "8e6d57c1b5e8d8c3fc82c6612e1fa97ec3910eaf00cd3ca4bf46a5128d011c03"
+      "tested_at": "2026-11-15T04:47:08Z",
+      "implementation_sha256": "0cd606a4b22809469da64594f5fb2bae98e35d6b43a7e19d1120033507f83f11"
     },
     {
       "source_id": "ipapi-free-geo-v6",
@@ -25,8 +25,8 @@
       "schema": "ipapi-free-fourteen-columns-v1",
       "version": 1,
       "fixture_sha256": "99f6c0ba9fbeacda88749d62782ba1a9eadb55aea2a5e4940a6f4a20b03704b7",
-      "tested_at": "2026-11-15T03:21:13Z",
-      "implementation_sha256": "8e6d57c1b5e8d8c3fc82c6612e1fa97ec3910eaf00cd3ca4bf46a5128d011c03"
+      "tested_at": "2026-11-15T04:47:08Z",
+      "implementation_sha256": "0cd606a4b22809469da64594f5fb2bae98e35d6b43a7e19d1120033507f83f11"
     },
     {
       "source_id": "ipverse-as-metadata",
@@ -34,8 +34,17 @@
       "schema": "asn-handle-description-country-csv-v1",
       "version": 1,
       "fixture_sha256": "354777d8e6b3e4ebc2d63b84aa84ab7ba8e4ba2d6b907c5d673ec6a25490310a",
-      "tested_at": "2026-11-15T03:21:13Z",
-      "implementation_sha256": "8e6d57c1b5e8d8c3fc82c6612e1fa97ec3910eaf00cd3ca4bf46a5128d011c03"
+      "tested_at": "2026-11-15T04:47:08Z",
+      "implementation_sha256": "0cd606a4b22809469da64594f5fb2bae98e35d6b43a7e19d1120033507f83f11"
+    },
+    {
+      "source_id": "ipverse-asn-usage",
+      "parser": "ipverse-asn-usage-json",
+      "schema": "ipverse-as-category-json-v1",
+      "version": 1,
+      "fixture_sha256": "ca510002163250ed211db3caed36496df9376c0796516b625f8c674bfe5bdb8d",
+      "tested_at": "2026-11-15T04:47:08Z",
+      "implementation_sha256": "0cd606a4b22809469da64594f5fb2bae98e35d6b43a7e19d1120033507f83f11"
     },
     {
       "source_id": "sapics-server-country-v4",
@@ -43,8 +52,8 @@
       "schema": "start-end-country-csv-v1",
       "version": 1,
       "fixture_sha256": "28568361445bb9b69974be1730ad27e03ff621f0a20c49c80bd674065b4cd6b8",
-      "tested_at": "2026-11-15T03:21:13Z",
-      "implementation_sha256": "8e6d57c1b5e8d8c3fc82c6612e1fa97ec3910eaf00cd3ca4bf46a5128d011c03"
+      "tested_at": "2026-11-15T04:47:08Z",
+      "implementation_sha256": "0cd606a4b22809469da64594f5fb2bae98e35d6b43a7e19d1120033507f83f11"
     },
     {
       "source_id": "sapics-user-country-v4",
@@ -52,8 +61,8 @@
       "schema": "start-end-country-csv-v1",
       "version": 1,
       "fixture_sha256": "28568361445bb9b69974be1730ad27e03ff621f0a20c49c80bd674065b4cd6b8",
-      "tested_at": "2026-11-15T03:21:13Z",
-      "implementation_sha256": "8e6d57c1b5e8d8c3fc82c6612e1fa97ec3910eaf00cd3ca4bf46a5128d011c03"
+      "tested_at": "2026-11-15T04:47:08Z",
+      "implementation_sha256": "0cd606a4b22809469da64594f5fb2bae98e35d6b43a7e19d1120033507f83f11"
     },
     {
       "source_id": "sapics-user-country-v6",
@@ -61,8 +70,17 @@
       "schema": "start-end-country-csv-v1",
       "version": 1,
       "fixture_sha256": "780d2a253095b64bf00230ad8c5eb40798ac18299eba073269eb25c96a0ba0e2",
-      "tested_at": "2026-11-15T03:21:13Z",
-      "implementation_sha256": "8e6d57c1b5e8d8c3fc82c6612e1fa97ec3910eaf00cd3ca4bf46a5128d011c03"
+      "tested_at": "2026-11-15T04:47:08Z",
+      "implementation_sha256": "0cd606a4b22809469da64594f5fb2bae98e35d6b43a7e19d1120033507f83f11"
+    },
+    {
+      "source_id": "tor-exits",
+      "parser": "tor-exit-addresses",
+      "schema": "tordnsel-exit-addresses-v1",
+      "version": 1,
+      "fixture_sha256": "1e0040d035e42b25717fd17f63b20c2c70549556b63c714871c7abbba8b746e7",
+      "tested_at": "2026-11-15T04:47:08Z",
+      "implementation_sha256": "0cd606a4b22809469da64594f5fb2bae98e35d6b43a7e19d1120033507f83f11"
     },
     {
       "source_id": "x4b-vpn-v4",
@@ -70,8 +88,8 @@
       "schema": "one-literal-ip-or-prefix-per-line-v1",
       "version": 1,
       "fixture_sha256": "a7038a372eebed2e872c8e8ee92c52ce5340c62c585f891b13f139de75d8f640",
-      "tested_at": "2026-11-15T03:21:13Z",
-      "implementation_sha256": "8e6d57c1b5e8d8c3fc82c6612e1fa97ec3910eaf00cd3ca4bf46a5128d011c03"
+      "tested_at": "2026-11-15T04:47:08Z",
+      "implementation_sha256": "0cd606a4b22809469da64594f5fb2bae98e35d6b43a7e19d1120033507f83f11"
     }
   ]
 }

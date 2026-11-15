@@ -3,7 +3,7 @@ const mode = useColorMode()
 const route = useRoute()
 const path = computed(() => route.path.replace(/\/+$/, '') || '/')
 const query = computed(() => typeof route.query.q === 'string' ? route.query.q : '')
-const links = [ ['Overview', 'overview'], ['Quality', 'quality'], ['Class C', 'class-c'], ['BGP', 'bgp'], ['ASN', 'asn'] ]
+const links = [ ['Overview', 'overview'], ['Observed risk', 'quality'], ['Class C', 'class-c'], ['BGP', 'bgp'], ['ASN', 'asn'] ]
 const href = (view: string) => `/ip/${view}${query.value ? `?q=${encodeURIComponent(query.value)}` : ''}`
 </script>
 

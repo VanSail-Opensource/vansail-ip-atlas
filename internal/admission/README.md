@@ -18,8 +18,9 @@ redistribution rights and any required global credits, an implemented parser/sch
 mapping, the observed real-fixture controls, and the matching reviewed ledger
 entry. It verifies fixture bytes and the current sorted internal Go code hash,
 then reruns that exact fixture through the current parser. This module cannot
-create reviews or certifications. The checked-in ledger remains empty, all 91
-catalog entries remain ineligible, and the catalog regression performs no fetch.
+create reviews or certifications. The checked-in ledger binds reviewed observed
+fixtures; active catalog entries still need fresh, hash-bound intake receipts.
+The catalog regression performs no fetch and cannot qualify production by itself.
 `CertificationFingerprint(ctx, workspace, sources)` binds the ledger, current
 internal Go bytes and active fixture bytes with a 64 MiB aggregate read cap.
 Compare it before and after intake alongside the configuration fingerprint, so

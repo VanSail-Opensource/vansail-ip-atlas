@@ -33,7 +33,7 @@ jobs:
           python-version: '3.13.7'
       - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '26.13.0'
+          node-version: '26.13.1'
       - name: Require successful trusted main integration artifact
         env:
           GH_TOKEN: ${{ github.token }}
@@ -76,8 +76,8 @@ jobs:
       - name: Install locked harness and current stable Chrome
         working-directory: tools/hosted
         run: |
-          npm exec --yes --package pnpm@12.18.0 -- pnpm install --frozen-lockfile --ignore-scripts
-          npm exec --yes --package pnpm@12.18.0 -- pnpm exec playwright install --with-deps chrome
+          npm exec --yes --package pnpm@11.28.12 -- pnpm install --frozen-lockfile --ignore-scripts
+          npm exec --yes --package pnpm@11.28.12 -- pnpm exec playwright install --with-deps chrome
       - name: Run hosted browser regression against frozen Pages deployment
         env:
           ATLAS_PREVIEW_URL: ${{ inputs.preview_url }}

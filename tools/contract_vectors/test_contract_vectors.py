@@ -22,7 +22,7 @@ class ScoringContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.config = yaml.safe_load((ROOT / "configs/scoring.yaml").read_text(encoding="utf-8"))
-        cls.vectors = json.loads((ROOT / "fixtures/scoring/contract-v1.json").read_text(encoding="utf-8"))
+        cls.vectors = json.loads((ROOT / "fixtures/scoring/observed-risk-v1.json").read_text(encoding="utf-8"))
         cls.signals = cls.config["category_evidence"]["signals"]
 
     def test_coefficients_and_half_lives_unchanged(self):
@@ -63,12 +63,12 @@ class ScoringContractTests(unittest.TestCase):
             next_risk = reference.layer(initial + [("malware", "b", i / 20)], self.signals)
             self.assertGreaterEqual(next_risk, risk)
 
-    def test_coverage_and_quality_vectors(self):
+    def test_observed_risk_and_independent_coverage_vectors(self):
         weights = list(self.config["layers"]["weights"].values())
-        for vector in self.vectors["quality"]:
+        for vector in self.vectors["observed_risk"]:
             with self.subTest(vector["id"]):
-                self.assertEqual(reference.quality(vector["ipv4"], vector["layers"], vector["complete_families"], weights),
-                                 (vector["expected_score"], vector["expected_confidence"]))
+                self.assertEqual(reference.observed_risk(vector["ipv4"], vector["layers"], vector["complete_families"], vector["positive_families"], weights),
+                                 (vector["expected_score"], vector["expected_confidence"], vector["expected_coverage"]))
 
     def test_asn_vectors_and_moas_max(self):
         contributions = []

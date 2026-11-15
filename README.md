@@ -4,11 +4,11 @@ A Go compiler and Nuxt 4 static IP/ASN atlas. The local synthetic application an
 
 The browser reads indexed, compressed VIA3 objects bundled with the site. It never uses an IP lookup API, resolves subscription hosts, or executes proxy connections. The only external runtime requests are optional OpenStreetMap tiles. IP lookup facts and VIA3 contain no source metadata. A shared footer displays reviewed dataset credits for included data from the same deployment; production facts wait for verified credits, and required publisher links remain visible when full notices are collapsed. Private lineage and source IDs stay private.
 
-Under the owner-approved `release-scope-v4`, compiled database material uses [CC BY-SA 4.0](DATA_LICENSE.md). The exact data-license notice and included-dataset credits are part of each immutable candidate. Source code and software dependencies retain their separate licenses; the product data license does not approve an unreviewed source.
+Under the owner-approved `release-scope-v5`, compiled database material uses [CC BY-SA 4.0](DATA_LICENSE.md). The exact data-license notice and included-dataset credits are part of each immutable candidate. Source code and software dependencies retain their separate licenses; the product data license does not approve an unreviewed source.
 
 ## Local preview
 
-Use the versions in `tools/hosted/toolchains.json`: Go 1.27.3, Node 26.13.0 and pnpm 12.18.0. Python validation dependencies are pinned in `tools/requirements.txt`.
+Use the versions in `tools/hosted/toolchains.json`: Go 1.27.4, Node 26.13.1 and pnpm 11.28.12. Python validation dependencies are pinned in `tools/requirements.txt`.
 
 From the repository root:
 
@@ -16,8 +16,8 @@ From the repository root:
 python -m pip install -r tools/requirements.txt
 python tools/validate_blueprint.py --report reports/capabilities.json
 go run ./cmd/atlas synthetic -graph24 -out build-private/local-atlas
-npm exec --yes --package node@26.13.0 --package pnpm@12.18.0 -- pnpm --dir web install --frozen-lockfile --ignore-scripts
-npm exec --yes --package node@26.13.0 --package pnpm@12.18.0 -- pnpm --dir web generate
+npm exec --yes --package node@26.13.1 --package pnpm@11.28.12 -- pnpm --dir web install --frozen-lockfile --ignore-scripts
+npm exec --yes --package node@26.13.1 --package pnpm@11.28.12 -- pnpm --dir web generate
 python tools/release_contract/prepare_static.py --atlas build-private/local-atlas --public web/.output/public
 python tools/hosted/static-server.py --directory web/.output/public --port 4173
 ```
@@ -33,7 +33,7 @@ go test ./...
 go vet ./...
 python -m unittest discover -s tools -p 'test_*.py' -v
 node --test tools/query_contract/query.test.mjs tools/query_contract/via3.test.mjs web/tests/zstd.test.ts web/tests/bgpGraph.test.ts tools/hosted/performance-gates.test.mjs tools/release_contract/bundle_licenses.test.mjs
-npm exec --yes --package node@26.13.0 --package pnpm@12.18.0 -- pnpm --dir web typecheck
+npm exec --yes --package node@26.13.1 --package pnpm@11.28.12 -- pnpm --dir web typecheck
 go test ./internal/subscription -run '^$' -fuzz FuzzLiteralDecoder -fuzztime 5s -parallel 2
 go test ./internal/intelligence -run '^$' -fuzz FuzzParseMRT -fuzztime 5s -parallel 2
 ```
@@ -41,7 +41,7 @@ go test ./internal/intelligence -run '^$' -fuzz FuzzParseMRT -fuzztime 5s -paral
 With the prepared static server running, install the locked harness dependencies and run actual stable Chrome:
 
 ```powershell
-npm exec --yes --package node@26.13.0 --package pnpm@12.18.0 -- pnpm --dir tools/hosted install --frozen-lockfile --ignore-scripts
+npm exec --yes --package node@26.13.1 --package pnpm@11.28.12 -- pnpm --dir tools/hosted install --frozen-lockfile --ignore-scripts
 node tools/hosted/codec-bundled.mjs
 node tools/hosted/ui-regression.mjs
 node tools/hosted/performance.mjs
@@ -65,9 +65,9 @@ Selected race tests require a CGO-capable toolchain: `go test -race ./internal/.
 
 ## Production boundary
 
-The November 9 catalog checkpoint contains 91 entries: eight active, 79 candidate, two rights-approved and two retired. The eight admitted entries have observed fixtures and reviewed source-specific controls; a static active label does not establish current downloaded data or complete production coverage. Every build rechecks actual bytes, clocks, rights and certifications. All 21 subscription repositories share one scoring family. See [the source audit](SOURCES_AUDIT.md) for the dated review and remaining source blockers.
+The November 15 shortlist contains 14 sources: ten statically admitted entries and four routing candidates. Dated Tor exits and Ipverse ASN categories add observed risk and usage. Every build independently rechecks actual bytes, item clocks, rights and parser certifications; a static active label never proves current production coverage. See [the source audit](SOURCES_AUDIT.md) for remaining qualification blockers.
 
-Production requires all required capabilities, real-source schema/freshness/rights certification, complete bulk ingestion/repacking, hosted regression and performance, a verified Pages preview and approval bound to the exact candidate. Current `release-scope-v4` retains v2's optional/unrated numeric quality and v3's reviewed global credits, and adds the approved CC BY-SA 4.0 compiled-data license. Complete negative risk feeds are not a release prerequisite; every non-null score still needs the unchanged coverage qualification. Source-specific redistribution, derivative-license and credit conditions remain mandatory. `configs/release-approval.yaml` remains default-deny.
+Production requires qualified real inputs, complete bulk ingestion, measured hosted regression/performance and a verified Pages preview bound to the exact frozen candidate. Under `release-scope-v5`, promotion is automatic from protected main after every mandatory gate passes. Observed risk can report supported positive evidence with explicit incomplete coverage; absent evidence never means safe. Reviewed required logos are local global-credit assets. Source-specific redistribution and credit obligations remain mandatory. The checked-in production policy cannot replace independently verified evidence.
 
 The external planner can also compile the small post-fusion engineering fixture:
 

@@ -45,6 +45,10 @@ func BuildMappings(ctx context.Context, options Options, state intelligence.Buil
 // child facts from falling through to stale affirmative parent values.
 func MappingProducer(state intelligence.BuildState, policy intelligence.Policy, clock time.Time) Producer {
 	return func(ctx context.Context, emit func(via3.PublicRecord) error) error {
+		state, joinErr := joinASNUsage(ctx, state)
+		if joinErr != nil {
+			return joinErr
+		}
 		if emit == nil {
 			return errors.New("mapping output sink is required")
 		}

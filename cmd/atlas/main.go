@@ -61,9 +61,15 @@ func writeJSON(path string, value any) error {
 }
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: atlas synthetic|compile-facts|compile-state|compile-production|verify-production|state-fingerprints|intake|lookup|inspect")
+		return fmt.Errorf("usage: atlas synthetic|compile-facts|compile-state|compile-production|verify-production|state-fingerprints|benchmark-state|corpus|memory-profile|intake|lookup|inspect")
 	}
 	switch args[0] {
+	case "memory-profile":
+		return memoryProfile(ctx, args[1:])
+	case "benchmark-state":
+		return benchmarkState(ctx, args[1:])
+	case "corpus":
+		return buildProductionCorpus(ctx, args[1:])
 	case "compile-facts":
 		return compileFacts(ctx, args[1:])
 	case "compile-state":

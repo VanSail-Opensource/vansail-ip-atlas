@@ -51,7 +51,7 @@ func runWithProcessMetrics(ctx context.Context, args []string, execute func(cont
 	command := "invalid"
 	if len(args) > 0 {
 		switch args[0] {
-		case "synthetic", "compile-facts", "compile-state", "compile-production", "verify-production", "state-fingerprints", "intake", "lookup", "inspect":
+		case "synthetic", "compile-facts", "compile-state", "compile-production", "verify-production", "state-fingerprints", "intake", "lookup", "inspect", "benchmark-state", "corpus":
 			command = args[0]
 		}
 	}

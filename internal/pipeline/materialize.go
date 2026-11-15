@@ -67,6 +67,10 @@ func containsAdmittedData(state intelligence.BuildState) bool {
 // network/announcement prefixes are kept independently of these derived regions.
 func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Policy, clock time.Time, inputs ...MaterializationInputs) Producer {
 	return func(ctx context.Context, emit func(via3.PublicRecord) error) error {
+		state, joinErr := joinASNUsage(ctx, state)
+		if joinErr != nil {
+			return joinErr
+		}
 		if emit == nil || len(inputs) > 1 {
 			return errors.New("one materialization policy and an output sink are required")
 		}
@@ -371,7 +375,7 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 				u := intelligence.FuseUsage(applicable)
 				typeID, _ := usageType(u.Type)
 				assignmentID, _ := assignmentType(u.Assignment)
-				v := via3.CellData{Address: cell.Address, Usage: typeID, Assignment: assignmentID, Anycast: u.Anycast, DirectedBroadcast: u.DirectedBroadcast, Reasons: cell.Reasons, Score: cell.Quality.Score, Confidence: confidenceID(cell.Quality.Confidence), AttachNetwork: len(cell.Origins) > 0}
+				v := via3.CellData{Address: cell.Address, Usage: typeID, Assignment: assignmentID, Anycast: u.Anycast, DirectedBroadcast: u.DirectedBroadcast, Reasons: cell.Reasons, Score: cell.Quality.Score, Confidence: confidenceID(cell.Quality.Confidence), CoverageComplete: cell.Quality.CoverageComplete, AttachNetwork: len(cell.Origins) > 0}
 				if cell.Quality.Contributions[0] != nil {
 					risk := *cell.Quality.Contributions[0] / policy.Weights[0]
 					v.ExactRisk = &risk
@@ -497,7 +501,7 @@ func confidenceID(value string) uint8 {
 	}
 }
 func qualityData(q intelligence.QualityResult) *via3.QualityData {
-	return &via3.QualityData{Score: q.Score, Confidence: confidenceID(q.Confidence), Reasons: q.Reasons, Exact: q.Contributions[0], Prefix: q.Contributions[1], ASN: q.Contributions[2], Neighbors: q.Contributions[3]}
+	return &via3.QualityData{Score: q.Score, Confidence: confidenceID(q.Confidence), Reasons: q.Reasons, Exact: q.Contributions[0], Prefix: q.Contributions[1], ASN: q.Contributions[2], Neighbors: q.Contributions[3], Assessed: q.Assessed, CoverageComplete: q.CoverageComplete}
 }
 func uniquePrefixes(values []netip.Prefix) []netip.Prefix {
 	out := values[:0]

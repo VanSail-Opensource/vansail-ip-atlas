@@ -12,7 +12,7 @@ from tools.release_contract.contracts import (
 
 
 def descriptor(mode="synthetic"):
-    return {"format_version": 3, "schema_version": 3, "codec": "zstd-1", "mode": mode,
+    return {"format_version": 3, "schema_version": 4, "codec": "zstd-1", "mode": mode,
             "valid_from": 1_800_000_000, "valid_until": 1_800_000_100,
             "objects": [{"sha256": "a" * 64, "bytes": 64, "kind": 1, "partition": "all"}]}
 

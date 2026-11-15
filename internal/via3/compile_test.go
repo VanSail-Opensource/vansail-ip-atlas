@@ -9,7 +9,9 @@ import (
 func TestTypedCompilerAllFactFamiliesAndProductionGate(t *testing.T) {
 	prefix := netip.MustParsePrefix("203.0.113.0/24")
 	zero := 0.0
-	score := uint8(100)
+	score := uint8(11)
+	positive := 0.11
+	exactRisk := 0.2
 	no := false
 	cone := uint32(1)
 	records := []PublicRecord{
@@ -17,8 +19,8 @@ func TestTypedCompilerAllFactFamiliesAndProductionGate(t *testing.T) {
 		{Version: 3, Kind: 3, Prefix: prefix, Coordinates: &CoordinateData{Latitude: 10.125, Longitude: -20.125, Precision: 3}},
 		{Version: 3, Kind: 4, Prefix: prefix, Network: &NetworkData{Name: "Example Network", Organization: "Example", Origins: []uint32{13335, 13335}}},
 		{Version: 3, Kind: 5, Prefix: prefix, Usage: &UsageData{Type: 1, Assignment: 1, Anycast: &no, DirectedBroadcast: &no}},
-		{Version: 3, Kind: 6, Prefix: netip.MustParsePrefix("203.0.113.1/32"), Exact: true, Quality: &QualityData{Score: &score, Confidence: 2, Exact: &zero, Prefix: &zero, ASN: &zero, Neighbors: &zero}},
-		{Version: 3, Kind: 7, Prefix: prefix, Profile: &ProfileData{Cells: []CellData{{Address: netip.MustParseAddr("203.0.113.1"), Usage: 1, Score: &score, Confidence: 2, ExactRisk: &zero, AttachNetwork: true}}}},
+		{Version: 3, Kind: 6, Prefix: netip.MustParsePrefix("203.0.113.1/32"), Exact: true, Quality: &QualityData{Score: &score, Confidence: 2, Reasons: 1, Exact: &positive, Prefix: &zero, ASN: &zero, Neighbors: &zero}},
+		{Version: 3, Kind: 7, Prefix: prefix, Profile: &ProfileData{Cells: []CellData{{Address: netip.MustParseAddr("203.0.113.1"), Usage: 1, Score: &score, Confidence: 2, Reasons: 1, ExactRisk: &exactRisk, AttachNetwork: true}}}},
 		{Version: 3, Kind: 8, ASN: 13335, ASNAggregate: &ASNData{Name: "Example Network", Country: "US", Risk: &zero, Confidence: 2, Prefixes: []netip.Prefix{prefix}, CustomerCone: &cone, NetworkClass: 2, Stability: 2}},
 		{Version: 3, Kind: 9, Prefix: prefix, ASN: 13335, RPKI: &RPKIData{Status: 1, MaximumLength: 24}},
 		{Version: 3, Kind: 10, Prefix: prefix, Origins: &OriginsData{ASNs: []uint32{13335}}},
@@ -48,11 +50,11 @@ func TestTypedCompilerAllFactFamiliesAndProductionGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if answer.Geo == nil || answer.Geo.Region == nil || *answer.Geo.Region != "St. Louis" || answer.Quality == nil || answer.Quality.Score == nil || *answer.Quality.Score != 100 || len(answer.Network.Origins) != 1 || len(answer.BGP.RPKI) != 1 || answer.BGP.RPKI[0].Status != "valid" {
+	if answer.Geo == nil || answer.Geo.Region == nil || *answer.Geo.Region != "St. Louis" || answer.Quality == nil || answer.Quality.Score == nil || *answer.Quality.Score != 11 || len(answer.Network.Origins) != 1 || len(answer.BGP.RPKI) != 1 || answer.BGP.RPKI[0].Status != "valid" {
 		t.Fatal("typed facts changed during assembly")
 	}
 	profile, err := reader.ClassC(context.Background(), "203.0.113.1")
-	if err != nil || profile == nil || profile.Cells[1].Score == nil || profile.Cells[2].Score != nil || profile.AggregateScore != nil {
+	if err != nil || profile == nil || profile.Cells[1].Score == nil || profile.Cells[2].Score != nil || profile.AggregateScore == nil || *profile.AggregateScore != 11 {
 		t.Fatal("sparse profile became clean", err)
 	}
 	input.Mode = "production"

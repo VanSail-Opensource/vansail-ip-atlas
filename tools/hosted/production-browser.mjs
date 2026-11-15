@@ -10,6 +10,7 @@ import { cpus, totalmem } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import { graphVisibleNodeCount } from './performance-gates.mjs'
 import { auditAccessibility } from './browser-accessibility.mjs'
+import { visitOwner as owner, submitLookup, waitForAtlasView } from './production-interactions.mjs'
 import { parseInput } from '../../web/app/lib/query.ts'
 
 const root = new URL('../../', import.meta.url)
@@ -191,22 +192,8 @@ async function graphPhase(page,name,action) {
 async function accessible(page) {
   return auditAccessibility(page,axeSource)
 }
-async function owner(page,name,ready) {
-  await page.getByRole('navigation',{name:'Atlas views'}).getByRole('link',{name,exact:true}).click()
-  await page.getByRole('heading',{name:name==='ASN'?'Autonomous systems':name,exact:true,level:1}).waitFor()
-  await page.locator('.view-page [role=status]').waitFor({state:'hidden'});await page.locator(ready).waitFor()
-  if(await page.locator('.demo-label').count()||await page.getByRole('alert').count())throw new Error('Production owner route unavailable or labelled synthetic')
-  for(const [owner,selector]of Object.entries({Overview:'.fact-list','Observed risk':'.quality-layout','Class C':'.ip-grid',BGP:'.bgp-graph',ASN:'.asn-list'}))
-    if(owner!==name&&await page.locator(selector).count())throw new Error('A route duplicated another canonical fact owner')
-}
 async function submit(page,q,{synthetic=false}={}) {
-  await page.evaluate(()=>{window.__atlasLastLookup=null})
-  await page.getByRole('textbox',{name:'IP address or ASN'}).fill(q)
-  await page.getByRole('button',{name:'Look up address'}).click()
-  await page.waitForFunction(({q,releaseId,synthetic})=>window.__atlasLastLookup?.q===q&&window.__atlasLastLookup.releaseId===releaseId&&window.__atlasLastLookup.synthetic===synthetic,{q,releaseId:synthetic?fixtureRelease:candidate.release_id,synthetic})
-  await page.getByRole('heading',{name:isIP(q)?'Overview':'Autonomous systems',exact:true,level:1}).waitFor()
-  await page.locator('.view-page [role=status]').waitFor({state:'hidden'})
-  if(await page.getByRole('alert').count()||Boolean(await page.locator('.demo-label').count())!==synthetic)throw new Error('Query did not render its verified release')
+  await submitLookup(page,q,{synthetic,releaseId:synthetic?fixtureRelease:candidate.release_id})
 }
 async function noFacts(page,q) {
   const answer=await page.evaluate(q=>new Promise((resolve,reject)=>{
@@ -318,7 +305,7 @@ try {
   if(ipQueries.length<100)throw new Error('Cold payload corpus needs at least100 real IP queries')
   for(let index=0;index<100;index++){
     const s=await newSample(390,'light'),query=ipQueries[Math.floor(index*ipQueries.length/100)]
-    try{await s.page.goto(new URL(`/ip/overview/?q=${encodeURIComponent(query.q)}`,base).href,{waitUntil:'networkidle'});await s.page.getByRole('heading',{name:'Overview',exact:true}).waitFor();await s.page.locator('.view-page [role=status]').waitFor({state:'hidden'});await s.page.locator('.fact-list').waitFor();if(await s.page.getByRole('alert').count())throw new Error('Cold lookup failed');await s.settle();if(s.atlas.length<2)throw new Error('Cold lookup did not fetch required controls');report.cold_queries.push({sample:index+1,stratum:query.stratum,atlas_body_bytes:s.atlas.reduce((sum,x)=>sum+x.body_bytes,0),responses:s.atlas})}finally{await s.context.close()}
+    try{await s.page.goto(new URL(`/ip/overview/?q=${encodeURIComponent(query.q)}`,base).href,{waitUntil:'networkidle'});await s.page.getByRole('heading',{name:'Overview',exact:true}).waitFor();await waitForAtlasView(s.page);await s.page.locator('.fact-list').waitFor();if(await s.page.getByRole('alert').count())throw new Error('Cold lookup failed');await s.settle();if(s.atlas.length<2)throw new Error('Cold lookup did not fetch required controls');report.cold_queries.push({sample:index+1,stratum:query.stratum,atlas_body_bytes:s.atlas.reduce((sum,x)=>sum+x.body_bytes,0),responses:s.atlas})}finally{await s.context.close()}
   }
   for(let index=1;index<=3;index++){
     const s=await newSample(1280,'light')

@@ -203,6 +203,7 @@ jobs:
           python tools/hosted/runner_budget.py --report reports/worker-runner-budget.json -- python tools/hosted/worker_memory.py --public web/.output/public --preview-url http://127.0.0.1:4173
       - name: Synthetic static HTTP browser regression (not Pages acceptance)
         run: |
+          node --test tools/hosted/production-interactions.browser-test.mjs
           python tools/hosted/static-server.py --directory web/.output/public --port 4173 &
           atlas_pid=$!
           trap 'kill "$atlas_pid"' EXIT

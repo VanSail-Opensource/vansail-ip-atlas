@@ -40,3 +40,20 @@ do not yield a known usage type. `networkRole` does not establish Tier-1 status.
 These small excerpts and tests do not establish current source inclusion. Runtime
 intake must verify the complete Tor payload or the complete immutable-commit-bound
 Ipverse payload and reconcile every retained item clock before qualification.
+
+`observed-ffraud.csv` is an inactive candidate's minimal observed excerpt from the
+2026-11-15 capture of FFraud's original `confirmed-abusive.csv`. It retains the
+four publisher comments, column header, and the first complete unchanged row of
+each of the eight categories present in that capture, in original order. Its
+adjacent [data notice](notices/FFraud-data.txt) preserves the publisher's explicit
+MIT data license. These are schema regression inputs, not an admission certificate.
+
+The publisher identifies the category as the worst observed activity from its
+own honeypot sensors and community reports. One row yields one exact-IP reason
+in one FFraud family. Publisher scores, report counts, and infrastructure types
+do not become probabilities, independent votes, usage facts, or extra reasons.
+The observed snapshot has no phishing category rows and supplies no fraud facts.
+The versioned schema has no item timestamps; additional date columns are rejected
+pending review, rather than silently discarded. Runtime proof requires the full
+CSV's independent immutable SHA-256/size match and the same commit's metadata row
+count and earlier `generated_utc`. Neither `live_utc` nor a new commit renews it.

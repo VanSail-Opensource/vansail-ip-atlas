@@ -27,6 +27,7 @@ fixtures/source-certification/*
 !fixtures/source-certification/observed-x4b-vpn-ipv4.txt
 !fixtures/source-certification/observed-tor-exit-addresses.txt
 !fixtures/source-certification/observed-ipverse-asn-usage.json
+!fixtures/source-certification/observed-ffraud.csv
 !fixtures/source-certification/logos/
 !fixtures/source-certification/logos/*.png
 !fixtures/source-certification/notices/

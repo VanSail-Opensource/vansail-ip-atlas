@@ -23,6 +23,8 @@ func selectRiskAdapter(s Source) bool {
 		return false
 	}
 	switch s.Parser.ID {
+	case "ffraud-csv":
+		return selectFFraudAdapter(s)
 	case "ip-count-tsv":
 		return s.Parser.Schema == "ip-positive-count-tsv-v1" && s.Format == "tsv" && fieldsEqual(s.Signals, "abuse") && mappedFields(s, map[string]string{"ip": "reason_flags"})
 	case "feodo-csv":
@@ -52,6 +54,9 @@ func parseRiskPayload(ctx context.Context, input io.Reader, s Source, published 
 	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if s.Parser.ID == "ffraud-csv" {
+		return parseFFraudPayload(ctx, input, s, published, maximum, emit)
 	}
 	r := &io.LimitedReader{R: contextReader{ctx, input}, N: (3 << 30) + 1}
 	scanner := bufio.NewScanner(r)

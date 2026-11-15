@@ -45,7 +45,7 @@ func selectAdapter(source Source) (adapter, bool) {
 		return torExits, torExitSource(source)
 	case "ipverse-asn-usage-json":
 		return ipverseUsageJSON, source.Parser.Schema == "ipverse-as-category-json-v1" && source.Category == "asn" && source.Coverage == "mapping" && source.Scope == "asn" && source.Format == "json" && fieldsEqual(source.PublicFields, "usage_type") && mappedFields(source, map[string]string{"metadata.category": "usage_type"})
-	case "ip-count-tsv", "feodo-csv":
+	case "ip-count-tsv", "feodo-csv", "ffraud-csv":
 		return riskAdapter, selectRiskAdapter(source)
 	case "ipapi-free-city-csv":
 		return ipapiCityZIP, selectGeoProvider(source)

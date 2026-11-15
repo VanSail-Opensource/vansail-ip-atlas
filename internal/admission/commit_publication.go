@@ -26,6 +26,9 @@ func commitSource(locator, assetURL string) (acquire.GitHubCommitQuery, bool) {
 }
 
 func publicationSupported(source Source) bool {
+	if source.Parser.ID == "ffraud-csv" {
+		return ffraudCommitSource(source)
+	}
 	if dbipProvider(source) {
 		return true
 	}
@@ -63,7 +66,7 @@ type commitMetadata struct {
 func (e *Engine) verifyCommit(ctx context.Context, metadataPath, quarantine string, source Source, digest [32]byte, size int64, now time.Time) (time.Time, error) {
 	deny := errors.New("publication proof rejected")
 	query, ok := commitSource(source.Publication.Locator, source.URL)
-	if !ok || now.IsZero() || size <= 0 || digest == ([32]byte{}) {
+	if !ok || now.IsZero() || size <= 0 || digest == ([32]byte{}) || source.Parser.ID == "ffraud-csv" && !ffraudCommitSource(source) {
 		return time.Time{}, deny
 	}
 	data, err := boundedFile(ctx, metadataPath, 4<<20)
@@ -102,6 +105,9 @@ func (e *Engine) verifyCommit(ctx context.Context, metadataPath, quarantine stri
 	actual, actualSize, err := hashFile(ctx, bound, source.MaxCompressedBytes)
 	if err != nil || actual != digest || actualSize != size {
 		return time.Time{}, deny
+	}
+	if source.Parser.ID == "ffraud-csv" {
+		return e.verifyFFraudGeneration(ctx, quarantine, metadata.SHA, bound, published)
 	}
 	return published, nil
 }

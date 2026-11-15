@@ -1062,4 +1062,71 @@ sources:
   field_mappings:
     metadata.category: usage_type
   signals: []
+- id: ffraud-ip
+  evidence_family: ffraud-original
+  source_group: ffraud-original
+  category: abuse
+  admission: candidate
+  discovery: https://github.com/FFraud-com/ip-fraud-database
+  download:
+    url: https://raw.githubusercontent.com/FFraud-com/ip-fraud-database/main/threat-ips/confirmed-abusive.csv
+    format: csv
+    max_compressed_mib: 64
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields: [ip, ffraud_score, confirmations, category, type]
+  depends_on: []
+  license:
+    status: needs-review
+    identifier: MIT
+    distribution: review
+    evidence_url: https://github.com/FFraud-com/ip-fraud-database/blob/main/LICENSE
+    attribution_required: true
+    review_basis: >-
+      Original publisher LICENSE explicitly covers data and requires the copyright
+      and permission notice. Observed notice is retained with the inactive schema
+      fixture; global credit review and admission certification remain pending.
+  trust:
+    source_weight: 70
+    correlation_group: ffraud-original
+  scope: exact_ip
+  notes: >-
+    Inactive candidate. Original honeypot/community maintained set, one family.
+    Category is the worst observed threat, not every configured signal per row.
+    Discard publisher scores, confirmations, and infrastructure type after strict
+    validation; they do not establish weights, votes, usage, or safe negatives.
+    Full November 3 snapshot had 1651503 rows including two nonpublic literals;
+    no phishing rows were present. Preserve immutable metadata generated_utc,
+    which precedes the file commit; live_utc cannot renew the content clock.
+    Minimal observed fixture and local parser tests are not admission certification.
+  publication_proof:
+    kind: github_commit
+    locator: https://api.github.com/repos/FFraud-com/ip-fraud-database/commits?path=threat-ips%2Fconfirmed-abusive.csv&sha=main&per_page=1
+    field: commit.committer.date
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: missing
+    path: fixtures/source-certification/observed-ffraud.csv
+    sha256: null
+    parser: ffraud-csv
+    schema: ffraud-five-column-risk-csv-v1
+    schema_observed: false
+    tested_at: null
+    synthetic: false
+    payload_format: original
+  parser:
+    id: ffraud-csv
+    schema: ffraud-five-column-risk-csv-v1
+    version: 1
+  public_fields: [reason_flags]
+  field_mappings:
+    ip: reason_flags
+    category: reason_flags
+    ffraud_score: null
+    confirmations: null
+    type: null
+  signals: [abuse, botnet, c2, fraud, malware, scanner, spam]
 contract_revision: 5

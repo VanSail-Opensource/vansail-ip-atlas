@@ -1730,7 +1730,11 @@
                 "vpn_provider",
                 "latitude",
                 "longitude",
-                "metadata.category"
+                "metadata.category",
+                "ffraud_score",
+                "confirmations",
+                "category",
+                "type"
               ]
             },
             "uniqueItems": true,
@@ -1797,7 +1801,9 @@
                 "vpn",
                 "proxy",
                 "datacenter",
-                "hosting"
+                "hosting",
+                "c2",
+                "scanner"
               ]
             },
             "uniqueItems": true,
@@ -7111,6 +7117,26 @@
                     }
                   }
                 ]
+              },
+              "category": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "reason_flags"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "ffraud_score": {
+                "type": "null"
+              },
+              "confirmations": {
+                "type": "null"
+              },
+              "type": {
+                "type": "null"
               }
             }
           },

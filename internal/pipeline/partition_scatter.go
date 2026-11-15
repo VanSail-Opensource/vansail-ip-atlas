@@ -57,7 +57,7 @@ func scatterRow(record via3.PublicRecord, row encoded, target scope, inherited *
 			if inherited.data == nil {
 				record.Inherited = true
 				var err error
-				*inherited, err = encodeRunRecord(record, row.sparse)
+				*inherited, err = reencodeRunRecord(record, row)
 				if err != nil {
 					return encoded{}, false, err
 				}

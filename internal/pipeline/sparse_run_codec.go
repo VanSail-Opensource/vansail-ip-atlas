@@ -81,7 +81,7 @@ func encodeRunRecord(record via3.PublicRecord, sparse bool) (encoded, error) {
 
 func (r encoded) frameBytes() int64 {
 	n := int64(4 + len(r.data))
-	if r.sparse {
+	if r.sparse || r.compact {
 		n += int64(len(sparseRunMarker))
 	}
 	return n
@@ -97,7 +97,14 @@ func writeRunFrame(w io.Writer, row encoded) error {
 	if _, err := w.Write(head[:]); err != nil {
 		return err
 	}
-	if row.sparse {
+	if row.sparse && row.compact {
+		return errors.New("private frame codecs conflict")
+	}
+	if row.compact {
+		if _, err := io.WriteString(w, compactRunMarker); err != nil {
+			return err
+		}
+	} else if row.sparse {
 		if _, err := io.WriteString(w, sparseRunMarker); err != nil {
 			return err
 		}
@@ -107,6 +114,12 @@ func writeRunFrame(w io.Writer, row encoded) error {
 }
 
 func decodeRunPayload(data []byte, limit int64) (encoded, via3.PublicRecord, error) {
+	if bytes.HasPrefix(data, []byte(compactRunMarker[:4])) {
+		if !bytes.HasPrefix(data, []byte(compactRunMarker)) {
+			return encoded{}, via3.PublicRecord{}, errors.New("private compact frame version invalid")
+		}
+		return decodeCompactRunPayload(data[len(compactRunMarker):], limit)
+	}
 	sparse := bytes.HasPrefix(data, []byte(sparseRunMarker[:4]))
 	if sparse {
 		if !bytes.HasPrefix(data, []byte(sparseRunMarker)) {
@@ -143,9 +156,12 @@ func lessEncoded(a, b encoded) bool {
 	if a.sparse != b.sparse {
 		return !a.sparse
 	}
+	if a.compact != b.compact {
+		return !a.compact
+	}
 	return bytes.Compare(a.data, b.data) < 0
 }
 
 func equalEncoded(a, b encoded) bool {
-	return a.sparse == b.sparse && bytes.Equal(a.data, b.data)
+	return a.sparse == b.sparse && a.compact == b.compact && bytes.Equal(a.data, b.data)
 }

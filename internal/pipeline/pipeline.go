@@ -506,7 +506,11 @@ func (c *compiler) sort(produce Producer) ([]string, error) {
 			return err
 		}
 		defer file.Close()
-		writer := bufio.NewWriterSize(file, 64<<10)
+		writer, err := newPrivateRunWriter(c, file)
+		if err != nil {
+			return err
+		}
+		defer writer.Close()
 		for _, row := range batch {
 			if err := c.writeRecord(writer, row.data); err != nil {
 				return err
@@ -572,8 +576,10 @@ func (c *compiler) writeRecord(w io.Writer, data []byte) error {
 	if err := c.ctx.Err(); err != nil {
 		return err
 	}
-	if err := c.reserve(uint64(4 + len(data))); err != nil {
-		return err
+	if _, compressed := w.(*privateRunWriter); !compressed {
+		if err := c.reserve(uint64(4 + len(data))); err != nil {
+			return err
+		}
 	}
 	var head [4]byte
 	binary.LittleEndian.PutUint32(head[:], uint32(len(data)))
@@ -585,8 +591,8 @@ func (c *compiler) writeRecord(w io.Writer, data []byte) error {
 }
 
 type runReader struct {
-	file   *os.File
-	reader *bufio.Reader
+	file   *privateRunFile
+	reader io.Reader
 	limit  int64
 	row    encoded
 	record via3.PublicRecord
@@ -597,7 +603,25 @@ func openRun(path string, limit int64) (*runReader, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &runReader{file: f, reader: bufio.NewReaderSize(f, 64<<10), limit: limit}, nil
+	input := bufio.NewReaderSize(f, 64<<10)
+	owned := &privateRunFile{File: f}
+	var reader io.Reader = input
+	prefix, peekErr := input.Peek(len(privateRunMagic))
+	if len(prefix) >= 4 && string(prefix[:4]) == "VPRZ" {
+		if peekErr != nil || string(prefix) != privateRunMagic {
+			f.Close()
+			return nil, errors.New("private run compression version invalid")
+		}
+		_, _ = input.Discard(len(privateRunMagic))
+		compressed, err := newPrivateRunReader(input)
+		if err != nil {
+			f.Close()
+			return nil, err
+		}
+		owned.compressed = compressed
+		reader = compressed
+	}
+	return &runReader{file: owned, reader: reader, limit: limit}, nil
 }
 func (r *runReader) next() error {
 	var head [4]byte
@@ -641,7 +665,11 @@ func (c *compiler) mergeGroup(paths []string) (string, error) {
 		return "", err
 	}
 	defer f.Close()
-	w := bufio.NewWriterSize(f, 64<<10)
+	w, err := newPrivateRunWriter(c, f)
+	if err != nil {
+		return "", err
+	}
+	defer w.Close()
 	var h mergeHeap
 	for _, path := range paths {
 		r, err := openRun(path, c.options.Limits.RecordBytes)
@@ -717,8 +745,13 @@ func (c *compiler) classify(path string) ([3]string, error) {
 	var paths [3]string
 	var sizes [3]partitionSize
 	var files [3]*os.File
-	var writers [3]*bufio.Writer
+	var writers [3]*privateRunWriter
 	defer func() {
+		for _, w := range writers {
+			if w != nil {
+				_ = w.Close()
+			}
+		}
 		for _, f := range files {
 			if f != nil {
 				f.Close()
@@ -749,7 +782,10 @@ func (c *compiler) classify(path string) ([3]string, error) {
 			if err != nil {
 				return paths, err
 			}
-			writers[i] = bufio.NewWriterSize(files[i], 64<<10)
+			writers[i], err = newPrivateRunWriter(c, files[i])
+			if err != nil {
+				return paths, err
+			}
 		}
 		if err := c.writeRecord(writers[i], r.row.data); err != nil {
 			return paths, err
@@ -971,8 +1007,13 @@ func (c *compiler) split(path string, children *[2]scope) ([2]string, error) {
 	var paths [2]string
 	var sizes [2]partitionSize
 	var files [2]*os.File
-	var writers [2]*bufio.Writer
+	var writers [2]*privateRunWriter
 	defer func() {
+		for _, w := range writers {
+			if w != nil {
+				_ = w.Close()
+			}
+		}
 		for _, f := range files {
 			if f != nil {
 				f.Close()
@@ -1037,7 +1078,10 @@ func (c *compiler) split(path string, children *[2]scope) ([2]string, error) {
 				if err != nil {
 					return paths, err
 				}
-				writers[i] = bufio.NewWriterSize(files[i], 64<<10)
+				writers[i], err = newPrivateRunWriter(c, files[i])
+				if err != nil {
+					return paths, err
+				}
 			}
 			if err := c.writeRecord(writers[i], data); err != nil {
 				return paths, err

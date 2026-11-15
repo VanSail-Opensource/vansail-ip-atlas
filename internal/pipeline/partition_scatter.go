@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"bufio"
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
@@ -238,7 +237,7 @@ func (c *compiler) scatterPartition(path string, s scope) (runs []scatteredRun, 
 	}
 	var planned uint64
 	for _, node := range selected {
-		planned += uint64(node.size.bytes - 508*node.size.records)
+		planned += privateRunStoredBound(uint64(node.size.bytes - 508*node.size.records))
 	}
 	extra := uint64(0)
 	if c.options.externalScratch != nil {
@@ -255,10 +254,15 @@ func (c *compiler) scatterPartition(path string, s scope) (runs []scatteredRun, 
 func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scatterNode, digest []byte) (runs []scatteredRun, applied bool, failure error) {
 	before := c.used
 	files := make([]*os.File, len(selected))
-	writers := make([]*bufio.Writer, len(selected))
+	writers := make([]*privateRunWriter, len(selected))
 	sizes := make([]partitionSize, len(selected))
 	runs = make([]scatteredRun, len(selected))
 	defer func() {
+		for _, w := range writers {
+			if w != nil {
+				_ = w.Close()
+			}
+		}
 		for _, file := range files {
 			if file != nil {
 				_ = file.Close()
@@ -312,7 +316,10 @@ func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scat
 					return err
 				}
 				runs[i] = scatteredRun{target, node.scope}
-				writers[i] = bufio.NewWriterSize(files[i], 64<<10)
+				writers[i], err = newPrivateRunWriter(c, files[i])
+				if err != nil {
+					return err
+				}
 			}
 			if err := c.writeRecord(writers[i], data); err != nil {
 				return err

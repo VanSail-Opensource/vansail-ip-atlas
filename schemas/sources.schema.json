@@ -7493,7 +7493,8 @@
               "payload_format": {
                 "enum": [
                   "original",
-                  "decoded-csv"
+                  "decoded-csv",
+                  "rpki-client-excerpt"
                 ]
               }
             },

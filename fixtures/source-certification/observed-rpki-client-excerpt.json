@@ -1,0 +1,201 @@
+{
+  "fixture_schema": "rpki-client-observed-excerpt-v1",
+  "metadata": {
+    "buildmachine": "dus-vrp-gen1.rpki-client.org",
+    "buildtime": "2026-11-15T12:58:16Z",
+    "elapsedtime": 494,
+    "usertime": 624,
+    "systemtime": 560,
+    "ccr_mfts_hash": "5p7OVeKa/+wCyI0txAsQ2lH8c33i752SKiEsq//A1ZI=",
+    "ccr_vrps_hash": "5/ehk3BWp81mOVJllsu27tMn6byHQezpZhR8fPZ2T4U=",
+    "ccr_vaps_hash": "hwvB4fZ+hD1MxJrQKe4wy94iN3BPkcJlVoRxLx37hag=",
+    "ccr_brks_hash": "GXiA5GEWQrJ74r7L1W8Ee1MafNU6T5fcrjr0/4VTx/Q=",
+    "ccr_tas_hash": "ubpmsrzVTkgSJJ9g7S3pNXZwzEj/hI8bw19ZhnA95x8=",
+    "roas": 401131,
+    "failedroas": 32,
+    "invalidroas": 0,
+    "aspas": 4111,
+    "failedaspas": 3,
+    "invalidaspas": 0,
+    "bgpsec_pubkeys": 3,
+    "certificates": 56312,
+    "invalidcertificates": 25,
+    "nonfunctionalcas": 96,
+    "deferredcas": 74,
+    "unconfirmedcas": 7051,
+    "taks": 0,
+    "tals": 5,
+    "invalidtals": 0,
+    "talfiles": [
+      "/etc/rpki/afrinic.tal",
+      "/etc/rpki/apnic.tal",
+      "/etc/rpki/lacnic.tal",
+      "/etc/rpki/ripe.tal",
+      "/etc/rpki/arin.tal"
+    ],
+    "manifests": 56212,
+    "failedmanifests": 22,
+    "crls": 56190,
+    "repositories": 108,
+    "vrps": 1049554,
+    "uniquevrps": 1034924,
+    "vsps": 0,
+    "uniquevsps": 0,
+    "vaps": 4108,
+    "uniquevaps": 4105,
+    "cachedir_new_files": 13425,
+    "cachedir_del_files": 0,
+    "cachedir_del_dirs": 1334,
+    "cachedir_superfluous_files": 6486,
+    "cachedir_del_superfluous_files": 11
+  },
+  "roas": [
+    {
+      "asn": 13335,
+      "prefix": "1.0.0.0/24",
+      "maxLength": 24,
+      "ta": "apnic",
+      "expires": 1795270642
+    },
+    {
+      "asn": 18144,
+      "prefix": "1.0.64.0/18",
+      "maxLength": 18,
+      "ta": "apnic",
+      "expires": 1795335354
+    },
+    {
+      "asn": 23969,
+      "prefix": "1.0.128.0/24",
+      "maxLength": 24,
+      "ta": "apnic",
+      "expires": 1795271150
+    },
+    {
+      "asn": 23969,
+      "prefix": "1.0.128.0/17",
+      "maxLength": 19,
+      "ta": "apnic",
+      "expires": 1795271150
+    },
+    {
+      "asn": 23969,
+      "prefix": "1.0.129.0/24",
+      "maxLength": 24,
+      "ta": "apnic",
+      "expires": 1795271150
+    },
+    {
+      "asn": 23969,
+      "prefix": "1.0.130.0/23",
+      "maxLength": 23,
+      "ta": "apnic",
+      "expires": 1795271150
+    },
+    {
+      "asn": 23969,
+      "prefix": "1.0.132.0/24",
+      "maxLength": 24,
+      "ta": "apnic",
+      "expires": 1795271150
+    },
+    {
+      "asn": 23969,
+      "prefix": "1.0.133.0/24",
+      "maxLength": 24,
+      "ta": "apnic",
+      "expires": 1795271150
+    },
+    {
+      "asn": 7224,
+      "prefix": "1.178.0.0/24",
+      "maxLength": 24,
+      "ta": "arin",
+      "expires": 1794848400
+    },
+    {
+      "asn": 12975,
+      "prefix": "1.178.112.0/20",
+      "maxLength": 24,
+      "ta": "ripe",
+      "expires": 1794808853
+    },
+    {
+      "asn": 52286,
+      "prefix": "2.152.0.0/22",
+      "maxLength": 24,
+      "ta": "lacnic",
+      "expires": 1795010783
+    },
+    {
+      "asn": 36994,
+      "prefix": "41.0.0.0/16",
+      "maxLength": 24,
+      "ta": "afrinic",
+      "expires": 1794874095
+    },
+    {
+      "asn": 112,
+      "prefix": "2001:4:112::/48",
+      "maxLength": 48,
+      "ta": "arin",
+      "expires": 1794844800
+    },
+    {
+      "asn": 2500,
+      "prefix": "2001:200::/32",
+      "maxLength": 32,
+      "ta": "apnic",
+      "expires": 1795275710
+    },
+    {
+      "asn": 9367,
+      "prefix": "2001:200:136::/48",
+      "maxLength": 48,
+      "ta": "apnic",
+      "expires": 1795275710
+    },
+    {
+      "asn": 24047,
+      "prefix": "2001:200:1ba::/48",
+      "maxLength": 48,
+      "ta": "apnic",
+      "expires": 1795275710
+    },
+    {
+      "asn": 7667,
+      "prefix": "2001:200:600::/40",
+      "maxLength": 40,
+      "ta": "apnic",
+      "expires": 1795275710
+    },
+    {
+      "asn": 7660,
+      "prefix": "2001:200:900::/40",
+      "maxLength": 40,
+      "ta": "apnic",
+      "expires": 1795275710
+    },
+    {
+      "asn": 4690,
+      "prefix": "2001:200:e00::/40",
+      "maxLength": 40,
+      "ta": "apnic",
+      "expires": 1795275710
+    },
+    {
+      "asn": 4690,
+      "prefix": "2001:200:8000::/35",
+      "maxLength": 35,
+      "ta": "apnic",
+      "expires": 1795275710
+    },
+    {
+      "asn": 262600,
+      "prefix": "177.85.64.0/21",
+      "maxLength": 32,
+      "ta": "lacnic",
+      "expires": 1794747860
+    }
+  ]
+}

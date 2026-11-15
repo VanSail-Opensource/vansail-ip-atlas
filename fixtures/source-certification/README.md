@@ -57,3 +57,19 @@ The versioned schema has no item timestamps; additional date columns are rejecte
 pending review, rather than silently discarded. Runtime proof requires the full
 CSV's independent immutable SHA-256/size match and the same commit's metadata row
 count and earlier `generated_utc`. Neither `live_utc` nor a new commit renews it.
+
+`observed-rpki-client-excerpt.json` is an explicitly incomplete schema fixture.
+It retains the original metadata field values (including the publisher's
+1,034,924 unique-row total) and 21 original authorization rows from the
+2026-11-15T12:58:16Z snapshot, including its first expiry. JSON whitespace is
+normalized; no publisher count, row value, clock or expiry is changed. The
+fixture-only `rpki-client-excerpt` validator shares the strict header and row
+decoders but emits no normalized records or completeness/publication proof.
+Runtime parsing rejects both this wrapper and these partial rows with the
+unchanged full total. Full-payload qualification independently consumed all
+1,034,924 rows through EOF; the original capture and digest remain private.
+The fixture can certify parser syntax only. Source freshness still uses the
+original publisher clock, while RPKI results retain their snapshot observation
+and authorization expiry after expiry, as explicitly approved by the user.
+Underlying RPKI trust-anchor terms remain in force; the rpki-client software
+license does not grant data rights.

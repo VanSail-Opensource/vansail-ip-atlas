@@ -278,6 +278,61 @@ internal Go bytes and does not require a new parser certification. It supersedes
 the in-progress checks for `9d3692149a6d5571a67ac19f955236f47941dea4`;
 the final exact-head workflow must complete before merge.
 
+## Actual scratch failure and bounded private-run repair
+
+At `34ebd97fae5129c2c64ddb2c7a582baddc549b9e`, official integration run
+`43711248505` passed contracts, codec, synthetic browser and all ten current
+source intakes. The actual compiler failed its unchanged scratch ceiling after
+875,598 ms during spatial materialization/public sorting. Its authenticated input
+contained 22,176,484 normalized records across 228 partition references,
+5,766,429,684 decoded bytes and 210,314,132 stored bytes. Source-free artifact
+`14161407886` was verified against SHA-256
+`d55a711215fe32153acfc304fd96c15f34445c30df6d3337d90880b53e853b4f`.
+The runner reported 12,424,257,536 workspace bytes and an 8-GiB cgroup peak with
+1,174 memory-max events and no OOM/kill. That cgroup value includes file cache;
+it is not a measured compiler RSS. No corpus/native lookup result was reached.
+The exact-head browser passed 21 scenarios, LCP p95 2,100 ms and a raw Chrome
+process-tree peak of 401,555,456 bytes with no memory events.
+
+The repair compresses every private public-record run into independent bounded
+1-MiB Zstandard segments. Exact lengths, window/content size, CRC, decoded SHA,
+frame extent and a terminal marker reject corruption, bombs, truncation and
+trailing bytes before records escape. All physical framing/compressed bytes are
+charged before writing; failures release only owned files and codec buffers.
+Sparse private JSON omits only nil union fields and preserves the original dense
+logical record/sort/partition limits. Format markers and raw bytes remain part of
+conflict detection and scatter integrity checks. Public VIA3 bytes, fields,
+partition decisions and all performance thresholds are unchanged.
+
+The combined 400,200-normalized-record synthetic diagnostic completed in 35.065
+seconds (previous 39.668), with 6,527,933 peak scratch bytes (previous 428,096,930)
+and 207,192,064 measured process RSS bytes. Its 602,000 unique public records,
+49 partitions and 1,745,029 output bytes were identical. This single diagnostic
+is not full-production acceptance. Golden parity covers all twelve public fact
+kinds, exact record/sort/partition boundaries and complete inventory/answers;
+hostile tests cover sparse markers, mixed codecs, byte conflicts, malformed
+compressed frames, incompressible storage, cancellation and scratch rejection.
+
+Benchmark setup now uses the same exclusive writer lock and process-local
+verified-state sequence as production, saving two redundant semantic walks.
+Transformed clones, later clocks, independent fresh verification, engineering
+mode, workload populations, timers and gates remain unchanged. Local fixture
+reruns completed before the ten adapter certificates were refreshed at
+`2026-11-15T12:41:46Z` against internal implementation hash
+`32066d89907f8085c5c77b80a3240c23495763019ad4d443b9024cd6e0e58c0e`.
+Full local Go tests/vet, selected internal/source-sample race tests, command
+regressions, 136 Python contract tests, 49 hosted-workflow tests, strict schemas
+and actionlint pass. The production website is still unreleased; the next
+exact-head actual-data measurement must pass before merge and all downstream
+production stages.
+
+The user now explicitly requests replacement-source work in parallel with the
+release repair. Research includes complete RouteViews MRT capture and IPtoASN
+mapping qualification. Neither is activated: source rights/notices, item clocks,
+actual acquisition and faithful mapping-versus-announcement semantics require
+separate proof. Research captures remain ignored and private. Do not contact
+publishers or count mirrors as independent routing evidence.
+
 ## Resume next
 
 1. Verify the branch and clean checkout. Run strict schemas, Go tests/vet, Python

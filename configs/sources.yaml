@@ -448,7 +448,7 @@ sources:
     parser: country-range-csv
     schema: start-end-country-csv-v1
     schema_observed: true
-    tested_at: '2026-11-15T11:43:06Z'
+    tested_at: '2026-11-15T12:41:46Z'
     synthetic: false
   parser:
     id: country-range-csv
@@ -504,7 +504,7 @@ sources:
     parser: country-range-csv
     schema: start-end-country-csv-v1
     schema_observed: true
-    tested_at: '2026-11-15T11:43:06Z'
+    tested_at: '2026-11-15T12:41:46Z'
     synthetic: false
   parser:
     id: country-range-csv
@@ -560,7 +560,7 @@ sources:
     parser: country-range-csv
     schema: start-end-country-csv-v1
     schema_observed: true
-    tested_at: '2026-11-15T11:43:06Z'
+    tested_at: '2026-11-15T12:41:46Z'
     synthetic: false
   parser:
     id: country-range-csv
@@ -630,7 +630,7 @@ sources:
     status: passed
     sha256: 9f1d79394ceedd24445922f84d17325c0f1809cadac60da410a5c7610bbf57ef
     schema_observed: true
-    tested_at: '2026-11-15T11:43:06Z'
+    tested_at: '2026-11-15T12:41:46Z'
     path: fixtures/source-certification/observed-dbip-city.csv
     parser: city-range-csv
     schema: dbip-city-eight-columns-v1
@@ -709,7 +709,7 @@ sources:
     status: passed
     sha256: 4df74d3dbe3a08c3bc7e6a63d4c3912f7bf4932fc203a69f566656f1f71e2836
     schema_observed: true
-    tested_at: '2026-11-15T11:43:06Z'
+    tested_at: '2026-11-15T12:41:46Z'
     path: fixtures/source-certification/observed-ipapi-city-ipv4.csv
     parser: ipapi-free-city-csv
     schema: ipapi-free-fourteen-columns-v1
@@ -788,7 +788,7 @@ sources:
     status: passed
     sha256: 99f6c0ba9fbeacda88749d62782ba1a9eadb55aea2a5e4940a6f4a20b03704b7
     schema_observed: true
-    tested_at: '2026-11-15T11:43:06Z'
+    tested_at: '2026-11-15T12:41:46Z'
     path: fixtures/source-certification/observed-ipapi-city-ipv6.csv
     parser: ipapi-free-city-csv
     schema: ipapi-free-fourteen-columns-v1
@@ -857,7 +857,7 @@ sources:
     parser: asn-identity-csv
     schema: asn-handle-description-country-csv-v1
     schema_observed: true
-    tested_at: '2026-11-15T11:43:06Z'
+    tested_at: '2026-11-15T12:41:46Z'
     synthetic: false
   parser:
     id: asn-identity-csv
@@ -933,7 +933,7 @@ sources:
     status: passed
     sha256: a7038a372eebed2e872c8e8ee92c52ce5340c62c585f891b13f139de75d8f640
     schema_observed: true
-    tested_at: '2026-11-15T11:43:06Z'
+    tested_at: '2026-11-15T12:41:46Z'
     path: fixtures/source-certification/observed-x4b-vpn-ipv4.txt
     parser: literal-prefix-text
     schema: one-literal-ip-or-prefix-per-line-v1
@@ -993,7 +993,7 @@ sources:
     parser: tor-exit-addresses
     schema: tordnsel-exit-addresses-v1
     schema_observed: true
-    tested_at: '2026-11-15T11:43:06Z'
+    tested_at: '2026-11-15T12:41:46Z'
     synthetic: false
   parser:
     id: tor-exit-addresses
@@ -1051,7 +1051,7 @@ sources:
     parser: ipverse-asn-usage-json
     schema: ipverse-as-category-json-v1
     schema_observed: true
-    tested_at: '2026-11-15T11:43:06Z'
+    tested_at: '2026-11-15T12:41:46Z'
     synthetic: false
   parser:
     id: ipverse-asn-usage-json

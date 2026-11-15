@@ -436,6 +436,36 @@ changed-input, native lookup or browser acceptance result yet. No historical
 Tier-1 stability is fabricated; unavailable observations remain unknown. The
 website is still unreleased, and this local checkpoint does not authorize it.
 
+## Actual replacement intake and remaining compiler failures
+
+Official run `43724330098` at `60e78426e4c2d2a8f2d5650e3d4c1d382fd636b5`
+successfully fetched, parsed and authenticated all fifteen complete current
+inputs. Contracts, codec and synthetic browser checks passed. Compilation failed
+the unchanged global 18,499-object cap after 2,049,148 ms; this is not a source
+qualification or timeout failure. The input contained 36,455,534 normalized
+records, 374 partition references, 11,154,103,519 decoded bytes and 342,160,207
+stored bytes. Source-free artifact `14167084798` was independently verified
+against SHA-256
+`d02be13489d7b7157650bb5cfefc7e6326642004f2c01443933ba99feefdd830`.
+The cgroup peaked at 1,272,410,112 bytes, workspace at 3,105,173,504 bytes, with
+zero memory-limit/OOM events. No actual lookup measurement or production
+acceptance was reached. The browser passed all 22 scenarios, including visible
+expired RPKI snapshots, with a 402,399,232-byte Chrome process-tree peak and no
+memory events. Synthetic success does not certify the actual production corpus.
+
+The parallel ten-source run `43722878012` at `27edf82599f7bb282ddfd90a53ca63d89305ac73`
+also passed complete intake and the other three integration jobs. Its compiler
+failed the original 35-minute deadline during final partitioning after
+2,102,318 ms. Source-free artifact `14167101520` was verified against SHA-256
+`1ba15d44aa83f45d2775a7e5e9aedc5f1d6e673707f2ad155e0c096f25ae9b07`.
+Neither failed head is eligible to merge or deploy. PR #3 and dependent PR #4
+remain open; no production deployment exists yet.
+
+The next integration combines reviewed cold-build improvements, authenticated
+incremental materialization and bounded fact-group partitioning. Measurements
+from small synthetic inputs remain diagnostic until the complete actual corpus
+passes the original cold, warm, lookup, resource and hosted deployment gates.
+
 ## Resume next
 
 1. Verify the branch and clean checkout. Run strict schemas, Go tests/vet, Python

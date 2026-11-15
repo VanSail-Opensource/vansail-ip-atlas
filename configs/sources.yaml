@@ -1,7 +1,7 @@
 schema_version: 3
 description: 'VanSail IP Atlas: reviewed download-only production shortlist. Positive observations support
   observed risk; absent categories and stale facts remain unknown. No per-IP provenance; reviewed credits
-  are global only. Five reviewed replacements remain candidates pending exact-code certification and hosted intake; unavailable facts remain unknown.'
+  are global only. All fifteen reviewed sources are enabled for attempted intake; authenticated current payloads and every production gate remain required.'
 build:
   profile: github-actions-standard
   incremental: true
@@ -172,12 +172,10 @@ build:
     numeric_quality_requires_all_layers: false
   bgp:
     download_mode: selected-snapshots
-    mrt_enabled: false
+    mrt_enabled: true
     collectors:
-    - rrc01
-    - rrc03
-    - rrc06
-    - route-views2
+    - rrc18
+    - route-views.wide
     max_mrt_sources_per_run: 2
     max_mrt_compressed_mib_per_run: 1024
     preserve_raw_as_path: true
@@ -448,7 +446,7 @@ sources:
     parser: country-range-csv
     schema: start-end-country-csv-v1
     schema_observed: true
-    tested_at: '2026-11-15T12:41:46Z'
+    tested_at: '2026-11-15T14:15:52Z'
     synthetic: false
   parser:
     id: country-range-csv
@@ -504,7 +502,7 @@ sources:
     parser: country-range-csv
     schema: start-end-country-csv-v1
     schema_observed: true
-    tested_at: '2026-11-15T12:41:46Z'
+    tested_at: '2026-11-15T14:15:52Z'
     synthetic: false
   parser:
     id: country-range-csv
@@ -560,7 +558,7 @@ sources:
     parser: country-range-csv
     schema: start-end-country-csv-v1
     schema_observed: true
-    tested_at: '2026-11-15T12:41:46Z'
+    tested_at: '2026-11-15T14:15:52Z'
     synthetic: false
   parser:
     id: country-range-csv
@@ -630,7 +628,7 @@ sources:
     status: passed
     sha256: 9f1d79394ceedd24445922f84d17325c0f1809cadac60da410a5c7610bbf57ef
     schema_observed: true
-    tested_at: '2026-11-15T12:41:46Z'
+    tested_at: '2026-11-15T14:15:52Z'
     path: fixtures/source-certification/observed-dbip-city.csv
     parser: city-range-csv
     schema: dbip-city-eight-columns-v1
@@ -709,7 +707,7 @@ sources:
     status: passed
     sha256: 4df74d3dbe3a08c3bc7e6a63d4c3912f7bf4932fc203a69f566656f1f71e2836
     schema_observed: true
-    tested_at: '2026-11-15T12:41:46Z'
+    tested_at: '2026-11-15T14:15:52Z'
     path: fixtures/source-certification/observed-ipapi-city-ipv4.csv
     parser: ipapi-free-city-csv
     schema: ipapi-free-fourteen-columns-v1
@@ -788,7 +786,7 @@ sources:
     status: passed
     sha256: 99f6c0ba9fbeacda88749d62782ba1a9eadb55aea2a5e4940a6f4a20b03704b7
     schema_observed: true
-    tested_at: '2026-11-15T12:41:46Z'
+    tested_at: '2026-11-15T14:15:52Z'
     path: fixtures/source-certification/observed-ipapi-city-ipv6.csv
     parser: ipapi-free-city-csv
     schema: ipapi-free-fourteen-columns-v1
@@ -857,7 +855,7 @@ sources:
     parser: asn-identity-csv
     schema: asn-handle-description-country-csv-v1
     schema_observed: true
-    tested_at: '2026-11-15T12:41:46Z'
+    tested_at: '2026-11-15T14:15:52Z'
     synthetic: false
   parser:
     id: asn-identity-csv
@@ -933,7 +931,7 @@ sources:
     status: passed
     sha256: a7038a372eebed2e872c8e8ee92c52ce5340c62c585f891b13f139de75d8f640
     schema_observed: true
-    tested_at: '2026-11-15T12:41:46Z'
+    tested_at: '2026-11-15T14:15:52Z'
     path: fixtures/source-certification/observed-x4b-vpn-ipv4.txt
     parser: literal-prefix-text
     schema: one-literal-ip-or-prefix-per-line-v1
@@ -993,7 +991,7 @@ sources:
     parser: tor-exit-addresses
     schema: tordnsel-exit-addresses-v1
     schema_observed: true
-    tested_at: '2026-11-15T12:41:46Z'
+    tested_at: '2026-11-15T14:15:52Z'
     synthetic: false
   parser:
     id: tor-exit-addresses
@@ -1051,7 +1049,7 @@ sources:
     parser: ipverse-asn-usage-json
     schema: ipverse-as-category-json-v1
     schema_observed: true
-    tested_at: '2026-11-15T12:41:46Z'
+    tested_at: '2026-11-15T14:15:52Z'
     synthetic: false
   parser:
     id: ipverse-asn-usage-json
@@ -1066,7 +1064,7 @@ sources:
   evidence_family: ffraud-original
   source_group: ffraud-original
   category: abuse
-  admission: candidate
+  admission: active
   discovery: https://github.com/FFraud-com/ip-fraud-database
   download:
     url: https://raw.githubusercontent.com/FFraud-com/ip-fraud-database/main/threat-ips/confirmed-abusive.csv
@@ -1111,7 +1109,7 @@ sources:
     source_weight: 70
     correlation_group: ffraud-original
   scope: exact_ip
-  notes: Candidate pending final code-bound certification and hosted intake. Original honeypot/community
+  notes: Enabled for attempted intake; complete current hosted payload verification remains required. Original honeypot/community
     maintained set, one family. Category is the worst observed threat, not every configured signal per
     row. Explicit proxy, VPN, Tor or datacenter types add one exact-IP reason under that same family and
     original clock; blank and mobile types remain unknown. Scores and confirmation counts never establish
@@ -1134,7 +1132,7 @@ sources:
     parser: ffraud-csv
     schema: ffraud-five-column-risk-csv-v2
     schema_observed: true
-    tested_at: '2026-11-15T13:57:15Z'
+    tested_at: '2026-11-15T14:15:52Z'
     synthetic: false
     payload_format: original
   parser:
@@ -1165,7 +1163,7 @@ sources:
   evidence_family: routeviews-mrt
   source_group: routeviews-mrt
   category: bgp
-  admission: candidate
+  admission: active
   discovery: https://archive.routeviews.org/route-views.wide/bgpdata/2026.11/RIBS/
   download:
     url: https://archive.routeviews.org/route-views.wide/bgpdata/2026.11/RIBS/rib.20261115.1200.bz2
@@ -1217,8 +1215,8 @@ sources:
     rotation uses the reviewed collector schedule, 30-minute publication lag and one prior slot only after
     HTTP 404. The private seal binds the selected archive and embedded capture clocks. Unsupported origins
     preserve empty longest-prefix-match boundaries; they do not fabricate origins or paths. Same-family
-    collectors cannot supply independent votes, and no historical Tier-1 stability is fabricated. Candidate
-    pending final code-bound certification and full hosted intake.
+    collectors cannot supply independent votes, and no historical Tier-1 stability is fabricated. Enabled for attempted intake;
+    complete current hosted payload verification remains required.
   publication_proof:
     kind: embedded
     locator: https://archive.routeviews.org/route-views.wide/bgpdata/2026.11/RIBS/rib.20261115.1200.bz2
@@ -1231,7 +1229,7 @@ sources:
     path: fixtures/source-certification/routeviews-wide-20261115-1200.mrt.bz2
     sha256: 5361ec3605f86ecab79f210df266602bb8833ec9b64bb47705efce4c2c345818
     schema_observed: true
-    tested_at: '2026-11-15T13:47:10Z'
+    tested_at: '2026-11-15T14:15:52Z'
     parser: mrt-table-dump-v2
     schema: mrt-table-dump-v2-unicast-v1
     synthetic: false
@@ -1251,7 +1249,7 @@ sources:
   evidence_family: ripe-ris-mrt
   source_group: ripe-ris-mrt
   category: bgp
-  admission: candidate
+  admission: active
   discovery: https://data.ris.ripe.net/rrc18/2026.11/
   download:
     url: https://data.ris.ripe.net/rrc18/2026.11/bview.20261115.0800.gz
@@ -1308,8 +1306,8 @@ sources:
     rotation uses the reviewed collector schedule, 30-minute publication lag and one prior slot only after
     HTTP 404. The private seal binds the selected archive and embedded capture clocks. Unsupported origins
     preserve empty longest-prefix-match boundaries; they do not fabricate origins or paths. Same-family
-    collectors cannot supply independent votes, and no historical Tier-1 stability is fabricated. Candidate
-    pending final code-bound certification and full hosted intake.
+    collectors cannot supply independent votes, and no historical Tier-1 stability is fabricated. Enabled for attempted intake;
+    complete current hosted payload verification remains required.
   publication_proof:
     kind: embedded
     locator: https://data.ris.ripe.net/rrc18/2026.11/bview.20261115.0800.gz
@@ -1322,7 +1320,7 @@ sources:
     path: fixtures/source-certification/ris-rrc18-20261115-0800.mrt.gz
     sha256: 37931b008476cfd2fb385bff603c9a68badffa51411649c912a35b14adc4bbb3
     schema_observed: true
-    tested_at: '2026-11-15T13:47:10Z'
+    tested_at: '2026-11-15T14:15:52Z'
     parser: mrt-table-dump-v2
     schema: mrt-table-dump-v2-unicast-v1
     synthetic: false
@@ -1342,7 +1340,7 @@ sources:
   evidence_family: caida-rel
   source_group: caida-rel
   category: bgp
-  admission: candidate
+  admission: active
   download:
     format: text-bz2
     max_compressed_mib: 64
@@ -1381,8 +1379,8 @@ sources:
     the earliest original topology observation date across all BGP and looking-glass headers. The observed
     capture dates span 2026-11-01 through 2026-11-05. Filename, index display date and HTTP time cannot
     renew the body. CAIDA derives from RouteViews/RIS and looking-glass observations, not an additional
-    independent path family. Input-clique membership does not establish Tier-1. Candidate pending final
-    code-bound certification and full hosted intake.
+    independent path family. Input-clique membership does not establish Tier-1. Enabled for attempted intake;
+    complete current hosted payload verification remains required.
   publication_proof:
     kind: embedded
     locator: https://publicdata.caida.org/datasets/as-relationships/serial-2/
@@ -1395,7 +1393,7 @@ sources:
     path: fixtures/source-certification/observed-caida-asrel2.txt.bz2
     sha256: e36b548f613b4ae09f9a848cf9893fb02fc326185d7439db6b0a0995aeccc6a8
     schema_observed: true
-    tested_at: '2026-11-15T13:47:10Z'
+    tested_at: '2026-11-15T14:15:52Z'
     parser: caida-relationships
     schema: asn-asn-relation-pipe-v1
     synthetic: false
@@ -1420,7 +1418,7 @@ sources:
   evidence_family: rpki-client
   source_group: rpki-client
   category: rpki
-  admission: candidate
+  admission: active
   discovery: https://console.rpki-client.org/
   download:
     url: https://console.rpki-client.org/rpki.json
@@ -1464,8 +1462,8 @@ sources:
     Authorization expiry does not extend or shorten the original publisher snapshot freshness limit of
     720 hours. Schema-5 lookup results retain observedAt and validUntil and display expired results as
     snapshot observations. The 21-row observed fixture preserves original metadata totals and certifies
-    syntax only; it cannot produce runtime completeness or publication proof. Candidate pending final
-    code-bound certification and full hosted intake.
+    syntax only; it cannot produce runtime completeness or publication proof. Enabled for attempted intake;
+    complete current hosted payload verification remains required.
   publication_proof:
     kind: embedded
     locator: https://console.rpki-client.org/rpki.json
@@ -1478,7 +1476,7 @@ sources:
     path: fixtures/source-certification/observed-rpki-client-excerpt.json
     sha256: fedd54c17bd596ecb93792aa5b31566549698edbfee914cc06c27002dc5db91b
     schema_observed: true
-    tested_at: '2026-11-15T13:47:10Z'
+    tested_at: '2026-11-15T14:15:52Z'
     parser: rpki-client-json
     schema: rpki-client-payloads-json-v1
     synthetic: false

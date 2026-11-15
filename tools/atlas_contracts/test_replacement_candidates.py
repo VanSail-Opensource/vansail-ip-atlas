@@ -12,19 +12,28 @@ class ReplacementCandidateTests(unittest.TestCase):
         self.ids = {'ffraud-ip', 'routeviews-wide-rib', 'ripe-mrt-rrc18', 'caida-asrel2', 'rpki-client-vrps'}
         self.config['sources'] = [s for s in self.config['sources'] if s['id'] in self.ids]
 
-    def test_observed_candidates_have_exact_assets_but_no_current_facts(self):
+    def test_active_replacements_have_exact_assets_but_no_current_facts(self):
         self.assertEqual({s['id'] for s in self.config['sources']}, self.ids)
         validate_schema('sources', self.config)
         validate_sources(self.config)
         for source in self.config['sources']:
             with self.subTest(source=source['id']):
-                self.assertEqual(source['admission'], 'candidate')
+                self.assertEqual(source['admission'], 'active')
                 self.assertEqual(source['fixture']['status'], 'passed')
                 self.assertTrue(source['fixture']['schema_observed'])
                 self.assertIs(source['fixture']['synthetic'], False)
                 payload = (ROOT / source['fixture']['path']).read_bytes()
                 self.assertEqual(sha256(payload).hexdigest(), source['fixture']['sha256'])
-                self.assertLessEqual(set(static_issues(source, ROOT)), {'reviewed_adapter_certification_required'})
+                self.assertEqual(static_issues(source, ROOT), [])
+        report = capability_report(self.config, utc('2026-11-15T14:00:00Z'), ROOT)
+        self.assertEqual(report['active_count'], 5)
+        self.assertEqual(report['current_count'], 0)
+        self.assertEqual(report['dataset_attributions'], [])
+        self.assertTrue(all(not row['families'] for row in report['capabilities']))
+
+    def test_deactivated_replacements_cannot_contribute_facts_or_credits(self):
+        for source in self.config['sources']:
+            source['admission'] = 'candidate'
         report = capability_report(self.config, utc('2026-11-15T14:00:00Z'), ROOT)
         self.assertEqual(report['active_count'], 0)
         self.assertEqual(report['current_count'], 0)

@@ -41,7 +41,7 @@ These small excerpts and tests do not establish current source inclusion. Runtim
 intake must verify the complete Tor payload or the complete immutable-commit-bound
 Ipverse payload and reconcile every retained item clock before qualification.
 
-`observed-ffraud.csv` is an inactive candidate's minimal observed excerpt from the
+`observed-ffraud.csv` is a minimal observed schema excerpt from the
 2026-11-15 capture of FFraud's original `confirmed-abusive.csv`. It retains the
 four publisher comments, column header, and the first complete unchanged row of
 each of the eight categories present in that capture, plus the first unchanged
@@ -83,8 +83,8 @@ upstream terms and the educational decision without claiming a publisher grant.
 The earliest explicit topology date is the content clock. The clique annotation
 does not establish Tier-1 membership. Tests cover every observed row-provenance
 combination, original relationship direction, bounded monthly discovery and full
-archive EOF. This candidate fixture has no certification ledger entry and does
-not activate the source.
+archive EOF. Its implementation-bound ledger entry certifies the observed parser
+run, not current full-payload qualification or production inclusion.
 
 `routeviews-wide-20261115-1200.mrt.bz2` and
 `ris-rrc18-20261115-0800.mrt.gz` retain each observed capture's complete original

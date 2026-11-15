@@ -213,7 +213,7 @@ func TestFFraudObservedExcerpt(t *testing.T) {
 	}
 }
 
-func TestFFraudCatalogControlsRemainInactive(t *testing.T) {
+func TestFFraudCatalogControlsRequireReviewedIntake(t *testing.T) {
 	f, err := os.Open("../../configs/sources.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -228,10 +228,10 @@ func TestFFraudCatalogControlsRemainInactive(t *testing.T) {
 			continue
 		}
 		_, ok := selectAdapter(source)
-		if !ok || !publicationSupported(source) || source.Admission != "candidate" || source.Fixture.Status != "passed" || source.Fixture.SHA256 == "" || source.Rights.Status != "reviewed" || source.Rights.Distribution != "allow" || source.Rights.Identifier != "MIT" {
-			t.Fatal("candidate controls or implemented parser/publication binding changed")
+		if !ok || !publicationSupported(source) || source.Admission != "active" || source.Fixture.Status != "passed" || source.Fixture.SHA256 == "" || source.Rights.Status != "reviewed" || source.Rights.Distribution != "allow" || source.Rights.Identifier != "MIT" {
+			t.Fatal("reviewed intake controls or implemented parser/publication binding changed")
 		}
 		return
 	}
-	t.Fatal("inactive FFraud candidate absent")
+	t.Fatal("reviewed FFraud source absent")
 }

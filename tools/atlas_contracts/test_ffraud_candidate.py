@@ -9,20 +9,19 @@ class FFraudCandidateTests(unittest.TestCase):
     def setUp(self):
         self.config = load_yaml(ROOT / "configs/sources.yaml")
         self.source = next(source for source in self.config["sources"] if source["id"] == "ffraud-ip")
-        # Test the new inactive source independently of the unrelated active
-        # sources' implementation-bound certificates, which root refreshes only
-        # after all compiler changes have been integrated and reviewed.
+        # Static activation permits intake but cannot manufacture a current
+        # payload receipt, categories, independence or public credits.
         self.config["sources"] = [self.source]
 
-    def test_candidate_does_not_claim_categories_or_certification(self):
+    def test_active_source_requires_current_authenticated_payload(self):
         validate_schema("sources", self.config)
         validate_sources(self.config)
-        self.assertEqual(self.source["admission"], "candidate")
+        self.assertEqual(self.source["admission"], "active")
         self.assertEqual(self.source["fixture"]["status"], "passed")
         self.assertRegex(self.source["fixture"]["sha256"], r"^[0-9a-f]{64}$")
         report = capability_report(self.config, utc("2026-11-15T13:00:00Z"), ROOT)
         self.assertEqual(report["current_count"], 0)
-        self.assertEqual(report["active_count"], 0)
+        self.assertEqual(report["active_count"], 1)
         self.assertEqual(report["dataset_attributions"], [])
         self.assertTrue(all(not row["families"] for row in report["capabilities"]))
 

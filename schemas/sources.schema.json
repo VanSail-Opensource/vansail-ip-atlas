@@ -595,15 +595,13 @@
             },
             "mrt_enabled": {
               "type": "boolean",
-              "const": false
+              "const": true
             },
             "collectors": {
               "type": "array",
               "const": [
-                "rrc01",
-                "rrc03",
-                "rrc06",
-                "route-views2"
+                "rrc18",
+                "route-views.wide"
               ]
             },
             "max_mrt_sources_per_run": {

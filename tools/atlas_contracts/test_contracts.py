@@ -20,10 +20,11 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_actual_catalog_is_blocked_and_has_shared_family(self):
         report = capability_report(self.configs["sources"], utc("2026-11-08T00:00:00Z"), ROOT)
-        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (15, 10, 0))
+        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (15, 15, 0))
         self.assertEqual({s["id"] for s in self.configs["sources"]["sources"] if s["admission"] == "active"}, {
             "sapics-user-country-v4", "sapics-user-country-v6", "sapics-server-country-v4", "ipverse-as-metadata",
-            "dbip-lite-direct", "ipapi-free-geo-v4", "ipapi-free-geo-v6", "x4b-vpn-v4", "tor-exits", "ipverse-asn-usage"})
+            "dbip-lite-direct", "ipapi-free-geo-v4", "ipapi-free-geo-v6", "x4b-vpn-v4", "tor-exits", "ipverse-asn-usage",
+            "ffraud-ip", "routeviews-wide-rib", "ripe-mrt-rrc18", "caida-asrel2", "rpki-client-vrps"})
         self.assertFalse(report["production_eligible"])
         self.assertEqual(report["schema_version"], 3)
         self.assertEqual(report["release_scope"], "release-scope-v6")
@@ -57,10 +58,10 @@ class ConfigurationTests(unittest.TestCase):
             with self.subTest(name=name), self.assertRaises(ContractError):
                 validate_schema(name, invalid)
 
-    def test_candidate_routing_feed_keeps_exact_discovery_guard(self):
+    def test_active_routing_feed_keeps_exact_discovery_guard(self):
         valid = copy.deepcopy(self.configs['sources'])
         candidate = next(source for source in valid['sources'] if source['id'] == 'caida-asrel2')
-        self.assertEqual(candidate['admission'], 'candidate')
+        self.assertEqual(candidate['admission'], 'active')
         validate_sources(valid)
         candidate['download']['url'] = 'https://publicdata.caida.org/datasets/as-relationships/serial-2/20261101.as-rel2.txt.bz2'
         with self.assertRaisesRegex(ContractError, 'deterministic current-snapshot discovery'):

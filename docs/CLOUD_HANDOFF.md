@@ -69,6 +69,37 @@ count is zero, linear history and conversation resolution are required.
   unsupported-version warnings. Official CI pins Go 1.27.4, Node 26.13.1 and
   pnpm 11.28.12. Hosted stable Chrome/cgroup and exact-commit CI remain pending.
 
+## Codex Cloud continuation — 2026-11-15
+
+- Restored the ASN-usage fixture's exact certified CRLF bytes and disabled Git
+  text conversion for observed JSON fixtures. Strict validation now passes on
+  Linux without changing the recorded payload hash.
+- Both readers reject scored `/24` cells without supported reasons, including
+  rounded-zero scores. Shared hostile fixtures cover both cases; the all-families
+  compiler fixture now supplies consistent positive evidence. Observed parser
+  certifications were refreshed only after actual fixture reruns.
+- Runner and Chrome scopes share an aggregate limited systemd slice. Pinned
+  executable paths survive sudo; disk accounting includes active toolchains,
+  Chrome, workspace caches and temporary files without counting hardlinks twice.
+  Checkpoint restore and packing also run inside the resource envelope.
+- CI discovers all hosted Python regressions. The complete 200,005-prefix
+  capacity test remains in `go test ./...`; selected race tests exclude only
+  that capacity test, whose instrumented run exceeded Go's ten-minute timeout.
+  The remaining pipeline race regressions retain external sorting, resource
+  guards, cancellation, cross-partition context and withdrawal coverage.
+- Local full Go tests/vet, seven fuzz targets, strict contracts, 132 Python
+  contract tests, 26 hosted Python tests, actual age roundtrip/wrong-key/corruption
+  tests, frontend typecheck and 206 Node/TypeScript tests passed. Chrome passed
+  21 synthetic UI scenarios and all three actual worker boundary workloads.
+- Local synthetic LCP p95 was 2.904 seconds against the unchanged 2.5-second
+  ceiling during concurrent validation; other measured local comparisons passed.
+  Local intake could not reach upstream data. Use the PR's exact-commit hosted
+  checks for intake, browser timing and systemd memory evidence; these local
+  results do not establish production acceptance.
+
+The four routing-source qualifications below remain unresolved. No production
+release or publisher permission is implied by these implementation fixes.
+
 ## Resume next
 
 1. Verify the branch and clean checkout. Run strict schemas, Go tests/vet, Python

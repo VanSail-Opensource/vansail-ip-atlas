@@ -391,7 +391,7 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 		}
 		if r.MRTProof != nil {
 			content, err := r.MRTProof.ContentHash()
-			if err != nil || content != r.PayloadHash || r.ProofKind != "embedded" || r.PublishedAt.After(r.MRTProof.CapturedAt) || r.MRTProof.Through.After(state.EvaluatedAt.Add(24*time.Hour)) || r.MRTProof.CaptureEnd().After(state.EvaluatedAt.Add(24*time.Hour)) {
+			if err != nil || content != r.PayloadHash || !validMRTArchiveBinding(s, r.MRTProof, state.EvaluatedAt) || r.ProofKind != "embedded" || r.PublishedAt.After(r.MRTProof.CapturedAt) || r.MRTProof.Through.After(state.EvaluatedAt.Add(24*time.Hour)) || r.MRTProof.CaptureEnd().After(state.EvaluatedAt.Add(24*time.Hour)) {
 				return report, nil, errors.New("production MRT content-set proof invalid")
 			}
 		} else if s.Parser.ID == "mrt-table-dump-v2" {

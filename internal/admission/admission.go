@@ -25,6 +25,7 @@ import (
 type Source struct {
 	ID, Family, Category, Admission string
 	URL, Format                     string
+	MRTArchivePolicy                string `json:",omitempty"`
 	MaxCompressedBytes              int64
 	MaxAge                          time.Duration
 	Weight                          float64

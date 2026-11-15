@@ -43,9 +43,10 @@ type catalogSource struct {
 	State    string `yaml:"admission"`
 	Scope    string `yaml:"scope"`
 	Download struct {
-		URL     string `yaml:"url"`
-		Format  string `yaml:"format"`
-		Maximum int64  `yaml:"max_compressed_mib"`
+		URL              string `yaml:"url"`
+		Format           string `yaml:"format"`
+		Maximum          int64  `yaml:"max_compressed_mib"`
+		MRTArchivePolicy string `yaml:"mrt_archive_policy"`
 	} `yaml:"download"`
 	Refresh struct {
 		Maximum string `yaml:"max_stale"`
@@ -156,6 +157,10 @@ func DecodeCatalog(reader io.Reader) ([]Source, error) {
 				return nil, errors.New("source discovery projection invalid")
 			}
 			output[len(output)-1].Discovery = &discovery
+		}
+		output[len(output)-1].MRTArchivePolicy = raw.Download.MRTArchivePolicy
+		if !validMRTArchivePolicy(output[len(output)-1]) {
+			return nil, errors.New("MRT archive rotation policy invalid")
 		}
 		if f := raw.MRTUpdatesFixture; f != nil {
 			if raw.Category != "bgp" || raw.Scope != "path" || len(raw.ID) > 120 || f.Status == "missing" && (f.SHA256 != "" || f.Observed || f.TestedAt != "") {

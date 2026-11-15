@@ -1580,6 +1580,12 @@
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 1024
+              },
+              "mrt_archive_policy": {
+                "type": "string",
+                "enum": [
+                  "latest-complete-v1"
+                ]
               }
             },
             "required": [

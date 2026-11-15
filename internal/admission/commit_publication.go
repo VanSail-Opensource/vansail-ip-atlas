@@ -26,6 +26,9 @@ func commitSource(locator, assetURL string) (acquire.GitHubCommitQuery, bool) {
 }
 
 func publicationSupported(source Source) bool {
+	if !validMRTArchivePolicy(source) {
+		return false
+	}
 	if source.Parser.ID == "ffraud-csv" {
 		return ffraudCommitSource(source)
 	}

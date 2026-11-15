@@ -2,6 +2,7 @@ package acquire
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -85,10 +86,24 @@ func TestScopedHeaderOnlyFailureKeepsColdFallbackBodyBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = group.Fetch(context.Background(), "https://example.com/missing", filepath.Join(t.TempDir(), "payload"), 20); err != ErrFetch {
+	if _, err = group.Fetch(context.Background(), "https://example.com/missing", filepath.Join(t.TempDir(), "payload"), 20); !errors.Is(err, ErrFetch) || !errors.Is(err, ErrNotFound) {
 		t.Fatal("missing archive accepted", err)
 	}
 	if remaining, valid := group.GroupBytesRemaining(); !valid || remaining != 20 || parent.budget.Load() != 100 {
 		t.Fatal("header-only failure consumed a body budget", remaining)
+	}
+}
+
+func TestOnlyHTTP404IsAnArchiveNotFoundSignal(t *testing.T) {
+	for _, status := range []int{401, 403, 404, 410, 429, 500, 503} {
+		f := New()
+		f.attempts = 1
+		f.client.Transport = roundTrip(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader("private upstream detail")), Header: make(http.Header), ContentLength: 23}, nil
+		})
+		_, err := f.Fetch(context.Background(), "https://example.com/archive", filepath.Join(t.TempDir(), "asset"), 100)
+		if !errors.Is(err, ErrFetch) || errors.Is(err, ErrNotFound) != (status == 404) || strings.Contains(err.Error(), "private") || strings.Contains(err.Error(), "https://") {
+			t.Fatal("archive status was misclassified or exposed upstream detail", status, err)
+		}
 	}
 }

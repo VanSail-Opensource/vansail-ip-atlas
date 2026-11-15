@@ -81,6 +81,20 @@ publication clock. Plain/gzip/bzip2 inputs stream into bounded private record
 partitions. A malformed or unrepresentable route aborts the candidate rather than
 being truncated or assigned an invented origin.
 
+The optional `download.mrt_archive_policy: latest-complete-v1` is reviewed only
+for RouteViews WIDE's canonical bzip2 RIBs and RIS RRC18's canonical gzip RIBs.
+The configured dated URL remains the catalog's collector/codec anchor. Intake
+selects the newest scheduled slot at least 30 minutes old (two hours for WIDE,
+eight hours for RRC18), with only the immediately preceding slot allowed after
+a header-only HTTP 404. Other acquisition failures, invalid hashes, malformed
+archives and invalid capture clocks fail the pair; they never select older
+bytes. Every accepted frame clock must lie in the selected slot and at or before
+the original selection time. The private sealed proof records the actual URL
+and selection time alongside the full payload hash and capture clocks, so
+revalidation and replay preserve the actual base without mutating the catalog
+or renewing its publication age. An absent policy retains exact-URL acquisition.
+This support does not enable or certify any source.
+
 An optional `mrt_updates_fixture` has its own exact `source-id-updates` ledger
 certificate for `mrt-bgp4mp-unicast-v1`. Its encoded bytes and metadata participate
 in the certification/policy identity, so revocation also invalidates a retained

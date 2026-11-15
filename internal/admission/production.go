@@ -65,14 +65,37 @@ type ProductionQualification struct {
 	report      CapabilityReport
 	validUntil  time.Time
 	vrpComplete bool
+	validation  *sourceValidation
 }
 
 func QualifyProductionState(ctx context.Context, root string, catalog []Source, now time.Time, binding [32]byte) (*ProductionQualification, error) {
-	state, err := intelligence.VerifyPrivateStateSeal(ctx, root, binding)
+	state, report, validation, err := validateSourceSet(ctx, root, catalog, now, binding)
 	if err != nil {
 		return nil, err
 	}
-	return productionFromAuthenticatedState(ctx, root, catalog, state, now, binding)
+	q, err := qualificationFromReport(state, report)
+	if err != nil {
+		return nil, err
+	}
+	q.validation = validation
+	return q, nil
+}
+
+// QualifyProductionStateVerified accepts only an opaque handle minted by a
+// full semantic seal verification in this process. It rechecks the same root,
+// seal/key/state and every chunk before the unchanged source-semantic admission
+// pass. This lets Tier-1 observation precede unrelated capability failures.
+func QualifyProductionStateVerified(ctx context.Context, root string, catalog []Source, now time.Time, binding [32]byte, verified *intelligence.VerifiedPrivateState) (*ProductionQualification, error) {
+	state, report, validation, err := validateVerifiedSourceSet(ctx, root, catalog, now, binding, verified)
+	if err != nil {
+		return nil, err
+	}
+	q, err := qualificationFromReport(state, report)
+	if err != nil {
+		return nil, err
+	}
+	q.validation = validation
+	return q, nil
 }
 
 // QualifyProductionStateAtHash selects the exact current or retained generation.
@@ -118,7 +141,10 @@ func productionFromAuthenticatedState(ctx context.Context, root string, catalog 
 	if err != nil {
 		return nil, err
 	}
-	if err = report.RequireProduction(); err != nil {
+	return qualificationFromReport(state, report)
+}
+func qualificationFromReport(state intelligence.BuildState, report CapabilityReport) (*ProductionQualification, error) {
+	if err := report.RequireProduction(); err != nil {
 		return nil, err
 	}
 	data, err := json.Marshal(state)
@@ -280,9 +306,22 @@ func RightsDigests(s Source) (string, *string, error) {
 // actual records. It accepts neither caller success flags nor a release manifest
 // as proof of source coverage. The caller must first verify the private seal.
 func RevalidateStoredSources(ctx context.Context, root string, catalog []Source, state intelligence.BuildState, now time.Time, binding [32]byte) (CapabilityReport, []SourceStatistics, error) {
+	return revalidateStoredSources(ctx, root, catalog, state, now, binding, nil)
+}
+
+// Only sourceValidation supplies prior statistics, after authenticating its
+// exact original state and checking every current normalized object byte.
+// Source controls, certification, deadlines and dependencies still run below.
+func revalidateStoredSources(ctx context.Context, root string, catalog []Source, state intelligence.BuildState, now time.Time, binding [32]byte, prior map[string]SourceStatistics) (CapabilityReport, []SourceStatistics, error) {
 	var report CapabilityReport
 	if state.Version != 2 || state.PolicyHash != binding || binding == ([32]byte{}) || now.IsZero() || state.EvaluatedAt.After(now) || len(state.Sources) > 1000 {
 		return report, nil, errors.New("production requires current sealed intake")
+	}
+	if err := ctx.Err(); err != nil {
+		return report, nil, err
+	}
+	if prior != nil && len(prior) != len(state.Sources) {
+		return report, nil, errors.New("verified source statistics differ from current state")
 	}
 	byID := make(map[string]Source, len(catalog))
 	for _, s := range catalog {
@@ -384,7 +423,13 @@ func RevalidateStoredSources(ctx context.Context, root string, catalog []Source,
 			}
 		}
 		stat := SourceStatistics{ID: s.ID, Family: find(s.Family), Signals: map[intelligence.Signal]bool{}}
-		if err := intelligence.WalkStoredSource(ctx, root, v, func(record intelligence.NormalizedRecord) error {
+		if prior != nil {
+			previous, ok := prior[s.ID]
+			if !ok || previous.ID != stat.ID || previous.Family != stat.Family {
+				return report, nil, errors.New("verified source statistics differ from current controls")
+			}
+			stat = previous
+		} else if err := intelligence.WalkStoredSource(ctx, root, v, func(record intelligence.NormalizedRecord) error {
 			if err := record.Validate(); err != nil {
 				return err
 			}

@@ -116,6 +116,20 @@ func readProductionReceiptSeal(ctx context.Context, directory, name string, key 
 // read back from disk to the exact current sealed state and manifest. It does
 // not create a key, source review, capability or public release approval.
 func SealProductionReceipt(ctx context.Context, workspace string, binding [32]byte, receiptBytes []byte, stateHash, manifestHash [32]byte, validUntil time.Time) (failure error) {
+	return sealProductionReceipt(ctx, workspace, binding, receiptBytes, stateHash, manifestHash, validUntil, nil)
+}
+
+// SealProductionReceipt preserves all exact artifact and lifetime checks while
+// reusing the handle's initial normalized-record semantics. The caller must
+// still hold the workspace writer lock and complete the production gates.
+func (v *VerifiedPrivateState) SealProductionReceipt(ctx context.Context, workspace string, binding [32]byte, receiptBytes []byte, stateHash, manifestHash [32]byte, validUntil time.Time) error {
+	if v == nil {
+		return errors.New("verified private state handle required")
+	}
+	return sealProductionReceipt(ctx, workspace, binding, receiptBytes, stateHash, manifestHash, validUntil, v)
+}
+
+func sealProductionReceipt(ctx context.Context, workspace string, binding [32]byte, receiptBytes []byte, stateHash, manifestHash [32]byte, validUntil time.Time, verified *VerifiedPrivateState) (failure error) {
 	if ctx == nil {
 		return errors.New("production artifact context required")
 	}
@@ -131,7 +145,14 @@ func SealProductionReceipt(ctx context.Context, workspace string, binding [32]by
 	if err != nil {
 		return err
 	}
-	state, err := VerifyPrivateStateSeal(ctx, workspace, binding)
+	var state BuildState
+	var identity privateStateIdentity
+	if verified == nil {
+		state, identity, err = verifyPrivateState(ctx, workspace, binding, nil)
+	} else {
+		state, err = verified.RevalidateFor(ctx, workspace, binding)
+		identity = verified.identity
+	}
 	if err != nil {
 		return err
 	}
@@ -139,8 +160,15 @@ func SealProductionReceipt(ctx context.Context, workspace string, binding [32]by
 		return err
 	}
 	key, err := readPrivateBounded(ctx, workspace, "state-seal.key", 32)
-	if err != nil || len(key) != 32 {
+	if err != nil || len(key) != 32 || sha256.Sum256(key) != identity.keyHash {
 		return errors.New("existing production artifact key required")
+	}
+	checkAuthentication := func() error {
+		_, current, err := readAuthenticatedPrivateState(ctx, workspace, binding)
+		if err != nil || current != identity || verified != nil && !verified.sameRoot() {
+			return errors.New("source authentication changed before artifact attestation")
+		}
+		return ctx.Err()
 	}
 	seal.EvaluatedAt = state.EvaluatedAt.Unix()
 	seal.MAC = productionReceiptMAC(key, seal)
@@ -155,7 +183,7 @@ func SealProductionReceipt(ctx context.Context, workspace string, binding [32]by
 	name := receiptSealName(seal.ReceiptSHA256)
 	if _, existing, err := readProductionReceiptSeal(ctx, directory, name, key); err == nil {
 		if bytes.Equal(existing, data) {
-			return nil
+			return checkAuthentication()
 		}
 		return errors.New("immutable production artifact attestation already differs")
 	} else if !os.IsNotExist(err) {
@@ -221,6 +249,11 @@ func SealProductionReceipt(ctx context.Context, workspace string, binding [32]by
 		return err
 	}
 	if err = ctx.Err(); err != nil {
+		return err
+	}
+	// Authenticate both state and key immediately before the atomic publication.
+	// A key rotation cannot produce a new attestation from old verified inputs.
+	if err = checkAuthentication(); err != nil {
 		return err
 	}
 	// Link publishes a complete content-addressed object without overwriting any

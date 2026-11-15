@@ -48,6 +48,18 @@ func ObserveTier1State(ctx context.Context, workspace string, state BuildState, 
 	return observeTier1State(ctx, workspace, sealed, binding, now, 100_000_000)
 }
 
+// ObserveTier1State preserves the same pending and evaluated source-epoch
+// history while reusing only the handle's prior normalized-union validation.
+// Callers must hold the admission workspace writer lock and call this before
+// unrelated source-capability or output gates, including failed release builds.
+func (v *VerifiedPrivateState) ObserveTier1State(ctx context.Context, workspace string, binding [32]byte, now time.Time) (*QualifiedTier1, error) {
+	state, err := v.RevalidateFor(ctx, workspace, binding)
+	if err != nil {
+		return nil, err
+	}
+	return observeTier1StateChecked(ctx, workspace, state, binding, now, 100_000_000, func() error { return v.recheckAuthentication(ctx) })
+}
+
 // QualifiedTier1 is a read-only context derived from the exact sealed private
 // state. Its unexported construction/binding cannot be replaced by a caller's
 // eligibility boolean or an ASN allowlist. The global graph is bounded apart
@@ -81,6 +93,10 @@ func BuildQualifiedTier1(ctx context.Context, workspace string, policyHash [32]b
 }
 
 func observeTier1State(ctx context.Context, workspace string, state BuildState, policyHash [32]byte, now time.Time, maxWork int) (*QualifiedTier1, error) {
+	return observeTier1StateChecked(ctx, workspace, state, policyHash, now, maxWork, nil)
+}
+
+func observeTier1StateChecked(ctx context.Context, workspace string, state BuildState, policyHash [32]byte, now time.Time, maxWork int, finalCheck func() error) (*QualifiedTier1, error) {
 	if now.IsZero() || !state.EvaluatedAt.Equal(now) || maxWork <= 0 {
 		return nil, errors.New("same-clock qualified Tier-1 inputs required")
 	}
@@ -242,6 +258,12 @@ func observeTier1State(ctx context.Context, workspace string, state BuildState, 
 	}
 	if len(epoch.Stable) > 0 && epoch.Anchor != nil && (qualified.expires.IsZero() || epoch.Anchor.ExpiresAt.Before(qualified.expires)) {
 		qualified.expires = epoch.Anchor.ExpiresAt
+	}
+	// A changed authenticated input cannot clear the pending failure marker.
+	if finalCheck != nil {
+		if err = finalCheck(); err != nil {
+			return nil, err
+		}
 	}
 	history.Pending = [32]byte{}
 	history.Epochs = []tier1HistoryEpoch{epoch}
@@ -485,7 +507,27 @@ func VerifyTier1ObservationHistory(ctx context.Context, workspace string, qualif
 	if err != nil {
 		return err
 	}
-	if err = qualified.ValidateObservation(state, qualified.clock); err != nil {
+	return verifyTier1ObservationHistory(ctx, workspace, state, qualified)
+}
+
+// VerifyTier1ObservationHistory checks the persisted outcome without recording
+// a new epoch, including when the observed routing capability was unavailable.
+func (v *VerifiedPrivateState) VerifyTier1ObservationHistory(ctx context.Context, workspace string, qualified *QualifiedTier1) error {
+	if qualified == nil {
+		return errors.New("authenticated Tier-1 observation required")
+	}
+	state, err := v.RevalidateFor(ctx, workspace, qualified.policyHash)
+	if err != nil {
+		return err
+	}
+	if err = verifyTier1ObservationHistory(ctx, workspace, state, qualified); err != nil {
+		return err
+	}
+	return v.recheckAuthentication(ctx)
+}
+
+func verifyTier1ObservationHistory(ctx context.Context, workspace string, state BuildState, qualified *QualifiedTier1) error {
+	if err := qualified.ValidateObservation(state, qualified.clock); err != nil {
 		return err
 	}
 	history, err := loadTier1History(ctx, workspace, qualified.policyHash)

@@ -94,17 +94,34 @@ func writeHistoryBytes(directory, name string, data []byte) error {
 // The digest is its only filename component. At most three recent indexes are
 // retained; actual source objects still follow immediate withdrawal/expiry GC.
 func RetainPrivateStateSeal(ctx context.Context, workspace string, binding [32]byte) error {
-	state, err := VerifyPrivateStateSeal(ctx, workspace, binding)
+	state, identity, err := verifyPrivateState(ctx, workspace, binding, nil)
 	if err != nil {
 		return err
 	}
-	data, err := readPrivateBounded(ctx, workspace, "state-v1.json", 64<<20)
+	return retainPrivateStateSeal(ctx, workspace, binding, state, identity)
+}
+
+// RetainPrivateStateSeal retains only the handle's exact authenticated current
+// state. Callers must hold the same workspace writer lock as the full entry.
+func (v *VerifiedPrivateState) RetainPrivateStateSeal(ctx context.Context, workspace string, binding [32]byte) error {
+	state, err := v.RevalidateFor(ctx, workspace, binding)
 	if err != nil {
 		return err
+	}
+	if err = retainPrivateStateSeal(ctx, workspace, binding, state, v.identity); err != nil {
+		return err
+	}
+	return v.recheckAuthentication(ctx)
+}
+
+func retainPrivateStateSeal(ctx context.Context, workspace string, binding [32]byte, state BuildState, expected privateStateIdentity) error {
+	data, identity, err := readAuthenticatedPrivateState(ctx, workspace, binding)
+	if err != nil || identity != expected {
+		return errors.New("source state changed before retention")
 	}
 	seal, err := readPrivateBounded(ctx, workspace, "state-seal-v2.json", 4096)
-	if err != nil {
-		return err
+	if err != nil || sha256.Sum256(seal) != expected.sealHash {
+		return errors.New("source seal changed before retention")
 	}
 	digest := sha256.Sum256(data)
 	directory, err := stateHistoryDirectory(workspace, true)
@@ -167,7 +184,11 @@ func RetainPrivateStateSeal(ctx context.Context, workspace string, binding [32]b
 			}
 		}
 	}
-	return nil
+	_, after, err := readAuthenticatedPrivateState(ctx, workspace, binding)
+	if err != nil || after != expected {
+		return errors.New("source state changed during retention")
+	}
+	return ctx.Err()
 }
 
 // VerifyRetainedPrivateStateSeal is read-only and never substitutes current

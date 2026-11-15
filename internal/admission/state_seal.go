@@ -32,3 +32,17 @@ func (e *Engine) RetainPrivateStateSeal(ctx context.Context, binding [32]byte) e
 	}
 	return intelligence.RetainPrivateStateSeal(ctx, e.workspace, binding)
 }
+
+// RetainVerifiedPrivateStateSeal retains the same writer-lock requirement and
+// exact archive checks while reusing only already verified record semantics.
+func (e *Engine) RetainVerifiedPrivateStateSeal(ctx context.Context, binding [32]byte, verified *intelligence.VerifiedPrivateState) error {
+	if e == nil {
+		return errors.New("admission engine unavailable")
+	}
+	e.lifecycle.RLock()
+	defer e.lifecycle.RUnlock()
+	if e.closed || e.lock == nil {
+		return errors.New("admission writer lock required")
+	}
+	return verified.RetainPrivateStateSeal(ctx, e.workspace, binding)
+}

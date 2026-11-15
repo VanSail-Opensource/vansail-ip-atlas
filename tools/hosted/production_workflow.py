@@ -1,6 +1,7 @@
 """Fixed trusted-main production stage commands; all private diagnostics stay local."""
 from __future__ import annotations
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,7 @@ ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT))
 from tools.hosted.checkpoint import api, REPOSITORY, WORKFLOWS
 from tools.release_contract.contracts import ContractError, canonical_bytes
+from tools.release_contract.production import read_private
 
 def run(argv, *, output=None):
     private=ROOT/'.atlas-private';private.mkdir(exist_ok=True,mode=0o700)
@@ -68,11 +70,34 @@ def update_context(kind):
     path.parent.mkdir(exist_ok=True,mode=0o700);path.write_bytes(canonical_bytes(value))
     return value
 
+def intake_clock():
+    # Select the materialization clock from the restored state. The Go compiler
+    # independently authenticates its seal and requires this exact evaluation.
+    try:
+        state=json.loads(read_private(ROOT/'.atlas-private/state-v1.json',64*1024**2))
+    except ValueError as error:
+        raise ContractError('invalid intake state clock') from error
+    if type(state) is not dict or type(state.get('Version')) is not int or state['Version']!=2:
+        raise ContractError('partitioned intake state required')
+    value=state.get('EvaluatedAt')
+    if not isinstance(value,str) or not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z',value):
+        raise ContractError('UTC whole-second intake clock required')
+    try:
+        clock=int(datetime.strptime(value,'%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).timestamp())
+    except (ValueError,OverflowError) as error:
+        raise ContractError('invalid intake state clock') from error
+    if not 0<=clock<=int(time.time()):
+        raise ContractError('intake clock is outside the current time interval')
+    return clock
+
 def candidate():
     update_context('candidate')
-    clock=int(time.time());private=ROOT/'.atlas-private'
+    clock=intake_clock();private=ROOT/'.atlas-private'
     receipt=private/'production-receipt.json';atlas=ROOT/'build-private/production-atlas'
     run(['build-private/atlas','compile-production','-workspace',ROOT,'-clock',clock,'-out',atlas,'-receipt',receipt])
+    # Compilation is deterministic at intake time; eligibility must still hold
+    # at the current wall clock before any corpus or public packaging is built.
+    run(['build-private/atlas','verify-production','-workspace',ROOT,'-atlas',atlas,'-receipt',receipt])
     run(['build-private/atlas','corpus','-atlas',atlas,'-out',private/'production-browser-corpus.json'])
     pnpm=['npm','exec','--yes','--package','pnpm@11.28.12','--','pnpm','--dir','web']
     with (ROOT/'build-private/software-license-metadata.json').open('wb') as output:

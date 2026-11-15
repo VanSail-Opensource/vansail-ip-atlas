@@ -196,6 +196,19 @@ runtime errors. Local mobile graph measurements met the unchanged gate in all
 three ten-second phases. Hosted actual-data capacity and release gates remain
 pending; these local results do not authorize production.
 
+PR #3 is open on this branch. At head
+`324da7339e10d4db7cd5238f1d66296020cb4af9`, hosted run `43697685335`
+passed contracts, codec and synthetic browser checks. All ten reviewed inputs
+passed actual intake, but `compile-production` reached its unchanged 35-minute
+deadline before corpus or native lookup measurement. No memory/disk limit or
+OOM event was reported. The source-free evidence artifact `14157315239` was
+verified against SHA-256
+`2c2877b000f3a38f5d94739f1d4e39bc1fbaf7dbdb269796f80c49834e6f0f3a`.
+The PR remains unmerged. Repeated semantic source scans are being optimized
+without removing independent byte/authentication or current-time checks.
+The integration driver now retains failed-compile elapsed time and accepts only
+bounded, fixed-schema compiler phase diagnostics; raw child output stays private.
+
 ## Resume next
 
 1. Verify the branch and clean checkout. Run strict schemas, Go tests/vet, Python

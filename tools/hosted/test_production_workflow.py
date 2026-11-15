@@ -140,5 +140,49 @@ class CandidateClockTests(unittest.TestCase):
             workflow.context('intake', None)
 
 
+class CompilePhaseDiagnosticsTests(unittest.TestCase):
+    def test_compiler_log_output_exposes_only_allowlisted_phase_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            public_out, public_err = io.StringIO(), io.StringIO()
+            rows = [{'phase': 'stage', 'event': 'begin', 'elapsed_ms': 0, 'ok': True},
+                    {'phase': 'PRIVATE_SOURCE', 'event': 'begin', 'elapsed_ms': 0, 'ok': True},
+                    {'phase': 'stage', 'event': 'end', 'elapsed_ms': 3, 'ok': False}]
+            def execute(argv, **kwargs):
+                kwargs['stderr'].write(b'private-token-marker\n')
+                for row in rows:
+                    kwargs['stderr'].write(('ATLAS_COMPILE_PHASE ' + json.dumps(row) + '\n').encode())
+                return workflow.subprocess.CompletedProcess(argv, 1)
+            with patch.object(workflow, 'ROOT', root), patch.object(workflow.subprocess, 'run', side_effect=execute), \
+                 contextlib.redirect_stdout(public_out), contextlib.redirect_stderr(public_err), \
+                 self.assertRaises(ContractError):
+                workflow.run(['build-private/atlas', 'compile-production'])
+            output = public_out.getvalue() + public_err.getvalue()
+            self.assertIn('phase ended: stage elapsed_ms=3 ok=false', output)
+            self.assertNotIn('private-token-marker', output)
+            self.assertNotIn('PRIVATE_SOURCE', output)
+
+    def test_fixed_schema_bounds_and_current_command_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'stage.log'
+            begin = {'phase': 'stage', 'event': 'begin', 'elapsed_ms': 0, 'ok': True}
+            end = {**begin, 'event': 'end', 'elapsed_ms': 123, 'ok': False}
+            encode = lambda row: 'ATLAS_COMPILE_PHASE ' + json.dumps(row) + '\n'
+            old = encode(begin) + encode(end)
+            invalid = [{**begin, 'phase': 'PRIVATE_SOURCE'}, {**begin, 'elapsed_ms': True},
+                       {**begin, 'elapsed_ms': -1}, {**begin, 'elapsed_ms': 86400001},
+                       {**begin, 'ok': 'secret'}, {**begin, 'event': 'secret'},
+                       {**begin, 'source': 'secret'}, {**begin, 'ok': False},
+                       {**begin, 'elapsed_ms': 1}]
+            path.write_text(old + 'secret token marker\n' + ''.join(map(encode, invalid)) + encode(begin) + encode(end))
+            self.assertEqual(workflow.compile_phase_diagnostics(path, len(old)), [begin, end])
+            path.write_text(encode(begin))
+            self.assertEqual(workflow.compile_phase_diagnostics(path, 0), [begin])
+            path.write_text(encode(begin) + encode({**end, 'phase': 'build'}))
+            self.assertEqual(workflow.compile_phase_diagnostics(path, 0), [])
+            path.write_text(encode(begin) * 65)
+            self.assertEqual(workflow.compile_phase_diagnostics(path, 0), [])
+
+
 if __name__ == '__main__':
     unittest.main()

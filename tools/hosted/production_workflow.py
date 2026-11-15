@@ -50,6 +50,40 @@ SAFE_FAILURES={
     'pipeline requires at least one public fact':'empty-public-data',
 }
 
+COMPILE_PHASES=frozenset({'stage','config','qualification','tier1','build','boundary',
+    'objects','receipt','retention','history','seal'})
+
+def compile_phase_diagnostics(path, start):
+    """Read bounded fixed-schema diagnostics, never arbitrary child output."""
+    records=[]
+    stack=[]
+    try:
+        with path.open('rb') as stream:
+            stream.seek(0,2);end=stream.tell();stream.seek(max(start,end-65536))
+            lines=stream.read(65536).splitlines()
+        for line in lines:
+            prefix=b'ATLAS_COMPILE_PHASE '
+            if not line.startswith(prefix) or len(line)>1024:
+                continue
+            try: row=json.loads(line[len(prefix):])
+            except (ValueError,UnicodeDecodeError): continue
+            if (type(row) is not dict or set(row)!={'phase','event','elapsed_ms','ok'}
+                    or type(row['phase']) is not str or row['phase'] not in COMPILE_PHASES
+                    or row['event'] not in ('begin','end')
+                    or type(row['elapsed_ms']) is not int or not 0<=row['elapsed_ms']<=86400000
+                    or type(row['ok']) is not bool):
+                continue
+            if row['event']=='begin':
+                if row['elapsed_ms']!=0 or not row['ok']: continue
+                stack.append(row['phase'])
+            else:
+                if not stack or stack.pop()!=row['phase']: return []
+            records.append(row)
+            if len(records)>64: return []
+    except OSError:
+        return []
+    return records
+
 def failure_category(path, start):
     # Classify only bounded current-command output into fixed labels. Raw text,
     # filenames, source identities and arbitrary exception messages stay private.
@@ -75,6 +109,13 @@ def run(argv, *, output=None):
     with (private/'stage.log').open('ab') as log:
         start=log.tell()
         result=subprocess.run([str(x) for x in argv],cwd=ROOT,stdout=output or log,stderr=log,check=False)
+    if phase=='compile-production':
+        for row in compile_phase_diagnostics(private/'stage.log',start):
+            if row['event']=='begin':
+                print('Production compiler phase entered: '+row['phase'],flush=True)
+            else:
+                print('Production compiler phase ended: '+row['phase']
+                    +' elapsed_ms='+str(row['elapsed_ms'])+' ok='+str(row['ok']).lower(),flush=True)
     if result.returncode:
         print('Production step failed: '+phase,file=sys.stderr,flush=True)
         print('Production failure category: '+failure_category(private/'stage.log',start),file=sys.stderr,flush=True)

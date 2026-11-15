@@ -42,7 +42,7 @@ class ActualLookupGateTests(unittest.TestCase):
                         path.parent.mkdir(parents=True, exist_ok=True)
                         path.write_text(json.dumps(self.report(lookup_ns)))
                 with patch.object(check, 'ROOT', root), patch.object(check, 'run', side_effect=run), \
-                     patch.object(check, 'intake_clock', return_value='2026-11-15T08:00:00Z'), \
+                     patch.object(check, 'intake_clock', return_value=1794733697), \
                      patch.object(check.time, 'monotonic_ns', side_effect=(0, 1000001)):
                     if passed:
                         check.main()
@@ -53,3 +53,26 @@ class ActualLookupGateTests(unittest.TestCase):
                 self.assertIs(report['passed'], passed)
                 self.assertEqual(report['compile_runtime_ms'], 2)
                 self.assertIs(type(report['compile_runtime_ms']), int)
+
+    def test_compile_failure_retains_elapsed_time_and_only_current_phase_diagnostics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            private = root / '.atlas-private'
+            private.mkdir()
+            log = private / 'stage.log'
+            old = 'ATLAS_COMPILE_PHASE ' + json.dumps({'phase': 'history', 'event': 'begin', 'elapsed_ms': 0, 'ok': True}) + '\n'
+            log.write_text(old)
+            row = {'phase': 'qualification', 'event': 'begin', 'elapsed_ms': 0, 'ok': True}
+            def run(_):
+                with log.open('a') as stream:
+                    stream.write('private source marker\nATLAS_COMPILE_PHASE ' + json.dumps(row) + '\n')
+                raise ContractError('compile failed')
+            with patch.object(check, 'ROOT', root), patch.object(check, 'run', side_effect=run), \
+                 patch.object(check, 'intake_clock', return_value=1794733697), \
+                 patch.object(check.time, 'monotonic_ns', side_effect=(0, 2100000000000)), \
+                 self.assertRaises(ContractError):
+                check.main()
+            report = json.loads((root / 'reports/production-data-check.json').read_bytes())
+            self.assertFalse(report['passed'])
+            self.assertEqual(report['compile_runtime_ms'], 2100000)
+            self.assertEqual(report['compile_phases'], [row])

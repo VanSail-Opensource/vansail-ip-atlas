@@ -7,7 +7,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from tools.hosted.production_workflow import intake_clock, run
+from tools.hosted.production_workflow import compile_phase_diagnostics, intake_clock, run
 from tools.release_contract.contracts import ContractError, canonical_bytes
 from tools.release_contract.production import read_private
 
@@ -37,9 +37,14 @@ def main():
     report = {'schema_version': 1, 'scope': 'actual-data-compile-not-release', 'passed': False}
     try:
         started = time.monotonic_ns()
-        run(['build-private/atlas', 'compile-production', '-workspace', ROOT,
-             '-clock', intake_clock(), '-out', atlas, '-receipt', receipt])
-        report['compile_runtime_ms'] = (time.monotonic_ns() - started + 999999) // 1000000
+        log = private / 'stage.log'
+        log_start = log.stat().st_size if log.exists() else 0
+        try:
+            run(['build-private/atlas', 'compile-production', '-workspace', ROOT,
+                 '-clock', intake_clock(), '-out', atlas, '-receipt', receipt])
+        finally:
+            report['compile_runtime_ms'] = (time.monotonic_ns() - started + 999999) // 1000000
+            report['compile_phases'] = compile_phase_diagnostics(log, log_start)
         if report['compile_runtime_ms'] >= 35 * 60 * 1000:
             raise ContractError('actual compilation exceeds the original cold-build ceiling')
         run(['build-private/atlas', 'verify-production', '-workspace', ROOT,

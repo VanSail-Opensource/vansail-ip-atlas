@@ -79,9 +79,9 @@ func ValidateDatasetLogoFile(workspace string, logo *DatasetLogo) error {
 	return ValidateDatasetLogoBytes(data, logo.SHA256)
 }
 
-// Legal artwork uses a closed PNG subset: metadata-free, non-interlaced 8-bit
-// grayscale/RGB with optional alpha. Only IHDR, consecutive IDAT and IEND are
-// allowed, preventing hidden publisher metadata from entering public assets.
+// Legal artwork uses a closed PNG subset: non-interlaced 8-bit grayscale/RGB
+// with optional alpha. One bounded symmetric physical-density chunk may precede
+// consecutive IDAT chunks; text, profiles and other metadata remain forbidden.
 func ValidateDatasetLogoBytes(data []byte, digest string) error {
 	deny := errors.New("invalid dataset logo PNG")
 	actual := sha256.Sum256(data)
@@ -89,6 +89,7 @@ func ValidateDatasetLogoBytes(data []byte, digest string) error {
 		return deny
 	}
 	pos, stage := 8, 0
+	physicalDensity := false
 	for pos+12 <= len(data) {
 		size := int(binary.BigEndian.Uint32(data[pos : pos+4]))
 		if size > 256<<10 || size > len(data)-pos-12 {
@@ -110,6 +111,15 @@ func ValidateDatasetLogoBytes(data []byte, digest string) error {
 				return deny
 			}
 			stage = 1
+		case "pHYs":
+			if stage != 1 || physicalDensity || size != 9 {
+				return deny
+			}
+			density := binary.BigEndian.Uint32(body[:4])
+			if density < 1 || density > 40000 || density != binary.BigEndian.Uint32(body[4:8]) || body[8] != 1 {
+				return deny
+			}
+			physicalDensity = true
 		case "IDAT":
 			if stage != 1 && stage != 2 {
 				return deny

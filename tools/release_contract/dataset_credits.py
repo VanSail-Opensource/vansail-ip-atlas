@@ -135,7 +135,7 @@ def _release_modes(current_id: str, modes: dict[str, str]) -> None:
 
 
 def validate_logo(data: bytes, digest: str) -> None:
-    """Bounded, metadata-free, non-interlaced 8-bit PNG legal artwork only."""
+    """Bounded PNG artwork; only symmetric numeric density metadata is allowed."""
     if len(data) > MAX_LOGO_BYTES or sha256(data) != digest or data[:8] != b"\x89PNG\r\n\x1a\n":
         _reject()
     pos, chunks, compressed = 8, [], bytearray()
@@ -146,7 +146,7 @@ def validate_logo(data: bytes, digest: str) -> None:
         if size > MAX_LOGO_BYTES or pos + size + 12 > len(data):
             _reject()
         payload = data[pos + 8:pos + 8 + size]
-        if kind not in (b"IHDR", b"IDAT", b"IEND"):
+        if kind not in (b"IHDR", b"pHYs", b"IDAT", b"IEND"):
             _reject()
         if zlib.crc32(kind + payload) & 0xffffffff != struct.unpack_from(">I", data, pos + size + 8)[0]:
             _reject()
@@ -159,6 +159,12 @@ def validate_logo(data: bytes, digest: str) -> None:
                 _reject()
         elif not chunks:
             _reject()
+        if kind == b"pHYs":
+            if chunks != [b"IHDR"] or size != 9:
+                _reject()
+            x, y, unit = struct.unpack(">IIB", payload)
+            if not 1 <= x <= 40000 or x != y or unit != 1:
+                _reject()
         if kind == b"IDAT":
             compressed.extend(payload)
         if kind == b"IEND" and (size or pos + 12 != len(data)):

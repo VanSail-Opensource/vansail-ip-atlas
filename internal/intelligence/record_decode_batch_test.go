@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -61,9 +62,19 @@ func decodeBatchFixture(t *testing.T, frames [][]byte, tail []byte, compressed b
 func assertNoRecordDecodeWorkers(t *testing.T) {
 	t.Helper()
 	stack := make([]byte, 1<<20)
-	n := runtime.Stack(stack, true)
-	if bytes.Contains(stack[:n], []byte("intelligence.runRecordDecodeWorker(")) {
-		t.Fatal("record decoder returned before joining its workers")
+	deadline := time.Now().Add(time.Second)
+	for {
+		n := runtime.Stack(stack, true)
+		if !bytes.Contains(stack[:n], []byte("intelligence.runRecordDecodeWorker(")) {
+			return
+		}
+		// WaitGroup completion already synchronizes every worker access, but
+		// its deferred Done can briefly precede the final runtime.goexit. Allow
+		// that scheduler handoff without accepting an actually leaked worker.
+		if time.Now().After(deadline) {
+			t.Fatal("record decoder leaked a worker after completion")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 

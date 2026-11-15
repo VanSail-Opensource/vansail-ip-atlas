@@ -34,6 +34,7 @@ type Source struct {
 	Fixture                         Fixture
 	MRTUpdatesFixture               *Fixture
 	Publication                     Publication
+	Discovery                       *Discovery
 	Coverage                        string
 	Scope                           string
 	PublicFields                    []string
@@ -179,7 +180,7 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 	if source.Rights.Attribution != nil && intelligence.ValidateDatasetLogoFile(e.workspace, source.Rights.Attribution.Logo) != nil {
 		return deny("quarantined", "reviewed_dataset_logo_required")
 	}
-	if !safeHTTPS(source.URL) && !dbipProvider(source) || !publicationSupported(source) {
+	if !safeHTTPS(source.URL) && !dbipProvider(source) && !caidaSource(source) || !publicationSupported(source) {
 		return deny("quarantined", "unsupported_or_unbound_publication_verifier")
 	}
 	adapter, ok := selectAdapter(source)
@@ -224,6 +225,21 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 	payload := filepath.Join(quarantine, "payload")
 	assetURL := source.URL
 	var dbipPlan dbipMonthlyPlan
+	var caidaIndexHash [32]byte
+	if caidaSource(source) {
+		indexPath := filepath.Join(quarantine, "index")
+		if _, err := e.fetch.Fetch(ctx, source.Discovery.IndexURL, indexPath, 1<<20); err != nil {
+			return deny("quarantined", "discovery_index_unavailable")
+		}
+		page, indexErr := boundedFile(ctx, indexPath, 1<<20)
+		if indexErr == nil {
+			assetURL, indexErr = resolveCAIDASerial2Index(page, now)
+		}
+		if indexErr != nil {
+			return deny("quarantined", "discovery_index_invalid")
+		}
+		caidaIndexHash = sha256.Sum256(page)
+	}
 	if dbipProvider(source) {
 		metadata := filepath.Join(quarantine, "publication")
 		if _, err := e.fetch.Fetch(ctx, source.Publication.Locator, metadata, 4<<20); err != nil {
@@ -251,6 +267,7 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 	var published, contentValidUntil time.Time
 	var geoProof *intelligence.GeoSourceProof
 	var vrpProof *intelligence.VRPSourceProof
+	var caidaProof *intelligence.CAIDASourceProof
 	if dbipProvider(source) || adapter == ipapiCityZIP {
 		proofFile, openErr := os.Open(payload)
 		if openErr != nil {
@@ -267,6 +284,11 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		if err == nil {
 			published = geoProof.UpstreamClock
 			published, err = e.retainClock(ctx, decodedGeoClockKey(geoProof.DecodedSHA256), published)
+		}
+	} else if caidaSource(source) {
+		caidaProof, err = verifyCAIDAFile(ctx, payload, size, source, assetURL, caidaIndexHash, hash, now)
+		if err == nil {
+			published = caidaProof.FirstObservedAt
 		}
 	} else if adapter == torExits {
 		published, err = verifyTorExitFile(ctx, payload, source, now)
@@ -356,6 +378,7 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		ProofKind: source.Publication.Kind, PayloadVerified: true, SchemaVerified: true, ImmutableCommitBound: source.Publication.Kind == "github_commit", Records: records, RecordPartitions: partitions}
 	result.Snapshot.GeoProof = geoProof
 	result.Snapshot.VRPProof = vrpProof
+	result.Snapshot.CAIDAProof = caidaProof
 	if adapter == asnIdentityCSV {
 		result.Snapshot.ASNIdentityStats = &asnStats
 	}

@@ -35,7 +35,7 @@ func publicationSupported(source Source) bool {
 	if _, ok := ipapiCSVMember(source); ok {
 		return true
 	}
-	if torExitSource(source) {
+	if torExitSource(source) || caidaSource(source) {
 		return true
 	}
 	switch source.Publication.Kind {

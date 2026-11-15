@@ -73,3 +73,12 @@ original publisher clock, while RPKI results retain their snapshot observation
 and authorization expiry after expiry, as explicitly approved by the user.
 Underlying RPKI trust-anchor terms remain in force; the rpki-client software
 license does not grant data rights.
+`observed-caida-asrel2.txt.bz2` retains all original headers and five unchanged
+relationship rows from the complete 2026-11-01 serial-2 capture, then recompresses
+that bounded excerpt. Its [notice](notices/CAIDA-serial2-excerpt.txt) records the
+upstream terms and the educational decision without claiming a publisher grant.
+The earliest explicit topology date is the content clock. The clique annotation
+does not establish Tier-1 membership. Tests cover every observed row-provenance
+combination, original relationship direction, bounded monthly discovery and full
+archive EOF. This candidate fixture has no certification ledger entry and does
+not activate the source.

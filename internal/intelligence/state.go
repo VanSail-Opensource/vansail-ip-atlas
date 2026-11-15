@@ -115,6 +115,7 @@ type SourceSnapshot struct {
 	MRTProof                                              *MRTSourceProof   `json:",omitempty"`
 	GeoProof                                              *GeoSourceProof   `json:",omitempty"`
 	VRPProof                                              *VRPSourceProof   `json:",omitempty"`
+	CAIDAProof                                            *CAIDASourceProof `json:",omitempty"`
 }
 type SourceDecision struct{ ID, State, Reason string }
 type StoredSource struct {
@@ -231,6 +232,9 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 					deny("invalid", "geolocation_payload_or_clock_invalid")
 				}
 			}
+			if snapshot.CAIDAProof != nil && (snapshot.ProofKind != "embedded" || snapshot.CAIDAProof.Validate(now, snapshot.PublishedAt, snapshot.PayloadHash) != nil) {
+				deny("invalid", "caida_payload_or_clock_invalid")
+			}
 			if snapshot.VRPProof != nil && snapshot.VRPProof.Validate(now, snapshot.PublishedAt, snapshot.ContentValidUntil) != nil {
 				deny("quarantined", "complete_vrp_snapshot_not_bound")
 			}
@@ -339,7 +343,7 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 		records := make([]NormalizedRecord, 0, len(snapshot.Records))
 		var writer *RecordWriter
 		var parts []RecordPartition
-		var vrpCount uint64
+		var vrpCount, caidaCount uint64
 		var vrpMinimumExpiry time.Time
 		if storage != nil {
 			writer = storage.store.Writer(ctx)
@@ -355,6 +359,12 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 			}
 			if snapshot.VRPProof != nil && snapshot.VRPProof.Version == 2 && record.Kind != RecordVRP {
 				return errors.New("complete VRP observation snapshot contains another record kind")
+			}
+			if snapshot.CAIDAProof != nil {
+				if record.Kind != RecordRelationship {
+					return errors.New("CAIDA proof contains non-relationship record")
+				}
+				caidaCount++
 			}
 			clone, err := cloneRecord(record)
 			if err != nil {
@@ -497,6 +507,9 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 				}
 			}
 		}
+		if snapshot.CAIDAProof != nil && caidaCount != snapshot.CAIDAProof.Rows {
+			return plan, errors.New("CAIDA proof differs from retained record count")
+		}
 		if proof := snapshot.VRPProof; proof != nil {
 			if proof.Version == 2 {
 				if vrpCount != proof.RetainedRows || !vrpMinimumExpiry.Equal(proof.CoverageValidUntil) {
@@ -511,7 +524,7 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 			Snapshot         SourceSnapshot
 			Records          []NormalizedRecord
 			RecordPartitions []RecordPartition `json:",omitempty"`
-		}{policy, SourceSnapshot{ID: id, PayloadHash: snapshot.PayloadHash, ProofPayloadHash: snapshot.ProofPayloadHash, NormalizationPolicyHash: snapshot.NormalizationPolicyHash, ParserVersion: snapshot.ParserVersion, SchemaVersion: snapshot.SchemaVersion, PublishedAt: snapshot.PublishedAt, ContentValidUntil: snapshot.ContentValidUntil, ProofKind: snapshot.ProofKind, PayloadVerified: true, SchemaVerified: true, ImmutableCommitBound: snapshot.ImmutableCommitBound, MRTProof: cloneMRTProof(snapshot.MRTProof), GeoProof: cloneGeoProof(snapshot.GeoProof), VRPProof: cloneVRPProof(snapshot.VRPProof)}, records, parts})
+		}{policy, SourceSnapshot{ID: id, PayloadHash: snapshot.PayloadHash, ProofPayloadHash: snapshot.ProofPayloadHash, NormalizationPolicyHash: snapshot.NormalizationPolicyHash, ParserVersion: snapshot.ParserVersion, SchemaVersion: snapshot.SchemaVersion, PublishedAt: snapshot.PublishedAt, ContentValidUntil: snapshot.ContentValidUntil, ProofKind: snapshot.ProofKind, PayloadVerified: true, SchemaVerified: true, ImmutableCommitBound: snapshot.ImmutableCommitBound, MRTProof: cloneMRTProof(snapshot.MRTProof), GeoProof: cloneGeoProof(snapshot.GeoProof), VRPProof: cloneVRPProof(snapshot.VRPProof), CAIDAProof: cloneCAIDAProof(snapshot.CAIDAProof)}, records, parts})
 		if err != nil {
 			return plan, err
 		}

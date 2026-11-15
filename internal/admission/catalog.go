@@ -68,6 +68,7 @@ type catalogSource struct {
 		Schema  string `yaml:"schema"`
 		Version uint32 `yaml:"version"`
 	} `yaml:"parser"`
+	Discovery         yaml.Node       `yaml:"discovery"`
 	Fixture           catalogFixture  `yaml:"fixture"`
 	MRTUpdatesFixture *catalogFixture `yaml:"mrt_updates_fixture"`
 	Publication       struct {
@@ -103,7 +104,8 @@ type catalogFixture struct {
 // that validator checks global budgets, the other four configs and unused
 // catalog fields. Ambiguous YAML and duplicate IDs/dependency cycles are rejected
 // here independently. Unsupported discovery/multiple-asset entries retain an
-// empty URL and cannot pass Ingest's download/proof contract.
+// empty URL and cannot pass Ingest's download/proof contract. The narrow
+// CAIDA serial-2 discovery object is projected and independently validated.
 func DecodeCatalog(reader io.Reader) ([]Source, error) {
 	data, err := io.ReadAll(io.LimitReader(reader, (2<<20)+1))
 	if err != nil || len(data) > 2<<20 || !utf8.Valid(data) {
@@ -148,6 +150,13 @@ func DecodeCatalog(reader io.Reader) ([]Source, error) {
 			Fixture:     Fixture{raw.Fixture.Status, raw.Fixture.Path, raw.Fixture.SHA256, raw.Fixture.Parser, raw.Fixture.Schema, raw.Fixture.TestedAt, raw.Fixture.Observed, raw.Fixture.Synthetic, raw.Fixture.ContentEncoding, raw.Fixture.PayloadFormat},
 			Publication: Publication{raw.Publication.Kind, raw.Publication.Locator, raw.Publication.Field}, Coverage: raw.Coverage.Kind, Scope: raw.Scope, PublicFields: append([]string(nil), raw.PublicFields...), Fields: append([]string(nil), raw.Fields...), FieldMappings: mappings})
 		ids[raw.ID] = len(output) - 1
+		if raw.Discovery.Kind == yaml.MappingNode {
+			var discovery Discovery
+			if raw.Discovery.Decode(&discovery) != nil {
+				return nil, errors.New("source discovery projection invalid")
+			}
+			output[len(output)-1].Discovery = &discovery
+		}
 		if f := raw.MRTUpdatesFixture; f != nil {
 			if raw.Category != "bgp" || raw.Scope != "path" || len(raw.ID) > 120 || f.Status == "missing" && (f.SHA256 != "" || f.Observed || f.TestedAt != "") {
 				return nil, errors.New("MRT UPDATE fixture controls invalid")

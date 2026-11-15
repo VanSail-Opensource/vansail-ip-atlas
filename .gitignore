@@ -29,6 +29,7 @@ fixtures/source-certification/*
 !fixtures/source-certification/observed-ipverse-asn-usage.json
 !fixtures/source-certification/observed-ffraud.csv
 !fixtures/source-certification/observed-rpki-client-excerpt.json
+!fixtures/source-certification/observed-caida-asrel2.txt.bz2
 !fixtures/source-certification/logos/
 !fixtures/source-certification/logos/*.png
 !fixtures/source-certification/notices/

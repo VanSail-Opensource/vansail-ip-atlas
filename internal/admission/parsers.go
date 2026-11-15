@@ -204,6 +204,10 @@ func parsePayloadTo(ctx context.Context, file *os.File, size int64, source Sourc
 				return emit(intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordPath, Path: &intelligence.ScopedPath{Prefix: value.Prefix, Observation: intelligence.PathObservation{Origin: value.Origin, Segments: value.Segments, Family: source.Family, Current: true, OriginOutward: false}}})
 			})
 		default:
+			if caidaSource(source) {
+				_, err := parseCAIDASerial2(ctx, reader, maxRecords, emit)
+				return err
+			}
 			return parseBulkPayload(ctx, reader, source, published, maxRecords, emit)
 		}
 	}

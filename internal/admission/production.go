@@ -397,6 +397,13 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 		} else if s.Parser.ID == "mrt-table-dump-v2" {
 			return report, nil, errors.New("production MRT snapshot proof missing")
 		}
+		if caidaSource(s) {
+			if r.ProofKind != "embedded" || r.CAIDAProof.Validate(state.EvaluatedAt, r.PublishedAt, r.PayloadHash) != nil {
+				return report, nil, errors.New("production CAIDA content proof invalid")
+			}
+		} else if r.CAIDAProof != nil {
+			return report, nil, errors.New("production CAIDA proof source mismatch")
+		}
 		if err := validateStoredGeoSource(s, v, now); err != nil {
 			return report, nil, err
 		}
@@ -567,6 +574,11 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 		}
 		if stat.Records == 0 {
 			return report, nil, errors.New("empty production source")
+		}
+		if proof := v.Receipt.CAIDAProof; proof != nil {
+			if stat.Kinds[intelligence.RecordRelationship-1] != proof.Rows || stat.Records != proof.Rows {
+				return report, nil, errors.New("CAIDA proof differs from retained records")
+			}
 		}
 		if proof := v.Receipt.VRPProof; proof != nil {
 			retained := proof.AcceptedRows

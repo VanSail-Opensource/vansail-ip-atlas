@@ -67,6 +67,26 @@ class RunnerBudgetTests(unittest.TestCase):
             (root / 'symlink').symlink_to(original)
             self.assertEqual(budget.usage(root), original.stat().st_blocks * 512)
 
+    def test_toolchain_roots_are_active_installations_and_counted_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            workspace=root/'workspace';workspace.mkdir()
+            python=workspace/'tools/python';python.mkdir(parents=True)
+            shared=root/'hosted-cache/active-version';(shared/'bin').mkdir(parents=True)
+            node=shared/'bin/node';node.write_bytes(b'node')
+            unrelated=root/'hosted-cache/unused-version';unrelated.mkdir()
+            with patch.object(budget.sys,'prefix',str(python)), \
+                 patch.object(budget.shutil,'which',return_value=str(node)), \
+                 patch.object(budget.subprocess,'check_output',return_value=str(shared)+'\n') as go:
+                installations=budget.toolchain_roots()
+            go.assert_called_once()
+            self.assertEqual(budget.storage_roots(workspace,installations),[workspace,shared])
+            self.assertNotIn(unrelated,budget.storage_roots(workspace,installations))
+
+    def test_missing_node_cannot_silently_omit_toolchain_costs(self):
+        with patch.object(budget.shutil,'which',return_value=None), self.assertRaisesRegex(RuntimeError,'Node'):
+            budget.toolchain_roots()
+
 
 if __name__ == '__main__':
     unittest.main()

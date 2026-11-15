@@ -40,6 +40,35 @@ def require_descendant(child: Path, parent: Path) -> None:
     if child.resolve()==parent.resolve() or not child.resolve().is_relative_to(parent.resolve()):
         raise RuntimeError('workload escaped the aggregate runner budget')
 
+def toolchain_roots() -> list[Path]:
+    # Resolve only the active installations, never the whole hosted tool cache.
+    node=shutil.which('node')
+    if node is None:
+        raise RuntimeError('pinned Node toolchain is unavailable for storage accounting')
+    node_binary=Path(node).resolve(strict=True)
+    if node_binary.parent.name!='bin':
+        raise RuntimeError('Node installation root is unavailable')
+    go=subprocess.check_output(['go','env','GOROOT'],text=True,stderr=subprocess.DEVNULL,timeout=30).strip()
+    if not go or not Path(go).is_absolute():
+        raise RuntimeError('Go installation root is unavailable')
+    roots=[Path(sys.prefix),Path(go),node_binary.parent.parent]
+    broad={Path('/'),Path('/usr'),Path('/usr/local'),Path('/opt')}
+    for root in roots:
+        if root.resolve() in broad or not root.is_dir():
+            raise RuntimeError('dedicated pinned toolchain installation required')
+    return roots
+
+def storage_roots(workspace: Path, installations: list[Path]) -> list[Path]:
+    workspace=workspace.resolve()
+    roots=[workspace]
+    for root in sorted({path.resolve() for path in installations},key=lambda path:(len(path.parts),str(path))):
+        if any(root.is_relative_to(existing) for existing in roots):
+            continue
+        if workspace.is_relative_to(root):
+            raise RuntimeError('toolchain accounting cannot include unrelated workspace parents')
+        roots.append(root)
+    return roots
+
 def usage(root: Path) -> int:
     # Count every writable task directory, including input checkpoints, caches and staging.
     total=0;seen=set()
@@ -101,6 +130,9 @@ def main():
     root=slice_cgroup(os.environ.get('ATLAS_RUNNER_SLICE',''))
     require_descendant(cgroup(),root)
     profile=effective(root); workspace=Path(os.environ['GITHUB_WORKSPACE']).resolve()
+    # Discover once. Package managers may keep these pinned installations outside
+    # RUNNER_TOOL_CACHE even when mutable caches are redirected into the workspace.
+    disk_roots=storage_roots(workspace,[*toolchain_roots(),Path('/opt/google/chrome')])
     profile_path=workspace/'build-private/runner-profile.json';profile_path.parent.mkdir(exist_ok=True)
     profile_path.write_text(json.dumps(profile));os.environ['ATLAS_RUNNER_PROFILE']=str(profile_path)
     report={'schema_version':1,'execution_envelope':profile,'raw_host':{'logical_cpus':os.cpu_count(),
@@ -109,8 +141,7 @@ def main():
     start=time.monotonic();process=subprocess.Popen(command,start_new_session=True)
     try:
         while True:
-            # Stable Chrome is installed by Playwright outside the workspace.
-            occupied=usage(workspace)+usage(Path('/opt/google/chrome'))
+            occupied=sum(usage(path) for path in disk_roots)
             free=shutil.disk_usage(workspace).free
             report['workspace_peak_bytes']=max(report['workspace_peak_bytes'],occupied)
             report['physical_free_low_water_bytes']=min(report['physical_free_low_water_bytes'],free)

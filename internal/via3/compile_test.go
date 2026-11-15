@@ -11,6 +11,7 @@ func TestTypedCompilerAllFactFamiliesAndProductionGate(t *testing.T) {
 	zero := 0.0
 	score := uint8(11)
 	positive := 0.11
+	exactRisk := 0.2
 	no := false
 	cone := uint32(1)
 	records := []PublicRecord{
@@ -19,7 +20,7 @@ func TestTypedCompilerAllFactFamiliesAndProductionGate(t *testing.T) {
 		{Version: 3, Kind: 4, Prefix: prefix, Network: &NetworkData{Name: "Example Network", Organization: "Example", Origins: []uint32{13335, 13335}}},
 		{Version: 3, Kind: 5, Prefix: prefix, Usage: &UsageData{Type: 1, Assignment: 1, Anycast: &no, DirectedBroadcast: &no}},
 		{Version: 3, Kind: 6, Prefix: netip.MustParsePrefix("203.0.113.1/32"), Exact: true, Quality: &QualityData{Score: &score, Confidence: 2, Reasons: 1, Exact: &positive, Prefix: &zero, ASN: &zero, Neighbors: &zero}},
-		{Version: 3, Kind: 7, Prefix: prefix, Profile: &ProfileData{Cells: []CellData{{Address: netip.MustParseAddr("203.0.113.1"), Usage: 1, Score: &score, Confidence: 2, ExactRisk: &zero, AttachNetwork: true}}}},
+		{Version: 3, Kind: 7, Prefix: prefix, Profile: &ProfileData{Cells: []CellData{{Address: netip.MustParseAddr("203.0.113.1"), Usage: 1, Score: &score, Confidence: 2, Reasons: 1, ExactRisk: &exactRisk, AttachNetwork: true}}}},
 		{Version: 3, Kind: 8, ASN: 13335, ASNAggregate: &ASNData{Name: "Example Network", Country: "US", Risk: &zero, Confidence: 2, Prefixes: []netip.Prefix{prefix}, CustomerCone: &cone, NetworkClass: 2, Stability: 2}},
 		{Version: 3, Kind: 9, Prefix: prefix, ASN: 13335, RPKI: &RPKIData{Status: 1, MaximumLength: 24}},
 		{Version: 3, Kind: 10, Prefix: prefix, Origins: &OriginsData{ASNs: []uint32{13335}}},

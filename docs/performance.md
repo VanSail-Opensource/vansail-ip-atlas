@@ -74,8 +74,11 @@ falls below 1024 MiB and before either RSS/scratch ceiling. Polling is a safety
 signal, not permission to allocate an unbounded archive between samples. Stream
 expanded inputs, cap concurrent decoders and reclaim sort scratch before packaging.
 Temporary files and package caches stay in the accounted workspace. Installed
-stable Chrome under `/opt/google/chrome` also counts toward the task storage
-ceiling. Count hardlinked package files once by inode, as physical allocation does.
+stable Chrome under `/opt/google/chrome` and the active Python, Go and Node
+installation roots also count toward the task storage ceiling when they reside
+outside the workspace. Do not count unrelated versions in the host tool cache;
+deduplicate overlapping installation roots. Count hardlinked package files once
+by inode, as physical allocation does.
 
 ## Lookup and browser protocol
 

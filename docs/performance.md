@@ -3,6 +3,12 @@
 This freezes C06/C11 before collecting a baseline. No budget is raised. Synthetic
 contract tests measure correctness only; they do not establish full-dataset capacity.
 
+The production workflow measures the fifteen scenario/sample combinations in
+separate official hosted jobs. Preparation remains outside each warm-case timer;
+the complete measured command, including authentication and freshness checks,
+remains inside. A completed-run join verifies every sample and its original
+candidate identity before preview. Parallel scheduling does not change any gate.
+
 ## Absolute gates and measurement population
 
 | Gate | Requirement |

@@ -376,16 +376,33 @@ WIDE/RRC18 complete-RIB rotation are being integrated independently. All new
 sources still need final exact-code certification, actual intake and production
 capacity gates before inclusion. No publisher contact occurred.
 
-Cold compiler optimization continues in `/tmp/vansail-private-frame` and
-`/tmp/vansail-spatial-performance`. A separate completed-run benchmark matrix is
-being implemented to execute all fifteen original build scenarios in parallel
-without weakening timers, budgets, independent run/artifact binding or promotion
-checks. Do not confuse that orchestration repair with a measured runtime pass.
+The compiler now encodes closed private run metadata without repeated JSON
+reflection and reuses owned canonical record frames during materialization.
+Every input walk retains chunk integrity, strict JSON decoding and semantic
+validation. Actual logical byte limits and legacy imported-record behavior remain.
+The combined local 400,200-record diagnostic took 24.797 seconds, versus 35.065
+seconds before these changes, with identical 602,000 public records, 49 partitions
+and 1,745,029 output bytes. This is not actual hosted capacity acceptance.
+
+All fifteen original production benchmark cases now run in separate hosted jobs.
+A checked dispatch relay resets GitHub's workflow-run depth; a completed-run join
+independently binds all fifteen successful jobs and digest-verified artifacts to
+the exact candidate, configuration, state and original limits. Preview and
+promotion independently verify the joined evidence and original frozen candidate.
+No runtime, workload, resource or lookup gate changed.
+
+On the parallel ten-source release branch, observed parser fixtures were rerun
+and recertified at `2026-11-15T14:07:02Z` against internal implementation hash
+`63d9ddf18af054428cd1feb45e08ca8bbd170da0889859373cbf2f5fc203029f`.
+The next exact-head hosted run must still compile the actual full inputs and pass
+the individual 100,000-lookup p95 ceiling before merge. Separate work is reducing
+repeated verified Tier-1 discovery scans for the unchanged-build runtime gate.
 
 ## Replacement intake integration prepared — 2026-11-15
 
-The isolated source branch merges root performance/orchestration through
-`6b1c617` and the authenticated Tier-1 verification fusion `3b439fe`. Semantic
+The isolated source branch merges the root checkpoint `27edf82`, including
+performance/orchestration through `6b1c617`, and the authenticated Tier-1
+verification fusion `3b439fe`. Semantic
 review retained schema-5 RPKI observation/coverage clocks, every original VRP,
 exact private-run logical byte budgets and schema-4 cache rejection. The fifteen
 original build benchmark cases remain required under the completed-run matrix.
@@ -402,12 +419,13 @@ the certification ledger was refreshed at `2026-11-15T14:15:52Z`, then rerun
 successfully. The ledger binds internal implementation hash
 `897e485176fa34a3ca49f1e0ccdc412b4604b3fd65c5b5471b5b457816182ca7`.
 Any later internal Go edit requires another observed-fixture run and refresh.
-Local strict schemas, 157 Python contract tests, focused Go source/schema/cache
-tests, maximum-memory-profile generation tests and actionlint pass. The 72-test
-hosted-helper suite passes with one local skip for the unavailable pinned age
-CLI; official CI runs that encryption round trip separately. This suite caught
-and repaired a stale schema-4 object check in the memory verifier, without
-changing its workload, framing checks or limits.
+Local strict schemas, 157 Python contract tests, the full Go suite and vet,
+selected internal/source-sample races, focused source/schema/cache and
+maximum-memory-profile tests, and actionlint pass. All
+72 hosted-helper tests pass using pinned age 1.3.0, including real encryption,
+wrong-key and corrupt-ciphertext rejection. This suite caught and repaired a
+stale schema-4 object check in the memory verifier, without changing its workload,
+framing checks or limits.
 
 No catalog or observed-fixture activation blocker remains. Actual hosted intake
 must still fetch and authenticate every complete current payload under the

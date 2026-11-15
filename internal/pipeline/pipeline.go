@@ -60,10 +60,11 @@ type Options struct {
 	ProductionGate          func(context.Context) error
 	// InputGate binds source/config/state inputs throughout a build in either
 	// mode. It is independent of the mandatory production capability gate.
-	InputGate       func(context.Context) error
-	externalScratch func() uint64
-	scratchUsage    func(uint64)
-	prefixProvider  via3.ASNPrefixProvider
+	InputGate            func(context.Context) error
+	externalScratch      func() uint64
+	scratchUsage         func(uint64)
+	prefixProvider       via3.ASNPrefixProvider
+	materializationCache *materializationCache
 }
 
 // Stats account this compiler's files and process, not unrelated processes or
@@ -71,6 +72,7 @@ type Options struct {
 type Stats struct {
 	InputRecords, UniqueRecords, SortRuns, Partitions                int64
 	BinaryByteRepacks                                                int64
+	MaterializationCacheHits                                         int64
 	SortBufferPeak, PartitionBufferPeak, ScratchPeak, ProcessRSSPeak uint64
 	ProcessRSSMeasured                                               bool
 	OutputBytes                                                      uint64
@@ -226,40 +228,46 @@ func Build(ctx context.Context, options Options, produce Producer) (Candidate, e
 			}
 		}
 	}()
-	runs, err := c.sort(produce)
+	reused, err := c.restoreMaterialization()
 	if err != nil {
 		return result, c.cause(err)
 	}
-	merged, err := c.merge(runs)
-	if err != nil {
-		return result, c.cause(err)
-	}
-	groups, err := c.classify(merged)
-	if err != nil {
-		return result, c.cause(err)
-	}
-	for i, path := range groups {
-		if path == "" {
-			continue
-		}
-		var scope scope
-		if i == 0 {
-			scope.prefix = netip.MustParsePrefix("0.0.0.0/0")
-		} else if i == 1 {
-			scope.prefix = netip.MustParsePrefix("::/0")
-		} else {
-			scope.asn = true
-			scope.last = ^uint32(0)
-		}
-		if err := c.partition(path, scope); err != nil {
+	if !reused {
+		runs, err := c.sort(produce)
+		if err != nil {
 			return result, c.cause(err)
 		}
-	}
-	if len(c.routes) == 0 {
-		return result, errors.New("pipeline requires at least one public fact")
-	}
-	if err := c.router(); err != nil {
-		return result, c.cause(err)
+		merged, err := c.merge(runs)
+		if err != nil {
+			return result, c.cause(err)
+		}
+		groups, err := c.classify(merged)
+		if err != nil {
+			return result, c.cause(err)
+		}
+		for i, path := range groups {
+			if path == "" {
+				continue
+			}
+			var scope scope
+			if i == 0 {
+				scope.prefix = netip.MustParsePrefix("0.0.0.0/0")
+			} else if i == 1 {
+				scope.prefix = netip.MustParsePrefix("::/0")
+			} else {
+				scope.asn = true
+				scope.last = ^uint32(0)
+			}
+			if err := c.partition(path, scope); err != nil {
+				return result, c.cause(err)
+			}
+		}
+		if len(c.routes) == 0 {
+			return result, errors.New("pipeline requires at least one public fact")
+		}
+		if err := c.router(); err != nil {
+			return result, c.cause(err)
+		}
 	}
 	infos := make([]via3.ObjectInfo, 0, len(c.objects))
 	for _, info := range c.objects {
@@ -288,8 +296,25 @@ func Build(ctx context.Context, options Options, produce Producer) (Candidate, e
 	if err := c.write(filepath.Join(c.output, "current.json"), pointer); err != nil {
 		return result, err
 	}
+	// Retained objects and their authenticated index are part of this build's
+	// measured work. Keep the existing final gate/resource checks after that IO.
+	published := false
+	defer func() {
+		if cache := options.materializationCache; !published && cache != nil && cache.created {
+			_ = os.RemoveAll(cache.root)
+		}
+	}()
+	result.Stats = c.stats
+	if err := c.retainMaterialization(result, c.output); err != nil {
+		return Candidate{}, err
+	}
 	if err := gate(workCtx); err != nil {
 		return result, err
+	}
+	if reused {
+		if err := options.materializationCache.verifyInputs(workCtx); err != nil {
+			return result, err
+		}
 	}
 	if err := checkResources(); err != nil {
 		return result, err
@@ -303,6 +328,7 @@ func Build(ctx context.Context, options Options, produce Producer) (Candidate, e
 	if err := os.Rename(c.output, output); err != nil {
 		return result, err
 	}
+	published = true
 	c.stats.ProcessRSSMeasured = measured.Load()
 	c.stats.ProcessRSSPeak = rssPeak.Load()
 	result.Stats = c.stats
@@ -543,6 +569,7 @@ type runReader struct {
 	reader *bufio.Reader
 	limit  int64
 	row    encoded
+	record via3.PublicRecord
 }
 
 func openRun(path string, limit int64) (*runReader, error) {
@@ -570,6 +597,7 @@ func (r *runReader) next() error {
 		return err
 	}
 	r.row = encoded{identity(record), data}
+	r.record = record
 	return nil
 }
 
@@ -668,6 +696,7 @@ func (c *compiler) merge(runs []string) (string, error) {
 func (c *compiler) classify(path string) ([3]string, error) {
 	var paths [3]string
 	var files [3]*os.File
+	var writers [3]*bufio.Writer
 	defer func() {
 		for _, f := range files {
 			if f != nil {
@@ -686,10 +715,7 @@ func (c *compiler) classify(path string) ([3]string, error) {
 		} else if err != nil {
 			return paths, err
 		}
-		record, err := decode(r.row.data)
-		if err != nil {
-			return paths, err
-		}
+		record := r.record
 		i := 0
 		if record.Kind == 8 || record.Kind >= 11 {
 			i = 2
@@ -702,14 +728,18 @@ func (c *compiler) classify(path string) ([3]string, error) {
 			if err != nil {
 				return paths, err
 			}
+			writers[i] = bufio.NewWriterSize(files[i], 64<<10)
 		}
-		if err := c.writeRecord(files[i], r.row.data); err != nil {
+		if err := c.writeRecord(writers[i], r.row.data); err != nil {
 			return paths, err
 		}
 		c.stats.UniqueRecords++
 	}
-	for _, f := range files {
+	for i, f := range files {
 		if f != nil {
+			if err := writers[i].Flush(); err != nil {
+				return paths, err
+			}
 			if err := f.Close(); err != nil {
 				return paths, err
 			}
@@ -795,12 +825,7 @@ func (c *compiler) partition(path string, s scope) error {
 			overflow = true
 			break
 		}
-		record, err := decode(r.row.data)
-		if err != nil {
-			r.file.Close()
-			return err
-		}
-		records = append(records, record)
+		records = append(records, r.record)
 		size += cost
 		if uint64(size) > c.stats.PartitionBufferPeak {
 			c.stats.PartitionBufferPeak = uint64(size)
@@ -835,17 +860,18 @@ func (c *compiler) partition(path string, s scope) error {
 		if err != nil {
 			return err
 		}
-		children, err := c.split(path, left, right)
+		scopes := [2]scope{left, right}
+		children, err := c.split(path, &scopes)
 		if err != nil {
 			return err
 		}
 		if children[0] != "" {
-			if err := c.partition(children[0], left); err != nil {
+			if err := c.partition(children[0], scopes[0]); err != nil {
 				return err
 			}
 		}
 		if children[1] != "" {
-			if err := c.partition(children[1], right); err != nil {
+			if err := c.partition(children[1], scopes[1]); err != nil {
 				return err
 			}
 		}
@@ -899,9 +925,10 @@ func compact(values []uint32) []uint32 {
 	return out
 }
 
-func (c *compiler) split(path string, left, right scope) ([2]string, error) {
+func (c *compiler) split(path string, children *[2]scope) ([2]string, error) {
 	var paths [2]string
 	var files [2]*os.File
+	var writers [2]*bufio.Writer
 	defer func() {
 		for _, f := range files {
 			if f != nil {
@@ -914,17 +941,30 @@ func (c *compiler) split(path string, left, right scope) ([2]string, error) {
 		return paths, err
 	}
 	defer r.file.Close()
+	var cover netip.Prefix
+	var firstASN, lastASN uint32
 	for {
 		if err := r.next(); err == io.EOF {
 			break
 		} else if err != nil {
 			return paths, err
 		}
-		record, err := decode(r.row.data)
-		if err != nil {
-			return paths, err
+		record := r.record
+		if children[0].asn {
+			if firstASN == 0 || record.ASN < firstASN {
+				firstASN = record.ASN
+			}
+			if record.ASN > lastASN {
+				lastASN = record.ASN
+			}
+		} else if !cover.IsValid() {
+			cover = record.Prefix
+		} else {
+			for cover.Bits() > record.Prefix.Bits() || !cover.Contains(record.Prefix.Addr()) {
+				cover = netip.PrefixFrom(cover.Addr(), cover.Bits()-1).Masked()
+			}
 		}
-		for i, child := range []scope{left, right} {
+		for i, child := range children {
 			copy := record
 			if child.asn {
 				if record.ASN < child.first || record.ASN > child.last {
@@ -938,9 +978,15 @@ func (c *compiler) split(path string, left, right scope) ([2]string, error) {
 			} else if !child.prefix.Contains(record.Prefix.Addr()) {
 				continue
 			}
-			data, err := json.Marshal(copy)
-			if err != nil {
-				return paths, err
+			// Most rows only move to a narrower run. Their validated frame
+			// already has the canonical bytes; only a newly inherited overlay
+			// changes the record and needs encoding again.
+			data := r.row.data
+			if copy.Inherited != record.Inherited {
+				data, err = json.Marshal(copy)
+				if err != nil {
+					return paths, err
+				}
 			}
 			if files[i] == nil {
 				paths[i] = c.next()
@@ -948,14 +994,18 @@ func (c *compiler) split(path string, left, right scope) ([2]string, error) {
 				if err != nil {
 					return paths, err
 				}
+				writers[i] = bufio.NewWriterSize(files[i], 64<<10)
 			}
-			if err := c.writeRecord(files[i], data); err != nil {
+			if err := c.writeRecord(writers[i], data); err != nil {
 				return paths, err
 			}
 		}
 	}
-	for _, f := range files {
+	for i, f := range files {
 		if f != nil {
+			if err := writers[i].Flush(); err != nil {
+				return paths, err
+			}
 			if err := f.Close(); err != nil {
 				return paths, err
 			}
@@ -964,6 +1014,37 @@ func (c *compiler) split(path string, left, right scope) ([2]string, error) {
 	r.file.Close()
 	if err := c.remove(path); err != nil {
 		return paths, err
+	}
+	// An overflowing partition whose rows all move unchanged into one child
+	// still overflows at every intervening empty branch. Jump to their common
+	// enclosing scope, where the ordinary split can first divide the rows.
+	// Ancestor overlays populate both children, so they can never take this
+	// path or lose their coverage outside a cluster of more-specific rows.
+	if (paths[0] == "") != (paths[1] == "") {
+		i := 0
+		if paths[0] == "" {
+			i = 1
+		}
+		if children[i].asn {
+			for children[i].first != children[i].last {
+				left, right, err := children[i].children()
+				if err != nil {
+					return paths, err
+				}
+				if lastASN <= left.last {
+					children[i] = left
+				} else if firstASN >= right.first {
+					children[i] = right
+				} else {
+					break
+				}
+			}
+		} else if cover.IsValid() && cover.Bits() > children[i].prefix.Bits() {
+			if cover.Addr().Is4() && cover.Bits() > 24 {
+				cover = netip.PrefixFrom(cover.Addr(), 24).Masked()
+			}
+			children[i].prefix = cover
+		}
 	}
 	return paths, nil
 }

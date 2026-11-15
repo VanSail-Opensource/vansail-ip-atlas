@@ -88,7 +88,7 @@ func TestCapabilityReportRequiresActualFacts(t *testing.T) {
 func TestPositiveRiskCapabilityDoesNotInventAbsentCategories(t *testing.T) {
 	stats := []SourceStatistics{{ID: "positive", Family: "one", Exact: true, Signals: map[intelligence.Signal]bool{"tor": true}}}
 	report := deriveCapabilities(stats, time.Unix(1800000000, 0))
-	if report.ReleaseScope != "release-scope-v5" {
+	if report.ReleaseScope != ProductionReleaseScope {
 		t.Fatal(report.ReleaseScope)
 	}
 	for _, v := range report.Capabilities {
@@ -100,6 +100,65 @@ func TestPositiveRiskCapabilityDoesNotInventAbsentCategories(t *testing.T) {
 	for _, v := range deriveCapabilities(stats, time.Unix(1800000000, 0)).Capabilities {
 		if v.Capability == "risk_reasons" && v.Qualified {
 			t.Fatal("empty observations qualified risk")
+		}
+	}
+}
+
+func TestAvailableDataProductionKeepsRoutingUnknownAndCoreRequired(t *testing.T) {
+	stats := []SourceStatistics{
+		{ID: "geo-one", Family: "one", Country: true, City: true, Coordinates: true},
+		{ID: "geo-two", Family: "two", Country: true, City: true, Coordinates: true},
+		{ID: "positive", Family: "three", Usage: true, Exact: true, Signals: map[intelligence.Signal]bool{"tor": true}},
+	}
+	report := deriveCapabilities(stats, time.Unix(1800000000, 0))
+	if err := report.RequireProduction(); err != nil {
+		t.Fatal("verified core observations require unrelated routing", err)
+	}
+	for _, c := range report.Capabilities {
+		if !c.Required && (c.Qualified || len(c.Families) != 0) {
+			t.Fatal("absent routing was asserted", c.Capability)
+		}
+	}
+	for _, name := range []string{"country", "region_city", "coordinates", "usage", "risk_reasons", "class_c"} {
+		changed := report
+		changed.Capabilities = append([]Capability(nil), report.Capabilities...)
+		for i := range changed.Capabilities {
+			if changed.Capabilities[i].Capability == name {
+				changed.Capabilities[i].Qualified = false
+			}
+		}
+		if changed.RequireProduction() == nil {
+			t.Fatal("missing core observation qualified", name)
+		}
+		for i := range changed.Capabilities {
+			if changed.Capabilities[i].Capability == name {
+				changed.Capabilities[i].Required = false
+			}
+		}
+		if changed.RequireProduction() == nil {
+			t.Fatal("caller downgraded core requirement", name)
+		}
+	}
+	for _, mutate := range []func(*CapabilityReport){
+		func(r *CapabilityReport) { r.IncludedSources = 0 },
+		func(r *CapabilityReport) { r.ReleaseScope = "release-scope-v5" },
+		func(r *CapabilityReport) { r.Capabilities[0] = r.Capabilities[1] },
+	} {
+		changed := report
+		changed.Capabilities = append([]Capability(nil), report.Capabilities...)
+		mutate(&changed)
+		if changed.RequireProduction() == nil {
+			t.Fatal("invalid capability identity accepted")
+		}
+	}
+	stats[0].Kinds[intelligence.RecordOrigins-1] = 1
+	stats[0].Kinds[intelligence.RecordPath-1] = 1
+	stats[0].Kinds[intelligence.RecordRelationship-1] = 1
+	stats[0].VRPComplete = true
+	stats[1].Kinds[intelligence.RecordPath-1] = 1
+	for _, c := range deriveCapabilities(stats, time.Unix(1800000000, 0)).Capabilities {
+		if !c.Required && !c.Qualified {
+			t.Fatal("optional routing discarded genuine coverage", c.Capability)
 		}
 	}
 }

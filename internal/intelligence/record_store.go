@@ -451,6 +451,40 @@ func (r *recordContextReader) Read(p []byte) (int, error) {
 	return r.reader.Read(p)
 }
 
+// VerifyStoredSourceObjects checks exact stored bytes without decoding an
+// already validated immutable record stream again. A caller may use this only
+// to verify an exact cache input identity; it does not certify source semantics,
+// rights, freshness, admission, or an unbound partition descriptor.
+func VerifyStoredSourceObjects(ctx context.Context, workspace string, source StoredSource) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if len(source.Records) > 0 && len(source.RecordPartitions) > 0 || len(source.RecordPartitions) > maxRecordPartitions {
+		return errors.New("ambiguous private record storage")
+	}
+	if len(source.RecordPartitions) == 0 {
+		for _, record := range source.Records {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := record.Validate(); err != nil {
+				return err
+			}
+		}
+		return ctx.Err()
+	}
+	root, err := recordDirectory(workspace, false)
+	if err != nil {
+		return err
+	}
+	for _, part := range source.RecordPartitions {
+		if err = walkPartition(ctx, root, part, nil); err != nil {
+			return err
+		}
+	}
+	return ctx.Err()
+}
+
 // WalkStoredSource emits one owned typed record at a time. V1 inline sources
 // remain supported. Every V2 object is hash checked before its first record.
 func WalkStoredSource(ctx context.Context, workspace string, source StoredSource, emit func(NormalizedRecord) error) error {

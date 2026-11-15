@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"vansail-ip-atlas/internal/via3"
+	querycontract "vansail-ip-atlas/tools/query_contract"
 )
 
 type query struct {
@@ -29,9 +31,83 @@ type query struct {
 type corpus struct {
 	FormatVersion    int     `json:"format_version"`
 	Mode             string  `json:"mode"`
-	GraphQuery       string  `json:"graph_query"`
+	GraphQuery       *string `json:"graph_query"`
+	MapQuery         *string `json:"map_query"`
 	InteractionQuery string  `json:"interaction_query"`
-	Queries          []query `json:"queries"`
+	ReleaseID        string  `json:"release_id"`
+	UnknownQueries   struct {
+		IPv4 string `json:"ipv4"`
+		IPv6 string `json:"ipv6"`
+		ASN  string `json:"asn"`
+	} `json:"unknown_queries"`
+	Availability []struct {
+		Stratum        string `json:"stratum"`
+		Status         string `json:"status"`
+		SampledQueries int    `json:"sampled_queries"`
+	} `json:"availability"`
+	Queries []query `json:"queries"`
+}
+
+func validateCorpus(c corpus) error {
+	fail := func() error { return errors.New("a versioned real 10000-query subset corpus is required") }
+	digest, err := hex.DecodeString(c.ReleaseID)
+	if c.FormatVersion != 2 || c.Mode != "production" || len(c.Queries) != 10000 || err != nil || len(digest) != 32 {
+		return fail()
+	}
+	valid := func(q string) bool {
+		input, err := querycontract.ParseInput(q)
+		return err == nil && input.Canonical == q
+	}
+	interaction, err := netip.ParseAddr(c.InteractionQuery)
+	if err != nil || !interaction.Is4() || !valid(c.InteractionQuery) {
+		return fail()
+	}
+	if c.MapQuery != nil {
+		address, err := netip.ParseAddr(*c.MapQuery)
+		if err != nil || !address.Is4() || *c.MapQuery != c.InteractionQuery {
+			return fail()
+		}
+	}
+	if c.GraphQuery != nil && (!valid(*c.GraphQuery) || !strings.HasPrefix(*c.GraphQuery, "AS")) {
+		return fail()
+	}
+	v4, e4 := netip.ParseAddr(c.UnknownQueries.IPv4)
+	v6, e6 := netip.ParseAddr(c.UnknownQueries.IPv6)
+	if e4 != nil || !v4.Is4() || e6 != nil || !v6.Is6() || v6.Is4In6() || !valid(c.UnknownQueries.IPv4) || !valid(c.UnknownQueries.IPv6) || !valid(c.UnknownQueries.ASN) || !strings.HasPrefix(c.UnknownQueries.ASN, "AS") {
+		return fail()
+	}
+	strata := []string{"ipv4_exact", "ipv4_lpm", "ipv6_exact", "ipv6_lpm", "moas", "sparse_asn", "dense_asn", "inherited", "unknown"}
+	if len(c.Availability) != len(strata) {
+		return fail()
+	}
+	available := map[string]int{}
+	counts := map[string]map[string]bool{}
+	for i, row := range c.Availability {
+		if row.Stratum != strata[i] || row.SampledQueries < 0 || row.SampledQueries > 1200 || (row.SampledQueries == 0 && row.Status != "absent") || (row.SampledQueries > 0 && row.Status != "observed") {
+			return fail()
+		}
+		available[row.Stratum] = row.SampledQueries
+		counts[row.Stratum] = map[string]bool{}
+	}
+	observed := 0
+	for _, row := range c.Queries {
+		if !valid(row.Q) || available[row.Stratum] == 0 {
+			return fail()
+		}
+		counts[row.Stratum][row.Q] = true
+		if row.Stratum != "unknown" {
+			observed++
+		}
+	}
+	for _, row := range c.Availability {
+		if len(counts[row.Stratum]) > row.SampledQueries || row.SampledQueries > 0 && len(counts[row.Stratum]) == 0 {
+			return fail()
+		}
+	}
+	if observed == 0 || !counts["unknown"][c.UnknownQueries.IPv4] || !counts["unknown"][c.UnknownQueries.IPv6] || !counts["unknown"][c.UnknownQueries.ASN] {
+		return fail()
+	}
+	return nil
 }
 
 func run() error {
@@ -55,7 +131,7 @@ func run() error {
 	var c corpus
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&c) != nil || c.FormatVersion != 1 || c.Mode != "production" || len(c.Queries) != 10000 {
+	if decoder.Decode(&c) != nil || validateCorpus(c) != nil {
 		return errors.New("a versioned real 10000-query corpus is required")
 	}
 	var extra any
@@ -68,6 +144,9 @@ func run() error {
 	}
 	if release.Manifest.Mode != "production" {
 		return errors.New("synthetic lookups cannot qualify production latency")
+	}
+	if release.Manifest.ReleaseID != c.ReleaseID {
+		return errors.New("lookup corpus belongs to another release")
 	}
 	var inputBytes int64
 	for _, obj := range release.Manifest.Objects {

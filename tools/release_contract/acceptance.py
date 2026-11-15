@@ -3,12 +3,16 @@ from __future__ import annotations
 
 import math
 import re
+import hashlib
+from pathlib import Path
 
 from .contracts import ContractError, HASH
 
 WIDTHS = (320, 390, 1280, 1440)
 THEMES = ("light", "dark")
 BUILD_SCENARIOS = ("cold_full", "warm_changed", "warm_unchanged", "clock_advance", "withdrawal")
+CORPUS_STRATA = ("ipv4_exact", "ipv4_lpm", "ipv6_exact", "ipv6_lpm", "moas", "sparse_asn", "dense_asn", "inherited", "unknown")
+GRAPH_FIXTURE_SHA256 = hashlib.sha256((Path(__file__).resolve().parents[2] / "fixtures/bin/synthetic-graph24-via3.json").read_bytes()).hexdigest()
 
 
 def number(value: object) -> bool:
@@ -65,11 +69,22 @@ def graph_gate(graph: object) -> str:
     return "passed"
 
 
-def browser_gates(report: dict) -> dict[str, str]:
-    if (report.get("scope") != "hosted-production-browser-v1" or report.get("mode") != "production"
-            or report.get("errors") != []):
-        raise ContractError("production browser evidence has wrong scope or errors")
-    samples = report.get("populations")
+def corpus_availability(value: object) -> bool:
+    if type(value) is not list or len(value) != len(CORPUS_STRATA):
+        return False
+    observed = []
+    for stratum, row in zip(CORPUS_STRATA, value):
+        if (type(row) is not dict or set(row) != {"stratum", "status", "sampled_queries"}
+                or row["stratum"] != stratum or type(row["sampled_queries"]) is not int
+                or not 0 <= row["sampled_queries"] <= 1200
+                or row["status"] != ("observed" if row["sampled_queries"] else "absent")):
+            return False
+        if row["sampled_queries"]:
+            observed.append(stratum)
+    return "unknown" in observed and any(s != "unknown" for s in observed)
+
+
+def population_groups(samples: object) -> dict:
     if not isinstance(samples, list):
         raise ContractError("production browser evidence has no raw populations")
     groups = {(width, theme): [] for width in WIDTHS for theme in THEMES}
@@ -84,6 +99,31 @@ def browser_gates(report: dict) -> dict[str, str]:
             raise ContractError("unknown or duplicate browser population")
         seen.add(identity)
         groups[key].append(sample)
+    return groups
+
+
+def browser_gates(report: dict) -> dict[str, str]:
+    if (report.get("scope") != "hosted-production-browser-v2" or report.get("mode") != "production"
+            or report.get("release_scope") != "release-scope-v6" or report.get("errors") != []):
+        raise ContractError("production browser evidence has wrong scope or errors")
+    if (not HASH.fullmatch(str(report.get("release_id", "")))
+            or report.get("corpus_release_id") != report["release_id"]
+            or not HASH.fullmatch(str(report.get("corpus_sha256", "")))
+            or not corpus_availability(report.get("corpus_availability"))):
+        raise ContractError("production corpus availability is not bound to the candidate")
+    features = report.get("corpus_features", {})
+    if type(features) is not dict or set(features) != {"map", "graph"} or any(type(v) is not bool for v in features.values()):
+        raise ContractError("candidate map/graph availability is missing")
+    groups = population_groups(report.get("populations"))
+    components = population_groups(report.get("component_populations", []))
+    fixture = report.get("graph_component_fixture", {})
+    memory = report.get("worst_case_worker_memory", {})
+    worker = memory.get("worker_sha256") if type(memory) is dict else None
+    fixture_bound = (type(fixture) is dict and fixture.get("scope") == "isolated-synthetic-capacity"
+        and fixture.get("fixture_sha256") == GRAPH_FIXTURE_SHA256
+        and HASH.fullmatch(str(worker)) is not None and fixture.get("worker_sha256") == worker
+        and HASH.fullmatch(str(report.get("candidate_bundle_sha256", ""))) is not None
+        and fixture.get("candidate_bundle_sha256") == report["candidate_bundle_sha256"])
     result = {}
     for (width, theme), rows in groups.items():
         prefix = f"browser_{width}_{theme}"
@@ -95,20 +135,40 @@ def browser_gates(report: dict) -> dict[str, str]:
         # maximum durations are retained. Missing/unsupported observers cannot pass.
         latencies = []
         complete = len(rows) >= 30
-        accessibility = complete
+        component_rows = components[(width, theme)]
+        accessibility = complete and len(component_rows) >= 30
         for row in rows:
             events = row.get("interaction_durations_ms", [])
             complete &= (row.get("complete_interaction_script") is True and row.get("event_timing_supported") is True
+                         and row.get("completed_routes") == ["overview", "quality", "class-c", "asn", "bgp"]
                          and isinstance(events, list) and len(events) > 0 and all(number(x) for x in events))
             latencies += events if isinstance(events, list) else []
+        for row in [*rows, *component_rows]:
             axe = row.get("accessibility", {})
             accessibility &= (type(axe) is dict and axe.get("engine") == "axe-core"
                               and axe.get("violations") == [] and axe.get("incomplete") == [])
         result[prefix + "_lab_INP"] = comparison(latencies, 200) if complete else "unmeasured"
-        violation = any(isinstance(row.get("accessibility"), dict) and row["accessibility"].get("violations") for row in rows)
+        violation = any(isinstance(row.get("accessibility"), dict) and row["accessibility"].get("violations") for row in [*rows, *component_rows])
         result[prefix + "_accessibility"] = "failed" if violation else "passed" if accessibility else "unmeasured"
-        graphs = [graph_gate(row.get("graph")) for row in rows]
-        result[prefix + "_graph"] = "failed" if "failed" in graphs else "passed" if len(rows) >= 30 and all(x == "passed" for x in graphs) else "unmeasured"
+        actual_states = len(rows) >= 30
+        unknowns = len(rows) >= 30
+        for row in rows:
+            mapping, graph = row.get("map", {}), row.get("graph", {})
+            actual_states &= (type(mapping) is dict and mapping.get("state") == ("observed" if features["map"] else "unavailable")
+                and (features["map"] or mapping.get("unknown_state_verified") is True)
+                and type(graph) is dict and graph.get("state") == ("observed" if features["graph"] else "unavailable")
+                and type(graph.get("visible_nodes")) is int and 0 <= graph["visible_nodes"] <= 24
+                and type(graph.get("observed_routes")) is int and graph["observed_routes"] >= 0
+                and (graph["observed_routes"] > 0 if features["graph"] else graph["visible_nodes"] == 0 and graph["observed_routes"] == 0 and graph.get("empty_state_verified") is True))
+            checks = row.get("unknown_states")
+            unknowns &= type(checks) is dict and set(checks) == {"ipv4", "ipv6", "asn"} and all(value is True for value in checks.values())
+        result[prefix + "_candidate_states"] = "passed" if actual_states else "unmeasured"
+        result[prefix + "_unknown_states"] = "passed" if unknowns else "unmeasured"
+        # Capacity remains the same 24-node workload on the exact emitted code.
+        # These isolated synthetic observations never claim real routing coverage.
+        graphs = [graph_gate(row.get("graph")) if row.get("worker_sha256") == worker else "unmeasured" for row in component_rows]
+        result[prefix + "_graph"] = ("failed" if "failed" in graphs else "passed"
+            if fixture_bound and len(component_rows) >= 30 and all(x == "passed" for x in graphs) else "unmeasured")
     # Whole-browser measured peaks are explicitly separate from a 384MiB worker
     # envelope. A sampled JS heap or process RSS cannot be relabelled worker proof.
     memory = report.get("worst_case_worker_memory", {})

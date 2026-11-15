@@ -84,7 +84,7 @@ func benchmarkState(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err = tier.Validate(baseline, baseClock); err != nil {
+	if err = tier.ValidateObservation(baseline, baseClock); err != nil {
 		return err
 	}
 	policyFile, err := openRegularInput(filepath.Join(root, "configs", "scoring.yaml"), 2<<20)

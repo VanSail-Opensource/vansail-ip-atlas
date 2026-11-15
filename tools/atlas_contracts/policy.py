@@ -11,7 +11,8 @@ from urllib.parse import urlsplit
 
 HEX = re.compile(r"^[0-9a-f]{64}$")
 UTC_TIMESTAMP = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?Z$")
-RELEASE_SCOPE = "release-scope-v5"
+RELEASE_SCOPE = "release-scope-v6"
+OPTIONAL_ROUTING_CAPABILITIES = frozenset({"asn_prefix", "rpki", "bgp_origins_paths", "relationships", "tier1"})
 CREDIT_SECRET = re.compile(r"(?:vless|vmess|trojan|ss|ssr|hy|hy2|hysteria|hysteria2|tuic|anytls)://|-----BEGIN[^\r\n]*PRIVATE KEY-----|(?:gh[pousr]_|github_pat_)", re.IGNORECASE)
 
 
@@ -345,10 +346,10 @@ def capability_report(config, now, root, snapshots=None):
         ("tier1", bool(relations) and len(paths) >= 2, sorted(set(paths + relations)), "relationships_and_two_path_families"),
         ("pages_release", False, [], "exact_artifact_hosted_preview_gates_and_approval_required"),
     ]
-    # V5 requires actual positive risk observations and computes observed risk.
-    # Missing categories remain unknown and never become negative assessments.
+    # V6 retains mandatory core observations and Pages acceptance. Unavailable
+    # routing is independently reported and never becomes a completeness claim.
     capabilities = [{"capability": name, "status": "qualified" if ok else "blocked",
-                     "required": True, "families": fs, "requirement": requirement}
+                     "required": name not in OPTIONAL_ROUTING_CAPABILITIES, "families": fs, "requirement": requirement}
                     for name, ok, fs, requirement in rows]
     required = [row for row in capabilities if row["required"]]
     attributions = [{"source_id": source["id"], "attribution": dict(source["license"]["attribution"])}

@@ -17,12 +17,69 @@ from tools.hosted.checkpoint import api, REPOSITORY, WORKFLOWS
 from tools.release_contract.contracts import ContractError, canonical_bytes
 from tools.release_contract.production import read_private
 
+# Integration now includes intake plus the separately bounded real cold compile.
+# This wait is orchestration headroom, not a build/performance threshold.
+EXACT_HEAD_WAIT_SECONDS=105*60
+
+COMMAND_PHASES={
+    ('build-private/atlas','compile-production'):'compile-production',
+    ('build-private/atlas','verify-production'):'verify-production',
+    ('build-private/atlas','corpus'):'derive-query-corpus',
+    ('python','tools/hosted/source_intake.py'):'source-intake',
+    ('python','tools/release_contract/software_licenses.py'):'software-license-audit',
+    ('python','tools/release_contract/prepare_static.py'):'package-static-candidate',
+    ('python','tools/hosted/production-build.py'):'measure-production-builds',
+    ('python','tools/hosted/candidate.py'):'verify-frozen-candidate',
+    ('python','tools/release_contract/pages.py'):'pages-deployment',
+    ('python','tools/hosted/worker_memory.py'):'measure-worker-memory',
+    ('node','tools/hosted/production-browser.mjs'):'measure-production-browser',
+    ('python','tools/release_contract/promotion.py'):'authorize-production',
+    ('python','tools/hosted/rollback.py'):'verify-rollback',
+    ('go','run'):'measure-native-lookup',
+    ('npm','exec'):'frontend-tooling',
+}
+
+SAFE_FAILURES={
+    'context deadline exceeded':'time-budget',
+    'pipeline process RSS ceiling exceeded':'rss-budget',
+    'pipeline physical free-space floor crossed':'disk-reserve',
+    'pipeline scratch ceiling exceeded':'scratch-budget',
+    'bulk scratch budget exceeded':'scratch-budget',
+    'resource_limit':'object-resource-profile',
+    'partition_budget':'object-partition-budget',
+    'pipeline requires at least one public fact':'empty-public-data',
+}
+
+def failure_category(path, start):
+    # Classify only bounded current-command output into fixed labels. Raw text,
+    # filenames, source identities and arbitrary exception messages stay private.
+    try:
+        with path.open('rb') as stream:
+            stream.seek(0,2);end=stream.tell();stream.seek(max(start,end-65536))
+            lines=stream.read(65536).decode('utf-8',errors='replace').splitlines()
+        for line in reversed(lines):
+            if line in SAFE_FAILURES: return SAFE_FAILURES[line]
+            if line.startswith('production_blocked: unqualified source capabilities: '):
+                return 'source-capability'
+    except OSError:
+        pass
+    return 'command-failed'
+
 def run(argv, *, output=None):
     private=ROOT/'.atlas-private';private.mkdir(exist_ok=True,mode=0o700)
+    # Only these fixed labels may reach public logs. Never echo arbitrary argv,
+    # exception text or child output, which can contain source-rich diagnostics.
+    phase=COMMAND_PHASES.get(tuple(str(x) for x in argv[:2]),'stage-command')
+    print('Production step started: '+phase,flush=True)
     # Never echo command arguments or source-specific parser errors to public logs.
     with (private/'stage.log').open('ab') as log:
+        start=log.tell()
         result=subprocess.run([str(x) for x in argv],cwd=ROOT,stdout=output or log,stderr=log,check=False)
-    if result.returncode: raise ContractError('production stage command failed; encrypted private diagnostics retained locally')
+    if result.returncode:
+        print('Production step failed: '+phase,file=sys.stderr,flush=True)
+        print('Production failure category: '+failure_category(private/'stage.log',start),file=sys.stderr,flush=True)
+        raise ContractError('production stage command failed; private diagnostics remain on runner')
+    print('Production step completed: '+phase,flush=True)
 
 def context(kind: str, upstream: int | None):
     if os.environ.get('GITHUB_REPOSITORY')!=REPOSITORY or os.environ.get('GITHUB_REF')!='refs/heads/main':
@@ -39,7 +96,7 @@ def context(kind: str, upstream: int | None):
             if not re.fullmatch(r'[1-9][0-9]{0,19}',raw): raise ContractError('invalid upstream run input')
             upstream=int(raw)
     if upstream is None and kind=='intake':
-        deadline=time.monotonic()+45*60
+        deadline=time.monotonic()+EXACT_HEAD_WAIT_SECONDS
         while True:
             runs=api('actions/workflows/p0-contracts.yml/runs?branch=main&per_page=100')['workflow_runs']
             matches=[item for item in runs if item['head_sha']==head and item['event'] in ('push','workflow_dispatch')]

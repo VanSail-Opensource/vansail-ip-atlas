@@ -1,10 +1,11 @@
 # Production CI cloud handoff — 2026-11-15
 
-Continue the user's implementation request in
-`VanSail-Opensource/vansail-ip-atlas`, branch `codex/production-ci-v5`.
-The user requested moving the ongoing work to Codex Cloud. This is a checkpoint,
-not a completed production release. Read `AGENTS.md` and `IMPLEMENTATION_PLAN.md`
-first. All implementation changes are saved in this branch.
+Continue the full production and website release in
+`VanSail-Opensource/vansail-ip-atlas`, branch `codex/production-release-v6`.
+PRs #1 and #2 are merged. The user explicitly approved releasing verified data
+with unavailable routing facts shown as unknown; all pages remain implemented.
+Read `AGENTS.md` and `IMPLEMENTATION_PLAN.md` first. This is a checkpoint, not
+a completed production release; the historical evidence below remains historical.
 
 ## Approved decisions
 
@@ -24,8 +25,8 @@ first. All implementation changes are saved in this branch.
 - Four production stages: authenticated intake, candidate, preview, promotion;
   official Ubuntu runners, encrypted age checkpoints, trusted exact-head checks,
   measured resource envelopes, automatic authorization and eligible-only rollback.
-- Shortlist reduced to fourteen sources. Ten statically admitted entries include
-  dated Tor exits and Ipverse ASN usage; four routing candidates remain blocked.
+- Release catalog contains ten statically admitted entries, including dated Tor
+  exits and Ipverse ASN usage. Four unqualified routing candidates are excluded.
 - Credit document version 2, locally hashed PNG logos, Go/Python/TS hostile-logo
   fixtures, complete inventory binding, legal checks before lookup/Class C facts.
 - Native `benchmark-state`, `corpus` and `memory-profile` commands. Engineering
@@ -155,6 +156,46 @@ routing-qualification rejection.
 The four routing-source qualifications below remain unresolved. No production
 release or publisher permission is implied by these implementation fixes.
 
+## Full website release continuation — scope v6
+
+The user requested resolving/removing failed feeds and completing production and
+website release, then explicitly selected “Release verified data with explicit
+unknowns.” After the current release work, the user additionally requires
+researching and qualifying replacement sources, then verifying that production
+and the website are fully available. Do not stop at a merged PR or a partial
+implementation. Preserve honest unknowns until each replacement has real rights,
+publication, parser and full-payload evidence. Four unqualified routing entries are removed from the catalog; ten
+reviewed active sources remain. Routing availability is still computed and bound,
+but missing origins/paths/relationships/RPKI/Tier-1 yield unknowns. Core source
+capabilities, every included-source rights/freshness check, exact-artifact gates,
+resource ceilings and current-time verification remain mandatory.
+
+The latest v5 main integration passed. Its later authenticated intake failed with
+6/10 active sources current and four `publication_metadata_unavailable` results;
+plaintext cleanup succeeded and all downstream stages skipped. Source acquisition
+had ignored the configured GitHub token and did not retry rate-limit 403 responses.
+The repair uses a dedicated token only on canonical GitHub metadata URLs, strips
+it on every redirect, and honors bounded retry deadlines without changing proof
+or age validation. The previous public aggregate cannot identify the four feeds
+or prove a particular HTTP failure.
+
+Scope v6 also binds real corpus availability, tests unknown views, retains all
+real browser viewport/theme populations and separate synthetic graph/worker
+capacity evidence, and adds an actual private compile/native-lookup integration
+check before merge. Production stage logs expose only fixed phase labels.
+Unchanged-input materialization reuse and native reader improvements must be
+validated against the original performance limits; local improvements are not
+hosted or production acceptance.
+
+Local v6 validation passed full Go tests (including the 200,005-prefix case),
+Go vet, 136 Python contract tests, 218 Node/TypeScript tests, typecheck/generate,
+21 UI scenarios, standalone graph export, and the 585-package runtime license
+audit. All ten observed parser fixtures passed after code-bound certification
+refresh. The final 104 accessibility states had zero violations, incompletes or
+runtime errors. Local mobile graph measurements met the unchanged gate in all
+three ten-second phases. Hosted actual-data capacity and release gates remain
+pending; these local results do not authorize production.
+
 ## Resume next
 
 1. Verify the branch and clean checkout. Run strict schemas, Go tests/vet, Python
@@ -168,16 +209,15 @@ release or publisher permission is implied by these implementation fixes.
 3. Review Linux cgroup, tool/cache accounting, checkpoint transport, runtime
    source intake and all automatic stage transitions. Checkpoints carry no raw
    quarantine or logs. Keep source-rich diagnostics out of public artifacts.
-4. Real routing qualification remains unresolved: RIPE RIS, RouteViews, CAIDA
-   relationships and the RPKI snapshot need compatible reviewed rights and exact
-   complete-payload/parser/publication proofs. CAIDA requires publication
-   reporting; ARIN relying-party data terms are distinct from the rpki-client
-   software license. Do not invent approval or contact publishers without an
-   explicit user instruction. Tier-1 requires real separated authenticated epochs.
-5. The warm compiler currently performs full materialization. All five benchmark
-   scenarios use that same path; no benchmark-only shortcut exists. Actual real
-   input may fail unchanged/changed runtime ceilings. Measure and optimize the
-   real pipeline without weakening retraction, freshness or accounting.
+4. Removed routing feeds remain excluded. Future reintroduction needs compatible
+   reviewed rights and exact complete-payload/parser/publication proofs. Do not
+   invent approval or contact publishers without explicit instruction. Unknown
+   routing is approved for this release; all pages and honest unknown states stay.
+5. The real compiler reuses authenticated materializations only when state,
+   clock, policy, limits, implementation and derived Tier-1 identity all match.
+   Changed inputs or clock still require full materialization. All five benchmark
+   scenarios use that same path. Actual real input must satisfy the original
+   runtime ceilings without weakening retraction, freshness or accounting.
 6. Merge only after required checks pass. Then verify exact-main CI, encrypted
    intake, complete candidate, hosted preview and production. Do not claim the
    public website released until every real qualification and hosted gate passes.

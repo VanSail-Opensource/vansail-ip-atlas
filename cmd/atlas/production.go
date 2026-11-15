@@ -151,7 +151,7 @@ func (b productionBinding) receipt(manifest via3.Manifest, manifestBytes []byte)
 		return productionReceipt{}, err
 	}
 	capHash := sha256.Sum256(caps)
-	r := productionReceipt{CertificationSHA256: digestString(b.certificationHash), EvaluatedAt: state.EvaluatedAt.Unix(), ImplementationSHA256: digestString(b.implementationHash), IncludedSources: []includedProductionSource{}, Mode: "production", NormalizationConfigSHA256: digestString(b.configHash), NormalizedStateSHA256: digestString(b.stateHash), ReleaseID: manifest.ReleaseID, ReleaseManifestSHA256: via3.Hash(manifestBytes), ReleaseScope: "release-scope-v5", RightsAuditSHA256: digestString(b.rightsHash), SchemaVersion: 1, SourceCapabilitiesSHA256: digestString(capHash), SourceCatalogSHA256: digestString(b.catalogHash), ValidUntil: manifest.ValidUntil}
+	r := productionReceipt{CertificationSHA256: digestString(b.certificationHash), EvaluatedAt: state.EvaluatedAt.Unix(), ImplementationSHA256: digestString(b.implementationHash), IncludedSources: []includedProductionSource{}, Mode: "production", NormalizationConfigSHA256: digestString(b.configHash), NormalizedStateSHA256: digestString(b.stateHash), ReleaseID: manifest.ReleaseID, ReleaseManifestSHA256: via3.Hash(manifestBytes), ReleaseScope: admission.ProductionReleaseScope, RightsAuditSHA256: digestString(b.rightsHash), SchemaVersion: 1, SourceCapabilitiesSHA256: digestString(capHash), SourceCatalogSHA256: digestString(b.catalogHash), ValidUntil: manifest.ValidUntil}
 	if manifest.Mode != "production" || manifest.ValidFrom != r.EvaluatedAt || manifest.ValidUntil > q.ValidUntil().Unix() {
 		return r, errors.New("production manifest outlives qualified input")
 	}

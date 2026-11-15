@@ -1,7 +1,7 @@
 schema_version: 3
 description: 'VanSail IP Atlas: reviewed download-only production shortlist. Positive observations support
   observed risk; absent categories and stale facts remain unknown. No per-IP provenance; reviewed credits
-  are global only. Routing candidates remain blocked pending qualification.'
+  are global only. Unqualified routing feeds are excluded; unavailable facts remain unknown.'
 build:
   profile: github-actions-standard
   incremental: true
@@ -448,7 +448,7 @@ sources:
     parser: country-range-csv
     schema: start-end-country-csv-v1
     schema_observed: true
-    tested_at: '2026-11-15T04:47:08Z'
+    tested_at: '2026-11-15T08:53:42Z'
     synthetic: false
   parser:
     id: country-range-csv
@@ -504,7 +504,7 @@ sources:
     parser: country-range-csv
     schema: start-end-country-csv-v1
     schema_observed: true
-    tested_at: '2026-11-15T04:47:08Z'
+    tested_at: '2026-11-15T08:53:42Z'
     synthetic: false
   parser:
     id: country-range-csv
@@ -560,7 +560,7 @@ sources:
     parser: country-range-csv
     schema: start-end-country-csv-v1
     schema_observed: true
-    tested_at: '2026-11-15T04:47:08Z'
+    tested_at: '2026-11-15T08:53:42Z'
     synthetic: false
   parser:
     id: country-range-csv
@@ -630,7 +630,7 @@ sources:
     status: passed
     sha256: 9f1d79394ceedd24445922f84d17325c0f1809cadac60da410a5c7610bbf57ef
     schema_observed: true
-    tested_at: '2026-11-15T04:47:08Z'
+    tested_at: '2026-11-15T08:53:42Z'
     path: fixtures/source-certification/observed-dbip-city.csv
     parser: city-range-csv
     schema: dbip-city-eight-columns-v1
@@ -709,7 +709,7 @@ sources:
     status: passed
     sha256: 4df74d3dbe3a08c3bc7e6a63d4c3912f7bf4932fc203a69f566656f1f71e2836
     schema_observed: true
-    tested_at: '2026-11-15T04:47:08Z'
+    tested_at: '2026-11-15T08:53:42Z'
     path: fixtures/source-certification/observed-ipapi-city-ipv4.csv
     parser: ipapi-free-city-csv
     schema: ipapi-free-fourteen-columns-v1
@@ -788,7 +788,7 @@ sources:
     status: passed
     sha256: 99f6c0ba9fbeacda88749d62782ba1a9eadb55aea2a5e4940a6f4a20b03704b7
     schema_observed: true
-    tested_at: '2026-11-15T04:47:08Z'
+    tested_at: '2026-11-15T08:53:42Z'
     path: fixtures/source-certification/observed-ipapi-city-ipv6.csv
     parser: ipapi-free-city-csv
     schema: ipapi-free-fourteen-columns-v1
@@ -857,7 +857,7 @@ sources:
     parser: asn-identity-csv
     schema: asn-handle-description-country-csv-v1
     schema_observed: true
-    tested_at: '2026-11-15T04:47:08Z'
+    tested_at: '2026-11-15T08:53:42Z'
     synthetic: false
   parser:
     id: asn-identity-csv
@@ -873,209 +873,6 @@ sources:
     handle: as_name
     description: organization
     country-code: asn_country
-  signals: []
-- id: ripe-mrt-rrc01
-  evidence_family: ripe-ris-mrt
-  source_group: ripe-ris-mrt
-  category: bgp
-  admission: candidate
-  discovery: https://data.ris.ripe.net/rrc01/
-  download:
-    url: null
-    format: mrt-gz
-    max_compressed_mib: 1000
-  refresh:
-    interval: 24h
-    max_stale: 720h
-  fields:
-  - prefix
-  - asn
-  - as_path
-  - peer
-  - observed_at
-  depends_on: []
-  license:
-    status: needs-review
-    identifier: RIPE-terms-review
-    distribution: review
-    evidence_url: null
-    attribution_required: null
-  trust:
-    source_weight: 70
-    correlation_group: ripe-ris-mrt
-  scope: path
-  notes: Use date-resolved complete RIB; do not specify nonexistent fixed filename or download all collectors.
-  publication_proof:
-    kind: unavailable
-    locator: null
-    field: null
-  coverage:
-    kind: mapping
-    scope: path
-  fixture:
-    status: missing
-    sha256: null
-    schema_observed: false
-    tested_at: null
-  parser:
-    id: null
-    schema: null
-    version: null
-  public_fields: []
-  field_mappings: {}
-  signals: []
-- id: routeviews-rib
-  evidence_family: routeviews-mrt
-  source_group: routeviews-mrt
-  category: bgp
-  admission: candidate
-  discovery: https://archive.routeviews.org/route-views2/bgpdata/
-  download:
-    url: null
-    format: mrt-bz2
-    max_compressed_mib: 1000
-  refresh:
-    interval: 24h
-    max_stale: 720h
-  fields:
-  - prefix
-  - asn
-  - as_path
-  - peer
-  - observed_at
-  depends_on: []
-  license:
-    status: needs-review
-    identifier: RouteViews-terms-review
-    distribution: review
-    evidence_url: null
-    attribution_required: null
-  trust:
-    source_weight: 70
-    correlation_group: routeviews-mrt
-  scope: path
-  notes: Resolve latest completed RIB with manifest and time budget, use separate worker.
-  publication_proof:
-    kind: unavailable
-    locator: null
-    field: null
-  coverage:
-    kind: mapping
-    scope: path
-  fixture:
-    status: missing
-    sha256: null
-    schema_observed: false
-    tested_at: null
-  parser:
-    id: null
-    schema: null
-    version: null
-  public_fields: []
-  field_mappings: {}
-  signals: []
-- id: caida-asrel2
-  evidence_family: caida-rel
-  source_group: caida-rel
-  category: bgp
-  admission: candidate
-  download:
-    url: null
-    format: text-bz2
-    max_compressed_mib: 800
-  refresh:
-    interval: 720h
-    max_stale: 720h
-  fields:
-  - asn
-  - as_relationship
-  depends_on: []
-  license:
-    status: needs-review
-    identifier: CAIDA-AUA
-    distribution: review
-    evidence_url: null
-    attribution_required: null
-  trust:
-    source_weight: 70
-    correlation_group: caida-rel
-  scope: asn_edge
-  notes: Discover the latest dated serial-2 asset deterministically; filename selects a candidate only, never
-    proves content publication. Exact payload timestamp binding, parser certification and redistribution review
-    remain required.
-  publication_proof:
-    kind: unavailable
-    locator: null
-    field: null
-  coverage:
-    kind: mapping
-    scope: asn_edge
-  fixture:
-    status: missing
-    sha256: null
-    schema_observed: false
-    tested_at: null
-  parser:
-    id: null
-    schema: null
-    version: null
-  discovery:
-    mode: latest-timestamped-asset
-    index_url: https://data.caida.org/datasets/as-relationships/serial-2/
-    filename_pattern: ^[0-9]{8}\.as-rel2\.txt\.bz2$
-    ordering: filename-date-desc-then-url-bytes
-    requires_exact_file: true
-    no_guessing: true
-  public_fields: []
-  field_mappings: {}
-  signals: []
-- id: rpki-client-vrps
-  evidence_family: rpki-client
-  source_group: rpki-client
-  category: rpki
-  admission: candidate
-  discovery: https://console.rpki-client.org/
-  download:
-    url: null
-    format: json
-    max_compressed_mib: 800
-  refresh:
-    interval: 12h
-    max_stale: 720h
-  fields:
-  - roa
-  - roa_max_length
-  - roa_asn
-  depends_on: []
-  license:
-    status: needs-review
-    identifier: rpki-client-terms-review
-    distribution: review
-    evidence_url: null
-    attribution_required: null
-  trust:
-    source_weight: 70
-    correlation_group: rpki-client
-  scope: prefix
-  notes: Resolve a validated full VRP/ROA snapshot; never use a lookup API.
-  publication_proof:
-    kind: unavailable
-    locator: null
-    field: null
-  coverage:
-    kind: mapping
-    scope: prefix
-  fixture:
-    status: missing
-    sha256: null
-    schema_observed: false
-    tested_at: null
-  parser:
-    id: null
-    schema: null
-    version: null
-  public_fields: []
-  field_mappings: {}
   signals: []
 - id: x4b-vpn-v4
   evidence_family: x4b
@@ -1136,7 +933,7 @@ sources:
     status: passed
     sha256: a7038a372eebed2e872c8e8ee92c52ce5340c62c585f891b13f139de75d8f640
     schema_observed: true
-    tested_at: '2026-11-15T04:47:08Z'
+    tested_at: '2026-11-15T08:53:42Z'
     path: fixtures/source-certification/observed-x4b-vpn-ipv4.txt
     parser: literal-prefix-text
     schema: one-literal-ip-or-prefix-per-line-v1
@@ -1196,7 +993,7 @@ sources:
     parser: tor-exit-addresses
     schema: tordnsel-exit-addresses-v1
     schema_observed: true
-    tested_at: '2026-11-15T04:47:08Z'
+    tested_at: '2026-11-15T08:53:42Z'
     synthetic: false
   parser:
     id: tor-exit-addresses
@@ -1254,7 +1051,7 @@ sources:
     parser: ipverse-asn-usage-json
     schema: ipverse-as-category-json-v1
     schema_observed: true
-    tested_at: '2026-11-15T04:47:08Z'
+    tested_at: '2026-11-15T08:53:42Z'
     synthetic: false
   parser:
     id: ipverse-asn-usage-json

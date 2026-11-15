@@ -14,16 +14,17 @@ import (
 	"vansail-ip-atlas/internal/via3"
 )
 
-// ProductionInputs cannot be manufactured from completeness booleans. Both
-// qualified objects independently bind the sealed real-source state and clock.
+// ProductionInputs cannot be manufactured from completeness booleans. Source qualification
+// and the authenticated Tier-1 observation bind the complete state and clock.
+// Missing routing observations remain unknown, never caller-supplied completeness.
 type ProductionInputs struct {
 	Qualification *admission.ProductionQualification
 	Tier1         *intelligence.QualifiedTier1
 }
 
 // BuildEngineeringBenchmark exercises the production materializer with isolated
-// benchmark records. The original authenticated baseline qualifies routing
-// completeness; transformed inputs can never create a production artifact or
+// benchmark records. The original authenticated baseline determines routing
+// availability; transformed inputs can never create a production artifact or
 // receipt. With empty inputs, expiry/withdrawal scenarios retain unknown routing
 // completeness. Callers must separately prove their measured record transition.
 func BuildEngineeringBenchmark(ctx context.Context, options Options, baseline, state intelligence.BuildState, policy intelligence.Policy, inputs ProductionInputs) (Candidate, error) {
@@ -44,7 +45,7 @@ func BuildEngineeringBenchmark(ctx context.Context, options Options, baseline, s
 		if err := inputs.Qualification.Validate(baseline, clock); err != nil {
 			return Candidate{}, err
 		}
-		if err := inputs.Tier1.Validate(baseline, clock); err != nil {
+		if err := inputs.Tier1.ValidateObservation(baseline, clock); err != nil {
 			return Candidate{}, err
 		}
 		if time.Unix(options.ValidUntil, 0).After(inputs.Tier1.ValidUntil()) {
@@ -98,7 +99,7 @@ func BuildProductionIntelligence(ctx context.Context, options Options, state int
 	if err := inputs.Qualification.Validate(state, clock); err != nil {
 		return Candidate{}, err
 	}
-	if err := inputs.Tier1.Validate(state, clock); err != nil {
+	if err := inputs.Tier1.ValidateObservation(state, clock); err != nil {
 		return Candidate{}, err
 	}
 	if time.Unix(options.ValidUntil, 0).After(inputs.Tier1.ValidUntil()) {
@@ -114,7 +115,7 @@ func BuildProductionIntelligence(ctx context.Context, options Options, state int
 		if err := inputs.Qualification.Validate(state, clock); err != nil {
 			return err
 		}
-		if err := inputs.Tier1.Validate(state, clock); err != nil {
+		if err := inputs.Tier1.ValidateObservation(state, clock); err != nil {
 			return err
 		}
 		return originalGate(gateCtx)
@@ -129,10 +130,16 @@ func buildStreamedCandidate(ctx context.Context, options Options, state intellig
 	if err := options.Limits.validate(); err != nil {
 		return Candidate{}, err
 	}
+	cache, err := openMaterializationCache(ctx, options, state, policy, inputs)
+	if err != nil {
+		return Candidate{}, err
+	}
+	options.materializationCache = cache
 	disk, err := stateDiskBytes(options.Workspace)
 	if err != nil {
 		return Candidate{}, err
 	}
+	disk += cache.bytes
 	if disk >= options.Limits.ScratchBytes {
 		return Candidate{}, errors.New("normalized state exhausted scratch budget")
 	}

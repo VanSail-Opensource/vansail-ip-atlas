@@ -10,7 +10,7 @@ import subprocess
 import sys
 
 from tools.atlas_contracts.config import ContractError, ROOT, load_configs, load_yaml, validate_schema, validate_sources
-from tools.atlas_contracts.policy import Snapshot, adapter_code_hash, capability_report, fixture_issues, runtime_state, static_issues, utc
+from tools.atlas_contracts.policy import OPTIONAL_ROUTING_CAPABILITIES, Snapshot, adapter_code_hash, capability_report, fixture_issues, runtime_state, static_issues, utc
 
 
 class ConfigurationTests(unittest.TestCase):
@@ -20,22 +20,23 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_actual_catalog_is_blocked_and_has_shared_family(self):
         report = capability_report(self.configs["sources"], utc("2026-11-08T00:00:00Z"), ROOT)
-        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (14, 10, 0))
+        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (10, 10, 0))
         self.assertEqual({s["id"] for s in self.configs["sources"]["sources"] if s["admission"] == "active"}, {
             "sapics-user-country-v4", "sapics-user-country-v6", "sapics-server-country-v4", "ipverse-as-metadata",
             "dbip-lite-direct", "ipapi-free-geo-v4", "ipapi-free-geo-v6", "x4b-vpn-v4", "tor-exits", "ipverse-asn-usage"})
         self.assertFalse(report["production_eligible"])
         self.assertEqual(report["schema_version"], 3)
-        self.assertEqual(report["release_scope"], "release-scope-v5")
+        self.assertEqual(report["release_scope"], "release-scope-v6")
         self.assertEqual(report["dataset_attributions"], [])
         self.assertEqual(len(report["capabilities"]), 12)
         required = [row for row in report["capabilities"] if row["required"]]
         optional = [row for row in report["capabilities"] if not row["required"]]
-        self.assertEqual(len(required), 12)
+        self.assertEqual(len(required), 7)
         self.assertTrue(all(row["status"] == "blocked" for row in required))
-        self.assertEqual(optional, [])
-        self.assertEqual(report["required_capability_count"], 12)
-        self.assertEqual(report["blocked_required_capability_count"], 12)
+        self.assertEqual({row["capability"] for row in optional}, OPTIONAL_ROUTING_CAPABILITIES)
+        self.assertTrue(all(row["status"] == "blocked" and row["families"] == [] for row in optional))
+        self.assertEqual(report["required_capability_count"], 7)
+        self.assertEqual(report["blocked_required_capability_count"], 7)
         subscriptions = [s for s in self.configs["sources"]["sources"] if s["category"] == "proxy_subscription_ip"]
         self.assertEqual(subscriptions, [])
 
@@ -43,7 +44,7 @@ class ConfigurationTests(unittest.TestCase):
         result = subprocess.run([sys.executable, str(ROOT / "tools/validate_blueprint.py"), "--now", "2026-11-08T00:00:00Z", "--require-production"],
                                 cwd=ROOT, capture_output=True, text=True, check=False)
         self.assertEqual(result.returncode, 2, result.stderr)
-        self.assertIn("12/12 required capabilities", result.stdout)
+        self.assertIn("7/7 required capabilities", result.stdout)
         self.assertIn("Observed risk: positive evidence only", result.stdout)
         production_line = next(line for line in result.stdout.splitlines() if line.startswith("Production BLOCKED"))
         self.assertNotIn("numeric_quality", production_line)
@@ -55,6 +56,16 @@ class ConfigurationTests(unittest.TestCase):
             invalid["unexpected"] = True
             with self.subTest(name=name), self.assertRaises(ContractError):
                 validate_schema(name, invalid)
+
+    def test_removed_routing_feed_is_optional_but_reintroduction_keeps_discovery_guard(self):
+        valid = copy.deepcopy(self.configs['sources'])
+        self.assertNotIn('caida-asrel2', {source['id'] for source in valid['sources']})
+        validate_sources(valid)
+        candidate = copy.deepcopy(valid['sources'][0])
+        candidate.update(id='caida-asrel2', admission='candidate')
+        valid['sources'].append(candidate)
+        with self.assertRaisesRegex(ContractError, 'deterministic current-snapshot discovery'):
+            validate_sources(valid)
 
     def test_unknown_nested_source_keys_and_obsolete_enabled_rejected(self):
         for path in [("enabled",), ("fixture", "extra"), ("parser", "extra"), ("license", "extra")]:

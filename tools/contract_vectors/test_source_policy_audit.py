@@ -128,7 +128,7 @@ class SourcePolicyAuditTests(unittest.TestCase):
         self.assertEqual(self.capability(report, "risk_reasons"), "blocked")
         self.assertEqual(self.capability(report, "class_c"), "blocked")
 
-    def test_positive_evidence_cannot_waive_routing_or_pages(self):
+    def test_positive_evidence_does_not_invent_routing_or_waive_core_and_pages(self):
         source = self.source("positive-only", category="abuse", fields=("reason_flags",),
                              scope="exact_ip", coverage="positive_only")
         source["signals"] = ["abuse"]
@@ -139,7 +139,10 @@ class SourcePolicyAuditTests(unittest.TestCase):
         self.assertEqual(self.capability(report, "pages_release"), "blocked")
         self.assertNotIn("abuse", report["missing_reason_evidence"])
         self.assertIn("fraud", report["missing_reason_evidence"])
-        self.assertEqual(report["required_capability_count"], 12)
+        self.assertEqual(report["required_capability_count"], 7)
+        required = {row["capability"] for row in report["capabilities"] if row["required"]}
+        self.assertIn("pages_release", required)
+        self.assertNotIn("rpki", required)
 
     def test_current_mrt_paths_supply_origin_and_path_capabilities(self):
         sources = [self.source(f"mrt-{i}", category="bgp", fields=("bgp_origins", "bgp_paths"), scope="path") for i in range(2)]

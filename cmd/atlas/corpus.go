@@ -5,16 +5,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
-	"fmt"
 	"io"
 	"net/netip"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"vansail-ip-atlas/internal/subscription"
@@ -28,11 +29,25 @@ type corpusQuery struct {
 	Stratum string `json:"stratum"`
 }
 type productionCorpus struct {
-	FormatVersion    int           `json:"format_version"`
-	GraphQuery       string        `json:"graph_query"`
-	InteractionQuery string        `json:"interaction_query"`
-	Mode             string        `json:"mode"`
-	Queries          []corpusQuery `json:"queries"`
+	FormatVersion    int                  `json:"format_version"`
+	GraphQuery       *string              `json:"graph_query"`
+	MapQuery         *string              `json:"map_query"`
+	InteractionQuery string               `json:"interaction_query"`
+	Mode             string               `json:"mode"`
+	ReleaseID        string               `json:"release_id"`
+	Availability     []corpusAvailability `json:"availability"`
+	UnknownQueries   corpusUnknowns       `json:"unknown_queries"`
+	Queries          []corpusQuery        `json:"queries"`
+}
+type corpusAvailability struct {
+	Stratum        string `json:"stratum"`
+	Status         string `json:"status"`
+	SampledQueries int    `json:"sampled_queries"`
+}
+type corpusUnknowns struct {
+	IPv4 string `json:"ipv4"`
+	IPv6 string `json:"ipv6"`
+	ASN  string `json:"asn"`
 }
 
 // Corpus labels come from verified actual indexes/answers. The graph population
@@ -76,7 +91,7 @@ func buildProductionCorpus(ctx context.Context, args []string) error {
 			buckets[stratum] = append(buckets[stratum], q)
 		}
 	}
-	corpus := productionCorpus{FormatVersion: 1, Mode: "production", Queries: []corpusQuery{}}
+	corpus := productionCorpus{FormatVersion: 2, Mode: "production", ReleaseID: release.Manifest.ReleaseID, Queries: []corpusQuery{}}
 	graphCommand := exec.CommandContext(ctx, "node", filepath.Join(root, "tools", "hosted", "corpus-graph.mjs"))
 	graphIn, err := graphCommand.StdinPipe()
 	if err != nil {
@@ -87,14 +102,19 @@ func buildProductionCorpus(ctx context.Context, args []string) error {
 		return err
 	}
 	graphCommand.Stderr = io.Discard
-	if err = graphCommand.Start(); err != nil {
-		return errors.New("corpus requires the pinned Node graph projector")
-	}
-	defer func() { _ = graphIn.Close(); _ = graphCommand.Wait() }()
+	graphStarted := false
+	defer func() {
+		_ = graphIn.Close()
+		_ = graphOut.Close()
+		if graphStarted {
+			_ = graphCommand.Wait()
+		}
+	}()
 	graphEncoder := json.NewEncoder(graphIn)
 	graphScanner := bufio.NewScanner(graphOut)
 	graphScanner.Buffer(make([]byte, 4096), 64<<10)
 	graphCandidates := 0
+	graphNodes := -1
 	objects := append([]via3.ObjectInfo(nil), release.Manifest.Objects...)
 	sort.Slice(objects, func(i, j int) bool {
 		if objects[i].Kind != objects[j].Kind {
@@ -122,6 +142,13 @@ func buildProductionCorpus(ctx context.Context, args []string) error {
 				continue
 			} // Router partitions are not observed facts.
 			rows, _ := shard.Rows(section)
+			var partition netip.Prefix
+			if section == 8 && object.Partition != "all" {
+				partition, err = corpusPartitionPrefix(object.Partition)
+				if err != nil {
+					continue
+				}
+			}
 			for offset := 0; offset+32 <= len(rows); offset += 32 {
 				row := rows[offset : offset+32]
 				prefix, exact, err := corpusPrefix(row)
@@ -129,14 +156,15 @@ func buildProductionCorpus(ctx context.Context, args []string) error {
 					return err
 				}
 				queryAddr := prefix.Addr()
-				if section == 8 {
-					partition, err := netip.ParsePrefix(object.Partition)
-					if err != nil || !prefix.Contains(partition.Addr()) {
+				scope := prefix
+				if partition.IsValid() {
+					if !prefix.Contains(partition.Addr()) {
 						continue
 					}
+					scope = partition
 					queryAddr = partition.Addr()
 				}
-				if !exact && prefix.Contains(queryAddr.Next()) {
+				if !exact && scope.Contains(queryAddr.Next()) {
 					queryAddr = queryAddr.Next()
 				}
 				if !subscription.Public(queryAddr) {
@@ -160,7 +188,12 @@ func buildProductionCorpus(ctx context.Context, args []string) error {
 				if object.Kind == 4 && len(buckets["moas"]) < 1200 {
 					moasCandidate = corpusNetworkMOAS(&shard, row)
 				}
-				need := len(buckets[stratum]) < 1200 || moasCandidate || object.Kind == 2 && queryAddr.Is4() && corpus.InteractionQuery == ""
+				mapCandidate := false
+				if object.Kind == 3 && queryAddr.Is4() && corpus.MapQuery == nil {
+					coordinates := shard.Record(binary.LittleEndian.Uint32(row[20:24]))
+					mapCandidate = len(coordinates) == 16 && (coordinates[12] == 3 || coordinates[12] == 4)
+				}
+				need := len(buckets[stratum]) < 1200 || moasCandidate || queryAddr.Is4() && corpus.InteractionQuery == "" || mapCandidate
 				if !need {
 					continue
 				}
@@ -168,9 +201,14 @@ func buildProductionCorpus(ctx context.Context, args []string) error {
 				// an exact record, or a local replacement for an inherited row.
 				// Only label the path that this query actually exercises. Do this
 				// after the bucket bounds to avoid lookups for unused candidates.
-				if !corpusRowSelected(&shard, section, row, queryAddr) {
+				queryAddr, selected := corpusSelectedAddress(&shard, section, row, queryAddr, scope)
+				if !selected && queryAddr != scope.Addr() {
+					queryAddr, selected = corpusSelectedAddress(&shard, section, row, scope.Addr(), scope)
+				}
+				if !selected || !subscription.Public(queryAddr) {
 					continue
 				}
+				q = queryAddr.String()
 				answer, err := release.Lookup(ctx, q)
 				if err != nil {
 					return err
@@ -179,8 +217,12 @@ func buildProductionCorpus(ctx context.Context, args []string) error {
 				if len(answer.BGP.Origins) > 1 {
 					add("moas", q)
 				}
-				if corpus.InteractionQuery == "" && queryAddr.Is4() && answer.Geo != nil && answer.Geo.Latitude != nil && answer.Geo.Longitude != nil && answer.Geo.City != nil && (answer.Usage == nil || answer.Usage.Anycast == nil || !*answer.Usage.Anycast) {
+				if corpus.InteractionQuery == "" && queryAddr.Is4() {
 					corpus.InteractionQuery = q
+				}
+				if corpus.MapQuery == nil && queryAddr.Is4() && corpusHasMap(answer) {
+					value := q
+					corpus.MapQuery = &value
 				}
 			}
 		}
@@ -189,7 +231,7 @@ func buildProductionCorpus(ctx context.Context, args []string) error {
 			for offset := 0; offset+8 <= len(rows); offset += 8 {
 				asn := binary.LittleEndian.Uint32(rows[offset:])
 				q := "AS" + strconv.FormatUint(uint64(asn), 10)
-				if len(buckets["dense_asn"]) >= 1200 && len(buckets["sparse_asn"]) >= 1200 && corpus.GraphQuery != "" {
+				if len(buckets["dense_asn"]) >= 1200 && len(buckets["sparse_asn"]) >= 1200 && graphNodes == 24 {
 					break
 				}
 				answer, err := release.Lookup(ctx, q)
@@ -202,11 +244,17 @@ func buildProductionCorpus(ctx context.Context, args []string) error {
 					}
 					if a.PrefixCursor != nil || len(a.Prefixes) >= 256 {
 						add("dense_asn", q)
-					} else if len(a.Prefixes) > 0 && len(a.Prefixes) <= 16 {
+					} else if len(a.Prefixes) <= 16 {
 						add("sparse_asn", q)
 					}
 				}
-				if corpus.GraphQuery == "" && graphCandidates < 10000 && len(answer.BGP.Paths) >= 2 {
+				if graphNodes < 24 && graphCandidates < 10000 && len(answer.BGP.Paths) > 0 {
+					if !graphStarted {
+						if err = graphCommand.Start(); err != nil {
+							return errors.New("corpus requires the pinned Node graph projector")
+						}
+						graphStarted = true
+					}
 					graphCandidates++
 					if err = graphEncoder.Encode(answer); err != nil {
 						return errors.New("graph corpus projector failed")
@@ -221,39 +269,149 @@ func buildProductionCorpus(ctx context.Context, args []string) error {
 					if json.Unmarshal(graphScanner.Bytes(), &projection) != nil {
 						return errors.New("invalid graph population reply")
 					}
-					if projection.Nodes == 24 && projection.Routes >= 2 {
-						corpus.GraphQuery = q
+					if projection.Nodes > graphNodes {
+						value := q
+						corpus.GraphQuery = &value
+						graphNodes = projection.Nodes
 					}
 				}
 			}
 		}
 	}
-	for _, q := range []string{"0.0.0.0", "10.0.0.1", "192.0.2.1", "::", "::1", "2001:db8::1"} {
+	for _, q := range []string{"0.0.0.0", "10.0.0.1", "192.0.2.1", "::", "::1", "2001:db8::1", "AS4199999999", "AS4199999998"} {
 		answer, err := release.Lookup(ctx, q)
 		if err != nil {
 			return err
 		}
-		if answer.Geo == nil && answer.Network == nil && answer.Usage == nil && answer.Quality == nil && len(answer.ASNs) == 0 && len(answer.BGP.Paths) == 0 {
+		if corpusUnknown(answer) {
 			add("unknown", q)
+			if answer.Kind == "asn" {
+				if corpus.UnknownQueries.ASN == "" {
+					corpus.UnknownQueries.ASN = q
+				}
+			} else if address, _ := netip.ParseAddr(q); address.Is4() {
+				if corpus.UnknownQueries.IPv4 == "" {
+					corpus.UnknownQueries.IPv4 = q
+				}
+			} else if corpus.UnknownQueries.IPv6 == "" {
+				corpus.UnknownQueries.IPv6 = q
+			}
 		}
 	}
-	if corpus.InteractionQuery == "" || corpus.GraphQuery == "" {
-		return errors.New("real corpus lacks map or 24-node graph population")
+	if corpus.UnknownQueries.IPv4 == "" || corpus.UnknownQueries.IPv6 == "" || corpus.UnknownQueries.ASN == "" {
+		return errors.New("verified unknown query population unavailable")
 	}
-	for _, stratum := range corpusStrata {
-		if len(buckets[stratum]) == 0 {
-			return fmt.Errorf("real corpus stratum unavailable: %s", stratum)
-		}
-		sort.Strings(buckets[stratum])
+	if corpus.MapQuery != nil {
+		corpus.InteractionQuery = *corpus.MapQuery
 	}
-	// Round-robin prevents a short hot/cold sample selecting only the first
-	// address family. Small real strata may repeat; they are never fabricated.
-	for i := 0; i < 10000; i++ {
-		stratum := corpusStrata[i%len(corpusStrata)]
-		pool := buckets[stratum]
-		corpus.Queries = append(corpus.Queries, corpusQuery{pool[(i/len(corpusStrata))%len(pool)], stratum})
+	if corpus.InteractionQuery == "" {
+		corpus.InteractionQuery = corpus.UnknownQueries.IPv4
+	}
+	if err := corpus.selectQueries(buckets); err != nil {
+		return err
 	}
 	return writeJSON(destination, corpus)
+}
+
+// Skip entire shadowing prefixes, not individual addresses. This finds an
+// actual selectable witness even when the usual first address is covered by
+// a more-specific row; IPv6 address-space size cannot make the search unbounded.
+func corpusSelectedAddress(shard *via3.Shard, section uint16, row []byte, address netip.Addr, scope netip.Prefix) (netip.Addr, bool) {
+	for scope.Contains(address) {
+		if corpusRowSelected(shard, section, row, address) {
+			return address, true
+		}
+		_, selected, ok := shard.FindPrefix(address)
+		if !ok {
+			break
+		}
+		prefix, err := netip.ParsePrefix(selected)
+		if err != nil {
+			break
+		}
+		bytes := prefix.Addr().As16()
+		start := 0
+		if prefix.Addr().Is4() {
+			start = 96
+		}
+		for bit := start + prefix.Bits(); bit < 128; bit++ {
+			bytes[bit/8] |= 1 << (7 - bit%8)
+		}
+		last := netip.AddrFrom16(bytes)
+		if prefix.Addr().Is4() {
+			last = last.Unmap()
+		}
+		next := last.Next()
+		if !next.IsValid() || next.Compare(address) <= 0 {
+			break
+		}
+		address = next
+	}
+	return netip.Addr{}, false
+}
+
+func corpusHasMap(answer via3.LookupAnswer) bool {
+	return answer.Geo != nil && answer.Geo.Latitude != nil && answer.Geo.Longitude != nil && answer.Geo.Precision != nil && (*answer.Geo.Precision == "city_centroid" || *answer.Geo.Precision == "area") && (answer.Usage == nil || answer.Usage.Anycast == nil || !*answer.Usage.Anycast)
+}
+
+func corpusPartitionPrefix(value string) (netip.Prefix, error) {
+	if len(value) < 36 || value[1] != ':' || value[0] != '4' && value[0] != '6' {
+		return netip.Prefix{}, errors.New("invalid corpus partition")
+	}
+	address, length, ok := strings.Cut(value[2:], "/")
+	bytes, err := hex.DecodeString(address)
+	bits, bitErr := strconv.ParseUint(length, 10, 8)
+	if !ok || err != nil || len(bytes) != 16 || bitErr != nil || strconv.FormatUint(bits, 10) != length {
+		return netip.Prefix{}, errors.New("invalid corpus partition")
+	}
+	row := make([]byte, 32)
+	row[0] = value[0] - '0'
+	row[1] = byte(bits)
+	copy(row[4:20], bytes)
+	prefix, _, err := corpusPrefix(row)
+	return prefix, err
+}
+
+func corpusUnknown(answer via3.LookupAnswer) bool {
+	if answer.Geo != nil || answer.Network != nil || answer.Usage != nil || answer.Quality != nil || len(answer.ASNs) != 0 || len(answer.BGP.Paths) != 0 || len(answer.BGP.Relationships) != 0 || len(answer.BGP.Tier1) != 0 {
+		return false
+	}
+	if answer.Kind != "asn" && len(answer.BGP.Origins) != 0 {
+		return false
+	}
+	for _, vrp := range answer.BGP.RPKI {
+		if vrp.Status != "unavailable" {
+			return false
+		}
+	}
+	return true
+}
+
+func (corpus *productionCorpus) selectQueries(buckets map[string][]string) error {
+	observed := []string{}
+	corpus.Availability = nil
+	for _, stratum := range corpusStrata {
+		status := "absent"
+		if len(buckets[stratum]) > 0 {
+			status = "observed"
+			observed = append(observed, stratum)
+		}
+		corpus.Availability = append(corpus.Availability, corpusAvailability{stratum, status, len(buckets[stratum])})
+		sort.Strings(buckets[stratum])
+	}
+	if len(observed) == 0 || len(observed) == 1 && observed[0] == "unknown" {
+		return errors.New("real corpus has no observed facts")
+	}
+	// Round-robin prevents a short hot/cold sample selecting only the first
+	// address family. Absent strata remain explicit; they never borrow labels
+	// from another stratum. Small real populations may repeat without fabrication.
+	corpus.Queries = nil
+	for i := 0; i < 10000; i++ {
+		stratum := observed[i%len(observed)]
+		pool := buckets[stratum]
+		corpus.Queries = append(corpus.Queries, corpusQuery{pool[(i/len(observed))%len(pool)], stratum})
+	}
+	return nil
 }
 
 // FindPrefix supplies the actual longest matching prefix. Resolve only the

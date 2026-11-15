@@ -48,6 +48,26 @@ function exportGraph() {
       if (value && !/url\s*\(/i.test(value)) copy.setAttribute(property, value)
     }
   })
+  // HTML labels have an opaque backing in the interactive SVG so their
+  // contrast does not depend on crossing edges or the page decoration.
+  // The download remains self-contained native SVG, with the same paint.
+  const liveLabels = [...svg.value.querySelectorAll('foreignObject')]
+  for (const [index, label] of [...snapshot.querySelectorAll('foreignObject')].entries()) {
+    const live = liveLabels[index]!.firstElementChild!
+    const style = getComputedStyle(live)
+    const width = parseFloat(style.width), height = parseFloat(style.height)
+    const left = Number(label.getAttribute('x')) + (Number(label.getAttribute('width')) - width) / 2
+    const top = Number(label.getAttribute('y'))
+    const backing = document.createElementNS(namespace, 'rect')
+    for (const [name, value] of Object.entries({ x: left, y: top, width, height })) backing.setAttribute(name, String(value))
+    backing.setAttribute('fill', style.backgroundColor)
+    const text = document.createElementNS(namespace, 'text')
+    text.setAttribute('x', String(left + width / 2)); text.setAttribute('y', String(top + 14))
+    text.setAttribute('text-anchor', 'middle'); text.setAttribute('fill', style.color)
+    text.setAttribute('font-family', style.fontFamily); text.setAttribute('font-size', style.fontSize)
+    text.setAttribute('font-weight', style.fontWeight); text.textContent = live.textContent
+    label.replaceWith(backing, text)
+  }
   const { width, height } = projection.value.bounds
   snapshot.setAttribute('xmlns', namespace)
   snapshot.setAttribute('width', String(width)); snapshot.setAttribute('height', String(height))
@@ -119,15 +139,16 @@ watch(() => props.origin, () => { activePath.value = -1; originalOpen.value = fa
 </script>
 
 <template>
-  <div class="glass edge-glow bgp-graph">
+  <div class="glass bgp-graph">
+    <span class="edge-accent" aria-hidden="true" />
     <div class="graph-toolbar"><label>Route <select v-model="activePath" aria-label="Focus observed route"><option :value="-1">All selected routes</option><option v-for="(path, index) in projection.routes" :key="path.pathIndex" :value="index">Route {{ originalNumber(path.original) }}{{ path.truncated ? ' · clipped' : '' }}</option></select></label><div class="graph-actions"><button class="plain-button" @click="exportGraph">Export</button><button v-if="fitted" class="plain-button" @click="resetView(false)">Actual size</button><button class="plain-button" @click="fit">Fit</button></div></div>
     <div ref="viewport" class="graph-viewport">
     <svg ref="svg" role="img" aria-label="Observed BGP paths. Arrow keys pan; plus and minus zoom; Home fits." tabindex="0" :viewBox="`0 0 ${projection.bounds.width} ${projection.bounds.height}`" :style="{ minWidth: fitted ? '0' : `${projection.bounds.width}px`, height: fitted ? 'min(60vh, 600px)' : undefined, minHeight: fitted ? '0' : undefined }" @wheel="wheel" @keydown="key" @pointerdown="down" @pointermove="move" @pointerup="up" @pointercancel="up">
       <g :transform="contentTransform">
         <path v-for="edge in projection.edges" :key="edge.key" :d="`M ${projection.byId.get(edge.from)!.x} ${projection.byId.get(edge.from)!.y} L ${projection.byId.get(edge.to)!.x} ${projection.byId.get(edge.to)!.y}`" class="graph-edge" :class="{ dimmed: activePath !== -1 && !edge.routeIds.includes(activePath), inferred: edge.inferred }"><title>{{ `AS${edge.from} → AS${edge.to}: ${edge.relation.replaceAll('_', ' ')}; observed adjacency; original hops ${edge.fromOriginalPosition} → ${edge.toOriginalPosition}${edge.inferred ? '; inferred relationship' : ''}` }}</title></path>
-        <g v-for="node in projection.nodes" :key="node.asn" class="graph-node" :transform="`translate(${node.x} ${node.y})`" :class="{ origin: node.asn === origin, truncated: projection.truncatedTerminals.includes(node.asn), dimmed: activePath !== -1 && !projection.routes[activePath]?.asns.includes(node.asn) }"><circle r="20"/><text text-anchor="middle" y="39">AS{{ node.asn }}</text><title>AS{{ node.asn }}{{ projection.truncatedTerminals.includes(node.asn) ? ' · a route suffix is clipped here' : '' }}</title></g>
+        <g v-for="node in projection.nodes" :key="node.asn" class="graph-node" :transform="`translate(${node.x} ${node.y})`" :class="{ origin: node.asn === origin, truncated: projection.truncatedTerminals.includes(node.asn), dimmed: activePath !== -1 && !projection.routes[activePath]?.asns.includes(node.asn) }"><circle r="20"/><foreignObject x="-62" y="26" width="124" height="20"><div xmlns="http://www.w3.org/1999/xhtml" class="graph-node-label">AS{{ node.asn }}</div></foreignObject><title>AS{{ node.asn }}{{ projection.truncatedTerminals.includes(node.asn) ? ' · a route suffix is clipped here' : '' }}</title></g>
       </g>
-      <text v-if="!projection.nodes.length" :x="projection.bounds.width / 2" :y="projection.bounds.height / 2" text-anchor="middle" class="empty-graph-label">No observed path is available</text>
+      <foreignObject v-if="!projection.nodes.length" :x="projection.bounds.width / 2 - 180" :y="projection.bounds.height / 2 - 13" width="360" height="26"><div xmlns="http://www.w3.org/1999/xhtml" class="empty-graph-label">No observed path is available</div></foreignObject>
     </svg>
     </div>
     <p class="graph-caption">Observed AS paths · relationships may be inferred · {{ projection.nodes.length }}/24 nodes{{ projection.truncated ? ' · view clipped' : '' }}</p>
@@ -142,10 +163,13 @@ watch(() => props.origin, () => { activePath.value = -1; originalOpen.value = fa
 .bgp-graph {
   /* Moving SVG content must not rerasterize a backdrop blur every frame. */
   backdrop-filter:none;
-  background:linear-gradient(135deg,color-mix(in srgb,var(--surface) 90%,var(--highlight) 10%),var(--surface));
+  background:var(--surface);
 }
 .graph-node.truncated circle { stroke-dasharray:3 2; }
-.graph-viewport { overflow-x:auto; overscroll-behavior-x:contain; }
+.graph-viewport { overflow-x:auto; overscroll-behavior-x:contain; background:var(--content); }
+/* Route focus dims the geometry while every ASN label remains readable. */
+.graph-node.dimmed { opacity:1; }
+.graph-node.dimmed circle { opacity:.25; }
 .graph-viewport svg { max-width:none; }
 .graph-original { border-top:1px solid var(--line); padding:14px 24px; font-size:11px; color:var(--secondary); }
 .graph-original summary { cursor:pointer; min-height:24px; }

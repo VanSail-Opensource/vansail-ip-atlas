@@ -41,6 +41,21 @@ type SourceStatistics struct {
 	Signals                                  map[intelligence.Signal]bool
 }
 
+const ProductionReleaseScope = "release-scope-v6"
+
+// Routing observations remain independently derived and recorded even when
+// absent. V6 permits that absence; it does not assert routing completeness.
+func requiredProductionCapability(name string) (required, known bool) {
+	switch name {
+	case "country", "region_city", "coordinates", "usage", "risk_reasons", "class_c":
+		return true, true
+	case "asn_prefix", "rpki", "bgp_origins_paths", "relationships", "tier1":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
 // ProductionQualification can only be constructed by revalidating a sealed
 // intake. Its fields are private so materializers cannot turn a boolean into
 // complete VRP or source coverage. Validate binds the exact normalized roots.
@@ -505,7 +520,7 @@ func deriveCapabilities(stats []SourceStatistics, clock time.Time) CapabilityRep
 		sort.Strings(values)
 		return values
 	}
-	report := CapabilityReport{EvaluatedAt: clock.Unix(), IncludedSources: len(stats), ReleaseScope: "release-scope-v5", SchemaVersion: 1}
+	report := CapabilityReport{EvaluatedAt: clock.Unix(), IncludedSources: len(stats), ReleaseScope: ProductionReleaseScope, SchemaVersion: 1}
 	add := func(name string, minimum int, match func(SourceStatistics) bool) {
 		fs := families(match)
 		report.Capabilities = append(report.Capabilities, Capability{Capability: name, Families: fs, Qualified: len(fs) >= minimum, Required: true})
@@ -538,6 +553,9 @@ func deriveCapabilities(stats []SourceStatistics, clock time.Time) CapabilityRep
 	// capability; absent categories and unlisted addresses remain unknown.
 	risk := len(allSignals) > 0
 	report.Capabilities = append(report.Capabilities, Capability{Capability: "risk_reasons", Families: families(func(s SourceStatistics) bool { return len(s.Signals) > 0 }), Qualified: risk, Required: true})
+	for i := range report.Capabilities {
+		report.Capabilities[i].Required, _ = requiredProductionCapability(report.Capabilities[i].Capability)
+	}
 	sort.Slice(report.Capabilities, func(i, j int) bool { return report.Capabilities[i].Capability < report.Capabilities[j].Capability })
 	return report
 }
@@ -551,13 +569,22 @@ func uniqueStrings(values []string) []string {
 	return out
 }
 func (r CapabilityReport) RequireProduction() error {
+	if r.SchemaVersion != 1 || r.ReleaseScope != ProductionReleaseScope || r.IncludedSources <= 0 || len(r.Capabilities) != 11 {
+		return errors.New("production_blocked: current nonempty source capability report required")
+	}
 	var missing []string
+	seen := make(map[string]bool, len(r.Capabilities))
 	for _, c := range r.Capabilities {
-		if c.Required && !c.Qualified {
+		required, known := requiredProductionCapability(c.Capability)
+		if !known || seen[c.Capability] || c.Required != required {
+			return errors.New("production_blocked: source capability policy differs")
+		}
+		seen[c.Capability] = true
+		if required && !c.Qualified {
 			missing = append(missing, c.Capability)
 		}
 	}
-	if len(r.Capabilities) != 11 || len(missing) > 0 {
+	if len(missing) > 0 {
 		return fmt.Errorf("production_blocked: unqualified source capabilities: %s", strings.Join(missing, ", "))
 	}
 	return nil

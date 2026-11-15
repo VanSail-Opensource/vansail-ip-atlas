@@ -7,7 +7,7 @@ from unittest.mock import patch
 import zipfile
 
 from tools.release_contract.contracts import ContractError, sha256
-from tools.release_contract.promotion import REPOSITORY, TrustedCI, extract_reports, json_object
+from tools.release_contract.promotion import REPOSITORY, TrustedCI, extract_reports, json_object, verify_corpus_binding
 
 
 def archive(entries):
@@ -21,6 +21,14 @@ def archive(entries):
 
 
 class TrustedEvidenceTests(unittest.TestCase):
+    def test_browser_and_native_measurements_bind_the_same_actual_corpus(self):
+        digest = 'a' * 64
+        verify_corpus_binding({'corpus_sha256': digest}, {'go_lookup': {'corpus_sha256': digest}})
+        for browser, build in (({}, {}), ({}, {'go_lookup': {}}),
+                               ({'corpus_sha256': 'b' * 64}, {'go_lookup': {'corpus_sha256': digest}})):
+            with self.subTest(browser=browser, build=build), self.assertRaises(ContractError):
+                verify_corpus_binding(browser, build)
+
     def test_source_free_archive_allowlist_and_regular_files_are_exact(self):
         regular = stat.S_IFREG | 0o644
         data = archive([("report.json", b'{"raw":1}', regular)])

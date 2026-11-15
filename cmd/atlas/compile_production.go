@@ -66,7 +66,7 @@ func compileProduction(ctx context.Context, args []string) (returnErr error) {
 	if err != nil {
 		return err
 	}
-	if err := tier1.Validate(state, now); err != nil {
+	if err := tier1.ValidateObservation(state, now); err != nil {
 		return err
 	}
 	gate := func(checkCtx context.Context) error {
@@ -84,7 +84,10 @@ func compileProduction(ctx context.Context, args []string) (returnErr error) {
 	if tier1.ValidUntil().Before(validUntil) {
 		validUntil = tier1.ValidUntil()
 	}
-	candidate, err := pipeline.BuildProductionIntelligence(ctx, pipeline.Options{Workspace: root, Output: output, Mode: "production", Clock: *clock, ValidUntil: validUntil.Unix(), Limits: pipeline.DefaultLimits(), ProductionGate: gate, InputGate: gate}, state, policy, pipeline.ProductionInputs{Qualification: q, Tier1: tier1})
+	// This complete production gate also revalidates the source/config/state
+	// binding at both boundaries. Installing it again as InputGate would repeat
+	// the same full source scan without adding an independent predicate.
+	candidate, err := pipeline.BuildProductionIntelligence(ctx, pipeline.Options{Workspace: root, Output: output, Mode: "production", Clock: *clock, ValidUntil: validUntil.Unix(), Limits: pipeline.DefaultLimits(), ProductionGate: gate}, state, policy, pipeline.ProductionInputs{Qualification: q, Tier1: tier1})
 	if err != nil {
 		return err
 	}
@@ -111,7 +114,7 @@ func compileProduction(ctx context.Context, args []string) (returnErr error) {
 	}
 	// This checks the already persisted observation. Output success cannot
 	// advance or suppress source-derived continuity.
-	if err = intelligence.SaveQualifiedTier1History(ctx, root, tier1); err != nil {
+	if err = intelligence.VerifyTier1ObservationHistory(ctx, root, tier1); err != nil {
 		_ = os.Remove(destination)
 		return err
 	}

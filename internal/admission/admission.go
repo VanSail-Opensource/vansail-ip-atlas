@@ -104,7 +104,11 @@ func New(workspace string) (*Engine, error) {
 	if err != nil {
 		return nil, errors.New("admission workspace invalid")
 	}
-	engine := &Engine{workspace: root, fetch: acquire.New(), cleanup: os.RemoveAll}
+	transport, err := acquire.NewWithGitHubMetadataToken(os.Getenv("ATLAS_GITHUB_METADATA_TOKEN"))
+	if err != nil {
+		return nil, errors.New("admission metadata transport invalid")
+	}
+	engine := &Engine{workspace: root, fetch: transport, cleanup: os.RemoveAll}
 	if err := engine.acquireWorkspace(); err != nil {
 		return nil, err
 	}

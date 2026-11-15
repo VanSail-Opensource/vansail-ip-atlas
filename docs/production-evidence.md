@@ -1,9 +1,12 @@
 # Production evidence and automatic hosted delivery
 
-The user-approved `release-scope-v5` retains CC BY-SA 4.0 compiled data and strict
+The user-approved `release-scope-v6` retains CC BY-SA 4.0 compiled data and strict
 source qualification. It adds schema-4 observed-risk answers, verified included
 publisher logos, encrypted state transfer and automatic promotion after all gates.
 A pipeline or passing fixture is not evidence that a real source or release passed.
+
+The v6 amendment explicitly permits unavailable routing facts to remain unknown.
+The release retains all views and every included-source qualification check.
 
 Production uses the current public repository and official `ubuntu-24.04` runners.
 Every workload is bounded by a cgroup with 200% CPU, 8 GiB memory and no swap; all
@@ -24,9 +27,17 @@ Successful intake starts candidate, preview and promotion through three successi
 Each consumer independently verifies repository, workflow, event, branch, revision,
 run completion and artifact identity. A changed main revision stops the old chain.
 
+Integration additionally compiles actual admitted inputs privately and measures
+100,000 indexed native lookups before merge. It uploads only fixed phase/status
+and numeric resource/latency reports, never the actual source state, query corpus
+or compiled real database. Its 90-minute job timeout accommodates intake plus the
+separate original 35-minute cold-build ceiling; no performance threshold changes.
+
 The candidate compiler creates its authenticated receipt and complete immutable
-public tree. The corpus command derives 10,000 actual indexed queries; missing
-required strata, map observations or a real 24-node graph fail the candidate.
+public tree. The corpus command derives 10,000 actual indexed queries and explicitly records
+observed and absent strata. Missing routing populations yield tested unknown
+states, not fabricated routes. Graph component capacity is measured separately
+with an explicitly synthetic 24-node fixture against the exact application bytes.
 The build harness derives fifteen isolated engineering cases from the exact
 sealed input, instead of requiring manually prepared directories. Warm cases are
 primed before measurement. Rounded one-percent mutations use `max(1,ceil(N/100))`.

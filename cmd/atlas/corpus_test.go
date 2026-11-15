@@ -1,12 +1,93 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
+	"encoding/json"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"vansail-ip-atlas/internal/via3"
 )
+
+func TestProductionCorpusRetainsTruthfulSubsetAndUnknowns(t *testing.T) {
+	root := t.TempDir()
+	prefix := netip.MustParsePrefix("8.8.8.0/24")
+	built, err := via3.Build(context.Background(), via3.CompileInput{Mode: "production", Clock: 1700000000, ValidUntil: 1700003600,
+		ProductionGate: func(context.Context) error { return nil }, Partitions: []via3.PartitionInput{{Partition: "all", PrefixRoutes: []netip.Prefix{prefix}, ASNRoutes: []uint32{13335}, Records: []via3.PublicRecord{
+			{Version: 3, Kind: 2, Prefix: prefix, Geo: &via3.GeoData{Country: "US"}},
+			{Version: 3, Kind: 8, ASN: 13335, ASNAggregate: &via3.ASNData{Name: "Observed metadata"}},
+		}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = built.Write(filepath.Join(root, "atlas")); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Mkdir(filepath.Join(root, ".atlas-private"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err = buildProductionCorpus(context.Background(), []string{"-workspace", root, "-atlas", "atlas", "-clock", "1700000001"}); err != nil {
+		t.Fatal(err)
+	}
+	bytes, err := os.ReadFile(filepath.Join(root, ".atlas-private/production-browser-corpus.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var corpus productionCorpus
+	if err = json.Unmarshal(bytes, &corpus); err != nil {
+		t.Fatal(err)
+	}
+	if corpus.FormatVersion != 2 || corpus.ReleaseID != built.Manifest.ReleaseID || corpus.GraphQuery != nil || corpus.MapQuery != nil || corpus.InteractionQuery != "8.8.8.1" || len(corpus.Queries) != 10000 {
+		t.Fatalf("incorrect subset corpus: %+v", corpus)
+	}
+	if corpus.UnknownQueries.IPv4 == "" || corpus.UnknownQueries.IPv6 == "" || corpus.UnknownQueries.ASN == "" {
+		t.Fatal("actual unknown coverage missing")
+	}
+	for _, row := range corpus.Availability {
+		want := row.Stratum == "ipv4_lpm" || row.Stratum == "sparse_asn" || row.Stratum == "unknown"
+		if (row.Status == "observed") != want || (row.SampledQueries > 0) != want {
+			t.Fatalf("fabricated or missing stratum: %+v", row)
+		}
+	}
+	for _, q := range corpus.Queries {
+		if q.Stratum != "ipv4_lpm" && q.Stratum != "sparse_asn" && q.Stratum != "unknown" {
+			t.Fatalf("borrowed absent stratum: %+v", q)
+		}
+	}
+}
+
+func TestCorpusMapAndUnknownClassificationsUseActualFacts(t *testing.T) {
+	coordinate := 1.0
+	precision := "area"
+	answer := via3.LookupAnswer{Kind: "ip", Geo: &via3.GeoAnswer{Latitude: &coordinate, Longitude: &coordinate, Precision: &precision}}
+	if !corpusHasMap(answer) || corpusUnknown(answer) {
+		t.Fatal("finer area coordinates misclassified")
+	}
+	precision = "country"
+	if corpusHasMap(answer) {
+		t.Fatal("country coordinates became a city map")
+	}
+	precision = "city_centroid"
+	yes := true
+	answer.Usage = &via3.UsageAnswer{Anycast: &yes}
+	if corpusHasMap(answer) {
+		t.Fatal("anycast became a location")
+	}
+	unknown := via3.LookupAnswer{Kind: "asn", BGP: via3.BGPAnswer{Origins: []uint32{4199999999}, RPKI: []via3.RPKIAnswer{{Status: "unavailable"}}}}
+	if !corpusUnknown(unknown) {
+		t.Fatal("requested ASN context became an observed fact")
+	}
+	unknown.BGP.RPKI[0].Status = "valid"
+	if corpusUnknown(unknown) {
+		t.Fatal("observed RPKI classified as unknown")
+	}
+	if (&productionCorpus{}).selectQueries(map[string][]string{"unknown": {"192.0.2.1"}}) == nil {
+		t.Fatal("unknown-only corpus accepted")
+	}
+}
 
 func TestCorpusLabelsOnlySelectedIndexRow(t *testing.T) {
 	parent := via3.PrefixKey(netip.MustParsePrefix("8.8.0.0/16"), false, 0)
@@ -46,6 +127,14 @@ func TestCorpusLabelsOnlySelectedIndexRow(t *testing.T) {
 	if corpusRowSelected(shard, 8, parent, netip.MustParseAddr("8.8.9.1")) || !corpusRowSelected(shard, 1, localParent, netip.MustParseAddr("8.8.9.1")) {
 		t.Fatal("local replacement mislabeled as inherited")
 	}
+	shard = newShard([][]byte{child, host, exact}, [][]byte{parent})
+	address, selected := corpusSelectedAddress(shard, 8, parent, netip.MustParseAddr("8.8.8.1"), netip.MustParsePrefix("8.8.0.0/16"))
+	if !selected || address.String() != "8.8.9.0" {
+		t.Fatalf("shadowed first address hid inherited population: %v %v", address, selected)
+	}
+	if _, selected := corpusSelectedAddress(shard, 8, parent, netip.MustParseAddr("8.8.8.1"), netip.MustParsePrefix("8.8.8.0/24")); selected {
+		t.Fatal("query witness escaped its actual router partition")
+	}
 }
 
 func TestCorpusNetworkMOASUsesRecordOrdinalAndOriginCount(t *testing.T) {
@@ -83,6 +172,20 @@ func TestCorpusPrefixRejectsNonCanonicalRows(t *testing.T) {
 		mutate(row)
 		if _, _, err := corpusPrefix(row); err == nil {
 			t.Fatal("malformed corpus row accepted")
+		}
+	}
+}
+
+func TestCorpusParsesActualInheritedPartitionKeys(t *testing.T) {
+	for encoded, want := range map[string]string{"4:00000000000000000000000008080800/24": "8.8.8.0/24", "6:20014860000000000000000000000000/32": "2001:4860::/32"} {
+		got, err := corpusPartitionPrefix(encoded)
+		if err != nil || got.String() != want {
+			t.Fatalf("partition %s: %v %v", encoded, got, err)
+		}
+	}
+	for _, invalid := range []string{"8.8.8.0/24", "4:00000000000000000000000008080801/24", "6:20014860000000000000000000000000/129", "all"} {
+		if _, err := corpusPartitionPrefix(invalid); err == nil {
+			t.Fatalf("invalid partition accepted: %s", invalid)
 		}
 	}
 }

@@ -4,7 +4,7 @@ This contract freezes C07/C08; its executable vectors are
 `tools/release_contract/test_contracts.py`. Passing these vectors does not certify
 a real dataset, a complete binary scanner, a hosted preview or a production release.
 
-Current `release-scope-v5` preserves CC BY-SA 4.0 compiled-data licensing while
+Current `release-scope-v6` preserves CC BY-SA 4.0 compiled-data licensing while
 adding public schema 4 observed risk, verified global publisher logos, encrypted
 private-state transport and automatic promotion under reviewed policy. Source rights
 remain individually reviewed and current; no license or policy revision activates

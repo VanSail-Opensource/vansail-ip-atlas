@@ -144,6 +144,18 @@ def _completed_before_packet(run: dict, assembled_at: int) -> None:
         raise ContractError("acceptance packet must follow all completed hosted evidence")
 
 
+def verify_corpus_binding(browser: dict, build: dict) -> None:
+    lookup = build.get('go_lookup')
+    if type(lookup) is not dict:
+        raise ContractError('native lookup corpus evidence missing')
+    native_digest = lookup.get('corpus_sha256')
+    browser_digest = browser.get('corpus_sha256')
+    _hash(native_digest)
+    _hash(browser_digest)
+    if native_digest != browser_digest:
+        raise ContractError('native and browser evidence use different real query corpora')
+
+
 def acceptance(public: Path, receipt_paths: list[Path], packet: dict, now: int, *, ci=None,
                verify_live=True) -> dict:
     packet = _keys(packet, {"format_version", "scope", "repository", "head_sha", "release_id",
@@ -185,6 +197,7 @@ def acceptance(public: Path, receipt_paths: list[Path], packet: dict, now: int, 
         raise ContractError("candidate was not packaged from the qualified inclusion set")
     if parsed["production-build.json"].get("normalized_state_sha256") != candidate.get("normalized_state_sha256") or not candidate.get("normalized_state_sha256"):
         raise ContractError("build scenarios do not bind the candidate's exact normalized corpus")
+    verify_corpus_binding(parsed['production-browser.json'], parsed['production-build.json'])
     check_candidate(public, candidate, now)
     for name in ("static-candidate.json", "production-build.json", "preview-identity.json", "production-browser.json"):
         report = parsed[name]
@@ -256,11 +269,11 @@ def automatic(public: Path, receipt_paths: list[Path], evidence: bytes, now: int
     """The reviewed policy authorizes exact passing bytes, never source admission."""
     policy_bytes = (ROOT / 'configs/production-policy.json').read_bytes().rstrip(b'\n')
     policy = parse_canonical(policy_bytes)
-    expected = {'automatic_promotion': True, 'contract_revision': 1,
+    expected = {'automatic_promotion': True, 'contract_revision': 2,
         'maximum_checkpoint_age_seconds': 604800, 'maximum_rollback_age_seconds': 172800,
         'repository': REPOSITORY, 'require_all_measured_gates': True,
         'require_current_source_qualification': True, 'require_exact_head_integration': True,
-        'require_protected_main': True, 'scope': 'release-scope-v5'}
+        'require_protected_main': True, 'scope': 'release-scope-v6'}
     if policy != expected:
         raise ContractError('unrecognized automatic production policy')
     ci = ci or TrustedCI()

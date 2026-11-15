@@ -2,7 +2,7 @@
 
 ## Current approved scope
 
-`release-scope-v5` (2026-11-15) retains every product view, introduces versioned
+`release-scope-v6` (2026-11-15) retains every product view, introduces versioned
 observed risk, permits reviewed required local publisher logos in global credits,
 and authorizes automatic gated publishing from the existing public repository on
 official GitHub runners. `AGENTS.md` is normative. Earlier dated reports remain
@@ -29,18 +29,18 @@ credits. Source code and dependencies retain their separate licenses.
 
 ## Sources and freshness
 
-The shortlist contains 14 entries: ten statically admitted and four routing
-candidates. Active is not proof of current availability. Runtime intake binds
+The release catalog contains ten statically admitted entries. Four unqualified
+routing candidates have been removed under the user-approved v6 release scope. Active is not proof of current availability. Runtime intake binds
 actual bytes, certification, policy and publication clocks before inclusion.
 Tor dated exits and Ipverse dated ASN categories supply observed risk and usage;
 Ipverse role labels never determine Tier-1. Deprecated, stale and unqualified
 lists are removed from the production catalog; useful parser regressions remain.
 
-Two independent MRT path families, directed relationships and a complete RPKI
-snapshot still require full qualification. A software license does not approve
-an upstream dataset. Unknown redistribution obligations block admission. Missing
-required routing coverage blocks production; synthetic data or an allowlist
-cannot replace it. Keep all twelve detection categories implemented, but require
+Any future MRT path families, directed relationships and complete RPKI snapshot
+still require full qualification. A software license does not approve an upstream
+dataset. Unknown redistribution obligations block admission. Missing routing
+coverage is explicitly unknown under v6; synthetic data or an allowlist cannot
+replace it or produce real routing claims. Keep all twelve detection categories implemented, but require
 available verified observations rather than twelve simultaneously active feeds.
 Absent categories remain unknown.
 
@@ -116,7 +116,10 @@ engineering copies and prove the deltas. Every scenario executes the same
 materializer as production; no benchmark-only shortcut or production receipt.
 Derive lookup strata, map and graph cases from actual current indexes. Report
 p50/p95/p99, allocation counts, RSS, scratch, input size and browser metrics.
-Missing populations, unmeasured bounds and failed original ceilings block release.
+Absent routing populations are recorded and tested as unknown; they never count
+as observed production data. Applicable unmeasured bounds and failed original
+ceilings block release. The exact application also retains independent synthetic
+24-node graph and maximum-memory capacity tests.
 
 Keep fewer than 18,500 files and each asset below 24 MiB. Verify all object hashes,
 public fields and legal assets before upload and on the hosted preview. OSM tiles

@@ -653,16 +653,16 @@ func (s *Shard) findPrefixWithin(addr netip.Addr, maxBits int) ([]byte, netip.Pr
 	if maxBits < 0 || maxBits > addr.BitLen() {
 		return nil, netip.Prefix{}, false
 	}
+	if s.lookup != nil && s.Kind != 9 {
+		family := 0
+		if addr.Is6() {
+			family = 1
+		}
+		return s.findAncestryPrefix(addr, family, maxBits)
+	}
 	var keyBytes [32]byte
 	key := keyBytes[:]
-	family := 0
-	if addr.Is6() {
-		family = 1
-	}
 	for length := maxBits; length >= 0; length-- {
-		if s.lookup != nil && !s.lookup.depths[family][length] {
-			continue
-		}
 		prefix := netip.PrefixFrom(addr, length).Masked()
 		for _, exact := range []bool{true, false} {
 			if exact && length != addr.BitLen() {
@@ -679,6 +679,53 @@ func (s *Shard) findPrefixWithin(addr netip.Addr, maxBits int) ([]byte, netip.Pr
 		}
 	}
 	return nil, netip.Prefix{}, false
+}
+
+// Prefixes are contiguous address intervals. Any earlier prefix containing a
+// query also contains its address predecessor, so the longest match must be on
+// that predecessor's ancestor chain. At most 129 prefix lengths plus one
+// explicit/exact tie are visited; no unrelated row or answer is scanned/cached.
+func (s *Shard) findAncestryPrefix(addr netip.Addr, family, maxBits int) ([]byte, netip.Prefix, bool) {
+	var address [16]byte
+	if family == 0 {
+		v4 := addr.As4()
+		copy(address[12:], v4[:])
+	} else {
+		address = addr.As16()
+	}
+	var best []byte
+	var prefix netip.Prefix
+	for section, id := range []uint16{1, 8} {
+		metadata := &s.lookup.prefixes[section]
+		first, end := metadata.families[family], metadata.families[family+1]
+		rows := s.lookup.rows[id]
+		i := sort.Search(int(end-first), func(i int) bool {
+			p := (int(first) + i) * 32
+			return bytes.Compare(rows[p+4:p+20], address[:]) > 0
+		})
+		if i == 0 {
+			continue
+		}
+		for ordinal := first + uint32(i) - 1; ordinal != None; ordinal = metadata.parents[ordinal] {
+			p := int(ordinal) * 32
+			row := rows[p : p+32]
+			if int(row[1]) > maxBits {
+				continue
+			}
+			start, _ := keyAddr(row)
+			candidate := netip.PrefixFrom(start, int(row[1]))
+			if candidate.Contains(addr) {
+				if best == nil || row[1] > best[1] || row[1] == best[1] && u16(row, 2) > u16(best, 2) {
+					best, prefix = row, candidate
+				}
+				break
+			}
+		}
+	}
+	if best == nil {
+		return nil, netip.Prefix{}, false
+	}
+	return s.Record(u32(best, 20)), prefix, true
 }
 func (s *Shard) ASNRun(asn uint32) ([][]byte, bool) {
 	first, end, ok := s.asnBounds(asn)

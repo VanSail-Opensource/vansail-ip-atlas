@@ -1,7 +1,7 @@
 import copy
 import unittest
 
-from tools.release_contract.acceptance import allocation_gate, browser_gates, build_gates, comparison, graph_gate, require_all
+from tools.release_contract.acceptance import CORPUS_STRATA, GRAPH_FIXTURE_SHA256, allocation_gate, browser_gates, build_gates, comparison, graph_gate, require_all
 from tools.release_contract.contracts import ContractError
 
 
@@ -13,6 +13,17 @@ def graph():
         "actions": 100, "complete_second_fps": [60] * 10,
         "population_checkpoints": [copy.deepcopy(population) for _ in range(12)]}
         for name in ("keyboard-pan", "wheel-zoom", "route-focus")]}
+
+
+def browser_report():
+    return {"scope": "hosted-production-browser-v2", "release_scope": "release-scope-v6", "mode": "production",
+        "errors": [], "release_id": "a" * 64, "corpus_release_id": "a" * 64, "corpus_sha256": "b" * 64,
+        "candidate_bundle_sha256": "c" * 64, "corpus_features": {"map": False, "graph": False},
+        "corpus_availability": [{"stratum": s, "status": "observed" if s in ("ipv4_lpm", "unknown") else "absent",
+            "sampled_queries": 1 if s in ("ipv4_lpm", "unknown") else 0} for s in CORPUS_STRATA],
+        "populations": [], "component_populations": [], "worst_case_worker_memory": {"worker_sha256": "d" * 64},
+        "graph_component_fixture": {"scope": "isolated-synthetic-capacity", "fixture_sha256": GRAPH_FIXTURE_SHA256,
+            "candidate_bundle_sha256": "c" * 64, "worker_sha256": "d" * 64}}
 
 
 class AcceptanceTests(unittest.TestCase):
@@ -74,9 +85,9 @@ class AcceptanceTests(unittest.TestCase):
         self.assertEqual(graph_gate(data), "unmeasured")
 
     def test_missing_theme_populations_heap_memory_and_fast_batch_mean_stay_unmeasured(self):
-        browser = browser_gates({"scope": "hosted-production-browser-v1", "mode": "production",
-            "errors": [], "populations": [], "worst_case_worker_memory": {
-                "accounting": "JSHeapUsedSize", "peak_bytes": 100_000}})
+        report = browser_report()
+        report["worst_case_worker_memory"] = {"accounting": "JSHeapUsedSize", "peak_bytes": 100_000}
+        browser = browser_gates(report)
         self.assertTrue(browser)
         self.assertTrue(all(value == "unmeasured" for value in browser.values()))
         build = build_gates({"scope": "hosted-production-build-v1", "mode": "production", "errors": [],
@@ -88,9 +99,67 @@ class AcceptanceTests(unittest.TestCase):
 
     def test_duplicate_population_cannot_manufacture_sample_count(self):
         sample = {"width": 320, "theme": "light", "sample": 1}
+        report = browser_report()
+        report["populations"] = [sample, sample]
         with self.assertRaises(ContractError):
-            browser_gates({"scope": "hosted-production-browser-v1", "mode": "production", "errors": [],
-                           "populations": [sample, sample]})
+            browser_gates(report)
+
+    def test_verified_unknowns_do_not_replace_full_graph_capacity_populations(self):
+        report = browser_report()
+        for width in (320, 390, 1280, 1440):
+            for theme in ("light", "dark"):
+                for sample in range(1, 31):
+                    identity = {"width": width, "theme": theme, "sample": sample}
+                    report["populations"].append({**identity, "lcp_ms": 100, "initial_js_gzip_bytes": 100,
+                        "interaction_cls": 0, "interaction_durations_ms": [16], "complete_interaction_script": True,
+                        "completed_routes": ["overview", "quality", "class-c", "asn", "bgp"], "event_timing_supported": True,
+                        "accessibility": {"engine": "axe-core", "violations": [], "incomplete": []},
+                        "map": {"state": "unavailable", "unknown_state_verified": True},
+                        "graph": {"state": "unavailable", "visible_nodes": 0, "observed_routes": 0, "empty_state_verified": True},
+                        "unknown_states": {"ipv4": True, "ipv6": True, "asn": True}})
+                    report["component_populations"].append({**identity, "worker_sha256": "d" * 64, "graph": graph(),
+                        "accessibility": {"engine": "axe-core", "violations": [], "incomplete": []}})
+        gates = browser_gates(report)
+        self.assertTrue(all(value == "passed" for key, value in gates.items() if key.startswith("browser_320_light_")))
+        report["corpus_features"] = {"map": True, "graph": True}
+        for row in report["populations"]:
+            row["map"] = {"state": "observed", "unknown_state_verified": False}
+            # Nonlinear observed paths can be retained while projecting no SVG nodes.
+            row["graph"] = {"state": "observed", "visible_nodes": 0, "observed_routes": 2, "empty_state_verified": False}
+        self.assertEqual(browser_gates(report)["browser_320_light_candidate_states"], "passed")
+        report["populations"][0]["graph"]["observed_routes"] = 0
+        self.assertEqual(browser_gates(report)["browser_320_light_candidate_states"], "unmeasured")
+        report["corpus_features"] = {"map": False, "graph": False}
+        for row in report["populations"]:
+            row["map"] = {"state": "unavailable", "unknown_state_verified": True}
+            row["graph"] = {"state": "unavailable", "visible_nodes": 0, "observed_routes": 0, "empty_state_verified": True}
+        report["component_populations"][0]["graph"] = {"visible_nodes": 0, "active_frames": []}
+        self.assertEqual(browser_gates(report)["browser_320_light_graph"], "unmeasured")
+        report["component_populations"][0]["graph"] = graph()
+        report["component_populations"][0]["graph"]["active_frames"][0]["complete_second_fps"][0] = 49
+        self.assertEqual(browser_gates(report)["browser_320_light_graph"], "failed")
+        report["component_populations"][0]["graph"] = graph()
+        report["graph_component_fixture"]["worker_sha256"] = "e" * 64
+        self.assertEqual(browser_gates(report)["browser_320_light_graph"], "unmeasured")
+        report["graph_component_fixture"]["worker_sha256"] = "d" * 64
+        report["component_populations"][0]["accessibility"]["incomplete"] = [{"id": "color-contrast"}]
+        self.assertEqual(browser_gates(report)["browser_320_light_accessibility"], "unmeasured")
+        report["component_populations"][0]["accessibility"]["violations"] = [{"id": "color-contrast"}]
+        self.assertEqual(browser_gates(report)["browser_320_light_accessibility"], "failed")
+        report["populations"][0]["graph"]["visible_nodes"] = 1
+        self.assertEqual(browser_gates(report)["browser_320_light_candidate_states"], "unmeasured")
+        report["populations"][0]["unknown_states"]["ipv4"] = 1
+        self.assertEqual(browser_gates(report)["browser_320_light_unknown_states"], "unmeasured")
+
+    def test_corpus_absence_and_candidate_identity_cannot_be_asserted_by_flags(self):
+        for mutation in ("count", "status", "release", "scope", "duplicate"):
+            report = browser_report()
+            if mutation == "count": report["corpus_availability"][0]["sampled_queries"] = True
+            elif mutation == "status": report["corpus_availability"][0]["status"] = "observed"
+            elif mutation == "release": report["corpus_release_id"] = "e" * 64
+            elif mutation == "scope": report["release_scope"] = "release-scope-v5"
+            elif mutation == "duplicate": report["corpus_availability"][0] = report["corpus_availability"][1]
+            with self.subTest(mutation=mutation), self.assertRaises(ContractError): browser_gates(report)
 
     def test_overshoot_one_build_sample_fails_maximum_gate(self):
         data = {"scope": "hosted-production-build-v1", "mode": "production", "errors": [],

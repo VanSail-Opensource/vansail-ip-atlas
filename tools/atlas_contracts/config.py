@@ -219,8 +219,8 @@ def validate_sources(config):
         raise ContractError("unresolved relationship alias")
     if bgp["max_mrt_sources_per_run"] < 2:
         raise ContractError("cold build cannot acquire two independent path families")
-    caida = by_id["caida-asrel2"]
-    if caida["download"].get("url") is not None or not isinstance(caida.get("discovery"), dict):
+    caida = by_id.get("caida-asrel2")
+    if caida is not None and (caida["download"].get("url") is not None or not isinstance(caida.get("discovery"), dict)):
         raise ContractError("CAIDA requires deterministic current-snapshot discovery")
 
 

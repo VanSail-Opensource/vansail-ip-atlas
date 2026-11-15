@@ -1,7 +1,10 @@
 import json
+import contextlib
+import io
 import os
 from pathlib import Path
 import tempfile
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -84,6 +87,57 @@ class CandidateClockTests(unittest.TestCase):
             workflow.candidate()
         self.assertEqual([call.args[0][1] for call in run.call_args_list], ['compile-production', 'verify-production'])
         self.assertFalse((self.root / 'build-private/software-license-metadata.json').exists())
+
+    def test_failed_child_logs_only_a_fixed_phase_and_keeps_details_private(self):
+        public_out, public_err = io.StringIO(), io.StringIO()
+        marker = 'synthetic-private-source-detail'
+        with patch.object(workflow, 'ROOT', self.root), contextlib.redirect_stdout(public_out), \
+                contextlib.redirect_stderr(public_err), self.assertRaises(ContractError):
+            workflow.run([sys.executable, '-c', f'import sys; print({marker!r}); sys.exit(1)'])
+        self.assertIn('Production step failed: stage-command', public_err.getvalue())
+        self.assertNotIn(marker, public_out.getvalue() + public_err.getvalue())
+        self.assertIn(marker, (self.private / 'stage.log').read_text())
+
+    def test_failure_category_is_bounded_fixed_and_cannot_reuse_previous_command(self):
+        log = self.private / 'stage.log'
+        previous = b'context deadline exceeded\n'
+        log.write_bytes(previous + b'private-source-identity and arbitrary error\n')
+        self.assertEqual(workflow.failure_category(log, len(previous)), 'command-failed')
+        log.write_bytes(previous + b'production_blocked: unqualified source capabilities: private-value\n')
+        self.assertEqual(workflow.failure_category(log, len(previous)), 'source-capability')
+        log.write_bytes(previous + b'x' * 70000 + b'\npipeline scratch ceiling exceeded\n')
+        self.assertEqual(workflow.failure_category(log, len(previous)), 'scratch-budget')
+
+    def test_intake_waits_for_longer_exact_head_integration_without_relaxing_identity(self):
+        head = 'a' * 40
+        event = self.root / 'event.json'
+        event.write_text('{}')
+        output, environment = self.root / 'github-output', self.root / 'github-env'
+        env = {'GITHUB_REPOSITORY': workflow.REPOSITORY, 'GITHUB_REF': 'refs/heads/main',
+               'GITHUB_SHA': head, 'GITHUB_EVENT_NAME': 'push', 'GITHUB_EVENT_PATH': str(event),
+               'GITHUB_OUTPUT': str(output), 'GITHUB_ENV': str(environment)}
+        polls = 0
+        def api(route):
+            nonlocal polls
+            if route == 'branches/main':
+                return {'commit': {'sha': head}}
+            if route.startswith('actions/workflows/'):
+                polls += 1
+                return {'workflow_runs': [{'head_sha': head, 'event': 'push', 'id': 11,
+                    'status': 'in_progress' if polls == 1 else 'completed', 'conclusion': 'success'}]}
+            self.assertEqual(route, 'actions/runs/11')
+            return {'head_sha': head, 'head_branch': 'main', 'path': '.github/workflows/p0-contracts.yml',
+                    'head_repository': {'full_name': workflow.REPOSITORY}, 'status': 'completed',
+                    'conclusion': 'success', 'event': 'push'}
+        with patch.dict(os.environ, env), patch.object(workflow, 'api', side_effect=api), \
+                patch.object(workflow.time, 'monotonic', side_effect=[0, 3600]), \
+                patch.object(workflow.time, 'sleep'):
+            workflow.context('intake', None)
+        self.assertEqual(output.read_text(), 'upstream_run_id=11\n')
+        self.assertEqual(polls, 2)
+        with patch.dict(os.environ, env), patch.object(workflow, 'api', return_value={'commit': {'sha': 'b' * 40}}), \
+                self.assertRaises(ContractError):
+            workflow.context('intake', None)
 
 
 if __name__ == '__main__':

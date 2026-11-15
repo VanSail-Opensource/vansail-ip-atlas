@@ -402,8 +402,10 @@ repeated verified Tier-1 discovery scans for the unchanged-build runtime gate.
 
 The isolated source branch merges the root checkpoint `27edf82`, including
 performance/orchestration through `6b1c617`, and the authenticated Tier-1
-verification fusion `3b439fe`. Semantic
-review retained schema-5 RPKI observation/coverage clocks, every original VRP,
+verification fusion `3b439fe`. Native ASN prefix pages also reuse bounded
+canonical prefix text from `cb14b68` within the original cache/live budgets;
+optional text is reclaimed before required payload space. Semantic review retained
+schema-5 RPKI observation/coverage clocks, every original VRP,
 exact private-run logical byte budgets and schema-4 cache rejection. The fifteen
 original build benchmark cases remain required under the completed-run matrix.
 
@@ -415,14 +417,14 @@ explicit educational-use decision remain recorded. No static activation grants
 permission, produces a runtime receipt or certifies current coverage.
 
 All fifteen exact observed fixtures were parsed and semantically validated before
-the certification ledger was refreshed at `2026-11-15T14:15:52Z`, then rerun
+the certification ledger was refreshed at `2026-11-15T14:22:58Z`, then rerun
 successfully. The ledger binds internal implementation hash
-`897e485176fa34a3ca49f1e0ccdc412b4604b3fd65c5b5471b5b457816182ca7`.
+`996f229b77a7e09d4cd12a8404fbd9291209ddc638b1fbc8985d98cac092ddc6`.
 Any later internal Go edit requires another observed-fixture run and refresh.
 Local strict schemas, 157 Python contract tests, the full Go suite and vet,
 selected internal/source-sample races, focused source/schema/cache and
-maximum-memory-profile tests, and actionlint pass. All
-72 hosted-helper tests pass using pinned age 1.3.0, including real encryption,
+maximum-memory-profile tests, and actionlint pass. All 72 hosted-helper tests pass
+using pinned age 1.3.0, including real encryption,
 wrong-key and corrupt-ciphertext rejection. This suite caught and repaired a
 stale schema-4 object check in the memory verifier, without changing its workload,
 framing checks or limits.

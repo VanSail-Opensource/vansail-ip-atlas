@@ -12,6 +12,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -58,6 +59,7 @@ type Options struct {
 	Clock, ValidUntil       int64
 	Limits                  Limits
 	ProductionGate          func(context.Context) error
+	ObserveStage            func(context.Context, Stage) func(bool)
 	// InputGate binds source/config/state inputs throughout a build in either
 	// mode. It is independent of the mandatory production capability gate.
 	InputGate            func(context.Context) error
@@ -95,8 +97,14 @@ type compiler struct {
 	used                  uint64
 	serial                int
 	objects               map[string]via3.ObjectInfo
+	partitionSizes        map[string]partitionSize
 	routes                []route
 	routerBytes           uint64
+}
+
+type partitionSize struct {
+	records int64
+	bytes   int64
 }
 
 type route struct {
@@ -233,18 +241,25 @@ func Build(ctx context.Context, options Options, produce Producer) (Candidate, e
 		return result, c.cause(err)
 	}
 	if !reused {
+		finishSort := observeStage(workCtx, options, StageSort)
 		runs, err := c.sort(produce)
+		finishSort(err == nil)
 		if err != nil {
 			return result, c.cause(err)
 		}
+		finishMerge := observeStage(workCtx, options, StageMerge)
 		merged, err := c.merge(runs)
+		finishMerge(err == nil)
 		if err != nil {
 			return result, c.cause(err)
 		}
+		finishClassify := observeStage(workCtx, options, StageClassify)
 		groups, err := c.classify(merged)
+		finishClassify(err == nil)
 		if err != nil {
 			return result, c.cause(err)
 		}
+		finishPartition := observeStage(workCtx, options, StagePartition)
 		for i, path := range groups {
 			if path == "" {
 				continue
@@ -259,16 +274,23 @@ func Build(ctx context.Context, options Options, produce Producer) (Candidate, e
 				scope.last = ^uint32(0)
 			}
 			if err := c.partition(path, scope); err != nil {
+				finishPartition(false)
 				return result, c.cause(err)
 			}
 		}
 		if len(c.routes) == 0 {
+			finishPartition(false)
 			return result, errors.New("pipeline requires at least one public fact")
 		}
 		if err := c.router(); err != nil {
+			finishPartition(false)
 			return result, c.cause(err)
 		}
+		finishPartition(true)
 	}
+	finishPublish := observeStage(workCtx, options, StagePublish)
+	published := false
+	defer func() { finishPublish(published) }()
 	infos := make([]via3.ObjectInfo, 0, len(c.objects))
 	for _, info := range c.objects {
 		infos = append(infos, info)
@@ -298,7 +320,6 @@ func Build(ctx context.Context, options Options, produce Producer) (Candidate, e
 	}
 	// Retained objects and their authenticated index are part of this build's
 	// measured work. Keep the existing final gate/resource checks after that IO.
-	published := false
 	defer func() {
 		if cache := options.materializationCache; !published && cache != nil && cache.created {
 			_ = os.RemoveAll(cache.root)
@@ -370,6 +391,7 @@ func (c *compiler) remove(path string) error {
 	if err := os.Remove(path); err != nil {
 		return err
 	}
+	delete(c.partitionSizes, path)
 	c.used -= uint64(info.Size())
 	if c.options.scratchUsage != nil {
 		c.options.scratchUsage(c.used)
@@ -455,13 +477,11 @@ func identity(r via3.PublicRecord) string {
 
 func decode(data []byte) (via3.PublicRecord, error) {
 	var r via3.PublicRecord
-	d := json.NewDecoder(bytes.NewReader(data))
-	d.DisallowUnknownFields()
-	if err := d.Decode(&r); err != nil {
+	// The complete bounded frame is already in memory. Decode it directly,
+	// preserving v1 field/method semantics and strict unknown-member rejection,
+	// instead of copying and scanning it through an intermediate stream buffer.
+	if err := jsonv2.Unmarshal(data, &r, json.DefaultOptionsV1(), jsonv2.RejectUnknownMembers(true)); err != nil {
 		return r, errors.New("invalid private sort record")
-	}
-	if err := d.Decode(new(json.RawMessage)); err != io.EOF {
-		return r, errors.New("trailing private sort record")
 	}
 	return r, nil
 }
@@ -695,6 +715,7 @@ func (c *compiler) merge(runs []string) (string, error) {
 
 func (c *compiler) classify(path string) ([3]string, error) {
 	var paths [3]string
+	var sizes [3]partitionSize
 	var files [3]*os.File
 	var writers [3]*bufio.Writer
 	defer func() {
@@ -733,6 +754,8 @@ func (c *compiler) classify(path string) ([3]string, error) {
 		if err := c.writeRecord(writers[i], r.row.data); err != nil {
 			return paths, err
 		}
+		sizes[i].records++
+		sizes[i].bytes += int64(len(r.row.data)) + 512
 		c.stats.UniqueRecords++
 	}
 	for i, f := range files {
@@ -743,6 +766,7 @@ func (c *compiler) classify(path string) ([3]string, error) {
 			if err := f.Close(); err != nil {
 				return paths, err
 			}
+			c.rememberPartitionSize(paths[i], sizes[i])
 		}
 	}
 	r.file.Close()
@@ -806,32 +830,40 @@ func (s scope) children() (scope, scope, error) {
 }
 
 func (c *compiler) partition(path string, s scope) error {
-	r, err := openRun(path, c.options.Limits.RecordBytes)
-	if err != nil {
-		return err
-	}
+	var err error
 	var records []via3.PublicRecord
 	var size int64
-	overflow := false
-	for {
-		if err := r.next(); err == io.EOF {
-			break
-		} else if err != nil {
-			r.file.Close()
+	// These exact totals belong only to this compiler's newly closed immutable
+	// run. An oversized run must split regardless of its content, so avoid a
+	// partial decode that the strict split pass would immediately repeat. Runs
+	// without totals, and every eventual leaf, retain the full bounded scan.
+	total := c.partitionSizes[path]
+	overflow := total.records > int64(c.options.Limits.PartitionRecords) || total.bytes > c.options.Limits.PartitionBytes
+	if !overflow {
+		r, err := openRun(path, c.options.Limits.RecordBytes)
+		if err != nil {
 			return err
 		}
-		cost := int64(len(r.row.data) + 512)
-		if len(records) >= c.options.Limits.PartitionRecords || size+cost > c.options.Limits.PartitionBytes {
-			overflow = true
-			break
+		for {
+			if err := r.next(); err == io.EOF {
+				break
+			} else if err != nil {
+				r.file.Close()
+				return err
+			}
+			cost := int64(len(r.row.data) + 512)
+			if len(records) >= c.options.Limits.PartitionRecords || size+cost > c.options.Limits.PartitionBytes {
+				overflow = true
+				break
+			}
+			records = append(records, r.record)
+			size += cost
+			if uint64(size) > c.stats.PartitionBufferPeak {
+				c.stats.PartitionBufferPeak = uint64(size)
+			}
 		}
-		records = append(records, r.record)
-		size += cost
-		if uint64(size) > c.stats.PartitionBufferPeak {
-			c.stats.PartitionBufferPeak = uint64(size)
-		}
+		r.file.Close()
 	}
-	r.file.Close()
 	var compiled via3.CompiledPartition
 	if !overflow {
 		compiled, err = via3.CompilePartition(c.ctx, via3.PartitionInput{Partition: s.name(), Records: records, PrefixProvider: c.options.prefixProvider})
@@ -856,6 +888,16 @@ func (c *compiler) partition(path string, s scope) error {
 	if overflow {
 		records = nil
 		compiled = via3.CompiledPartition{}
+		if runs, scattered, err := c.scatterPartition(path, s); err != nil {
+			return err
+		} else if scattered {
+			for _, run := range runs {
+				if err := c.partition(run.path, run.scope); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
 		left, right, err := s.children()
 		if err != nil {
 			return err
@@ -927,6 +969,7 @@ func compact(values []uint32) []uint32 {
 
 func (c *compiler) split(path string, children *[2]scope) ([2]string, error) {
 	var paths [2]string
+	var sizes [2]partitionSize
 	var files [2]*os.File
 	var writers [2]*bufio.Writer
 	defer func() {
@@ -999,6 +1042,8 @@ func (c *compiler) split(path string, children *[2]scope) ([2]string, error) {
 			if err := c.writeRecord(writers[i], data); err != nil {
 				return paths, err
 			}
+			sizes[i].records++
+			sizes[i].bytes += int64(len(data)) + 512
 		}
 	}
 	for i, f := range files {
@@ -1009,6 +1054,7 @@ func (c *compiler) split(path string, children *[2]scope) ([2]string, error) {
 			if err := f.Close(); err != nil {
 				return paths, err
 			}
+			c.rememberPartitionSize(paths[i], sizes[i])
 		}
 	}
 	r.file.Close()
@@ -1047,6 +1093,13 @@ func (c *compiler) split(path string, children *[2]scope) ([2]string, error) {
 		}
 	}
 	return paths, nil
+}
+
+func (c *compiler) rememberPartitionSize(path string, size partitionSize) {
+	if c.partitionSizes == nil {
+		c.partitionSizes = make(map[string]partitionSize)
+	}
+	c.partitionSizes[path] = size
 }
 
 func (c *compiler) object(object via3.BuiltObject) error {

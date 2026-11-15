@@ -76,7 +76,7 @@ func validateCorpus(c corpus) error {
 	if e4 != nil || !v4.Is4() || e6 != nil || !v6.Is6() || v6.Is4In6() || !valid(c.UnknownQueries.IPv4) || !valid(c.UnknownQueries.IPv6) || !valid(c.UnknownQueries.ASN) || !strings.HasPrefix(c.UnknownQueries.ASN, "AS") {
 		return fail()
 	}
-	strata := []string{"ipv4_exact", "ipv4_lpm", "ipv6_exact", "ipv6_lpm", "moas", "sparse_asn", "dense_asn", "inherited", "unknown"}
+	strata := fixedStrata()
 	if len(c.Availability) != len(strata) {
 		return fail()
 	}
@@ -153,6 +153,7 @@ func run() error {
 		inputBytes += int64(obj.Bytes)
 	}
 	ctx := context.Background()
+	readsBeforeWarmup := release.Reads
 	// Warm every query once. This exceeds the minimum 1000 warmups and cannot
 	// accidentally label a first object decode as a cached lookup.
 	for _, q := range c.Queries {
@@ -160,10 +161,12 @@ func run() error {
 			return errors.New("corpus warmup failed")
 		}
 	}
+	readsAfterWarmup := release.Reads
 	samples := make([]int64, 100000)
 	var before, after runtime.MemStats
 	runtime.GC()
 	runtime.ReadMemStats(&before)
+	readsBeforeTimed := release.Reads
 	started := time.Now()
 	for i := range samples {
 		q := c.Queries[i%len(c.Queries)].Q
@@ -177,6 +180,7 @@ func run() error {
 	}
 	runtime.ReadMemStats(&after)
 	duration := time.Since(started)
+	readsAfterTimed := release.Reads
 	sorted := append([]int64(nil), samples...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
 	peak := int64(0)
@@ -191,26 +195,36 @@ func run() error {
 			}
 		}
 	}
+	objectReads, err := summarizeReads(readsBeforeWarmup, readsAfterWarmup, readsBeforeTimed, readsAfterTimed)
+	if err != nil {
+		return err
+	}
+	stratumRows, err := summarizeStrata(c.Queries, samples)
+	if err != nil {
+		return err
+	}
 	digest := sha256.Sum256(data)
 	report := struct {
-		Timing         string  `json:"timing"`
-		CorpusQueries  int     `json:"corpus_queries"`
-		Warmups        int     `json:"warmups"`
-		CorpusSHA256   string  `json:"corpus_sha256"`
-		ReleaseID      string  `json:"release_id"`
-		InputBytes     int64   `json:"compressed_input_bytes"`
-		Samples        []int64 `json:"samples_ns"`
-		P50            int64   `json:"p50_ns"`
-		P95            int64   `json:"p95_ns"`
-		P99            int64   `json:"p99_ns"`
-		Allocations    uint64  `json:"allocation_count"`
-		AllocatedBytes uint64  `json:"allocated_bytes"`
-		PeakRSS        int64   `json:"process_peak_rss_bytes"`
-		ScratchBytes   int64   `json:"temporary_disk_bytes"`
-		Duration       int64   `json:"runtime_ns"`
-		GoVersion      string  `json:"go_version"`
+		Timing         string                `json:"timing"`
+		CorpusQueries  int                   `json:"corpus_queries"`
+		Warmups        int                   `json:"warmups"`
+		CorpusSHA256   string                `json:"corpus_sha256"`
+		ReleaseID      string                `json:"release_id"`
+		InputBytes     int64                 `json:"compressed_input_bytes"`
+		Samples        []int64               `json:"samples_ns"`
+		P50            int64                 `json:"p50_ns"`
+		P95            int64                 `json:"p95_ns"`
+		P99            int64                 `json:"p99_ns"`
+		Allocations    uint64                `json:"allocation_count"`
+		AllocatedBytes uint64                `json:"allocated_bytes"`
+		PeakRSS        int64                 `json:"process_peak_rss_bytes"`
+		ScratchBytes   int64                 `json:"temporary_disk_bytes"`
+		Duration       int64                 `json:"runtime_ns"`
+		GoVersion      string                `json:"go_version"`
+		ObjectReads    objectReadDiagnostics `json:"object_reads"`
+		Strata         []stratumDiagnostics  `json:"strata"`
 	}{"individual-indexed-lookups", len(c.Queries), len(c.Queries), hex.EncodeToString(digest[:]), release.Manifest.ReleaseID, inputBytes,
-		samples, sorted[49999], sorted[94999], sorted[98999], after.Mallocs - before.Mallocs, after.TotalAlloc - before.TotalAlloc, peak, 0, duration.Nanoseconds(), runtime.Version()}
+		samples, sorted[49999], sorted[94999], sorted[98999], after.Mallocs - before.Mallocs, after.TotalAlloc - before.TotalAlloc, peak, 0, duration.Nanoseconds(), runtime.Version(), objectReads, stratumRows}
 	encoded, err := json.Marshal(report)
 	if err != nil {
 		return err

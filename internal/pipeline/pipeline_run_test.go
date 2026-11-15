@@ -9,10 +9,52 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"vansail-ip-atlas/internal/via3"
 )
+
+func TestDirectFrameDecodePreservesStrictStreamSemantics(t *testing.T) {
+	var cases [][]byte
+	for _, row := range fusedFixture() {
+		data, err := json.Marshal(row)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cases = append(cases, data, append(append([]byte(" \n"), data...), '\t'))
+	}
+	for _, data := range []string{
+		`null`,
+		`{"version":3,"kind":2,"geo":{"Country":"US"}}`,
+		`{"Version":3,"Kind":2,"Geo":{"Country":"US"},"Geo":{"City":"Merged"}}`,
+		`{"Version":3,"Version":2,"Kind":2}`,
+		`{"Version":65536,"Kind":2}`,
+		`{"Version":3,"Kind":2,"unexpected":true}`,
+		`{"Version":3,"Kind":2,"Geo":{"Country":"US","unexpected":true}}`,
+		`{"Version":3,"Kind":2} {}`,
+		`{"Version":3,"Kind":2} null`,
+		`{"Version":3,"Kind":2`,
+		`{"Version":3,"Kind":2,"Geo":{"City":"bad` + string([]byte{0xff}) + `byte"}}`,
+	} {
+		cases = append(cases, []byte(data))
+	}
+	for i, data := range cases {
+		var old via3.PublicRecord
+		d := json.NewDecoder(bytes.NewReader(data))
+		d.DisallowUnknownFields()
+		oldErr := d.Decode(&old)
+		if oldErr == nil {
+			if err := d.Decode(new(json.RawMessage)); err != io.EOF {
+				oldErr = io.ErrUnexpectedEOF
+			}
+		}
+		got, err := decode(data)
+		if (err == nil) != (oldErr == nil) || err == nil && !reflect.DeepEqual(got, old) {
+			t.Fatalf("frame %d changed decoding: got %+v/%v, previous %+v/%v", i, got, err, old, oldErr)
+		}
+	}
+}
 
 func TestRunReaderRetainsIndependentValidatedRecord(t *testing.T) {
 	rows := []via3.PublicRecord{
@@ -147,6 +189,7 @@ func TestSplitSkipsOnlyProvenEmptyScopes(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				var measured partitionSize
 				for {
 					if err := r.next(); err == io.EOF {
 						break
@@ -154,11 +197,22 @@ func TestSplitSkipsOnlyProvenEmptyScopes(t *testing.T) {
 						t.Fatal(err)
 					}
 					counts[i]++
+					measured.records++
+					measured.bytes += int64(len(r.row.data)) + 512
 					if tc.name == "ancestor coverage" && r.record.Prefix == tc.root.prefix && !r.record.Inherited {
 						t.Fatal("broad prefix lost inherited coverage")
 					}
 				}
 				r.file.Close()
+				if c.partitionSizes[path] != measured {
+					t.Fatalf("split totals differ from completed frames: got %+v, want %+v", c.partitionSizes[path], measured)
+				}
+				if err := c.remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if _, ok := c.partitionSizes[path]; ok {
+					t.Fatal("removed run retained totals")
+				}
 			}
 			wantCounts := [2]int{2, 0}
 			if tc.name == "ancestor coverage" {
@@ -168,5 +222,84 @@ func TestSplitSkipsOnlyProvenEmptyScopes(t *testing.T) {
 				t.Fatal("split lost or duplicated rows", counts)
 			}
 		})
+	}
+}
+
+func TestClassifyTotalsMatchCompletedFrames(t *testing.T) {
+	c := &compiler{ctx: context.Background(), options: Options{Limits: DefaultLimits()}, scratch: t.TempDir()}
+	runs, err := c.sort(producer(fusedFixture()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged, err := c.merge(runs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, err := c.classify(merged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range paths {
+		if path == "" {
+			t.Fatal("fixture must cover IPv4, IPv6 and ASN runs")
+		}
+		r, err := openRun(path, c.options.Limits.RecordBytes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var measured partitionSize
+		for {
+			if err := r.next(); err == io.EOF {
+				break
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			measured.records++
+			measured.bytes += int64(len(r.row.data)) + 512
+		}
+		r.file.Close()
+		if c.partitionSizes[path] != measured {
+			t.Fatalf("classification totals differ from completed frames: got %+v, want %+v", c.partitionSizes[path], measured)
+		}
+	}
+}
+
+func TestPartitionTotalsNeverBypassFrameOrLeafValidation(t *testing.T) {
+	for _, malformed := range []bool{false, true} {
+		limits := DefaultLimits()
+		limits.PartitionRecords = 1
+		c := &compiler{ctx: context.Background(), options: Options{Limits: limits}, scratch: t.TempDir()}
+		path := c.next()
+		file, err := os.Create(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if malformed {
+			if err := c.writeRecord(file, []byte(`{"Version":3,"Kind":2,"unexpected":true}`)); err != nil {
+				t.Fatal(err)
+			}
+			// The known oversized path must still strictly decode its frames
+			// during splitting before it can create an accepted child.
+			c.rememberPartitionSize(path, partitionSize{records: 2})
+		} else {
+			for _, country := range []string{"US", "DE"} {
+				data, err := json.Marshal(via3.PublicRecord{Version: 3, Kind: 2, Prefix: netip.MustParsePrefix("8.8.8.0/24"), Geo: &via3.GeoData{Country: country}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := c.writeRecord(file, data); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// A missing or underestimated total cannot admit an oversized
+			// indivisible leaf; the ordinary record/byte scan still applies.
+			c.rememberPartitionSize(path, partitionSize{records: 1})
+		}
+		if err := file.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := c.partition(path, scope{prefix: netip.MustParsePrefix("0.0.0.0/0")}); err == nil {
+			t.Fatalf("partition totals bypassed validation; malformed=%t", malformed)
+		}
 	}
 }

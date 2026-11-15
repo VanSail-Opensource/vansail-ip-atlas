@@ -190,6 +190,45 @@ func TestSparseProfileDoesNotImputeCleanAndLPM(t *testing.T) {
 		t.Fatalf("sparse profile imputed facts: %+v", profile)
 	}
 }
+
+func TestEmptyOriginsPreserveAbsentAndNormalizedAddressResults(t *testing.T) {
+	queries := []netip.Addr{
+		{}, netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("2001:db8::1"),
+		netip.MustParseAddr("::ffff:192.0.2.1"), netip.MustParseAddr("fe80::1%zone"),
+		netip.MustParseAddr("::ffff:192.0.2.1%zone"),
+	}
+	// An unrelated populated index exercises the ordinary no-match path; empty
+	// indexes must preserve its nil result for valid and rejected addresses.
+	for _, origins := range []map[netip.Prefix][]uint32{
+		nil, {}, {netip.MustParsePrefix("203.0.113.0/24"): {13335}},
+	} {
+		engine := Engine{origins: origins}
+		for _, query := range queries {
+			if got := engine.Origins(query); got != nil {
+				t.Fatalf("absent origins changed for %v: %v", query, got)
+			}
+		}
+	}
+	engine := Engine{origins: map[netip.Prefix][]uint32{netip.MustParsePrefix("192.0.2.0/24"): {13335, 15169}}}
+	want := []uint32{13335, 15169}
+	for _, query := range queries[1:4] {
+		got := engine.Origins(query)
+		if query.Is6() && !query.Is4In6() {
+			if got != nil {
+				t.Fatal("IPv4 origins crossed into IPv6")
+			}
+			continue
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatal("mapped normalization changed origins", got)
+		}
+		got[0] = 1
+		if !reflect.DeepEqual(engine.Origins(query), want) {
+			t.Fatal("origin result aliases the frozen index")
+		}
+	}
+}
+
 func TestInvalidInputsAndClock(t *testing.T) {
 	p := testPolicy(t)
 	v := riskEvidence("192.0.2.1", "a", "malware")

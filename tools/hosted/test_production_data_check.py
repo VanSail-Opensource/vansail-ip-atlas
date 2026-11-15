@@ -1,4 +1,6 @@
 import json
+from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 import tempfile
 import unittest
@@ -53,6 +55,7 @@ class ActualLookupGateTests(unittest.TestCase):
                 self.assertIs(report['passed'], passed)
                 self.assertEqual(report['compile_runtime_ms'], 2)
                 self.assertIs(type(report['compile_runtime_ms']), int)
+                self.assertEqual(report['observed_input'], {'status': 'unavailable'})
 
     def test_compile_failure_retains_elapsed_time_and_only_current_phase_diagnostics(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -76,3 +79,88 @@ class ActualLookupGateTests(unittest.TestCase):
             self.assertFalse(report['passed'])
             self.assertEqual(report['compile_runtime_ms'], 2100000)
             self.assertEqual(report['compile_phases'], [row])
+
+
+class ObservedInputDiagnosticTests(unittest.TestCase):
+    clock = 1794096000
+
+    def fixture(self):
+        stamp = lambda value: datetime.fromtimestamp(value, timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        parts = [{'SHA256': [1] * 32, 'Bytes': 128, 'Records': 10,
+                  'Codec': 'zstd-v1', 'DecodedBytes': 1024},
+                 {'SHA256': [2] * 32, 'Bytes': 256, 'Records': 20,
+                  'Codec': 'zstd-v1', 'DecodedBytes': 2048}]
+        state = {'Version': 2, 'EvaluatedAt': stamp(self.clock), 'PolicyHash': [3] * 32,
+                 'Sources': [{'ID': 'PRIVATE_SOURCE_MARKER', 'Fingerprint': [4] * 32,
+                              'ExpiresAt': stamp(self.clock + 3600), 'Records': None,
+                              'RecordPartitions': parts,
+                              'Receipt': {'private': 'https://private.invalid/secret'}},
+                             {'ID': 'OTHER_PRIVATE_SOURCE', 'Fingerprint': [5] * 32,
+                              'ExpiresAt': stamp(self.clock + 3600), 'Records': [],
+                              'RecordPartitions': [dict(parts[0])]}]}
+        report = {'schema_version': 1, 'scope': 'actual-source-intake-not-production-acceptance',
+                  'evaluated_at': self.clock, 'configured_sources': 2, 'active_sources': 2,
+                  'current_sources': 2, 'all_active_current': True, 'production_eligible': False,
+                  'blocked_reason_counts': {}, 'source_catalog_sha256': 'a' * 64}
+        return state, report
+
+    def write(self, root, state, report):
+        (root / '.atlas-private').mkdir(exist_ok=True)
+        (root / 'reports').mkdir(exist_ok=True)
+        data = json.dumps(state).encode()
+        (root / '.atlas-private/state-v1.json').write_bytes(data)
+        report = dict(report, normalized_state_sha256=sha256(data).hexdigest())
+        (root / 'reports/source-intake.json').write_text(json.dumps(report))
+
+    def test_valid_compressed_reference_sums_are_source_free(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write(root, *self.fixture())
+            result = check.observed_input_diagnostics(root, self.clock + 1)
+            self.assertEqual(result, {'status': 'available', 'normalized_records': 40,
+                                     'partition_references': 3, 'stored_bytes': 512, 'decoded_bytes': 4096})
+            encoded = json.dumps(result)
+            for private in ('PRIVATE', 'secret', 'https:', 'SHA256', 'RecordPartitions', directory):
+                self.assertNotIn(private, encoded)
+
+    def test_hash_mismatch_missing_and_duplicate_json_are_unavailable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.assertEqual(check.observed_input_diagnostics(root, self.clock), {'status': 'unavailable'})
+            self.write(root, *self.fixture())
+            path = root / '.atlas-private/state-v1.json'
+            path.write_bytes(path.read_bytes() + b' ')
+            self.assertEqual(check.observed_input_diagnostics(root, self.clock), {'status': 'unavailable'})
+            self.write(root, *self.fixture())
+            report = root / 'reports/source-intake.json'
+            report.write_text(report.read_text().replace('{', '{"schema_version":1,', 1))
+            self.assertEqual(check.observed_input_diagnostics(root, self.clock), {'status': 'unavailable'})
+
+    def test_malformed_partition_counters_and_unsupported_storage_are_unavailable(self):
+        for key, value in [('Records', True), ('Records', 1.0), ('Records', '10'),
+                           ('Records', 0), ('Records', 100001), ('Bytes', -1),
+                           ('Bytes', 7), ('Bytes', (64 << 20) + 1),
+                           ('DecodedBytes', None), ('DecodedBytes', (64 << 20) + 1),
+                           ('Codec', ''), ('Codec', 'unknown'), ('SHA256', [True] * 32),
+                           ('SHA256', [0] * 32)]:
+            with self.subTest(key=key, value=value), tempfile.TemporaryDirectory() as directory:
+                state, report = self.fixture()
+                state['Sources'][0]['RecordPartitions'][0][key] = value
+                root = Path(directory)
+                self.write(root, state, report)
+                self.assertEqual(check.observed_input_diagnostics(root, self.clock), {'status': 'unavailable'})
+
+    def test_unsuccessful_or_expired_intake_and_inline_records_are_unavailable(self):
+        for target, key, value in [('report', 'all_active_current', False),
+                                   ('report', 'current_sources', True),
+                                   ('report', 'blocked_reason_counts', {'private': 1}),
+                                   ('report', 'evaluated_at', self.clock + 1),
+                                   ('state', 'Version', True), ('state', 'Version', 1),
+                                   ('source', 'ExpiresAt', '2020-01-01T00:00:00Z'),
+                                   ('source', 'Records', [{'private': 'raw-record'}])]:
+            with self.subTest(target=target, key=key), tempfile.TemporaryDirectory() as directory:
+                state, report = self.fixture()
+                {'report': report, 'state': state, 'source': state['Sources'][0]}[target][key] = value
+                root = Path(directory)
+                self.write(root, state, report)
+                self.assertEqual(check.observed_input_diagnostics(root, self.clock), {'status': 'unavailable'})

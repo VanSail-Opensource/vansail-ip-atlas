@@ -6,6 +6,8 @@ import (
 	"io"
 	"sync"
 	"time"
+
+	"vansail-ip-atlas/internal/pipeline"
 )
 
 // Diagnostics are fixed, source-free measurements, never acceptance evidence.
@@ -25,6 +27,16 @@ const (
 	phaseRetention     compilePhase = "retention"
 	phaseHistory       compilePhase = "history"
 	phaseSeal          compilePhase = "seal"
+	phaseSeed          compilePhase = "materialize-seed"
+	phasePaths         compilePhase = "materialize-paths"
+	phaseASNRisk       compilePhase = "materialize-asn-risk"
+	phaseSpatial       compilePhase = "materialize-spatial"
+	phaseASN           compilePhase = "materialize-asn"
+	phaseSort          compilePhase = "pipeline-sort"
+	phaseMerge         compilePhase = "pipeline-merge"
+	phaseClassify      compilePhase = "pipeline-classify"
+	phasePartition     compilePhase = "pipeline-partition"
+	phasePublish       compilePhase = "pipeline-publish"
 )
 
 type compilePhaseKey struct{}
@@ -50,7 +62,8 @@ func beginCompilePhase(ctx context.Context, phase compilePhase) func(bool) {
 		return func(bool) {}
 	}
 	switch phase {
-	case phaseStage, phaseConfig, phaseQualification, phaseTier1, phaseBuild, phaseBoundary, phaseObjects, phaseReceipt, phaseRetention, phaseHistory, phaseSeal:
+	case phaseStage, phaseConfig, phaseQualification, phaseTier1, phaseBuild, phaseBoundary, phaseObjects, phaseReceipt, phaseRetention, phaseHistory, phaseSeal,
+		phaseSeed, phasePaths, phaseASNRisk, phaseSpatial, phaseASN, phaseSort, phaseMerge, phaseClassify, phasePartition, phasePublish:
 	default:
 		return func(bool) {}
 	}
@@ -60,6 +73,35 @@ func beginCompilePhase(ctx context.Context, phase compilePhase) func(bool) {
 	return func(ok bool) {
 		once.Do(func() { logger.write(compilePhaseRecord{phase, "end", max(0, time.Since(started).Milliseconds()), ok}) })
 	}
+}
+
+func beginPipelinePhase(ctx context.Context, stage pipeline.Stage) func(bool) {
+	var phase compilePhase
+	switch stage {
+	case pipeline.StageSeed:
+		phase = phaseSeed
+	case pipeline.StagePaths:
+		phase = phasePaths
+	case pipeline.StageASNRisk:
+		phase = phaseASNRisk
+	case pipeline.StageSpatial:
+		phase = phaseSpatial
+	case pipeline.StageASN:
+		phase = phaseASN
+	case pipeline.StageSort:
+		phase = phaseSort
+	case pipeline.StageMerge:
+		phase = phaseMerge
+	case pipeline.StageClassify:
+		phase = phaseClassify
+	case pipeline.StagePartition:
+		phase = phasePartition
+	case pipeline.StagePublish:
+		phase = phasePublish
+	default:
+		return func(bool) {}
+	}
+	return beginCompilePhase(ctx, phase)
 }
 
 func (p *compilePhases) write(record compilePhaseRecord) {

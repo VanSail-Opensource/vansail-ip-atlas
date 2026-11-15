@@ -554,6 +554,9 @@ func (e *Engine) Origins(addr netip.Addr) []uint32 {
 	if !addr.IsValid() {
 		return nil
 	}
+	if len(e.origins) == 0 {
+		return nil
+	}
 	for bits := addr.BitLen(); bits >= 0; bits-- {
 		if origins, ok := e.origins[netip.PrefixFrom(addr, bits).Masked()]; ok {
 			return append([]uint32(nil), origins...)

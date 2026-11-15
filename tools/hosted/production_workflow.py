@@ -51,7 +51,9 @@ SAFE_FAILURES={
 }
 
 COMPILE_PHASES=frozenset({'stage','config','qualification','tier1','build','boundary',
-    'objects','receipt','retention','history','seal'})
+    'objects','receipt','retention','history','seal','materialize-seed','materialize-paths',
+    'materialize-asn-risk','materialize-spatial','materialize-asn','pipeline-sort',
+    'pipeline-merge','pipeline-classify','pipeline-partition','pipeline-publish'})
 
 def compile_phase_diagnostics(path, start):
     """Read bounded fixed-schema diagnostics, never arbitrary child output."""

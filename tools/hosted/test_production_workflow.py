@@ -141,6 +141,20 @@ class CandidateClockTests(unittest.TestCase):
 
 
 class CompilePhaseDiagnosticsTests(unittest.TestCase):
+    def test_aggregate_materializer_and_pipeline_phases_remain_nested_and_bounded(self):
+        phases = ('materialize-seed', 'materialize-paths', 'materialize-asn-risk',
+                  'materialize-spatial', 'materialize-asn', 'pipeline-sort',
+                  'pipeline-merge', 'pipeline-classify', 'pipeline-partition', 'pipeline-publish')
+        rows = [{'phase': 'build', 'event': 'begin', 'elapsed_ms': 0, 'ok': True}]
+        for phase in phases:
+            rows.extend(({'phase': phase, 'event': 'begin', 'elapsed_ms': 0, 'ok': True},
+                         {'phase': phase, 'event': 'end', 'elapsed_ms': 123, 'ok': True}))
+        rows.append({'phase': 'build', 'event': 'end', 'elapsed_ms': 1230, 'ok': True})
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'stage.log'
+            path.write_text(''.join('ATLAS_COMPILE_PHASE ' + json.dumps(row) + '\n' for row in rows))
+            self.assertEqual(workflow.compile_phase_diagnostics(path, 0), rows)
+
     def test_compiler_log_output_exposes_only_allowlisted_phase_fields(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

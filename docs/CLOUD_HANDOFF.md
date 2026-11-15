@@ -219,7 +219,52 @@ Independent review, focused race tests, full Go tests/vet, 136 contract tests
 and 44 hosted-workflow tests passed. All ten observed fixtures were rerun and
 recertified against implementation hash
 `239240293b7acfadaccaf703d0cbd07a83caf8c091e63523bf7edfc4b598f7e5`.
-The next hosted actual-data measurement remains required before merge.
+At head `53a226cdf1f298adecaa18ae697b044b18b873f3`, hosted run
+`43703177504` passed contracts, codec, synthetic browser and full current intake
+for all ten inputs. The semantic-scan repair reduced initial Tier-1 validation
+to 181 seconds, qualification to 96 seconds and the authenticated build boundary
+to 1.3 seconds. The build then consumed 1,822 seconds and again reached the
+unchanged 35-minute compilation deadline. Corpus and native lookup measurements
+were not reached. Peak compiler RSS was 367,759,360 bytes, workspace size was
+2,253,357,056 bytes, and no memory/disk/OOM events occurred. The source-free
+artifact `14158672243` was independently verified against SHA-256
+`801e6588e3b9d316a80851570177454f6ff358b600aee5d9f3509aa30f5ed694`.
+The synthetic browser again passed 21 UI scenarios and all maximum workloads,
+with a 382.40234375 MiB Chrome peak. This is not a production deployment.
+
+The follow-up replaces intermediate streaming JSON copies with direct bounded
+decoding while preserving the prior strict/v1 semantics. It skips the exact-IP
+ASN prepass only when the authenticated origin index is empty, retains final
+IP risk and `/24` work, and amortizes normalized spatial partition rewrites with
+at most sixteen writers. Logical binary groups still choose the original first
+fitting scopes. Public runs retain exact size totals and use bounded two-pass
+partitioning only for strongly oversized runs; unchanged unary branches reuse
+their owned run. Every final leaf still performs strict frame and binary checks.
+Independent review and focused regressions cover exact public-byte parity,
+inherited IPv4/IPv6 rows, count/byte bounds, shared-file GC, input mutation,
+cancellation and ownership-safe cleanup. No public schema or limit changed.
+
+The final synthetic normalized benchmark processed 400,200 records in 39.668
+seconds versus 85.379 seconds before these changes. It emitted the same 602,000
+unique public records, 49 partitions and 1,745,029 bytes. Compiler scratch was
+428,096,930 bytes and measured process RSS peaked at 270,802,944 bytes. A larger
+1,600,800-record diagnostic, measured before the final unary optimization,
+completed in 162.139 seconds with 1,712,430,208 scratch bytes. These population-
+specific figures do not establish actual cold/changed-input or disk acceptance.
+
+Aggregate phase diagnostics now distinguish seeding, path reduction, ASN risk,
+spatial/ASN materialization and the five public pipeline phases. The integration
+report also records optional source-free normalized record/byte totals bound to
+the exact successful intake state. Native lookup diagnostics report object reads
+and fixed-stratum percentiles from the same original 100,000 timed samples.
+No raw input, source identity or query text is exposed. All ten observed parser
+fixtures were rerun and recertified at `2026-11-15T11:43:06Z` against
+`a03db63ff34710e0609368326634ca918bcf58130396d0e3b7f5bf39edf20053`.
+Full local Go tests/vet, selected internal and command race tests, 136 Python
+contract tests, 49 hosted-workflow tests and strict schemas pass. Frontend assets
+are unchanged from the previously verified v6 build. The next exact-head hosted
+actual-data measurement remains required before merge. The production website
+is still unreleased.
 
 ## Resume next
 

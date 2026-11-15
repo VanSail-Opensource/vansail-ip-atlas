@@ -8,6 +8,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"vansail-ip-atlas/internal/pipeline"
 )
 
 func phaseRecords(t *testing.T, data string) []compilePhaseRecord {
@@ -64,5 +66,34 @@ func TestCompilePhaseDiagnosticsAreOptionalFixedAndBounded(t *testing.T) {
 	}
 	if records := phaseRecords(t, output.String()); len(records) != 64 {
 		t.Fatal("phase record budget differs", len(records))
+	}
+}
+
+func TestCompilePipelinePhasesUseOnlyFixedDiagnosticLabels(t *testing.T) {
+	stages := []pipeline.Stage{pipeline.StageSeed, pipeline.StagePaths, pipeline.StageASNRisk,
+		pipeline.StageSpatial, pipeline.StageASN, pipeline.StageSort, pipeline.StageMerge,
+		pipeline.StageClassify, pipeline.StagePartition, pipeline.StagePublish}
+	want := []compilePhase{phaseSeed, phasePaths, phaseASNRisk, phaseSpatial, phaseASN,
+		phaseSort, phaseMerge, phaseClassify, phasePartition, phasePublish}
+	var output bytes.Buffer
+	ctx := withCompilePhases(context.Background(), &output)
+	beginPipelinePhase(ctx, pipeline.Stage(0))(true)
+	beginPipelinePhase(ctx, pipeline.Stage(255))(false)
+	if output.Len() != 0 {
+		t.Fatal("unknown pipeline stage reached diagnostics")
+	}
+	for i, stage := range stages {
+		beginPipelinePhase(ctx, stage)(i%2 == 0)
+	}
+	records := phaseRecords(t, output.String())
+	if len(records) != 2*len(stages) {
+		t.Fatal("pipeline phase population differs")
+	}
+	for i, phase := range want {
+		if records[2*i] != (compilePhaseRecord{phase, "begin", 0, true}) ||
+			records[2*i+1].Phase != phase || records[2*i+1].Event != "end" ||
+			records[2*i+1].OK != (i%2 == 0) {
+			t.Fatal("pipeline phase mapping differs")
+		}
 	}
 }

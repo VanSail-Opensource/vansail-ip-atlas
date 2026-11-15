@@ -3,8 +3,10 @@ package pipeline
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"math/bits"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -23,6 +25,8 @@ type bulkBucket struct {
 	asn         bool
 	parts       []intelligence.RecordPartition
 	active      bool
+	cover       netip.Prefix
+	scattered   [2]*bulkBucket
 }
 type bulkSpool struct {
 	root         string
@@ -46,6 +50,11 @@ type bulkSpool struct {
 	hasExact     bool
 	hasASNDirect bool
 	usage        asnUsageIndex
+	observe      func(context.Context, Stage) func(bool)
+}
+
+func (s *bulkSpool) stage(ctx context.Context, stage Stage) func(bool) {
+	return observeStage(ctx, Options{ObserveStage: s.observe}, stage)
 }
 
 func (s *bulkSpool) refresh() error {
@@ -172,6 +181,10 @@ func bulkChildren(b *bulkBucket) (*bulkBucket, *bulkBucket, error) {
 	left, right := *b, *b
 	left.parts = nil
 	right.parts = nil
+	left.scattered = [2]*bulkBucket{}
+	right.scattered = [2]*bulkBucket{}
+	left.cover = netip.Prefix{}
+	right.cover = netip.Prefix{}
 	left.active = true
 	right.active = true
 	if b.asn {
@@ -232,6 +245,176 @@ func asnRecord(record intelligence.NormalizedRecord, b *bulkBucket) (intelligenc
 	}
 	return record, false
 }
+
+// bulkPrefixCover includes every address represented by either input prefix,
+// including an inherited broad row. Its constant-size work never walks the
+// address population or allows a descendant to narrow an ancestor's scope.
+func bulkPrefixCover(a, b netip.Prefix) netip.Prefix {
+	if !a.IsValid() {
+		return b
+	}
+	common := 0
+	if a.Addr().Is4() {
+		x, y := a.Addr().As4(), b.Addr().As4()
+		common = bits.LeadingZeros32(binary.BigEndian.Uint32(x[:]) ^ binary.BigEndian.Uint32(y[:]))
+	} else {
+		x, y := a.Addr().As16(), b.Addr().As16()
+		common = bits.LeadingZeros64(binary.BigEndian.Uint64(x[:8]) ^ binary.BigEndian.Uint64(y[:8]))
+		if common == 64 {
+			common += bits.LeadingZeros64(binary.BigEndian.Uint64(x[8:]) ^ binary.BigEndian.Uint64(y[8:]))
+		}
+	}
+	return netip.PrefixFrom(a.Addr(), min(common, a.Bits(), b.Bits())).Masked()
+}
+
+func narrowBulkChild(child *bulkBucket, cover netip.Prefix) {
+	if !cover.IsValid() || cover.Bits() <= child.prefix.Bits() {
+		return
+	}
+	depth := cover.Bits()
+	if cover.Addr().Is4() {
+		// Exact observations need their entire /24 for leave-one-out context.
+		depth = min(depth, 24)
+	}
+	if depth > child.prefix.Bits() {
+		target := netip.PrefixFrom(cover.Addr(), depth).Masked()
+		// Retain the matching cached subtree while skipping empty scopes. Its
+		// terminal parts contain each inherited row only once per terminal;
+		// rescattering the wider group's union would multiply those copies.
+		node := child
+		for node.prefix.Bits() < depth && node.scattered[0] != nil {
+			next, sibling := node.scattered[0], node.scattered[1]
+			if !next.prefix.Contains(target.Addr()) {
+				next, sibling = sibling, next
+			}
+			if len(sibling.parts) != 0 {
+				return // a populated sibling cannot be skipped
+			}
+			node = next
+		}
+		child.parts, child.scattered, child.cover = node.parts, node.scattered, node.cover
+		child.prefix = target
+	}
+}
+
+// splitSpatial amortizes up to four binary redistribution passes into one
+// bounded scatter. The logical binary groups still go through collect, so the
+// first fitting scope and public quality boundaries do not become finer merely
+// because streams were prepared ahead of time. Only the active frontier owns
+// parts for GC; each group's inventory includes all of its hidden descendants.
+func (s *bulkSpool) splitSpatial(ctx context.Context, b *bulkBucket) (left, right *bulkBucket, failure error) {
+	if b.asn {
+		return nil, nil, errors.New("spatial scatter cannot partition ASN scope")
+	}
+	if b.scattered[0] == nil {
+		root := *b
+		root.parts = nil
+		var terminal []*bulkBucket
+		var expand func(*bulkBucket, int) error
+		expand = func(node *bulkBucket, depth int) error {
+			limit := node.prefix.Addr().BitLen()
+			if node.prefix.Addr().Is4() {
+				limit = 24
+			}
+			if depth == 4 || node.prefix.Bits() >= limit && depth > 0 {
+				terminal = append(terminal, node)
+				return nil
+			}
+			l, r, err := bulkChildren(node)
+			if err != nil {
+				return err
+			}
+			l.active, r.active = false, false
+			node.scattered = [2]*bulkBucket{l, r}
+			if err = expand(l, depth+1); err != nil {
+				return err
+			}
+			return expand(r, depth+1)
+		}
+		if err := expand(&root, 0); err != nil {
+			return nil, nil, err
+		}
+		if len(terminal) < 2 || len(terminal) > 16 {
+			return nil, nil, errors.New("spatial scatter fanout exceeded")
+		}
+		if err := s.refresh(); err != nil {
+			return nil, nil, err
+		}
+		writers := make([]*intelligence.RecordWriter, len(terminal))
+		for i := range writers {
+			writers[i] = s.store.Writer(ctx)
+			defer writers[i].Abort()
+		}
+		if err := s.walk(ctx, b.parts, func(record intelligence.NormalizedRecord) error {
+			p, err := spatialPrefix(record)
+			if err != nil {
+				return err
+			}
+			for i, node := range terminal {
+				if p.Contains(node.prefix.Addr()) || node.prefix.Contains(p.Addr()) {
+					node.cover = bulkPrefixCover(node.cover, p)
+					if err := writers[i].Append(record); err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+		}); err != nil {
+			return nil, nil, err
+		}
+		for i, writer := range writers {
+			parts, err := writer.Finish()
+			if err != nil {
+				return nil, nil, err
+			}
+			terminal[i].parts = parts
+		}
+		var group func(*bulkBucket) error
+		group = func(node *bulkBucket) error {
+			if node.scattered[0] == nil {
+				return nil
+			}
+			seen := map[[32]byte]intelligence.RecordPartition{}
+			for _, child := range node.scattered {
+				if err := group(child); err != nil {
+					return err
+				}
+				if child.cover.IsValid() {
+					node.cover = bulkPrefixCover(node.cover, child.cover)
+				}
+				for _, part := range child.parts {
+					if prior, exists := seen[part.SHA256]; exists {
+						if prior != part {
+							return errors.New("shared spatial partition identity differs")
+						}
+						continue
+					}
+					seen[part.SHA256] = part
+					node.parts = append(node.parts, part)
+				}
+			}
+			return nil
+		}
+		if err := group(&root); err != nil {
+			return nil, nil, err
+		}
+		b.scattered = root.scattered
+	}
+	left, right = b.scattered[0], b.scattered[1]
+	if len(left.parts) == 0 {
+		narrowBulkChild(right, right.cover)
+	} else if len(right.parts) == 0 {
+		narrowBulkChild(left, left.cover)
+	}
+	b.active = false
+	left.active, right.active = true, true
+	s.all = append(s.all, left, right)
+	if err := s.gc(ctx); err != nil {
+		return nil, nil, err
+	}
+	return left, right, nil
+}
+
 func (s *bulkSpool) split(ctx context.Context, b *bulkBucket) (*bulkBucket, *bulkBucket, error) {
 	left, right, err := bulkChildren(b)
 	if err != nil {
@@ -243,6 +426,7 @@ func (s *bulkSpool) split(ctx context.Context, b *bulkBucket) (*bulkBucket, *bul
 	writers := [2]*intelligence.RecordWriter{s.store.Writer(ctx), s.store.Writer(ctx)}
 	defer writers[0].Abort()
 	defer writers[1].Abort()
+	var covers [2]netip.Prefix
 	err = s.walk(ctx, b.parts, func(record intelligence.NormalizedRecord) error {
 		for i, child := range []*bulkBucket{left, right} {
 			candidate := record
@@ -255,6 +439,9 @@ func (s *bulkSpool) split(ctx context.Context, b *bulkBucket) (*bulkBucket, *bul
 					return err
 				}
 				keep = p.Contains(child.prefix.Addr()) || child.prefix.Contains(p.Addr())
+				if keep {
+					covers[i] = bulkPrefixCover(covers[i], p)
+				}
 			}
 			if keep {
 				if err := writers[i].Append(candidate); err != nil {
@@ -274,6 +461,16 @@ func (s *bulkSpool) split(ctx context.Context, b *bulkBucket) (*bulkBucket, *bul
 	right.parts, err = writers[1].Finish()
 	if err != nil {
 		return nil, nil, err
+	}
+	if !b.asn {
+		// If both children contain rows, broad inherited observations may be
+		// required in each scope. Only a truly empty sibling proves that the
+		// surviving rows can skip the intervening empty address-space levels.
+		if len(left.parts) == 0 {
+			narrowBulkChild(right, covers[1])
+		} else if len(right.parts) == 0 {
+			narrowBulkChild(left, covers[0])
+		}
 	}
 	b.active = false
 	s.all = append(s.all, left, right)
@@ -309,7 +506,12 @@ func (s *bulkSpool) leaves(ctx context.Context, roots []*bulkBucket, coverage bo
 		}
 		state, err := s.collect(ctx, b, coverage)
 		if errors.Is(err, errBulkPartition) {
-			left, right, err := s.split(ctx, b)
+			var left, right *bulkBucket
+			if b.asn {
+				left, right, err = s.split(ctx, b)
+			} else {
+				left, right, err = s.splitSpatial(ctx, b)
+			}
 			if err != nil {
 				return err
 			}

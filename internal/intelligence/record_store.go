@@ -2,12 +2,12 @@ package intelligence
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"hash"
 	"io"
@@ -409,16 +409,15 @@ func walkPartition(ctx context.Context, root string, part RecordPartition, emit 
 			return errors.New("private record UTF-8 invalid")
 		}
 		var record NormalizedRecord
-		decoder := json.NewDecoder(bytes.NewReader(data))
-		decoder.DisallowUnknownFields()
-		if err = decoder.Decode(&record); err != nil {
+		// This complete frame is already owned and byte bounded. Decode directly
+		// without a second streaming input buffer, retaining v1 member matching
+		// and duplicate semantics while rejecting unknown members and trailing
+		// JSON. The explicit UTF-8 guard above remains stricter than v1 defaults.
+		if err = jsonv2.Unmarshal(data, &record, json.DefaultOptionsV1(), jsonv2.RejectUnknownMembers(true)); err != nil {
 			return err
 		}
 		if err = record.Validate(); err != nil {
 			return err
-		}
-		if err = decoder.Decode(new(json.RawMessage)); err != io.EOF {
-			return errors.New("private record trailing data")
 		}
 		if err = emit(record); err != nil {
 			return err

@@ -26,16 +26,19 @@ class FFraudCandidateTests(unittest.TestCase):
         self.assertEqual(report["dataset_attributions"], [])
         self.assertTrue(all(not row["families"] for row in report["capabilities"]))
 
-    def test_publisher_scores_counts_and_types_cannot_become_public_facts(self):
-        for field in ("ffraud_score", "confirmations", "type"):
+    def test_scores_and_counts_cannot_become_reasons_or_usage(self):
+        for field in ("ffraud_score", "confirmations"):
             invalid = copy.deepcopy(self.config)
             invalid["sources"][0]["field_mappings"][field] = "reason_flags"
             with self.subTest(field=field), self.assertRaises(ContractError):
                 validate_schema("sources", invalid)
-        invalid = copy.deepcopy(self.config)
-        invalid["sources"][0]["field_mappings"]["category"] = "usage_type"
-        with self.assertRaises(ContractError):
-            validate_schema("sources", invalid)
+        self.assertEqual(self.source["field_mappings"]["type"], "reason_flags")
+        self.assertEqual(self.source["parser"], {"id": "ffraud-csv", "schema": "ffraud-five-column-risk-csv-v2", "version": 2})
+        for field in ("type", "category"):
+            invalid = copy.deepcopy(self.config)
+            invalid["sources"][0]["field_mappings"][field] = "usage_type"
+            with self.subTest(field=field), self.assertRaises(ContractError):
+                validate_schema("sources", invalid)
 
     def test_new_item_date_column_requires_schema_review(self):
         invalid = copy.deepcopy(self.config)

@@ -1113,11 +1113,13 @@ sources:
   scope: exact_ip
   notes: Candidate pending final code-bound certification and hosted intake. Original honeypot/community
     maintained set, one family. Category is the worst observed threat, not every configured signal per
-    row. Discard publisher scores, confirmations, and infrastructure type after strict validation; they
-    do not establish weights, votes, usage, or safe negatives. Full November 3 snapshot had 1651503 rows
-    including two nonpublic literals; no phishing rows were present. Preserve immutable metadata generated_utc,
-    which precedes the file commit; live_utc cannot renew the content clock. Minimal observed fixture
-    and local parser tests are not admission certification.
+    row. Explicit proxy, VPN, Tor or datacenter types add one exact-IP reason under that same family and
+    original clock; blank and mobile types remain unknown. Scores and confirmation counts never establish
+    weights, probabilities or independent votes, and no usage type or safe negative is inferred. The complete
+    November 3 snapshot has 1651503 rows including two excluded nonpublic literals; it yields 1651501
+    threat reasons plus 189501 infrastructure reasons. No phishing/fraud rows were present. Preserve immutable
+    metadata generated_utc, which precedes the file commit; live_utc cannot renew the content clock. The
+    nine-row observed fixture and local parser tests are not admission certification.
   publication_proof:
     kind: github_commit
     locator: https://api.github.com/repos/FFraud-com/ip-fraud-database/commits?path=threat-ips%2Fconfirmed-abusive.csv&sha=main&per_page=1
@@ -1128,17 +1130,17 @@ sources:
   fixture:
     status: passed
     path: fixtures/source-certification/observed-ffraud.csv
-    sha256: 54838a874bf432b4aa7e968794494d24d0cec2c44db76c32f55061b8783c3296
+    sha256: b6db40d8ae70f233db411e5bd31f45c20f533284cd35373bfb24aadae2f94723
     parser: ffraud-csv
-    schema: ffraud-five-column-risk-csv-v1
+    schema: ffraud-five-column-risk-csv-v2
     schema_observed: true
-    tested_at: '2026-11-15T13:47:10Z'
+    tested_at: '2026-11-15T13:57:15Z'
     synthetic: false
     payload_format: original
   parser:
     id: ffraud-csv
-    schema: ffraud-five-column-risk-csv-v1
-    version: 1
+    schema: ffraud-five-column-risk-csv-v2
+    version: 2
   public_fields:
   - reason_flags
   field_mappings:
@@ -1146,15 +1148,19 @@ sources:
     category: reason_flags
     ffraud_score: null
     confirmations: null
-    type: null
+    type: reason_flags
   signals:
   - abuse
   - botnet
   - c2
+  - datacenter
   - fraud
   - malware
+  - proxy
   - scanner
   - spam
+  - tor
+  - vpn
 - id: routeviews-wide-rib
   evidence_family: routeviews-mrt
   source_group: routeviews-mrt

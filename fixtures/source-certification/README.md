@@ -44,14 +44,17 @@ Ipverse payload and reconcile every retained item clock before qualification.
 `observed-ffraud.csv` is an inactive candidate's minimal observed excerpt from the
 2026-11-15 capture of FFraud's original `confirmed-abusive.csv`. It retains the
 four publisher comments, column header, and the first complete unchanged row of
-each of the eight categories present in that capture, in original order. Its
+each of the eight categories present in that capture, plus the first unchanged
+VPN row. The nine-row excerpt covers all four explicit infrastructure types. Its
 adjacent [data notice](notices/FFraud-data.txt) preserves the publisher's explicit
 MIT data license. These are schema regression inputs, not an admission certificate.
 
 The publisher identifies the category as the worst observed activity from its
-own honeypot sensors and community reports. One row yields one exact-IP reason
-in one FFraud family. Publisher scores, report counts, and infrastructure types
-do not become probabilities, independent votes, usage facts, or extra reasons.
+own honeypot sensors and community reports. Each row yields its exact-IP threat
+reason in one FFraud family. Adapter v2 also retains an explicit proxy, VPN, Tor or
+datacenter type as an exact-IP reason in that same family and snapshot clock.
+Blank and mobile types remain unknown. Publisher scores and report counts do not
+become probabilities, weights or independent votes; no usage fact is inferred.
 The observed snapshot has no phishing category rows and supplies no fraud facts.
 The versioned schema has no item timestamps; additional date columns are rejected
 pending review, rather than silently discarded. Runtime proof requires the full

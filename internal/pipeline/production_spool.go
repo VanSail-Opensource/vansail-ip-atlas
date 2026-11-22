@@ -58,6 +58,8 @@ type bulkSpool struct {
 	publicStream *spatialStreamWriter
 	publicRows   uint64
 	started      bool
+
+	logicalSplits int
 }
 
 func (s *bulkSpool) stage(ctx context.Context, stage Stage) func(bool) {
@@ -368,7 +370,8 @@ func (s *bulkSpool) splitSpatial(ctx context.Context, b *bulkBucket) (left, righ
 	if b.asn {
 		return nil, nil, errors.New("spatial scatter cannot partition ASN scope")
 	}
-	if b.scattered[0] == nil {
+	wroteParts := b.scattered[0] == nil
+	if wroteParts {
 		root := *b
 		root.parts = nil
 		var terminal []*bulkBucket
@@ -445,6 +448,15 @@ func (s *bulkSpool) splitSpatial(ctx context.Context, b *bulkBucket) (left, righ
 	b.active = false
 	left.active, right.active = true, true
 	s.all = append(s.all, left, right)
+	// Precomputed children collectively own exactly the parent's objects, even
+	// after narrowing through empty siblings. No file was written or retired.
+	// Audit periodically during read-only splits and at the end of each pass.
+	if !wroteParts {
+		s.logicalSplits++
+		if s.logicalSplits < 16 {
+			return left, right, ctx.Err()
+		}
+	}
 	if err := s.gc(ctx); err != nil {
 		return nil, nil, err
 	}
@@ -515,6 +527,13 @@ func (s *bulkSpool) split(ctx context.Context, b *bulkBucket) (*bulkBucket, *bul
 	}
 	return left, right, nil
 }
+func (s *bulkSpool) auditLogicalSplits(ctx context.Context) error {
+	if s.logicalSplits == 0 {
+		return ctx.Err()
+	}
+	return s.gc(ctx)
+}
+
 func (s *bulkSpool) gc(ctx context.Context) error {
 	source := intelligence.StoredSource{ExpiresAt: s.clock.Add(720 * time.Hour), RecordPartitions: append([]intelligence.RecordPartition(nil), s.coverage...)}
 	source.RecordPartitions = append(source.RecordPartitions, s.pathParts...)
@@ -537,7 +556,11 @@ func (s *bulkSpool) gc(ctx context.Context) error {
 			delete(s.canonical, digest)
 		}
 	}
-	return s.refresh()
+	if err := s.refresh(); err != nil {
+		return err
+	}
+	s.logicalSplits = 0
+	return nil
 }
 func (s *bulkSpool) leaves(ctx context.Context, roots []*bulkBucket, coverage bool, visit func(*bulkBucket, intelligence.BuildState) error) ([]*bulkBucket, error) {
 	var leaves []*bulkBucket
@@ -581,7 +604,7 @@ func (s *bulkSpool) leaves(ctx context.Context, roots []*bulkBucket, coverage bo
 			return nil, err
 		}
 	}
-	return leaves, nil
+	return leaves, s.auditLogicalSplits(ctx)
 }
 func (s *bulkSpool) addASN(asn uint32) error {
 	if !facts.PublicASN(asn) {

@@ -377,3 +377,52 @@ func TestBulkSpatialScatterWritersShareScratchBudget(t *testing.T) {
 		t.Fatal("budget failure damaged the active parent", err)
 	}
 }
+
+func TestBulkSpatialLogicalSplitAuditsAtPassEnd(t *testing.T) {
+	for _, cached := range []bool{false, true} {
+		spool, roots := spatialTestSpool(t, "8.0.0.0/8", "8.8.0.0/24", "8.200.0.0/24")
+		ctx := context.Background()
+		child := roots[0]
+		for depth := 0; child.scattered[0] == nil; depth++ {
+			if depth > 2 {
+				t.Fatal("fixture has no precomputed children")
+			}
+			left, right, err := spool.splitSpatial(ctx, child)
+			if err != nil {
+				t.Fatal(err)
+			}
+			child = left
+			if len(child.parts) == 0 {
+				child = right
+			}
+		}
+		before := spool.store
+		if _, _, err := spool.splitSpatial(ctx, child); err != nil {
+			t.Fatal(err)
+		}
+		if before != spool.store || spool.logicalSplits != 1 {
+			t.Fatal("read-only descent unexpectedly reopened the private store")
+		}
+		unexpected := filepath.Join(spool.root, ".atlas-private", "records-v2", "unrecognized")
+		if err := os.WriteFile(unexpected, []byte("invalid private inventory"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		var reuse *bulkLeafReuse
+		if cached {
+			spool.reuse = &spatialCache{}
+			reuse = &bulkLeafReuse{}
+		}
+		if _, err := spool.leavesReusing(ctx, nil, false, reuse, nil); err == nil {
+			t.Fatalf("cached=%v: final inventory audit accepted an unknown file", cached)
+		}
+		if err := os.Remove(unexpected); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := spool.leavesReusing(ctx, nil, false, reuse, nil); err != nil {
+			t.Fatal(err)
+		}
+		if spool.logicalSplits != 0 || spool.store == before {
+			t.Fatal("validated inventory was not refreshed")
+		}
+	}
+}

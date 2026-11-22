@@ -167,5 +167,5 @@ func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, cove
 			return nil, err
 		}
 	}
-	return leaves, nil
+	return leaves, s.auditLogicalSplits(ctx)
 }

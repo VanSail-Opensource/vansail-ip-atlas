@@ -19,6 +19,14 @@ given IP has any observation depends on the included edition.
 | Proxy, datacenter, Tor and VPN | FFraud typed records, Tor exit observations and X4B VPN prefixes where applicable |
 | Hosting | Individual addresses in mature Microsoft Azure App Service allocations |
 
+A replay of the retained full FFraud input verified 525,852 abuse, 138,895
+botnet, 681,160 command-and-control, 32,216 malware, 7,828 scanning and
+265,550 spam observations. It also verified 66,220 datacenter, 83,110 proxy,
+18,319 Tor and 21,852 VPN observations. The reviewed TweetFeed and Azure
+editions supplied 40 fraud reports and 747 hosting allocations. An address can
+carry more than one signal. These counts describe those editions and can change
+with each publisher update.
+
 The public /24 view derives its cells from the admitted address and network
 facts. An unobserved cell carries unknown values. Source qualification,
 runtime coverage and hosted availability are measured for each build.

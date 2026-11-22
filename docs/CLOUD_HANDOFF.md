@@ -629,6 +629,41 @@ check still apply. The website now loads only the data needed by the risk and
 Class C pages. All 22 local Chrome site regressions passed. As of this checkpoint
 the production hostname returned HTTP 404 and Pages had no canonical deployment.
 
+## November 23 release verification
+
+The first complete eighteen-source GitHub intake authenticated all 18 sources
+and 36,478,864 normalized records. Compilation finished in 14 minutes 42.253
+seconds with 5,260 objects totaling 113,078,771 bytes. Both receipt verification
+and the corrected 10,000-query corpus completed. After 10,000 warmups, 100,000
+native full-answer calls measured 131,519 ns at p95. The earlier seventeen-source
+hosted run measured 25,758,294 ns. Both exceeded the 2,000 ns release ceiling.
+[Eighteen-source run](https://github.com/VanSail-Opensource/vansail-ip-atlas/actions/runs/45041008209)
+[Seventeen-source run](https://github.com/VanSail-Opensource/vansail-ip-atlas/actions/runs/45039299368)
+
+The next candidate uses a bounded cache of independently authenticated
+native lookup components. Every one of 10,000 complete answers matched the
+independent reader on the retained engineering corpus. Its 100,000 timed
+lookups measured 19.58 microseconds at p95. The hosted threshold remains
+2 microseconds. In three independent Chrome 158 contexts, each with 1,000
+warmups and 1,000 timed lookups, browser p95 was 6.4, 4.3 and 1.3 ms.
+All 6,000 browser answers matched the native reader. The browser verifies
+large object-reference lists against a manifest-derived digest, including
+each referenced object's kind and size. This removes hundreds of requests
+from a mobile ASN lookup.
+
+Chrome showed both historical results for 123.58.0.0/20 without an extra
+click in a private engineering replay. At the November 15 observation, AS23724
+was invalid and AS133119 was valid. It showed the former's coverage expiry
+and the latter's authorization expiry with their original timestamps. The
+updated page preserves graph focus as either clock advances.
+
+All eighteen observed source fixtures passed again on November 22 at
+`16:28:27Z` against
+`a1fb793968786d2007e13b34da57ba20d8d302da6db85a953ca162de4f75642a`.
+The production hostname still returned HTTP 404 with no canonical Pages
+deployment. Authenticated exact-main release, the 15 isolated build benchmarks,
+preview verification and production promotion remain outstanding.
+
 ## Resume next
 
 1. Verify the branch and clean checkout. Run strict schemas, Go tests/vet, Python

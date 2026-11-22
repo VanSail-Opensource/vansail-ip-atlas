@@ -119,11 +119,12 @@ func encodeCompactRunRecord(r via3.PublicRecord) (encoded, error) {
 	return encoded{key: identity(r), data: frame, logicalBytes: logical, compact: true}, nil
 }
 
-func decodeCompactRunPayload(data []byte, limit int64) (encoded, via3.PublicRecord, error) {
+var errCompactRunFrame = errors.New("private compact frame invalid")
+
+func decodeCompactRunHeader(data []byte, limit int64) (via3.PublicRecord, error) {
 	var r via3.PublicRecord
-	deny := errors.New("private compact frame invalid")
 	if len(data) <= compactRunHeader || int64(len(data)) > limit {
-		return encoded{}, r, deny
+		return r, errCompactRunFrame
 	}
 	h := data[:compactRunHeader]
 	r.Version, r.Kind = binary.LittleEndian.Uint16(h[0:2]), binary.LittleEndian.Uint16(h[2:4])
@@ -136,12 +137,24 @@ func decodeCompactRunPayload(data []byte, limit int64) (encoded, via3.PublicReco
 	case 6:
 		r.Prefix = netip.PrefixFrom(netip.AddrFrom16([16]byte(h[16:32])), int(h[12]))
 	default:
-		return encoded{}, r, deny
+		return r, errCompactRunFrame
 	}
 	canonical, err := compactHeader(r)
 	if err != nil || !bytes.Equal(h, canonical[:]) {
-		return encoded{}, r, deny
+		return r, errCompactRunFrame
 	}
+	return r, nil
+}
+
+func decodeCompactRunPayload(data []byte, limit int64) (encoded, via3.PublicRecord, error) {
+	r, err := decodeCompactRunHeader(data, limit)
+	if err != nil {
+		return encoded{}, r, err
+	}
+	return decodeCompactRunBody(r, data, limit)
+}
+
+func decodeCompactRunBody(r via3.PublicRecord, data []byte, limit int64) (encoded, via3.PublicRecord, error) {
 	var target any
 	switch r.Kind {
 	case 2:
@@ -184,7 +197,7 @@ func decodeCompactRunPayload(data []byte, limit int64) (encoded, via3.PublicReco
 	payload := data[compactRunHeader:]
 	trimmed := bytes.TrimSpace(payload)
 	if len(trimmed) == 0 || trimmed[0] != '{' || jsonv2.Unmarshal(payload, target, json.DefaultOptionsV1(), jsonv2.RejectUnknownMembers(true)) != nil {
-		return encoded{}, r, deny
+		return encoded{}, r, errCompactRunFrame
 	}
 	logical := compactLogicalBytes(r, len(payload))
 	if logical > limit {

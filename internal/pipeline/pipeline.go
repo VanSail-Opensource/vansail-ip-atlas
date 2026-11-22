@@ -107,6 +107,7 @@ type compiler struct {
 	routerBytes           uint64
 	encoder               via3.PublicEncoder
 	compiledCaptures      []*compiledPartitionCapture
+	runProofs             ownedRunRegistry
 }
 
 type partitionSize struct {
@@ -401,6 +402,7 @@ func (c *compiler) remove(path string) error {
 		return err
 	}
 	delete(c.partitionSizes, path)
+	c.runProofs.remove(path)
 	c.used -= uint64(info.Size())
 	if c.options.scratchUsage != nil {
 		c.options.scratchUsage(c.used)
@@ -499,34 +501,26 @@ func decode(data []byte) (via3.PublicRecord, error) {
 }
 
 func (c *compiler) sort(produce Producer) ([]string, error) {
-	var batch []encoded
+	var batch []ownedRunFrame
 	var size int64
 	var runs []string
 	flush := func() error {
 		if len(batch) == 0 {
 			return nil
 		}
-		sort.Slice(batch, func(i, j int) bool { return lessEncoded(batch[i], batch[j]) })
+		sort.Slice(batch, func(i, j int) bool { return lessEncoded(batch[i].row, batch[j].row) })
 		path := c.next()
-		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-		if err != nil {
-			return err
-		}
-		defer file.Close()
-		writer, err := newPrivateRunWriter(c, file)
+		writer, err := c.newOwnedRunWriter(path)
 		if err != nil {
 			return err
 		}
 		defer writer.Close()
-		for _, row := range batch {
-			if err := c.writeRow(writer, row); err != nil {
+		for _, frame := range batch {
+			if err := writer.AppendCanonical(frame); err != nil {
 				return err
 			}
 		}
-		if err := writer.Flush(); err != nil {
-			return err
-		}
-		if err := file.Close(); err != nil {
+		if err := writer.Finish(); err != nil {
 			return err
 		}
 		runs = append(runs, path)
@@ -542,19 +536,16 @@ func (c *compiler) sort(produce Producer) ([]string, error) {
 		if err := c.ctx.Err(); err != nil {
 			return err
 		}
-		r, err := normalize(input)
+		frame, err := c.newCanonicalRunFrame(input)
 		if err != nil {
 			return err
 		}
-		row, err := encodeCompactRunRecord(r)
-		if err != nil {
-			return err
-		}
+		row := frame.row
 		if row.logicalBytes > c.options.Limits.RecordBytes {
 			return errors.New("single fact exceeds bounded record size")
 		}
 		if c.options.materializationTap != nil {
-			if err := c.options.materializationTap(row); err != nil {
+			if err := c.options.materializationTap(frame.cloneEncoded()); err != nil {
 				return err
 			}
 		}
@@ -567,7 +558,7 @@ func (c *compiler) sort(produce Producer) ([]string, error) {
 				return err
 			}
 		}
-		batch = append(batch, row)
+		batch = append(batch, frame)
 		size += cost
 		c.stats.InputRecords++
 		if uint64(size) > c.stats.SortBufferPeak {
@@ -608,10 +599,42 @@ type runReader struct {
 	row       encoded
 	record    via3.PublicRecord
 	verifyEOF func() error
+	owner     *compiler // set only for authenticated intermediate runs
 }
 
 func openRun(path string, limit int64) (*runReader, error) {
 	return openRunBound(path, limit, nil)
+}
+
+// openIntermediateRun can use metadata only for a run whose original bytes
+// came from this build's closed canonical writer. All other paths use the
+// ordinary strict reader, including the final classified runs and cache inputs.
+func (c *compiler) openIntermediateRun(path string) (*runReader, error) {
+	reader, err := openRun(path, c.options.Limits.RecordBytes)
+	if err != nil {
+		return nil, err
+	}
+	proof := c.runProofs.lookup(path)
+	if proof == nil {
+		return reader, nil
+	}
+	info, err := reader.file.Stat()
+	if err == nil {
+		err = proof.checkFile(info)
+	}
+	if err == nil && reader.file.compressed == nil {
+		err = errors.New("canonical run framing changed")
+	}
+	if err != nil {
+		reader.file.Close()
+		return nil, err
+	}
+	if err := reader.file.compressed.attachProof(proof); err != nil {
+		reader.file.Close()
+		return nil, err
+	}
+	reader.owner = c
+	return reader, nil
 }
 
 func openRunBound(path string, limit int64, binding *compiledRunBinding) (*runReader, error) {
@@ -671,7 +694,11 @@ func (r *runReader) next() error {
 	if _, err := io.ReadFull(r.reader, data); err != nil {
 		return err
 	}
-	row, record, err := decodeRunPayload(data, r.limit)
+	decode := decodeRunPayload
+	if r.owner != nil {
+		decode = decodeOwnedRunPayload
+	}
+	row, record, err := decode(data, r.limit)
 	if err != nil {
 		return err
 	}
@@ -692,23 +719,21 @@ func (h *mergeHeap) Pop() any     { old := *h; x := old[len(old)-1]; *h = old[:l
 
 func (c *compiler) mergeGroup(paths []string) (string, error) {
 	path := c.next()
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	w, err := newPrivateRunWriter(c, f)
+	w, err := c.newOwnedRunWriter(path)
 	if err != nil {
 		return "", err
 	}
 	defer w.Close()
 	var h mergeHeap
 	for _, path := range paths {
-		r, err := openRun(path, c.options.Limits.RecordBytes)
+		r, err := c.openIntermediateRun(path)
 		if err != nil {
 			return "", err
 		}
 		defer r.file.Close()
+		if r.owner == nil {
+			w.disableProof()
+		}
 		if err := r.next(); err == nil {
 			heap.Push(&h, r)
 		} else if err != io.EOF {
@@ -723,7 +748,12 @@ func (c *compiler) mergeGroup(paths []string) (string, error) {
 				return "", errors.New("conflicting fused fact identity")
 			}
 		} else {
-			if err := c.writeRow(w, r.row); err != nil {
+			if r.owner != nil {
+				err = w.AppendCanonical(ownedRunFrame{owner: r.owner, row: r.row})
+			} else {
+				err = w.AppendUnproved(r.row)
+			}
+			if err != nil {
 				return "", err
 			}
 			previous = r.row
@@ -734,15 +764,10 @@ func (c *compiler) mergeGroup(paths []string) (string, error) {
 			return "", err
 		}
 	}
-	if err := w.Flush(); err != nil {
+	// Every input reader has reached verified EOF, including its terminator.
+	// A failed input therefore cannot publish an intermediate proof.
+	if err := w.Finish(); err != nil {
 		return "", err
-	}
-	if err := f.Close(); err != nil {
-		return "", err
-	}
-	// Windows requires readers to close before their temporary runs are removed.
-	for _, r := range h {
-		r.file.Close()
 	}
 	return path, nil
 }
@@ -790,7 +815,7 @@ func (c *compiler) classify(path string) ([]classifiedRun, error) {
 			}
 		}
 	}()
-	r, err := openRun(path, c.options.Limits.RecordBytes)
+	r, err := c.openIntermediateRun(path)
 	if err != nil {
 		return nil, err
 	}

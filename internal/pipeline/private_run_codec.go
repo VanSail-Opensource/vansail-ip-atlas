@@ -22,6 +22,7 @@ const privateRunStoredMax = privateRunBlockBytes + 1024
 const privateRunSegmentHeader = 40
 
 type privateRunWriter struct {
+	onSegment        func([privateRunSegmentHeader]byte, []byte)
 	ctx              context.Context
 	reserve          func(uint64) error
 	output           io.Writer
@@ -116,6 +117,9 @@ func (w *privateRunWriter) segment() error {
 			return io.ErrShortWrite
 		}
 	}
+	if w.onSegment != nil {
+		w.onSegment(header, w.encoded)
+	}
 	w.pending = w.pending[:0]
 	return nil
 }
@@ -162,6 +166,10 @@ func privateRunStoredBound(logical uint64) uint64 {
 }
 
 type privateRunReader struct {
+	proof            *ownedRunProof
+	proofBlock       *ownedProofBlock
+	proofIndex       int
+	pinned           bool
 	input            io.Reader
 	decoder          *zstd.Decoder
 	encoded, decoded []byte
@@ -217,6 +225,9 @@ func (r *privateRunReader) segment() error {
 		if n, err := io.ReadFull(r.input, extra[:]); n != 0 || err != io.EOF {
 			return errors.New("private run trailing bytes")
 		}
+		if r.proof != nil && r.proofIndex != r.proof.segments {
+			return errOwnedRunProof
+		}
 		r.ended = true
 		return io.EOF
 	}
@@ -226,6 +237,11 @@ func (r *privateRunReader) segment() error {
 	r.encoded = resizePrivateRun(r.encoded, int(stored))
 	if _, err := io.ReadFull(r.input, r.encoded); err != nil {
 		return err
+	}
+	if r.proof != nil {
+		if err := r.checkOwnedSegment(header); err != nil {
+			return err
+		}
 	}
 	if err := validatePrivateRunFrame(r.encoded, uint64(decoded)); err != nil {
 		return err
@@ -246,6 +262,34 @@ func (r *privateRunReader) segment() error {
 	r.offset = 0
 	return nil
 }
+func (r *privateRunReader) attachProof(p *ownedRunProof) error {
+	if p == nil || p.retired || r.pinned || r.ended || r.failure != nil || r.decoded != nil {
+		return errOwnedRunProof
+	}
+	p.readers++
+	r.proof = p
+	r.proofBlock = p.first
+	r.pinned = true
+	return nil
+}
+
+func (r *privateRunReader) checkOwnedSegment(header [privateRunSegmentHeader]byte) error {
+	p := r.proof
+	if r.proofIndex >= p.segments || r.proofBlock == nil {
+		return errOwnedRunProof
+	}
+	i := r.proofIndex % ownedProofBlockLength
+	original := &r.proofBlock.segments[i]
+	if original.header != header || original.stored != sha256.Sum256(r.encoded) {
+		return errOwnedRunProof
+	}
+	r.proofIndex++
+	if i == ownedProofBlockLength-1 {
+		r.proofBlock = r.proofBlock.next
+	}
+	return nil
+}
+
 func resizePrivateRun(p []byte, n int) []byte {
 	if cap(p) < n {
 		return make([]byte, n)
@@ -253,6 +297,12 @@ func resizePrivateRun(p []byte, n int) []byte {
 	return p[:n]
 }
 func (r *privateRunReader) Close() {
+	if r.pinned {
+		r.proof.readers--
+		r.proof.releaseIfUnused()
+		r.pinned = false
+	}
+	r.proof, r.proofBlock = nil, nil
 	if r.decoder != nil {
 		r.decoder.Close()
 		r.decoder = nil

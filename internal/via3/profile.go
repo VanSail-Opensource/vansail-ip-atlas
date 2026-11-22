@@ -134,6 +134,7 @@ func (r *Release) admitReference(reference *objectReference, size int) error {
 		// copies, so dropping the shard's headers cannot invalidate an answer.
 		for _, pinned := range r.usedReferences {
 			r.releasePrefixMetadata(pinned)
+			r.releaseGraphMetadata(pinned)
 			if size <= PublicLiveDecoded-r.residentBytes {
 				break
 			}

@@ -301,6 +301,8 @@ type shardLookup struct {
 	prefixes     [2]prefixLookup
 	prefixLabels []string
 	prefixSpans  []cachedPrefixSpan
+	graphOwner   *objectReference
+	graphIndex   *pathGraphIndex
 }
 
 type prefixLookup struct {
@@ -632,6 +634,9 @@ func (r *Release) objectReference(ctx context.Context, reference *objectReferenc
 		}
 	}
 	s.lookup = shardLookupMetadata(&s, references)
+	if s.Kind == 11 {
+		s.lookup.graphOwner = reference
+	}
 	r.preparePrefixLabels(reference, &s)
 	reference.shard = &s
 	r.cacheReference(reference)
@@ -724,6 +729,14 @@ func (s *Shard) ASNRecord(asn uint32) ([]byte, bool) {
 
 type destinationSet [15]*Shard
 
+func (d destinationSet) ipRecord(kind uint16, addr netip.Addr) ([]byte, netip.Prefix) {
+	if s := d[kind]; s != nil {
+		row, p, _ := s.findPrefix(addr)
+		return row, p
+	}
+	return nil, netip.Prefix{}
+}
+
 func (r *Release) asnDestinations(ctx context.Context, asn uint32) (destinationSet, error) {
 	row, ok := r.router.ASNRecord(asn)
 	return r.rowDestinations(ctx, row, ok)
@@ -804,6 +817,23 @@ type qualityLookupValues struct {
 	exact, prefix, asn, neighbors float64
 	score                         uint8
 }
+
+// Dense IP answers use one caller-owned allocation for the four present
+// families. Sparse coverage still creates only the individual values it has.
+type ipLookupValues struct {
+	geo     geoLookupValues
+	network networkLookupValues
+	usage   usageLookupValues
+	quality qualityLookupValues
+}
+
+type singleOriginValues struct {
+	values    [1]asnLookupValues
+	aggregate [1]ASNAnswer
+	tier      [1]TierAnswer
+	rpki      [1]RPKIAnswer
+}
+
 type asnLookupValues struct {
 	country, name, organization string
 	risk                        float64
@@ -912,9 +942,23 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 	var geoValues *geoLookupValues
 	networkOriginsKnown := false
 	if input.Kind == "ip" {
+		geoRow, _ := dest.ipRecord(2, addr)
+		networkRow, networkPrefix := dest.ipRecord(4, addr)
+		usageRow, _ := dest.ipRecord(5, addr)
+		qualityRow, _ := dest.ipRecord(6, addr)
+		var network *networkLookupValues
+		var usage *usageLookupValues
+		var quality *qualityLookupValues
+		if geoRow != nil && networkRow != nil && usageRow != nil && qualityRow != nil {
+			all := new(ipLookupValues)
+			geoValues, network, usage, quality = &all.geo, &all.network, &all.usage, &all.quality
+		}
+
 		if s := dest[2]; s != nil {
-			if row, _, ok := s.findPrefix(addr); ok {
-				geoValues = &geoLookupValues{}
+			if row := geoRow; row != nil {
+				if geoValues == nil {
+					geoValues = new(geoLookupValues)
+				}
 				g := &geoValues.answer
 				g.Country, g.RegistrationCountry = countryInto(u16(row, 4), &geoValues.country), countryInto(u16(row, 6), &geoValues.registration)
 				if g.Region, err = r.label(ctx, s, row, 8, &geoValues.region, &labels); err != nil {
@@ -940,11 +984,15 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 			}
 		}
 		if s := dest[4]; s != nil {
-			if row, prefix, ok := s.findPrefix(addr); ok {
+			if row, prefix := networkRow, networkPrefix; row != nil {
 				if err := budget.charge(4096 + 16*int(u32(row, 8))); err != nil {
 					return answer, err
 				}
-				values := &networkLookupValues{answer: NetworkAnswer{Prefix: prefix.String(), Origins: origins(s, row)}}
+				values := network
+				if values == nil {
+					values = new(networkLookupValues)
+				}
+				values.answer = NetworkAnswer{Prefix: prefix.String(), Origins: origins(s, row)}
 				n := &values.answer
 				if n.Name, err = r.label(ctx, s, row, 16, &values.name, &labels); err != nil {
 					return answer, err
@@ -964,8 +1012,12 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 			}
 		}
 		if s := dest[5]; s != nil {
-			if row, _, ok := s.findPrefix(addr); ok {
-				values := &usageLookupValues{answer: UsageAnswer{Type: usageName(row[4]), Assignment: []string{"unknown", "native", "broadcast_or_routed"}[row[5]]}}
+			if row := usageRow; row != nil {
+				values := usage
+				if values == nil {
+					values = new(usageLookupValues)
+				}
+				values.answer = UsageAnswer{Type: usageName(row[4]), Assignment: []string{"unknown", "native", "broadcast_or_routed"}[row[5]]}
 				u := &values.answer
 				if present(row, 7) {
 					values.anycast = row[6]&1 != 0
@@ -985,8 +1037,11 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 			}
 		}
 		if s := dest[6]; s != nil {
-			if row, _, ok := s.findPrefix(addr); ok {
-				values := &qualityLookupValues{}
+			if row := qualityRow; row != nil {
+				values := quality
+				if values == nil {
+					values = new(qualityLookupValues)
+				}
 				q := &values.answer
 				*q = QualityAnswer{Coverage: coverageAnswer(row[11], addr.Is6()), Confidence: confidence(row[10]), Reasons: reasons(u32(row, 4)), Layers: LayerAnswer{Exact: riskValue(row, 12, 10, &values.exact), Prefix: riskValue(row, 16, 11, &values.prefix), ASN: riskValue(row, 20, 12, &values.asn), Neighbors: riskValue(row, 24, 13, &values.neighbors)}}
 				if present(row, 9) {
@@ -1016,6 +1071,9 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 		answer.BGP.Origins = []uint32{uint32(n)}
 	}
 	var asnValues []asnLookupValues
+	var pairStorage [64]uint64
+	ordered := pairStorage[:0]
+	var sortedPairs bool
 	for _, asn := range answer.BGP.Origins {
 		asndest, err := r.asnDestinations(ctx, asn)
 		if err != nil {
@@ -1027,7 +1085,15 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 					return answer, err
 				}
 				if asnValues == nil {
-					asnValues = make([]asnLookupValues, len(answer.BGP.Origins))
+					if len(answer.BGP.Origins) == 1 {
+						single := new(singleOriginValues)
+						asnValues = single.values[:]
+						answer.ASNs = single.aggregate[:0]
+						answer.BGP.Tier1 = single.tier[:0]
+						answer.BGP.RPKI = single.rpki[:0]
+					} else {
+						asnValues = make([]asnLookupValues, len(answer.BGP.Origins))
+					}
 				}
 				values := &asnValues[len(answer.ASNs)]
 				a := ASNAnswer{ASN: asn, Country: countryInto(u16(row, 24), &values.country), Risk: riskValue(row, 28, 23, &values.risk), RiskBand: []string{"unknown", "low", "medium", "high"}[row[26]], Confidence: confidence(row[27]), Prefixes: []string{}, NetworkClass: className(row[52]), Stability: stability(row[53])}
@@ -1064,45 +1130,21 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 			}
 		}
 		if s := asndest[11]; s != nil {
-			if first, end, ok := s.asnBounds(asn); ok {
-				if end-first > 12 {
-					return answer, fail("record")
+			graph := r.pathGraph(s, asn)
+			if graph != nil && graph.fits(budget) {
+				answer.BGP.Paths = graph.appendPaths(answer.BGP.Paths, asn, budget)
+				ordered = append(ordered, graph.pairs...)
+				sortedPairs = len(answer.BGP.Origins) == 1
+			} else {
+				firstPath := len(answer.BGP.Paths)
+				answer.BGP.Paths, err = s.appendOriginPaths(answer.BGP.Paths, asn, budget)
+				if err != nil {
+					return answer, err
 				}
-				if cap(answer.BGP.Paths) == 0 {
-					answer.BGP.Paths = make([]PathAnswer, 0, end-first)
-				}
-				segments, _ := s.Rows(9)
-				ints, _ := s.Rows(4)
-				for ordinal := first; ordinal < end; ordinal++ {
-					row := s.Record(ordinal)
-					count := int(u16(row, 12))
-					total := 0
-					for j := u32(row, 8); j < u32(row, 8)+uint32(u16(row, 12)); j++ {
-						seg := segments[j*12 : (j+1)*12]
-						if err := budget.path(int(u32(seg, 8))); err != nil {
-							return answer, err
-						}
-						total += int(u32(seg, 8))
+				for _, path := range answer.BGP.Paths[firstPath:] {
+					if path.GraphEligible {
+						ordered = appendPathPairs(ordered, path.ASNs)
 					}
-					// Flat and per-segment values have disjoint caller-owned ranges.
-					// Full slice bounds also prevent an append from overwriting the
-					// next range. The complete allocation is reserved above first.
-					values := make([]uint32, 2*total)
-					p := PathAnswer{Origin: asn, ASNs: values[:total:total], Visibility: []string{"unknown", "low", "medium", "high"}[row[15]], GraphEligible: row[14]&1 != 0, Segments: make([]SegmentAnswer, count)}
-					start := 0
-					for offset := 0; offset < count; offset++ {
-						j := u32(row, 8) + uint32(offset)
-						seg := segments[j*12 : (j+1)*12]
-						end := start + int(u32(seg, 8))
-						a := values[total+start : total+end : total+end]
-						for k := range a {
-							a[k] = u32(ints, (int(u32(seg, 4))+k)*4)
-						}
-						p.Segments[offset] = SegmentAnswer{Type: []string{"", "sequence", "set", "confederation_sequence", "confederation_set"}[seg[0]], ASNs: a}
-						copy(p.ASNs[start:end], a)
-						start = end
-					}
-					answer.BGP.Paths = append(answer.BGP.Paths, p)
 				}
 			}
 		}
@@ -1133,42 +1175,42 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 	}
 	// Only actual consecutive retained path hops are queried. Relationship runs
 	// may be large; binary lookup avoids allocating or scanning an ASN's degree.
-	var pairStorage [64]uint64
-	ordered := pairStorage[:0]
-	for _, path := range answer.BGP.Paths {
-		if !path.GraphEligible {
-			continue
-		}
-		for i := 1; i < len(path.ASNs); i++ {
-			from, to := path.ASNs[i-1], path.ASNs[i]
-			if from != to {
-				ordered = append(ordered, uint64(from)<<32|uint64(to))
-			}
-		}
+	if !sortedPairs {
+		slices.Sort(ordered)
+		ordered = slices.Compact(ordered)
 	}
-	slices.Sort(ordered)
-	ordered = slices.Compact(ordered)
 	if err := budget.charge(256 * len(ordered)); err != nil {
 		return answer, err
 	}
 	answer.BGP.Relationships = make([]RelationshipAnswer, 0, len(ordered))
-	for _, pair := range ordered {
+	for len(ordered) > 0 {
+		from := uint32(ordered[0] >> 32)
 		if err := ctx.Err(); err != nil {
 			return answer, err
 		}
-		from, to := uint32(pair>>32), uint32(pair)
 		related, err := r.asnDestination(ctx, from, 12)
 		if err != nil {
 			return answer, err
 		}
-		edge := RelationshipAnswer{From: from, To: to, Relation: "unknown", Observed: true}
-		if s := related; s != nil {
-			if row, ok := s.FindRelationship(from, to); ok {
-				edge.Relation = []string{"unknown", "transit_upstream", "peer", "customer", "sibling"}[row[12]]
-				edge.Inferred = row[13]&2 != 0
-			}
+		var first, end uint32
+		if related != nil {
+			first, end, _ = related.asnBounds(from)
 		}
-		answer.BGP.Relationships = append(answer.BGP.Relationships, edge)
+		for len(ordered) > 0 && uint32(ordered[0]>>32) == from {
+			if err := ctx.Err(); err != nil {
+				return answer, err
+			}
+			to := uint32(ordered[0])
+			ordered = ordered[1:]
+			edge := RelationshipAnswer{From: from, To: to, Relation: "unknown", Observed: true}
+			if first < end {
+				if row, ok := related.findRelationshipWithin(first, end, to); ok {
+					edge.Relation = []string{"unknown", "transit_upstream", "peer", "customer", "sibling"}[row[12]]
+					edge.Inferred = row[13]&2 != 0
+				}
+			}
+			answer.BGP.Relationships = append(answer.BGP.Relationships, edge)
+		}
 	}
 	labels.finish()
 	if err := ctx.Err(); err != nil {

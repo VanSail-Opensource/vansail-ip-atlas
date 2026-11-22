@@ -2,7 +2,10 @@
 // readers. It contains no data-source identifiers or network lookup behavior.
 package facts
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // CountryValid accepts assigned ISO 3166-1 alpha-2 values, uppercase only.
 // Unknown/pseudo values (including AA, ZZ and XK) remain absent in schema 3.
@@ -15,4 +18,14 @@ const countryCodes = "AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD B
 // PublicASN uses the frozen schema-3 query/data acceptance ranges.
 func PublicASN(asn uint32) bool {
 	return asn != 0 && asn != 23456 && (asn < 64496 || asn >= 131072) && asn < 4_200_000_000
+}
+
+// A domain-like substring can occur inside punctuation in a descriptive token.
+// Its shortest identifying suffix is a name character, a dot, a letter, and
+// one more name character. This also recognizes the suffix of a longer domain.
+var labelDomain = regexp.MustCompile(`[\p{L}\p{N}-]\.\p{L}[\p{L}\p{N}-]`)
+
+// UnsafeLabelToken reports text that cannot be published in a descriptive label.
+func UnsafeLabelToken(token string) bool {
+	return strings.ContainsAny(token, `@:/\`) || strings.Contains(token, ".") && labelDomain.MatchString(token)
 }

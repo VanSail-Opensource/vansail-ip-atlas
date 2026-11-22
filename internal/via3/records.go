@@ -86,33 +86,8 @@ func safeLabel(s string) bool {
 	}
 	// Public labels are names, never URLs, mailboxes, domain names or credentials.
 	for _, token := range strings.Fields(s) {
-		if unsafeLabelToken(token) {
+		if facts.UnsafeLabelToken(token) {
 			return false
-		}
-	}
-	return true
-}
-func unsafeLabelToken(token string) bool {
-	if strings.ContainsAny(token, "@:/\\") {
-		return true
-	}
-	token = strings.Trim(token, ".,;!()[]{}\"'")
-	parts := strings.Split(token, ".")
-	if len(parts) < 2 {
-		return false
-	}
-	last := parts[len(parts)-1]
-	if len(last) < 2 || len(last) > 63 || last[0] < 'A' || last[0] > 'Z' && last[0] < 'a' || last[0] > 'z' {
-		return false
-	}
-	for _, part := range parts {
-		if part == "" {
-			return false
-		}
-		for _, r := range part {
-			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-') {
-				return false
-			}
 		}
 	}
 	return true

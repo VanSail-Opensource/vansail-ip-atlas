@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"vansail-ip-atlas/internal/intelligence"
 
@@ -258,6 +259,59 @@ func TestAuditPublicLabelTokensAndBidi(t *testing.T) {
 		}
 	}
 }
+func TestDictionaryLabelPrivacyAcrossCompilationAndReading(t *testing.T) {
+	data, err := os.ReadFile("../../fixtures/bin/dictionary-labels-via3.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vectors []struct {
+		Label, Base64 string
+		Safe          bool
+	}
+	if err = json.Unmarshal(data, &vectors); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range vectors {
+		raw, err := base64.StdEncoding.DecodeString(v.Base64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = Read(context.Background(), raw)
+		if v.Safe && err != nil || !v.Safe && ErrorCode(err) != "record" {
+			t.Fatal("encoded dictionary acceptance differs from the label contract")
+		}
+		want := v.Label
+		if !v.Safe {
+			want, _, _ = strings.Cut(v.Label, " ")
+		}
+		if got := intelligence.SafeLabel(v.Label); got != want {
+			t.Fatal("normalization retained an unsafe token or discarded a safe name")
+		}
+		partition, err := CompilePartition(context.Background(), PartitionInput{
+			Partition: "all",
+			Records:   []PublicRecord{{Version: 3, Kind: 8, ASN: 13335, ASNAggregate: &ASNData{Name: v.Label}}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got string
+		for _, obj := range partition.Objects {
+			if obj.Info.Kind != 14 {
+				continue
+			}
+			shard, err := Read(context.Background(), obj.Bytes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			text, _ := shard.Rows(6)
+			got = string(text)
+		}
+		if got != want {
+			t.Fatal("compiled dictionary differs from the sanitized name")
+		}
+	}
+}
+
 func TestAuditExpiredEmptyAuxiliaryLookups(t *testing.T) {
 	g := golden(t)
 	now := g.Clock

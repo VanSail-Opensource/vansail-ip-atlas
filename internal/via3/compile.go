@@ -180,7 +180,7 @@ func SanitizeLabel(input string) string {
 				break
 			}
 		}
-		if unsafe || unsafeLabelToken(token) {
+		if unsafe || facts.UnsafeLabelToken(token) {
 			continue
 		}
 		if token != "" {

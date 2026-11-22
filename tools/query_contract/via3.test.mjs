@@ -305,6 +305,15 @@ test('native fetch keeps its worker-global receiver', async () => {
   reader.clear()
 })
 
+test('encoded dictionary privacy matches the Go compiler and reader', async () => {
+  const vectors = JSON.parse(readFileSync(new URL('../../fixtures/bin/dictionary-labels-via3.json', import.meta.url), 'utf8'))
+  for (const { safe, base64 } of vectors) {
+    const bytes = new Uint8Array(Buffer.from(base64, 'base64'))
+    if (safe) assert.equal((await parseShard(bytes)).kind, 14)
+    else await assert.rejects(parseShard(bytes), { message: 'record' })
+  }
+})
+
 test('full-integrity hostile Go containers cannot manufacture public facts', async t => {
   const hostile = JSON.parse(readFileSync(new URL('../../fixtures/bin/semantic-hostile-via3.json', import.meta.url), 'utf8'))
   for (const vector of hostile) {

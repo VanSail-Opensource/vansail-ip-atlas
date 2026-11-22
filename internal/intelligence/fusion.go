@@ -264,7 +264,7 @@ func SafeLabel(value string) string {
 	safe := words[:0]
 	for _, word := range words {
 		trim := strings.Trim(word, "()[]{}.,;\"'")
-		if strings.ContainsAny(trim, "@:/\\") || strings.Contains(trim, "://") {
+		if facts.UnsafeLabelToken(word) {
 			continue
 		}
 		parts := strings.Split(trim, ".")

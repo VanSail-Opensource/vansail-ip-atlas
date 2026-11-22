@@ -4,6 +4,8 @@ const { overview: data, error, loading, current } = useAtlas()
 const facts = computed(() => data.value ? [
   ['Country', data.value.geo?.country], ['Region', data.value.geo?.region], ['City', data.value.usage?.anycast === true ? null : data.value.geo?.city],
   ['Registration country', data.value.geo?.registrationCountry],
+  ['Matched prefix', data.value.network?.prefix], ['Network name', data.value.network?.name],
+  ['Network organization', data.value.network?.organization],
   ['ISP', data.value.network?.isp], ['Usage', data.value.usage?.type], ['Assignment', data.value.usage?.assignment],
   ['Anycast', data.value.usage?.anycast == null ? null : data.value.usage.anycast ? 'Yes' : 'No'],
   ['Directed broadcast', data.value.usage?.directedBroadcast == null ? null : data.value.usage.directedBroadcast ? 'Yes' : 'No'],

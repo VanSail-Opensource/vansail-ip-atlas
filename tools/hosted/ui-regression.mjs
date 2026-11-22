@@ -275,6 +275,16 @@ try {
       const owners = { '.map-panel': 'overview', '.score-value': 'quality', '.ip-grid': 'class-c', '.bgp-graph': 'bgp', '.asn-card': 'asn' }
       await page.locator(Object.keys(owners).find(selector => owners[selector] === view)).first().waitFor({ timeout: 20000 })
       for (const [selector, owner] of Object.entries(owners)) assert.equal((await page.locator(selector).count()) > 0, owner === view)
+      if (view === 'overview') {
+        const values = await page.locator('.fact-list > div').evaluateAll(rows => Object.fromEntries(
+          rows.map(row => [row.querySelector('dt').textContent.trim(), row.querySelector('dd').textContent.trim()]),
+        ))
+        assert.equal(values['Matched prefix'], '203.0.113.0/24')
+        assert.equal(values['Network name'], 'Atlas Transit')
+        assert.equal(values['Network organization'], 'Example Organization')
+        assert.equal(values['Registration country'], 'GB')
+        assert.equal(values.Country, 'US')
+      }
       for (const width of [320, 390, 1280, 1440]) {
         await page.setViewportSize({ width, height: 900 })
         assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `Horizontal overflow on ${view} at ${width}`)

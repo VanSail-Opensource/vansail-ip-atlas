@@ -242,7 +242,8 @@ async function coveredIPv4(page,proof) {
   if(canonical(await workerAnswer(page,'lookup',q))!==canonical(expected))throw new Error('IPv4 coverage witness differs between the native and browser readers')
   const boolLabel=value=>value==null?null:value?'Yes':'No'
   const facts={'Country':expected.geo?.country,'Region':expected.geo?.region,'City':expected.usage?.anycast?null:expected.geo?.city,
-    'Registration country':expected.geo?.registrationCountry,'ISP':expected.network.isp,'Usage':expected.usage?.type,'Assignment':expected.usage?.assignment,
+    'Registration country':expected.geo?.registrationCountry,'Matched prefix':expected.network?.prefix,'Network name':expected.network?.name,
+    'Network organization':expected.network?.organization,'ISP':expected.network?.isp,'Usage':expected.usage?.type,'Assignment':expected.usage?.assignment,
     'Anycast':boolLabel(expected.usage?.anycast),'Directed broadcast':boolLabel(expected.usage?.directedBroadcast)}
   const visible=await page.locator('.fact-list > div').evaluateAll(rows=>Object.fromEntries(rows.map(row=>[row.querySelector('dt').textContent.trim(),row.querySelector('dd').textContent.trim()])))
   if(canonical(visible)!==canonical(Object.fromEntries(Object.entries(facts).map(([k,v])=>[k,v??'Unknown']))))throw new Error('IPv4 coverage witness overview differs from its native facts')

@@ -572,6 +572,36 @@ An engineering replay of the complete earlier corpus with the quality changes
 produced 5,888 objects totaling 119,479,954 bytes. This replay does not prove
 that the official current candidate fits the deadline.
 
+## November 22 browser and corpus verification
+
+The sixteen-source hosted build completed compilation in 23 minutes 20.77 seconds
+and passed independent production receipt verification. It admitted 36,478,100
+normalized rows and produced 160,199,317 bytes of VIA3 objects. The subsequent
+corpus step failed. The underlying data contains an IPv4 default network, which
+makes a completely empty IPv4 answer unavailable. The new corpus implementation
+verifies the selected network coverage for all 4,294,967,296 IPv4 addresses.
+It compares a real default-route answer with the website, retains actual empty
+IPv6 and ASN examples, and tests empty IPv4 behavior on a separate synthetic
+release. [Sixteen-source run](https://github.com/VanSail-Opensource/vansail-ip-atlas/actions/runs/45034561273)
+
+The browser now reads a hash-bound routing directory and loads geographic,
+coordinate, network and usage data when opening Overview. A private replay
+of the complete fifteen-source corpus with 100 fresh Chrome 158 mobile
+contexts returned every expected Overview answer. The total p95 was
+219,711 bytes including the credit document, index and both logos, with a
+maximum of 249,404 bytes. Substituting a damaged directory root produced
+an integrity failure before any facts or credits loaded. These are local
+measurements. The original hosted cold and hot gates remain active.
+
+The corrected dictionary sanitizer removes embedded domain tokens consistently
+during compilation and immutable validation. The tested real corpus contained
+368,492 sanitized entries across 540 dictionaries. Chrome 158 passed the 22
+local synthetic site regressions. All seventeen source fixtures passed against
+the combined compiler at `2026-11-22T15:34:17Z`, implementation
+`8dd590654eda03ff8589b29abff3ca2bb782b2378004095875a3de7948e24819`.
+Native full-answer lookup latency, the five build scenarios, hosted preview
+and production promotion still require their exact-candidate measurements.
+
 ## Resume next
 
 1. Verify the branch and clean checkout. Run strict schemas, Go tests/vet, Python

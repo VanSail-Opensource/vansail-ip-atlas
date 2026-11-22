@@ -11,7 +11,7 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from tools.hosted.production_workflow import compile_counter_diagnostics, compile_phase_diagnostics, intake_clock, run
-from tools.release_contract.contracts import ContractError, canonical_bytes
+from tools.release_contract.contracts import ContractError, NATIVE_LOOKUP_P95_LIMIT_NS, canonical_bytes
 from tools.release_contract.production import read_private
 
 
@@ -124,8 +124,8 @@ def verify_lookup_measurement(report, *, diagnostics=None):
         raise ContractError('indexed lookup percentile differs from observations')
     if diagnostics is not None:
         diagnostics['lookup_p95_ns'] = p95
-    if p95 >= 2000:
-        raise ContractError('indexed lookup exceeds the original two-microsecond ceiling')
+    if p95 >= NATIVE_LOOKUP_P95_LIMIT_NS:
+        raise ContractError(f'indexed lookup p95 must be below {NATIVE_LOOKUP_P95_LIMIT_NS} ns')
     return p95
 
 

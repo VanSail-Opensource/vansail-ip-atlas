@@ -6,7 +6,7 @@ import re
 import hashlib
 from pathlib import Path
 
-from .contracts import ContractError, HASH
+from .contracts import ContractError, HASH, NATIVE_LOOKUP_P95_LIMIT_NS
 
 WIDTHS = (320, 390, 1280, 1440)
 THEMES = ("light", "dark")
@@ -344,7 +344,7 @@ def build_gates(report: dict) -> dict[str, str]:
     result["go_lookup_p95"] = "unmeasured"
     if (lookup.get("corpus_queries") == 10_000 and lookup.get("warmups", 0) >= 1000
             and lookup.get("timing") == "individual-indexed-lookups" and len(lookup.get("samples_ns", [])) >= 100_000):
-        result["go_lookup_p95"] = comparison(lookup["samples_ns"], 2000, minimum=100_000)
+        result["go_lookup_p95"] = comparison(lookup["samples_ns"], NATIVE_LOOKUP_P95_LIMIT_NS, minimum=100_000)
     return result
 
 

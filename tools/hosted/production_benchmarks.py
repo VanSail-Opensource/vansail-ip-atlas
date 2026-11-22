@@ -11,7 +11,7 @@ import json
 import re
 
 from tools.release_contract.acceptance import BUILD_SCENARIOS, CORPUS_STRATA, allocation_gate, build_gates, require_all, valid_ipv4_coverage
-from tools.release_contract.contracts import ContractError, canonical_bytes, sha256
+from tools.release_contract.contracts import ContractError, NATIVE_LOOKUP_P95_LIMIT_NS, canonical_bytes, sha256
 
 CASE_SCOPE = 'hosted-production-build-case-v1'
 BUILD_SCOPE = 'hosted-production-build-v2'
@@ -24,7 +24,7 @@ RESOURCE_ACCOUNTING = {'scope': 'entire-child-process-group', 'poll_ms': 100,
 LIMIT_CONTRACT = {'schema_version': 1, 'execution_envelope': ENVELOPE,
     'runtime_ms': {name: (35 if name == 'cold_full' else 3 if name == 'warm_unchanged' else 8) * 60000 for name in BUILD_SCENARIOS},
     'rss_bytes': 6656 * 1024**2, 'scratch_bytes': 10240 * 1024**2, 'disk_reserve_bytes': 1024**3,
-    'lookup_p95_ns': 2000, 'lookup_samples': 100000, 'lookup_warmups': 10000,
+    'lookup_p95_ns': NATIVE_LOOKUP_P95_LIMIT_NS, 'lookup_samples': 100000, 'lookup_warmups': 10000,
     'corpus_queries': 10000, 'samples_per_case': 3, 'gomaxprocs': 2, 'gomemlimit_bytes': 5 * 1024**3}
 DIGEST_KEYS = {'release_id', 'candidate_bundle_sha256', 'qualification_receipt_sha256', 'normalized_state_sha256',
     'source_catalog_sha256', 'rights_audit_sha256', 'normalization_config_sha256', 'implementation_sha256',
@@ -278,7 +278,7 @@ def verify_native_lookup(candidate, native_report):
                 fail()
         elif any(row[f'p{rank}_ns'] is not None for rank in (50, 95, 99)):
             fail()
-    if sum(row['corpus_queries'] for row in strata) != 10000 or report['p95_ns'] >= 2000:
+    if sum(row['corpus_queries'] for row in strata) != 10000 or report['p95_ns'] >= NATIVE_LOOKUP_P95_LIMIT_NS:
         fail()
     return report['p95_ns']
 

@@ -69,8 +69,8 @@ func (s *bulkSpool) verifyParts(ctx context.Context, parts []intelligence.Record
 	return intelligence.VerifyStoredSourceObjects(ctx, s.root, intelligence.StoredSource{RecordPartitions: parts})
 }
 
-// Cached normalized streams are imported as ordinary immutable objects. They
-// never acquire the process-local canonical-frame capability of a live writer.
+// Import verifies the ordinary immutable object. A later strict traversal can
+// separately compare every stored frame with the writer's canonical encoding.
 func (s *bulkSpool) importCachedGroups(ctx context.Context, groups [][]intelligence.RecordPartition) error {
 	if s.reuse == nil {
 		return errors.New("spatial cache is unavailable")

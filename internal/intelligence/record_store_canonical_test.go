@@ -322,3 +322,77 @@ func TestValidatedRecordPrefixAuthenticatesTheUnreadPhysicalSuffix(t *testing.T)
 		}
 	}
 }
+
+func TestComparedCanonicalFramesRequireEveryOriginalFrame(t *testing.T) {
+	record := canonicalTestRecord()
+	encoded, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(encoded)
+	for _, mode := range []string{"canonical", "whitespace", "unknown-member", "count", "cancel", "sink"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			last := encoded
+			switch mode {
+			case "whitespace":
+				last = append([]byte(" \n"), encoded...)
+			case "unknown-member":
+				last = append([]byte("{\"unreviewed\":true,"), encoded[1:]...)
+			}
+			data := []byte(recordHeader)
+			for _, f := range [][]byte{encoded, last} {
+				data = binary.LittleEndian.AppendUint32(data, uint32(len(f)))
+				data = append(data, f...)
+			}
+			count := uint64(2)
+			if mode == "count" {
+				count++
+			}
+			p := putRecordFixture(t, root, data, RecordPartition{Records: count})
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			sinkErr := errors.New("comparison canceled by caller")
+			calls := 0
+			capability, err := CompareCanonicalFrames(ctx, root, p, func(frame CanonicalRecordFrame) error {
+				calls++
+				r, err := frame.Record()
+				if err != nil {
+					return err
+				}
+				r.Origins.Origins[0]++
+				if frame.EncodedBytes() != len(encoded) || frame.Digest() != digest {
+					t.Fatal("frame did not match independent canonical writer")
+				}
+				switch mode {
+				case "cancel":
+					cancel()
+				case "sink":
+					return sinkErr
+				}
+				return nil
+			})
+			wantSuccess := mode == "canonical" || mode == "whitespace"
+			if (err == nil) != wantSuccess || (capability.Descriptor() == p) != (mode == "canonical") {
+				t.Fatalf("wrong proof for %s: error=%v capability=%t", mode, err, capability.Descriptor() == p)
+			}
+			if wantSuccess && calls != 2 {
+				t.Fatal("partial comparison")
+			}
+			if mode == "sink" && !errors.Is(err, sinkErr) {
+				t.Fatal("callback failure lost")
+			}
+			if mode != "canonical" {
+				return
+			}
+			content := filepath.Join(root, ".atlas-private", "records-v2", partitionName(p))
+			data[len(data)-1] ^= 1
+			if err = os.WriteFile(content, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err = capability.Walk(context.Background(), func(CanonicalRecordFrame) error { t.Fatal("changed original reached callback"); return nil }); err == nil {
+				t.Fatal("capability skipped current object verification")
+			}
+		})
+	}
+}

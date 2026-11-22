@@ -87,27 +87,35 @@ func (s *bulkSpool) walk(ctx context.Context, parts []intelligence.RecordPartiti
 	return intelligence.WalkStoredSource(ctx, s.root, intelligence.StoredSource{RecordPartitions: parts}, emit)
 }
 
-// Only chunks just produced by this process's writers carry canonical frame
-// capabilities. Imported/legacy descriptors retain the ordinary strict path.
+// Writer-produced and independently re-encoded chunks can reuse frame sizes
+// and digests during later strictly verified reads in this process.
 func (s *bulkSpool) walkOwned(ctx context.Context, parts []intelligence.RecordPartition, emit func(intelligence.NormalizedRecord, intelligence.CanonicalRecordFrame) error) error {
+	consume := func(frame intelligence.CanonicalRecordFrame) error {
+		record, err := frame.Record()
+		if err != nil {
+			return err
+		}
+		return emit(record, frame)
+	}
 	for _, part := range parts {
 		if capability, ok := s.canonical[part.SHA256]; ok {
 			if capability.Descriptor() != part {
 				return errors.New("canonical spool partition identity differs")
 			}
-			if err := capability.Walk(ctx, func(frame intelligence.CanonicalRecordFrame) error {
-				record, err := frame.Record()
-				if err != nil {
-					return err
-				}
-				return emit(record, frame)
-			}); err != nil {
+			if err := capability.Walk(ctx, consume); err != nil {
 				return err
 			}
-		} else if err := s.walk(ctx, []intelligence.RecordPartition{part}, func(record intelligence.NormalizedRecord) error {
-			return emit(record, intelligence.CanonicalRecordFrame{})
-		}); err != nil {
+			continue
+		}
+		verified, err := intelligence.CompareCanonicalFrames(ctx, s.root, part, consume)
+		if err != nil {
 			return err
+		}
+		if verified.Descriptor() == part {
+			if s.canonical == nil {
+				s.canonical = make(map[[32]byte]intelligence.CanonicalPartition)
+			}
+			s.canonical[part.SHA256] = verified
 		}
 	}
 	return nil

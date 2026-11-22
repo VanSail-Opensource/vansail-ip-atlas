@@ -2,6 +2,7 @@ package intelligence
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -34,9 +35,9 @@ type RecordPartition struct {
 // suffix on the same read that supplied the decoded prefix.
 var ErrVerifyRecordPrefix = errors.New("verify consumed record prefix")
 
-// CanonicalPartition is a process-local capability for the exact canonical
-// records emitted by a successful RecordWriter. It conveys no source approval
-// or freshness, and cannot be reconstructed from a persisted descriptor.
+// CanonicalPartition is a process-local capability for frames produced by a
+// successful RecordWriter or verified byte-for-byte against its encoder.
+// It conveys no source approval or freshness.
 type CanonicalPartition struct {
 	root string
 	part RecordPartition
@@ -46,7 +47,7 @@ type CanonicalPartition struct {
 func (p CanonicalPartition) Descriptor() RecordPartition { return p.part }
 
 // Walk retains the normal byte, framing, decoding and semantic checks. Only the
-// canonical writer provenance permits reusing the encoded length and digest.
+// proven writer encoding permits reusing the encoded length and digest.
 func (p CanonicalPartition) Walk(ctx context.Context, emit func(CanonicalRecordFrame) error) error {
 	if p.root == "" || !validPartition(p.part) || emit == nil {
 		return errors.New("canonical partition capability invalid")
@@ -64,6 +65,35 @@ func (p CanonicalPartition) Walk(ctx context.Context, emit func(CanonicalRecordF
 	return walkPartitionFrames(ctx, root, p.part, func(record NormalizedRecord, data []byte) error {
 		return emit(CanonicalRecordFrame{record: record, data: data})
 	})
+}
+
+// CompareCanonicalFrames walks the ordinary strict representation, including
+// its final count, hash and decoder checks. The callback receives a fresh frame
+// encoded exactly as a RecordWriter would encode the owned record. A capability
+// for later reads is returned only if every original frame already matched.
+func CompareCanonicalFrames(ctx context.Context, workspace string, part RecordPartition, emit func(CanonicalRecordFrame) error) (CanonicalPartition, error) {
+	if ctx == nil || emit == nil {
+		return CanonicalPartition{}, errors.New("canonical comparison sink required")
+	}
+	root, err := recordDirectory(workspace, false)
+	if err != nil {
+		return CanonicalPartition{}, err
+	}
+	equal := true
+	err = walkPartitionFrames(ctx, root, part, func(record NormalizedRecord, data []byte) error {
+		encoded, err := json.Marshal(record)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(data, encoded) {
+			equal = false
+		}
+		return emit(CanonicalRecordFrame{record: record, data: encoded})
+	})
+	if err != nil || !equal {
+		return CanonicalPartition{}, err
+	}
+	return CanonicalPartition{root: root, part: part}, nil
 }
 
 // CanonicalRecordFrame owns one strictly decoded canonical frame. Its encoded

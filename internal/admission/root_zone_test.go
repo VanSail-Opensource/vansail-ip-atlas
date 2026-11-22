@@ -7,8 +7,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -97,6 +99,42 @@ func TestRootZoneAddressProjectionRejectsAmbiguity(t *testing.T) {
 	}
 }
 
+func addRootZoneTestAssets(t *testing.T, fetch *fixtureFetch, body []byte) {
+	t.Helper()
+	sum := md5.Sum(body)
+	fetch.assets[rootZoneURL] = body
+	fetch.assets[rootZoneURL+".gz"] = gzipMRTFixture(t, body)
+	fetch.assets[rootZoneURL+".md5"] = []byte(hex.EncodeToString(sum[:]) + "\n")
+}
+
+func TestRootZoneProductionQualificationUsesAll26ExactObservations(t *testing.T) {
+	ctx := context.Background()
+	engine, catalog, now, binding, fresh := prepareCoreQualification(t, true)
+	scan, _, err := VerifySourceRecordsForTier1(ctx, engine.workspace, catalog, now, binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fused, err := scan.Qualify(ctx, engine.workspace, catalog, now, binding)
+	if err != nil || !reflect.DeepEqual(fresh.Report(), fused.Report()) || !reflect.DeepEqual(fresh.validation.statistics, fused.validation.statistics) {
+		t.Fatal("DNS root source changed qualification between full and combined scans", err)
+	}
+	stat := fused.validation.statistics["iana-root-anycast"]
+	retained := scan.records["iana-root-anycast"].rootAddresses
+	if !retained.complete() || stat.Records != 26 || stat.Kinds[intelligence.RecordUsage-1] != 26 || stat.Usage || stat.Exact || len(stat.Signals) != 0 {
+		t.Fatal("DNS source population or capabilities changed", stat)
+	}
+	body, _ := rootZoneFixture(t)
+	for _, line := range strings.Split(string(body), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 5 && (fields[3] == "A" || fields[3] == "AAAA") && !retained[netip.MustParseAddr(fields[4])] {
+			t.Fatal("genuine anycast address omitted")
+		}
+	}
+	if err := fused.RevalidateCurrent(ctx, engine.workspace, catalog, now, binding); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRootZoneCompleteAdmissionAndWithdrawal(t *testing.T) {
 	b, s := rootZoneFixture(t)
 	ctx := context.Background()
@@ -107,9 +145,8 @@ func TestRootZoneCompleteAdmissionAndWithdrawal(t *testing.T) {
 	s.Fixture.TestedAt = "2026-11-22T06:00:00Z"
 	certifyGeoTestSource(t, e, s)
 	now := time.Date(2026, 11, 22, 9, 0, 0, 0, time.UTC)
-	gzipBytes := gzipMRTFixture(t, b)
-	md := md5.Sum(b)
-	fetch.assets = map[string][]byte{rootZoneURL: b, rootZoneURL + ".gz": gzipBytes, rootZoneURL + ".md5": []byte(hex.EncodeToString(md[:]) + "\n")}
+	addRootZoneTestAssets(t, fetch, b)
+	gzipBytes := fetch.assets[rootZoneURL+".gz"]
 	res, err := e.IngestPartitioned(ctx, s, now, binding)
 	if err != nil || res.Snapshot == nil || fetch.calls != 3 || res.Snapshot.PublishedAt.Format(time.RFC3339) != "2026-11-22T00:00:00Z" || res.Snapshot.ContentValidUntil.Format(time.RFC3339) != "2026-11-28T00:00:00Z" {
 		t.Fatal("complete DNS source intake failed", res.Decision, err)

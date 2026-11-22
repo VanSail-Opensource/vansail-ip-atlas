@@ -152,8 +152,16 @@ func TestSourceRevalidationCannotRenewExpiredOrResealedSources(t *testing.T) {
 // fixture checks and partitioned reconciliation. No capabilities are injected.
 func preparedCoreQualification(t *testing.T) (*Engine, []Source, time.Time, [32]byte, *ProductionQualification) {
 	t.Helper()
+	return prepareCoreQualification(t, false)
+}
+
+func prepareCoreQualification(t *testing.T, withDNSRoot bool) (*Engine, []Source, time.Time, [32]byte, *ProductionQualification) {
+	t.Helper()
 	ctx := context.Background()
 	engine, template, fetch, now, binding := prepared(t, []byte("asn,prefix,maxLength\n13335,1.1.1.0/24,24\n"), "csv")
+	if withDNSRoot {
+		now = time.Date(2026, 11, 22, 9, 0, 0, 0, time.UTC)
+	}
 	geo := bulkSource("city-range-csv", "sapics-city-ten-columns-v1")
 	risk := Source{Category: "abuse", Scope: "exact_ip", Coverage: "positive_only", Format: "txt", Parser: Parser{"literal-prefix-text", "one-literal-ip-or-prefix-per-line-v1", 1}, Signals: []string{"abuse"}, Fields: []string{"abuse"}, PublicFields: []string{"reason_flags"}, FieldMappings: map[string][]string{"abuse": {"reason_flags"}}}
 	usage := Source{Category: "asn", Scope: "asn", Coverage: "mapping", Format: "json", Parser: Parser{"ipverse-asn-usage-json", "ipverse-as-category-json-v1", 1}, Fields: []string{"metadata.category"}, PublicFields: []string{"usage_type"}, FieldMappings: map[string][]string{"metadata.category": {"usage_type"}}}
@@ -190,6 +198,16 @@ func preparedCoreQualification(t *testing.T) (*Engine, []Source, time.Time, [32]
 		reviews.Certifications = append(reviews.Certifications, certification{s.ID, s.Parser.ID, s.Parser.Schema, s.Parser.Version, s.Fixture.SHA256, s.Fixture.TestedAt, hashString(implementation)})
 		fetch.assets[s.URL] = []byte(entry.payload)
 		fetch.assets[s.Publication.Locator] = metadataFor(t, s.URL, []byte(entry.payload), now.Add(-time.Hour), now.Add(-2*time.Hour))
+		catalog = append(catalog, s)
+	}
+	if withDNSRoot {
+		body, s := rootZoneFixture(t)
+		s.Fixture.TestedAt = now.Add(-time.Hour).Format(time.RFC3339)
+		if err := os.WriteFile(filepath.Join(engine.workspace, s.Fixture.Path), body, 0600); err != nil {
+			t.Fatal(err)
+		}
+		reviews.Certifications = append(reviews.Certifications, certification{s.ID, s.Parser.ID, s.Parser.Schema, s.Parser.Version, s.Fixture.SHA256, s.Fixture.TestedAt, hashString(implementation)})
+		addRootZoneTestAssets(t, fetch, body)
 		catalog = append(catalog, s)
 	}
 	data, err := json.Marshal(reviews)

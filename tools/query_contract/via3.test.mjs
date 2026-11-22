@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import test from 'node:test'
-import { AtlasReader, parseShard, hash, answerJSONBytes, PathSegmentPool, prefixKeyValid, comparePrefixKeys } from '../../web/app/workers/atlas.ts'
+import { AtlasReader, parseShard, hash, answerJSONBytes, PathSegmentPool, prefixKeyValid, comparePrefixKeys, partitionContains } from '../../web/app/workers/atlas.ts'
 import { hasMapLocation } from '../../web/app/lib/via3.ts'
 import { rpkiSnapshotTiming, trackSnapshotTime } from '../../web/app/lib/rpkiSnapshot.ts'
 
@@ -140,6 +140,32 @@ test('path sharing preserves exact segment types, sequence order and serialized 
   assert.equal(JSON.stringify(shared), before, 'Eviction cannot change a previously materialized answer')
   assert(pool.size <= 256)
   assert(pool.keyBytes <= 128 * 1024)
+})
+
+test('binary partition containment respects every IPv4 and IPv6 prefix boundary', () => {
+  for (const [family, width, address] of [[4, 32, 0xe13579adn], [6, 128, 0x20010db8fedcba9876543210deadbeefn]]) {
+    const key = (value, depth, exact = false) => {
+      const trailing = BigInt(width - depth)
+      const bytes = new Uint8Array(32)
+      bytes[0] = family; bytes[1] = depth; bytes[2] = Number(exact)
+      bytes.set(Uint8Array.fromHex(((value >> trailing) << trailing).toString(16).padStart(32, '0')), 4)
+      return bytes
+    }
+    const storage = new Uint8Array(76)
+    for (let depth = 0; depth <= width; depth++) {
+      storage.set(key(address, depth), 7)
+      for (const childDepth of new Set([0, Math.max(0, depth - 1), depth, Math.min(width, depth + 1), width])) {
+        for (const variant of [address, address ^ 1n, address ^ (1n << BigInt(width - 1)), address ^ (1n << BigInt(Math.min(width - 1, width - depth)))]) {
+          storage.set(key(variant, childDepth, childDepth === width), 43)
+          const shift = BigInt(width - depth)
+          assert.equal(partitionContains(storage, 7, storage, 43), depth <= childDepth && (address >> shift) === (variant >> shift))
+        }
+      }
+      storage.set(key(address, width), 43)
+      storage[43] = family === 4 ? 6 : 4
+      assert.equal(partitionContains(storage, 7, storage, 43), false)
+    }
+  }
 })
 
 test('offset prefix validation preserves the prior key rules at hostile boundaries', () => {
@@ -432,6 +458,44 @@ test('decoded storage is detached only after its final query, cache and router p
   assert([...routerBuffers, ...retained].every(buffer => buffer.byteLength === 0))
   assert.deepEqual(await reader.lookup('203.0.113.1'), expected, 'Clearing cannot corrupt a subsequent release lookup')
   reader.clear()
+})
+
+test('schema reuse binds each reload to the complete original bytes and release partition', async () => {
+  const reader = new AtlasReader(response, () => golden.clock)
+  try {
+    const answer = await reader.lookup('203.0.113.1')
+    const key = [...reader.cache.keys()].find(key => reader.inventory.get(key).kind === 2)
+    const digest = Uint8Array.fromHex(key)
+    const schemas = reader.verifiedSchemas
+    assert(schemas.has(digest))
+    const sibling = digest.slice(); sibling[31] ^= 255
+    assert(!schemas.has(sibling), 'A matching slot alone proves nothing')
+    schemas.remember(sibling)
+    assert(!schemas.has(digest)); assert(schemas.has(sibling))
+    reader.evictCache(key)
+    assert.deepEqual(await reader.lookup('203.0.113.1'), answer)
+    assert(schemas.has(digest)); assert(!schemas.has(sibling))
+    reader.evictCache(key)
+
+    const info = reader.inventory.get(key)
+    reader.inventory.set(key, { ...info, partition: '4:0000000000000000000000007f000001/32' })
+    await assert.rejects(reader.lookup('203.0.113.1'), { message: 'record' })
+    reader.inventory.set(key, info)
+
+    const evictions = []
+    reader.persistent = {
+      get: async hash => {
+        const bytes = files.get(`/_atlas/objects/${hash}.via3`).slice()
+        if (hash === key) bytes[bytes.length - 1] ^= 1
+        return bytes
+      },
+      evict: async hash => evictions.push(hash),
+    }
+    await assert.rejects(reader.lookup('203.0.113.1'), { message: 'integrity' })
+    assert.deepEqual(evictions, [key])
+    reader.clear()
+    assert(!reader.verifiedSchemas.has(digest), 'Release invalidation retires all schema proofs')
+  } finally { reader.clear() }
 })
 
 test('query pins release on success, failure and cancellation', async () => {

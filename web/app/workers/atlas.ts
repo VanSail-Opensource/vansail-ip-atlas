@@ -37,11 +37,16 @@ const mask = (...bits: number[]) => bits.reduce((value, bit) => (value | (1 << b
 const has = (b: Uint8Array, bit: number) => (u32(b, 0) & (1 << bit)) !== 0
 const range = (first: number, count: number, total: number) => first <= total && count <= total - first
 const checkAbort = (signal?: AbortSignal) => { if (signal?.aborted) throw new DOMException('Aborted', 'AbortError') }
-const hex = (b: Uint8Array) => Array.from(b, value => value.toString(16).padStart(2, '0')).join('')
-const unhex = (text: string) => Uint8Array.from(text.match(/../g) ?? [], part => parseInt(part, 16))
-// Read the owned input in fixed-size blocks. WebCrypto snapshots the complete
-// BufferSource, temporarily duplicating a maximum-sized decoded section.
-export const hash = async (b: Uint8Array): Promise<string> => hex(sha256(b))
+const hex = (b: Uint8Array) => b.toHex()
+const unhex = (text: string) => Uint8Array.fromHex(text)
+// WebCrypto may snapshot its input. Limit native calls to one MiB and keep
+// the streaming implementation for larger sections and shared buffers.
+export const hash = async (b: Uint8Array): Promise<string> => {
+  if (b.byteLength >= 4096 && b.byteLength <= 1 << 20 && b.buffer instanceof ArrayBuffer && globalThis.crypto?.subtle) {
+    return hex(new Uint8Array(await crypto.subtle.digest('SHA-256', b as Uint8Array<ArrayBuffer>)))
+  }
+  return hex(sha256(b))
+}
 const textDecoder = new TextDecoder('utf-8', { fatal: true })
 const reasonNames = ['malware', 'botnet', 'command_control', 'abuse', 'fraud', 'scanning', 'spam', 'tor', 'vpn', 'proxy', 'datacenter', 'hosting', 'asn_context', 'subnet_context']
 const reasons = (bits: number) => reasonNames.filter((_, bit) => (bits & (1 << bit)) !== 0)
@@ -174,7 +179,23 @@ export function comparePrefixKeys(a: Uint8Array, aOffset: number, b: Uint8Array,
   if (a[aOffset + 1] !== b[bOffset + 1]) return a[aOffset + 1]! - b[bOffset + 1]!
   return u16(a, aOffset + 2) - u16(b, bOffset + 2)
 }
-function compareKey(a: Uint8Array, b: Uint8Array): number { return comparePrefixKeys(a, 0, b, 0) }
+// All callers have already validated both keys. IPv4 uses the low four of
+// the sixteen address bytes. Local exact markers do not affect containment.
+export function partitionContains(ancestor: Uint8Array, a: number, child: Uint8Array, c: number): boolean {
+  const bits = ancestor[a + 1]!
+  if (ancestor[a] !== child[c] || bits > child[c + 1]!) return false
+  const start = ancestor[a] === 4 ? 16 : 4
+  const whole = bits >>> 3
+  for (let i = start; i < start + whole; i++) if (ancestor[a + i] !== child[c + i]) return false
+  const tail = bits & 7
+  return tail === 0 || ((ancestor[a + start + whole]! ^ child[c + start + whole]!) >>> (8 - tail)) === 0
+}
+
+function bytesBefore(data: Uint8Array, a: number, aEnd: number, b: number, bEnd: number): boolean {
+  const count = Math.min(aEnd - a, bEnd - b)
+  for (let i = 0; i < count; i++) if (data[a + i] !== data[b + i]) return data[a + i]! < data[b + i]!
+  return aEnd - a < bEnd - b
+}
 const zeroRange = (bytes: Uint8Array, first: number, end: number) => {
   for (let p = first; p < end; p++) if (bytes[p] !== 0) return false
   return true
@@ -190,8 +211,10 @@ export function prefixKeyValid(bytes: Uint8Array, offset: number, recordBytes: n
   if (width === 128 && zeroRange(bytes, offset + 4, offset + 14) && bytes[offset + 14] === 255 && bytes[offset + 15] === 255) return false
   if (flags === 1 && bits !== width) return false
   const address = offset + (width === 32 ? 16 : 4)
-  for (let bit = bits; bit < width; bit++) if ((bytes[address + Math.floor(bit / 8)]! & (1 << (7 - bit % 8))) !== 0) return false
-  return true
+  const partial = bits & 7
+  const next = address + (bits >>> 3)
+  if (partial && (bytes[next]! & (255 >>> partial))) return false
+  return zeroRange(bytes, partial ? next + 1 : next, offset + 20)
 }
 function validKey(row: Uint8Array): boolean { return prefixKeyValid(row, 0, row.length) }
 function addressBytes(canonical: string): { family: number; bytes: Uint8Array } {
@@ -228,15 +251,31 @@ export class Shard {
   record(index: number): Uint8Array { const rows = this.rows(3); const width = this.width(3); if (!width || index < 0 || index >= rows.length / width) return fail('record'); return rows.subarray(index * width, (index + 1) * width) }
   prefix(canonical: string): { row: Uint8Array; prefix: string; key: Uint8Array } | null {
     const width = canonical.includes(':') ? 128 : 32
+    const offset = width === 32 ? 16 : 4
+    const target = keyFor(canonical, width, true)
+    const indexes = [this.rows(1), this.rows(8)]
     for (let length = width; length >= 0; length--) {
-      for (const exact of length === width ? [true, false] : [false]) {
-        const target = keyFor(canonical, length, exact)
-        for (const id of [1, 8]) {
-          const rows = this.rows(id)
+      target[1] = length
+      // Try the exact host first. A same-length prefix follows, then each
+      // ancestor with exactly one more address bit cleared.
+      for (let flag = length === width ? 1 : 0; flag >= 0; flag--) {
+        target[2] = flag
+        for (const rows of indexes) {
           let lo = 0; let hi = rows.length / 32
-          while (lo < hi) { const mid = lo + Math.floor((hi - lo) / 2); if (compareKey(rows.subarray(mid * 32, (mid + 1) * 32), target) < 0) lo = mid + 1; else hi = mid }
-          if (lo < rows.length / 32) { const key = rows.subarray(lo * 32, (lo + 1) * 32); if (compareKey(key, target) === 0) return { row: this.record(u32(key, 20)), prefix: prefixText(key), key } }
+          while (lo < hi) {
+            const mid = lo + Math.floor((hi - lo) / 2)
+            if (comparePrefixKeys(rows, mid * 32, target, 0) < 0) lo = mid + 1
+            else hi = mid
+          }
+          if (lo < rows.length / 32 && comparePrefixKeys(rows, lo * 32, target, 0) === 0) {
+            const key = rows.subarray(lo * 32, (lo + 1) * 32)
+            return { row: this.record(u32(key, 20)), prefix: prefixText(key), key }
+          }
         }
+      }
+      if (length > 0) {
+        const bit = length - 1
+        target[offset + (bit >>> 3)]! &= ~(128 >>> (bit & 7))
       }
     }
     return null
@@ -259,9 +298,10 @@ export class Shard {
   }
   relationship(from: number, to: number): Uint8Array | null {
     const bounds = this.asnBounds(from); if (!bounds) return null
+    const rows = this.rows(3); const width = this.width(3)
     const [first, end] = bounds; let lo = first; let hi = end
-    while (lo < hi) { const mid = lo + Math.floor((hi - lo) / 2); if (u32(this.record(mid), 8) < to) lo = mid + 1; else hi = mid }
-    return lo < end && u32(this.record(lo), 8) === to ? this.record(lo) : null
+    while (lo < hi) { const mid = lo + Math.floor((hi - lo) / 2); if (u32(rows, mid * width + 8) < to) lo = mid + 1; else hi = mid }
+    return lo < end && u32(rows, lo * width + 8) === to ? this.record(lo) : null
   }
   rpki(canonical: string, origin: number, announcement: string | null): Uint8Array | null {
     const width = canonical.includes(':') ? 128 : 32
@@ -274,11 +314,11 @@ export class Shard {
     if (prefixText(target) !== announcement) return null
     for (const id of [1, 8]) {
       const index = this.rows(id); const count = index.length / 32; let lo = 0; let hi = count
-      while (lo < hi) { const mid = lo + Math.floor((hi - lo) / 2); if (compareKey(index.subarray(mid * 32, (mid + 1) * 32), target) < 0) lo = mid + 1; else hi = mid }
+      while (lo < hi) { const mid = lo + Math.floor((hi - lo) / 2); if (comparePrefixKeys(index, mid * 32, target, 0) < 0) lo = mid + 1; else hi = mid }
       const first = lo
-      if (first === count || compareKey(index.subarray(first * 32, (first + 1) * 32), target) !== 0) continue
+      if (first === count || comparePrefixKeys(index, first * 32, target, 0) !== 0) continue
       hi = count
-      while (lo < hi) { const mid = lo + Math.floor((hi - lo) / 2); if (compareKey(index.subarray(mid * 32, (mid + 1) * 32), target) <= 0) lo = mid + 1; else hi = mid }
+      while (lo < hi) { const mid = lo + Math.floor((hi - lo) / 2); if (comparePrefixKeys(index, mid * 32, target, 0) <= 0) lo = mid + 1; else hi = mid }
       const end = lo; lo = first; hi = end
       while (lo < hi) { const mid = lo + Math.floor((hi - lo) / 2); if (u32(this.record(u32(index, mid * 32 + 20)), 4) < origin) lo = mid + 1; else hi = mid }
       if (lo === end) return null
@@ -306,7 +346,7 @@ function validate(shard: Shard): void {
   for (let p = 0; p < objects.length; p += 40) {
     const kind = u16(objects, p)
     if (kind < 1 || kind > 14 || u16(objects, p + 2) !== 0 || u32(objects, p + 4) < 64 || u32(objects, p + 4) >= MAX_FILE) fail('record')
-    if (p && (u16(objects, p - 40) > kind || (u16(objects, p - 40) === kind && hex(objects.subarray(p - 32, p)) >= hex(objects.subarray(p + 8, p + 40))))) fail('record')
+    if (p && (u16(objects, p - 40) > kind || (u16(objects, p - 40) === kind && !bytesBefore(objects, p - 32, p, p + 8, p + 40)))) fail('record')
   }
   const ref = (row: Uint8Array, p: number, bit: number, kind: number) => {
     const object = u32(row, p); const id = u32(row, p + 4)
@@ -329,7 +369,7 @@ function validate(shard: Shard): void {
     }
   }
   const local = shard.rows(1); const overlay = shard.rows(8)
-  for (let p = 0; p < overlay.length; p += 32) { let lo = 0; let hi = local.length / 32; const key = overlay.subarray(p, p + 32); while (lo < hi) { const mid = lo + Math.floor((hi - lo) / 2); if (compareKey(local.subarray(mid * 32, (mid + 1) * 32), key) < 0) lo = mid + 1; else hi = mid }; if (lo < local.length / 32 && compareKey(local.subarray(lo * 32, (lo + 1) * 32), key) === 0) fail('record') }
+  for (let p = 0; p < overlay.length; p += 32) { let lo = 0; let hi = local.length / 32; while (lo < hi) { const mid = lo + Math.floor((hi - lo) / 2); if (comparePrefixKeys(local, mid * 32, overlay, p) < 0) lo = mid + 1; else hi = mid }; if (lo < local.length / 32 && comparePrefixKeys(local, lo * 32, overlay, p) === 0) fail('record') }
   const index = shard.rows(2)
   for (let p = 0; p < index.length; p += 8) {
     if (u32(index, p) === 0 || u32(index, p + 4) >= count || (p > 0 && (u32(index, p - 8) >= u32(index, p) || u32(index, p - 4) > u32(index, p + 4) || (shard.kind !== 1 && u32(index, p - 4) === u32(index, p + 4))))) fail('record')
@@ -426,20 +466,21 @@ function validate(shard: Shard): void {
   if (shard.kind === 14) {
     const offsets = shard.rows(5); const bytes = shard.rows(6)
     if (offsets.length < 4 || u32(offsets, 0) !== 0 || u32(offsets, offsets.length - 4) !== bytes.length) fail('record')
-    let previous = ''
     for (let p = 0; p < offsets.length - 4; p += 4) {
       const a = u32(offsets, p); const b = u32(offsets, p + 4)
       if (a >= b || b > bytes.length || b - a > 256) fail('record')
       let label: string
       try { label = textDecoder.decode(bytes.subarray(a, b)) } catch { return fail('record') }
-      if (label.normalize('NFC') !== label || label.trim() !== label || /[\p{Cc}\p{Cf}]/u.test(label) || label.split(/\s/u).some(unsafeLabelToken) || (p > 0 && hex(bytes.subarray(u32(offsets, p - 4), a)) >= hex(bytes.subarray(a, b)))) fail('record')
-      previous = label
+      if (label.normalize('NFC') !== label || label.trim() !== label || /[\p{Cc}\p{Cf}]/u.test(label) || label.split(/\s/u).some(unsafeLabelToken) || (p > 0 && !bytesBefore(bytes, u32(offsets, p - 4), a, a, b))) fail('record')
     }
-    void previous
   }
 }
 
-export async function parseShard(bytes: Uint8Array, signal?: AbortSignal): Promise<Shard> {
+export function parseShard(bytes: Uint8Array, signal?: AbortSignal): Promise<Shard> {
+  return decodeShard(bytes, false, signal)
+}
+
+async function decodeShard(bytes: Uint8Array, knownSchema: boolean, signal?: AbortSignal): Promise<Shard> {
   checkAbort(signal)
   if (bytes.length < 64 || bytes.length >= MAX_FILE) return fail('length')
   if (bytes[0] !== 86 || bytes[1] !== 73 || bytes[2] !== 65 || bytes[3] !== 51 || u16(bytes, 4) !== 3 || u16(bytes, 6) !== 5) return fail('version')
@@ -472,7 +513,7 @@ export async function parseShard(bytes: Uint8Array, signal?: AbortSignal): Promi
     }
     checkAbort(signal)
     const shard = new Shard(kind, sections)
-    validate(shard)
+    if (!knownSchema) validate(shard)
     return shard
   } catch (error) {
     releaseDecoded(sections)
@@ -498,6 +539,26 @@ function canonical(value: unknown): string {
   return fail('manifest')
 }
 function parseCanonical<T>(bytes: Uint8Array): T { let text: string; let parsed: unknown; try { text = textDecoder.decode(bytes); parsed = JSON.parse(text) } catch { return fail('manifest') }; if (canonical(parsed) !== text) return fail('manifest'); return parsed as T }
+
+// A collision evicts the previous proof. A hit requires all 256 digest bits.
+// Each of the 128 pages has 64 entries of 33 bytes (one presence byte and a
+// full digest). Only touched pages are allocated, at most 264 KiB per reader.
+class VerifiedShardSchemas {
+  private pages: (Uint8Array | undefined)[] = []
+  has(digest: Uint8Array): boolean {
+    const page = this.pages[digest[0]! & 127]
+    const start = (digest[1]! & 63) * 33
+    if (!page?.[start]) return false
+    for (let i = 0; i < 32; i++) if (page[start + 1 + i] !== digest[i]) return false
+    return true
+  }
+  remember(digest: Uint8Array): void {
+    const page = this.pages[digest[0]! & 127] ??= new Uint8Array(64 * 33)
+    const start = (digest[1]! & 63) * 33
+    page[start] = 1
+    page.set(digest, start + 1)
+  }
+}
 
 class ObjectCache {
   private database: Promise<IDBDatabase | null> | null = null
@@ -585,6 +646,7 @@ export class AtlasReader {
   private residentBytes = 0
   private router: Shard | null = null
   private persistent = new ObjectCache()
+  private verifiedSchemas = new VerifiedShardSchemas()
   private expiryTimer: ReturnType<typeof setTimeout> | null = null
   private leaseTimer: ReturnType<typeof setTimeout> | null = null
   private revalidateTimer: ReturnType<typeof setTimeout> | null = null
@@ -592,7 +654,7 @@ export class AtlasReader {
   private leaseEpoch = 0
   private revalidateController: AbortController | null = null
   constructor(fetcher: typeof fetch = fetch, clock = () => Math.floor(Date.now() / 1000), invalidate: (reason: string) => void = () => {}, leaseClock = () => performance.now() / 1000) { this.fetcher = fetcher.bind(globalThis); this.clock = clock; this.invalidate = invalidate; this.leaseClock = leaseClock }
-  clear(): void { for (const entry of this.residents.values()) if (entry.shard) releaseDecoded(entry.shard.sections); this.cache.clear(); this.cacheBytes = 0; this.active.clear(); this.activeReserved.clear(); this.activeBytes = 0; this.routerBytes = 0; this.residents.clear(); this.residentBytes = 0; this.manifest = null; this.index = null; this.indexHash = undefined; this.router = null; this.inventory.clear(); this.pointerHash = ''; this.pointerCheckedAt = -Infinity; this.leaseEpoch++; this.revalidateController?.abort(); if (this.expiryTimer) clearTimeout(this.expiryTimer); if (this.leaseTimer) clearTimeout(this.leaseTimer); if (this.revalidateTimer) clearTimeout(this.revalidateTimer) }
+  clear(): void { for (const entry of this.residents.values()) if (entry.shard) releaseDecoded(entry.shard.sections); this.cache.clear(); this.cacheBytes = 0; this.active.clear(); this.activeReserved.clear(); this.activeBytes = 0; this.routerBytes = 0; this.residents.clear(); this.residentBytes = 0; this.manifest = null; this.index = null; this.indexHash = undefined; this.verifiedSchemas = new VerifiedShardSchemas(); this.router = null; this.inventory.clear(); this.pointerHash = ''; this.pointerCheckedAt = -Infinity; this.leaseEpoch++; this.revalidateController?.abort(); if (this.expiryTimer) clearTimeout(this.expiryTimer); if (this.leaseTimer) clearTimeout(this.leaseTimer); if (this.revalidateTimer) clearTimeout(this.revalidateTimer) }
   private releaseResident(key: string): void { const entry = this.residents.get(key); if (entry && !entry.query && !entry.cache && !entry.router) { if (entry.shard) releaseDecoded(entry.shard.sections); this.residentBytes -= entry.size; this.residents.delete(key) } }
   private endQuery(): void { for (const key of this.activeReserved) { const entry = this.residents.get(key); if (entry) { entry.query = false; this.releaseResident(key) } }; this.active.clear(); this.activeReserved.clear(); this.activeBytes = 0 }
   private beginQuery(): void { this.endQuery() }
@@ -720,17 +782,22 @@ export class AtlasReader {
     const active = this.active.get(key); if (active) return active
     const cached = this.cache.get(key)
     if (cached) { this.admit(key, this.shardBytes(cached)); this.active.set(key, cached); if (this.cache.has(key)) { this.cache.delete(key); this.cache.set(key, cached) }; return cached }
+    const schemas = this.verifiedSchemas
     const info = await this.info(key, signal)
     const stored = await this.persistent.get(key, info.bytes)
     const bytes = stored ?? await this.read(`/_atlas/objects/${key}.via3`, MAX_FILE - 1, signal)
     try {
       if (bytes.length !== info.bytes || await hash(bytes) !== key) { if (stored) await this.persistent.evict(key); return fail('integrity') }
       checkAbort(signal); this.current()
+      if (this.verifiedSchemas !== schemas) return fail('expired')
       if (bytes.length < 64 || view(bytes).getBigUint64(36, true) > BigInt(PUBLIC_OBJECT)) return fail('resource_limit')
       this.admit(key, Number(view(bytes).getBigUint64(36, true)))
-      const shard = await parseShard(bytes, signal)
+      // The complete owned container matches its release key. decodeShard still
+      // rechecks every decoded section's length and SHA-256 on a schema hit.
+      const digestBytes = unhex(key)
+      const shard = await decodeShard(bytes, schemas.has(digestBytes), signal)
       const resident = this.residents.get(key)
-      if (!resident) { releaseDecoded(shard.sections); return fail('expired') }
+      if (!resident || this.verifiedSchemas !== schemas) { releaseDecoded(shard.sections); return fail('expired') }
       resident.shard = shard
       checkAbort(signal); this.current()
       if (shard.kind !== info.kind) return fail('schema')
@@ -740,13 +807,19 @@ export class AtlasReader {
         const [address, length] = info.partition.slice(2).split('/'); const partition = new Uint8Array(32); partition[0] = info.partition[0] === '4' ? 4 : 6; partition[1] = Number(length); partition.set(unhex(address!), 4)
         if (!validKey(partition)) return fail('manifest')
         const overlay = shard.rows(8)
-        for (let p = 0; p < overlay.length; p += 32) { const row = overlay.subarray(p, p + 32); if (row[0] !== partition[0] || row[1]! > partition[1]!) return fail('record'); const candidate = keyFor(prefixText(partition).split('/')[0]!, row[1]!, false); if (compareKey(candidate, row) !== 0) return fail('record') }
+        for (let p = 0; p < overlay.length; p += 32) {
+          if (u16(overlay, p + 2) !== 0 || !partitionContains(overlay, p, partition, 0)) return fail('record')
+        }
         const local = shard.rows(1)
-        for (let p = 0; p < local.length; p += 32) { const row = local.subarray(p, p + 32); if (row[0] !== partition[0] || row[1]! < partition[1]!) return fail('record'); const candidate = keyFor(prefixText(row).split('/')[0]!, partition[1]!, false); if (compareKey(candidate, partition) !== 0) return fail('record') }
+        for (let p = 0; p < local.length; p += 32) {
+          if (!partitionContains(partition, 0, local, p)) return fail('record')
+        }
       }
       if (info.partition.startsWith('asn:')) { const [, first, last] = info.partition.split(':'); const index = shard.rows(2); for (let p = 0; p < index.length; p += 8) if (u32(index, p) < Number(first) || u32(index, p) > Number(last)) return fail('record') }
       if (!stored) await this.persistent.put(key, bytes)
       checkAbort(signal); this.current()
+      if (this.verifiedSchemas !== schemas) return fail('expired')
+      schemas.remember(digestBytes)
       const size = [...shard.sections.values()].reduce((sum, bytes) => sum + bytes.length, 0)
       if (size <= 32 * 1024 * 1024) {
         while (this.cacheBytes + size > 32 * 1024 * 1024 && this.cache.size) this.evictCache(this.cache.keys().next().value!)

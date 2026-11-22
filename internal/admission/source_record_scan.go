@@ -13,6 +13,7 @@ import (
 // typed records. One family can be observed per source. Its final canonical
 // family is checked once all receipt payload aliases are known.
 type sourceRecordScan struct {
+	nroDigest     *intelligence.NRORegistrationDigest
 	rootAddresses rootAddressSet
 	azureHosts    map[netip.Addr]bool
 	source        Source
@@ -26,6 +27,9 @@ func newSourceRecordScan(s Source, clocks intelligence.SourceRecordClocks, now t
 	s.Signals = append([]string(nil), s.Signals...)
 	s.PublicFields = append([]string(nil), s.PublicFields...)
 	scan := &sourceRecordScan{source: s, clocks: clocks, now: now, stat: SourceStatistics{ID: clocks.ID, Signals: map[intelligence.Signal]bool{}}}
+	if nroSource(s) {
+		scan.nroDigest = new(intelligence.NRORegistrationDigest)
+	}
 	if azureServiceSource(s) {
 		scan.azureHosts = map[netip.Addr]bool{}
 	}
@@ -39,6 +43,14 @@ func (scan *sourceRecordScan) accept(record intelligence.NormalizedRecord) error
 	s, v, now, stat := &scan.source, &scan.clocks, scan.now, &scan.stat
 	if err := record.Validate(); err != nil {
 		return err
+	}
+	if scan.nroDigest != nil {
+		if err := scan.nroDigest.Add(record); err != nil {
+			return err
+		}
+		if record.Geo.Weight != s.Weight {
+			return errors.New("NRO registration source weight differs")
+		}
 	}
 	if scan.azureHosts != nil {
 		if !intelligence.AzureHostObservation(record) || record.Evidence.Weight != s.Weight || scan.azureHosts[record.Evidence.Address] || len(scan.azureHosts) >= intelligence.MaxAzureServiceHosts {
@@ -88,7 +100,7 @@ func (scan *sourceRecordScan) accept(record intelligence.NormalizedRecord) error
 	case intelligence.RecordGeo:
 		x := record.Geo
 		family = x.Family
-		if !x.Current || x.PhysicalCountry != "" && !contains(s.PublicFields, "physical_country") || x.Region != "" && !contains(s.PublicFields, "region") || x.City != "" && !contains(s.PublicFields, "city") || x.Coordinates != nil && (!contains(s.PublicFields, "latitude") || !contains(s.PublicFields, "longitude")) {
+		if !x.Current || x.RegistrationCountry != "" && !contains(s.PublicFields, "registration_country") || x.PhysicalCountry != "" && !contains(s.PublicFields, "physical_country") || x.Region != "" && !contains(s.PublicFields, "region") || x.City != "" && !contains(s.PublicFields, "city") || x.Coordinates != nil && (!contains(s.PublicFields, "latitude") || !contains(s.PublicFields, "longitude")) {
 			return errors.New("production geographic field binding invalid")
 		}
 		stat.Country = stat.Country || x.PhysicalCountry != ""

@@ -93,6 +93,16 @@ func (e *Engine) certify(ctx context.Context, source Source, adapter adapter, no
 	// Review evidence is necessary, but not sufficient: the current adapter must
 	// still successfully parse the exact reviewed fixture on this run.
 	count := uint64(0)
+	if fixture.PayloadFormat == "nro-delegated-excerpt" {
+		if adapter != nroRegistration || !nroSource(source) || fixture.ContentEncoding != "" && fixture.ContentEncoding != "identity" {
+			return errNRO
+		}
+		proof, err := parseNRO(ctx, file, source, 5000000, true, func(record intelligence.NormalizedRecord) error { return record.Validate() })
+		if err == nil && proof.Day.After(tested) {
+			return errNRO
+		}
+		return err
+	}
 	if fixture.PayloadFormat == "rpki-client-excerpt" {
 		_, err = validateRPKIClientExcerpt(ctx, file, source, adapter, tested)
 		return err

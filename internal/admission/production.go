@@ -32,6 +32,7 @@ type Capability struct {
 	Required   bool     `json:"required"`
 }
 type SourceStatistics struct {
+	nroProjection                               [32]byte
 	azureHostHash                               [32]byte
 	ID                                          string
 	Records                                     uint64
@@ -395,6 +396,9 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 		} else if s.Parser.ID == "mrt-table-dump-v2" {
 			return report, nil, errors.New("production MRT snapshot proof missing")
 		}
+		if nroSource(s) != (r.NROProof != nil) || r.NROProof != nil && (r.ProofKind != "embedded" || r.NROProof.Validate(state.EvaluatedAt, r.PublishedAt, r.PayloadHash) != nil) {
+			return report, nil, errors.New("production NRO report proof invalid")
+		}
 		if azureServiceSource(s) != (r.AzureProof != nil) {
 			return report, nil, errors.New("Azure source receipt binding invalid")
 		}
@@ -488,11 +492,17 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 			if scan.stat.Family != "" && scan.stat.Family != family {
 				return report, nil, errors.New("production evidence independence changed")
 			}
+			if scan.nroDigest != nil {
+				_, scan.stat.nroProjection = scan.nroDigest.Sum()
+			}
 			if scan.azureHosts != nil {
 				scan.stat.azureHostHash = intelligence.AzureHostSetHash(scan.azureHosts)
 			}
 			stat = scan.stat
 			stat.Family = family
+		}
+		if p := v.Receipt.NROProof; p != nil && (p.Prefixes != stat.Records || p.Projection != stat.nroProjection) {
+			return report, nil, errors.New("NRO registration population differs from complete report")
 		}
 		if p := v.Receipt.AzureProof; p != nil {
 			hosts, err := p.Eligible(state.EvaluatedAt, v.Receipt.PublishedAt, v.Receipt.PayloadHash)

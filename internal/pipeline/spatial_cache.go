@@ -19,7 +19,7 @@ import (
 	"vansail-ip-atlas/internal/intelligence"
 )
 
-const spatialCacheVersion = 1
+const spatialCacheVersion = 2
 const spatialCacheIndexLimit = 16 << 20
 const spatialCacheEntryLimit = 16384
 const spatialCacheObjectLimit = 32768
@@ -49,6 +49,7 @@ type spatialCacheEntry struct {
 	Scatter  *spatialCacheScatter    `json:",omitempty"`
 	Leaf     *spatialCacheLeaf       `json:",omitempty"`
 	Compiled *compiledPartitionEntry `json:",omitempty"`
+	Packed   *compiledIndexEntry     `json:",omitempty"`
 }
 type spatialCacheIndex struct {
 	Version  int
@@ -94,6 +95,10 @@ func validSpatialPrefix(p netip.Prefix) bool {
 // Only reviewed descriptor shapes enter the signed index. Semantic decoding of
 // cached records/public streams remains the consumer's responsibility.
 func spatialCacheFiles(e spatialCacheEntry) (map[[32]byte]uint64, error) {
+	e, err := e.expanded()
+	if err != nil {
+		return nil, err
+	}
 	files := map[[32]byte]uint64{}
 	if e.Key == ([32]byte{}) {
 		return nil, errSpatialCache
@@ -195,7 +200,11 @@ func spatialIndexMAC(key [32]byte, index spatialCacheIndex) [32]byte {
 	index.MAC = [32]byte{}
 	data, _ := json.Marshal(index)
 	mac := hmac.New(sha256.New, key[:])
-	_, _ = mac.Write([]byte("atlas-spatial-cache-v1\x00"))
+	if index.Version == 1 {
+		_, _ = mac.Write([]byte("atlas-spatial-cache-v1\x00"))
+	} else {
+		_, _ = mac.Write([]byte("atlas-spatial-cache-v2\x00"))
+	}
 	_, _ = mac.Write(data)
 	var out [32]byte
 	copy(out[:], mac.Sum(nil))
@@ -269,7 +278,7 @@ func openSpatialCache(ctx context.Context, workspace string, contract [32]byte, 
 	}
 	if index.Contract == contract {
 		for _, entry := range index.Entries {
-			c.current[spatialCacheEntryID(entry)] = entry
+			c.current[spatialCacheEntryID(entry)] = entry.packed()
 		}
 	}
 	return c, nil
@@ -318,7 +327,7 @@ func (c *spatialCache) readGeneration(ctx context.Context, root string) (spatial
 		return fail()
 	}
 	canonical, err := json.Marshal(index)
-	if err != nil || !bytes.Equal(data, canonical) || index.Version != spatialCacheVersion || index.Contract == ([32]byte{}) || len(index.Entries) == 0 || len(index.Entries) > spatialCacheEntryLimit {
+	if err != nil || !bytes.Equal(data, canonical) || (index.Version != 1 && index.Version != spatialCacheVersion) || index.Contract == ([32]byte{}) || len(index.Entries) == 0 || len(index.Entries) > spatialCacheEntryLimit {
 		return fail()
 	}
 	mac := spatialIndexMAC(c.key, index)
@@ -327,6 +336,9 @@ func (c *spatialCache) readGeneration(ctx context.Context, root string) (spatial
 	}
 	files := map[[32]byte]uint64{}
 	for i, entry := range index.Entries {
+		if index.Version == 1 && entry.Packed != nil || index.Version == 2 && entry.Compiled != nil {
+			return fail()
+		}
 		if i > 0 && !spatialEntryLess(index.Entries[i-1], entry) {
 			return fail()
 		}
@@ -471,6 +483,10 @@ func (c *spatialCache) Lookup(ctx context.Context, domain string, key [32]byte) 
 	if !ok {
 		return spatialCacheEntry{}, false, nil
 	}
+	entry, err := entry.expanded()
+	if err != nil {
+		return spatialCacheEntry{}, false, err
+	}
 	files, err := spatialCacheFiles(entry)
 	if err != nil {
 		return spatialCacheEntry{}, false, err
@@ -511,14 +527,14 @@ func (c *spatialCache) Retain(ctx context.Context, entry spatialCacheEntry, file
 	if err := c.checkRoot(); err != nil {
 		return false, err
 	}
-	if c.prepared || c.committed {
+	if c.prepared || c.committed || entry.Packed != nil {
 		return false, errSpatialCache
 	}
 	objects, err := spatialCacheFiles(entry)
 	if err != nil {
 		return false, err
 	}
-	entry = cloneSpatialEntry(entry)
+	entry = cloneSpatialEntry(entry).packed()
 	encoded, err := json.Marshal(entry)
 	if err != nil {
 		return false, err

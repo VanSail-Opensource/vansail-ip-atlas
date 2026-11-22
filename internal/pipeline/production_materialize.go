@@ -197,7 +197,7 @@ func buildStreamedCandidate(ctx context.Context, options Options, state intellig
 	defer func() { returnErr = errors.Join(returnErr, reuse.Abort()) }()
 	if canReuseSpatialState(state) {
 		spool.reuse = reuse
-		options.materializationTap = spool.recordPublicRow
+		options.spatialSpool = spool
 		options.compiledReuse = reuse
 		var dependencies [32]byte
 		dependenciesBound := false

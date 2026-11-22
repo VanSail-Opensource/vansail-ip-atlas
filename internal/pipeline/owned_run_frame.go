@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"bytes"
 	"errors"
 
 	"vansail-ip-atlas/internal/via3"
@@ -35,14 +34,6 @@ func (c *compiler) newCanonicalRunFrame(input via3.PublicRecord) (ownedRunFrame,
 func (f ownedRunFrame) ownedBy(c *compiler) bool {
 	return c != nil && f.owner == c && f.row.compact && !f.row.sparse &&
 		len(f.row.key) == 32 && len(f.row.data) > compactRunHeader && f.row.logicalBytes > 0
-}
-
-// A private cache callback may retain or alter its argument. It receives its
-// own bytes, never the immutable bytes that keep this frame's provenance.
-func (f ownedRunFrame) cloneEncoded() encoded {
-	row := f.row
-	row.data = bytes.Clone(row.data)
-	return row
 }
 
 // This is usable only after an original process-local segment proof has

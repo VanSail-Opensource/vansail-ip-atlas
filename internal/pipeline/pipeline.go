@@ -67,7 +67,7 @@ type Options struct {
 	scratchUsage          func(uint64)
 	prefixProvider        via3.ASNPrefixProvider
 	materializationCache  *materializationCache
-	materializationTap    func(encoded) error
+	spatialSpool          *bulkSpool
 	prepareSpatialCache   func(context.Context) error
 	commitSpatialCache    func(context.Context) error
 	compiledReuse         *spatialCache
@@ -544,8 +544,10 @@ func (c *compiler) sort(produce Producer) ([]string, error) {
 		if row.logicalBytes > c.options.Limits.RecordBytes {
 			return errors.New("single fact exceeds bounded record size")
 		}
-		if c.options.materializationTap != nil {
-			if err := c.options.materializationTap(frame.cloneEncoded()); err != nil {
+		// The concrete cache writer copies each frame into its private segment buffer.
+		// No mutable callback or cached object gets ownership of canonical sort bytes.
+		if spool := c.options.spatialSpool; spool != nil {
+			if err := spool.publicStream.appendPublic(row); err != nil {
 				return err
 			}
 		}

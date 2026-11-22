@@ -24,10 +24,6 @@ func (r *bulkLeafReuse) recordRisk(event spatialRiskEvent) error {
 	return r.writer.appendRisk(event)
 }
 
-func (s *bulkSpool) recordPublicRow(row encoded) error {
-	return s.publicStream.appendPublic(row)
-}
-
 func (r *bulkLeafReuse) begin(ctx context.Context) error {
 	writer, err := r.spool.newSpatialStream(ctx)
 	if err != nil {

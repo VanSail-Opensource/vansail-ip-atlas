@@ -76,12 +76,16 @@ func TestOwnedRunFrameCallerOwnership(t *testing.T) {
 			t.Fatal(err)
 		}
 		before := bytes.Clone(frame.row.data)
-		borrowed := frame.cloneEncoded()
-		for i := range borrowed.data {
-			borrowed.data[i] ^= 255
+		cache := &spatialStreamWriter{writer: &privateRunWriter{ctx: context.Background()}}
+		if err := cache.appendPublic(frame.row); err != nil {
+			t.Fatal(err)
+		}
+		// Mutating every retained cache byte cannot affect the sorter.
+		for i := range cache.writer.pending {
+			cache.writer.pending[i] ^= 255
 		}
 		if !bytes.Equal(frame.row.data, before) {
-			t.Fatal("cache callback could mutate canonical frame bytes")
+			t.Fatal("cache writer retained mutable canonical bytes")
 		}
 
 	}

@@ -8,8 +8,8 @@ given IP has any observation depends on the included edition.
 
 | Facts | Contributing data |
 |---|---|
-| Country, registration, city and coordinates | Sapics, DB-IP and ipapi.is bulk geographic files |
-| ASN identity and contextual usage | Ipverse identity and dated ASN role entries joined to observed origins |
+| Physical country, region, city and coordinates | Sapics supplies physical country. DB-IP and ipapi.is supply physical country and finer geographic observations. |
+| ASN identity and contextual usage | Ipverse supplies ASN names, organizations and ASN registration countries. Dated ASN roles join to observed origins. |
 | Network prefixes, origin ASNs, observed AS paths | RouteViews and RIPE RIS RIB snapshots |
 | AS relationships and Tier-1 candidates | CAIDA directional relationships with observed paths and current snapshot evidence |
 | RPKI | RPKI-client snapshot validated per observed prefix and ASN, retaining both clocks |
@@ -18,6 +18,12 @@ given IP has any observation depends on the included edition.
 | Fraud | Explicit phishing reports from TweetFeed, in the same community evidence family as FFraud |
 | Proxy, datacenter, Tor and VPN | FFraud typed records, Tor exit observations and X4B VPN prefixes where applicable |
 | Hosting | Individual addresses in mature Microsoft Azure App Service allocations |
+
+The eighteen-source catalog provides observed network prefixes and origin ASNs.
+IP registration country, network name, network organization, ISP, assignment mode
+and IPv4 directed-broadcast status have no explicit mapping in this edition and
+display as unknown. The ASN identity fields belong to the autonomous system. A
+routed prefix supplies no per-address assignment or broadcast classification.
 
 A replay of the retained full FFraud input verified 525,852 abuse, 138,895
 botnet, 681,160 command-and-control, 32,216 malware, 7,828 scanning and

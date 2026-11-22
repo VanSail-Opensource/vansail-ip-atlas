@@ -27,6 +27,8 @@ func selectRiskAdapter(s Source) bool {
 		return false
 	}
 	switch s.Parser.ID {
+	case "tweetfeed-week-csv":
+		return tweetFeedSource(s)
 	case "ffraud-csv":
 		return selectFFraudAdapter(s)
 	case "ip-count-tsv":
@@ -57,6 +59,10 @@ func parseRiskPayload(ctx context.Context, input io.Reader, s Source, published 
 		return errors.New("bounded supported positive risk schema required")
 	}
 	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.Parser.ID == "tweetfeed-week-csv" {
+		_, err := scanTweetFeed(ctx, input, published, maximum, emit)
 		return err
 	}
 	if s.Parser.ID == "ffraud-csv" {

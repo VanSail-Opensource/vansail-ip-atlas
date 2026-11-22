@@ -95,3 +95,19 @@ These excerpts certify schema only, not global route completeness or historical
 Tier-1 stability. Adjacent RouteViews and RIPE notices retain original terms and
 the educational decision. Exact publisher logo bytes are stored by SHA-256 under
 `logos/`; the RouteViews density chunk is preserved without altering pixels.
+
+`observed-tweetfeed-week.csv` retains four complete rows from TweetFeed's
+November 22 weekly feed with their original CRLF endings. They exercise a hash,
+an IP with an unrelated tag, an untagged IP, and a reported IP with an explicit
+phishing tag. Only that last row supplies an observation, dated to its original
+UTC report. The publisher dedicates its CSV feeds to CC0 1.0. The publisher
+describes the indicators as community reports and asks users to verify them
+before taking action. [Feed documentation](https://tweetfeed.live/feeds/)
+[Data terms](https://tweetfeed.live/tos/)
+
+All four rows appeared in the canonical static download and the later weekly
+artifact with SHA-256
+`72575cac4fcc14ba054ba3010d413bcb7a15220f678f3c581a8f2e4e86ba811d`.
+The fixture supports schema tests. Production separately requires the publisher
+manifest's exact byte count, digest, full CSV row count and original UTC update
+time on each intake.

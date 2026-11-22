@@ -32,6 +32,9 @@ func publicationSupported(source Source) bool {
 	if source.Parser.ID == "ffraud-csv" {
 		return ffraudCommitSource(source)
 	}
+	if source.Parser.ID == "tweetfeed-week-csv" {
+		return tweetFeedSource(source)
+	}
 	if dbipProvider(source) {
 		return true
 	}

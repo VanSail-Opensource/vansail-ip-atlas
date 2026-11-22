@@ -308,7 +308,9 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 			}
 			return deny("quarantined", "publication_metadata_unavailable")
 		}
-		if source.Publication.Kind == "github_commit" {
+		if source.Parser.ID == "tweetfeed-week-csv" {
+			published, err = verifyTweetFeedFile(ctx, metadata, payload, hash, size, now)
+		} else if source.Publication.Kind == "github_commit" {
 			published, err = e.verifyCommit(ctx, metadata, quarantine, source, hash, size, now)
 		} else {
 			published, err = verifyReleaseFile(ctx, metadata, source.URL, hash, size, now)

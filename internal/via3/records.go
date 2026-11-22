@@ -739,17 +739,22 @@ func (s *Shard) FindRelationship(from, to uint32) ([]byte, bool) {
 	return s.findRelationshipWithin(first, end, to)
 }
 func (s *Shard) findRelationshipWithin(first, end, to uint32) ([]byte, bool) {
+	row, _, found := s.relationshipPosition(first, end, to)
+	return row, found
+}
+
+func (s *Shard) relationshipPosition(first, end, to uint32) ([]byte, uint32, bool) {
 	records, width := s.Rows(3)
 	if width != 16 || end < first || uint64(end) > uint64(len(records)/width) {
-		return nil, false
+		return nil, None, false
 	}
 	run := records[int(first)*width : int(end)*width]
 	i := sort.Search(len(run)/16, func(i int) bool { return u32(run, i*16+8) >= to })
 	if i == len(run)/16 {
-		return nil, false
+		return nil, None, false
 	}
 	row := run[i*16 : (i+1)*16]
-	return row, u32(row, 8) == to
+	return row, first + uint32(i), u32(row, 8) == to
 }
 func (s *Shard) FindRPKI(addr netip.Addr, origin uint32, announcement netip.Prefix) ([]byte, bool) {
 	addr = addr.Unmap()

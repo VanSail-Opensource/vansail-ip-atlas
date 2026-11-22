@@ -43,7 +43,7 @@ func graphFixture(t *testing.T) (*Release, *objectReference, *Shard) {
 	}
 	shard.lookup = shardLookupMetadata(&shard, nil)
 	ref := &objectReference{shard: &shard}
-	shard.lookup.graphOwner = ref
+	shard.lookup.owner = ref
 	r := &Release{}
 	if err := r.admitReference(ref, decodedSize(&shard)); err != nil {
 		t.Fatal(err)

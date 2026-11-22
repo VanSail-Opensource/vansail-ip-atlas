@@ -301,7 +301,7 @@ type shardLookup struct {
 	prefixes     [2]prefixLookup
 	prefixLabels []string
 	prefixSpans  []cachedPrefixSpan
-	graphOwner   *objectReference
+	owner        *objectReference
 	graphIndex   *pathGraphIndex
 }
 
@@ -634,8 +634,8 @@ func (r *Release) objectReference(ctx context.Context, reference *objectReferenc
 		}
 	}
 	s.lookup = shardLookupMetadata(&s, references)
-	if s.Kind == 11 {
-		s.lookup.graphOwner = reference
+	if s.Kind == 11 || s.Kind == 12 {
+		s.lookup.owner = reference
 	}
 	r.preparePrefixLabels(reference, &s)
 	reference.shard = &s
@@ -1074,6 +1074,7 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 	var pairStorage [64]uint64
 	ordered := pairStorage[:0]
 	var sortedPairs bool
+	var components graphComponents
 	for _, asn := range answer.BGP.Origins {
 		asndest, err := r.asnDestinations(ctx, asn)
 		if err != nil {
@@ -1135,6 +1136,9 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 				answer.BGP.Paths = graph.appendPaths(answer.BGP.Paths, asn, budget)
 				ordered = append(ordered, graph.pairs...)
 				sortedPairs = len(answer.BGP.Origins) == 1
+				if sortedPairs {
+					components.prepare(s, asn, graph)
+				}
 			} else {
 				firstPath := len(answer.BGP.Paths)
 				answer.BGP.Paths, err = s.appendOriginPaths(answer.BGP.Paths, asn, budget)
@@ -1182,35 +1186,9 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 	if err := budget.charge(256 * len(ordered)); err != nil {
 		return answer, err
 	}
-	answer.BGP.Relationships = make([]RelationshipAnswer, 0, len(ordered))
-	for len(ordered) > 0 {
-		from := uint32(ordered[0] >> 32)
-		if err := ctx.Err(); err != nil {
-			return answer, err
-		}
-		related, err := r.asnDestination(ctx, from, 12)
-		if err != nil {
-			return answer, err
-		}
-		var first, end uint32
-		if related != nil {
-			first, end, _ = related.asnBounds(from)
-		}
-		for len(ordered) > 0 && uint32(ordered[0]>>32) == from {
-			if err := ctx.Err(); err != nil {
-				return answer, err
-			}
-			to := uint32(ordered[0])
-			ordered = ordered[1:]
-			edge := RelationshipAnswer{From: from, To: to, Relation: "unknown", Observed: true}
-			if first < end {
-				if row, ok := related.findRelationshipWithin(first, end, to); ok {
-					edge.Relation = []string{"unknown", "transit_upstream", "peer", "customer", "sibling"}[row[12]]
-					edge.Inferred = row[13]&2 != 0
-				}
-			}
-			answer.BGP.Relationships = append(answer.BGP.Relationships, edge)
-		}
+	answer.BGP.Relationships, err = r.relationshipAnswers(ctx, ordered, &components)
+	if err != nil {
+		return answer, err
 	}
 	labels.finish()
 	if err := ctx.Err(); err != nil {
@@ -1222,6 +1200,7 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 	if err := lookupFits(answer); err != nil {
 		return answer, err
 	}
+	r.retainGraphComponents(&components, len(ordered))
 	return answer, nil
 }
 

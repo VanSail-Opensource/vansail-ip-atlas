@@ -15,10 +15,11 @@ type graphSegment struct {
 	kind  byte
 }
 type pathGraph struct {
-	paths    []graphPath
-	segments []graphSegment
-	values   []uint32
-	pairs    []uint64 // sorted consecutive directed hops of graph-eligible paths
+	paths     []graphPath
+	segments  []graphSegment
+	values    []uint32
+	positions []relationshipPosition
+	pairs     []uint64 // sorted consecutive directed hops of graph-eligible paths
 }
 type graphSlot struct {
 	asn   uint32
@@ -64,14 +65,14 @@ func (r *Release) chargeGraph(ref *objectReference, bytes int) {
 }
 
 func (g *pathGraph) bytes() int {
-	return graphHeaderBytes + 12*cap(g.paths) + 8*cap(g.segments) + 4*cap(g.values) + 8*cap(g.pairs)
+	return graphHeaderBytes + 12*cap(g.paths) + 8*cap(g.segments) + 4*cap(g.values) + 8*cap(g.pairs) + relationshipPositionBytes*cap(g.positions)
 }
 
 func (r *Release) pathGraph(s *Shard, asn uint32) *pathGraph {
 	if s.lookup == nil {
 		return nil
 	}
-	ref := s.lookup.graphOwner
+	ref := s.lookup.owner
 	if ref == nil || !ref.cache || !ref.query {
 		return nil
 	}

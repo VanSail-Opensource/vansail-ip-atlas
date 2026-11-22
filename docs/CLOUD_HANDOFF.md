@@ -492,6 +492,32 @@ Hosted intake, actual compilation, indexed lookups and the production deployment
 chain must run on the new revision. Cloudflare still reported only a preview
 deployment on November 22 before this push.
 
+## November 22 compiler and browser repairs
+
+Run `45029545267` on PR #4 passed the contract and codec jobs. Chrome 158
+reached exactly 402,653,184 bytes in the 384 MiB cgroup and recorded five
+memory-limit events. All three maximum-size workloads completed. The replacement
+decoder uses the bytes already produced for back-references and removes the
+second history allocation. The browser also reads only the relevant shards for
+auxiliary lookups. The combined local build passed 249 Node tests, 15 codec
+cases, 22 browser scenarios and all three maximum-size workloads. The official
+cgroup measurement must be repeated on the repaired revision.
+
+A private engineering replay of 36,465,626 normalized records exposed a second
+failure in the previous candidate. ASN-risk partitioning exhausted the allowance
+of 16,384 private files. The compiler now sizes top-level scatter groups against
+remaining file slots and coalesces deeper groups into one stream per terminal.
+A regression retained 16,640 distinct observations in 256 files. Build-local
+verification of sorted intermediate runs and batched verification of imported
+spatial files also reduce repeated work. Final decoding, integrity checks and
+the existing file and byte limits still apply.
+
+PR #3 carries the combined fifteen-source repair. Its fifteen observed parser
+fixtures were rerun at `2026-11-22T14:15:49Z` and bind implementation digest
+`7ed1c791c1d2778326b8b7d283a09f7f651d31f8057f33b0ce24b3f1575f4c83`.
+Use the complete hosted run for release evidence. The private replay has no
+production intake receipts or authorization to deploy.
+
 ## Resume next
 
 1. Verify the branch and clean checkout. Run strict schemas, Go tests/vet, Python

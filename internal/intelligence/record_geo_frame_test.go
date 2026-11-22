@@ -34,6 +34,15 @@ func TestWriterGeoFrameParity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	owned := bytes.Clone(data)
+	decoded, ok := decodeWriterGeo(owned)
+	if !ok {
+		t.Fatal("writer shape missed")
+	}
+	clear(owned)
+	if !reflect.DeepEqual(decoded, record.Geo) {
+		t.Fatal("decoded geography retained the mutable wire buffer")
+	}
 	for _, value := range [][]byte{
 		data,
 		bytes.Replace(data, []byte("true"), []byte("false"), 1),

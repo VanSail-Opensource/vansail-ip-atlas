@@ -557,14 +557,14 @@ func walkPartitionFrames(ctx context.Context, root string, part RecordPartition,
 // the existing UTF-8, v1 member/duplicate semantics, trailing-data, unknown-field
 // and typed-union checks; concurrency conveys no source or schema approval.
 func decodeRecordFrame(data []byte) (NormalizedRecord, error) {
-	var record NormalizedRecord
 	if !utf8.Valid(data) {
-		return record, errors.New("private record UTF-8 invalid")
+		return NormalizedRecord{}, errors.New("private record UTF-8 invalid")
 	}
 	if geo, ok := decodeWriterGeo(data); ok {
-		record = NormalizedRecord{Version: 3, Kind: RecordGeo, Geo: geo}
+		record := NormalizedRecord{Version: 3, Kind: RecordGeo, Geo: geo}
 		return record, record.Validate()
 	}
+	var record NormalizedRecord
 	if err := jsonv2.Unmarshal(data, &record, json.DefaultOptionsV1(), jsonv2.RejectUnknownMembers(true)); err != nil {
 		return record, err
 	}

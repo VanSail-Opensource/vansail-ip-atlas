@@ -359,6 +359,38 @@ func TestGeoHierarchySupportCoordinatesAndAnycast(t *testing.T) {
 	}
 }
 
+func TestSingleGeoObservationMatchesIndependentFamilyVote(t *testing.T) {
+	p := testPolicy(t)
+	base := GeoEvidence{Family: "alpha", Weight: 70, Prefix: netip.MustParsePrefix("::ffff:192.0.2.0/120"), PhysicalCountry: " us ", RegistrationCountry: "ca", Region: "North", City: "Cafe\u0301", Coordinates: &Coordinates{10.1115, -20.1115, 3}, Current: true}
+	defaultSupport := p.GeoSupport
+	for _, mutate := range []func(*GeoEvidence){
+		func(*GeoEvidence) {},
+		func(v *GeoEvidence) { v.PhysicalCountry = "zz" },
+		func(v *GeoEvidence) { v.RegistrationCountry = "" },
+		func(v *GeoEvidence) { v.Region = "x@example.com"; v.City = "\u202e" },
+		func(v *GeoEvidence) { v.Coordinates = &Coordinates{Latitude: math.NaN(), Longitude: 181} },
+		func(v *GeoEvidence) { v.Family = "" },
+		func(v *GeoEvidence) { v.Weight = math.NaN() },
+		func(v *GeoEvidence) { v.Weight = 0; v.Prefix = netip.MustParsePrefix("::ffff:0:0/80") },
+		func(v *GeoEvidence) { v.Prefix = netip.MustParsePrefix("::ffff:0:0/80") },
+		func(v *GeoEvidence) { v.Current = false; v.Weight = -1 },
+	} {
+		v := base
+		mutate(&v)
+		for _, support := range [][2]int{defaultSupport, {1, 1}, {1, 2}, {2, 1}} {
+			p.GeoSupport = support
+			for _, anycast := range []bool{false, true} {
+				got, err := FuseGeo(p, []GeoEvidence{v}, anycast)
+				// The second observation is filtered by the general voting path.
+				want, wantErr := FuseGeo(p, []GeoEvidence{v, {}}, anycast)
+				if (err == nil) != (wantErr == nil) || err != nil && err.Error() != wantErr.Error() || !reflect.DeepEqual(got, want) {
+					t.Fatalf("single observation diverged for support %v and anycast %v: got %+v, %v, want %+v, %v", support, anycast, got, err, want, wantErr)
+				}
+			}
+		}
+	}
+}
+
 func TestGeoFieldLPMAndMappedPrefixNormalization(t *testing.T) {
 	p := testPolicy(t)
 	index, err := NewGeoIndex(p, []GeoEvidence{{Family: "a", Weight: 90, Prefix: netip.MustParsePrefix("::ffff:192.0.2.0/120"), PhysicalCountry: "US", Current: true}, {Family: "a", Weight: 80, Prefix: netip.MustParsePrefix("192.0.2.1/32"), PhysicalCountry: "CA", Current: true}, {Family: "b", Weight: 80, Prefix: netip.MustParsePrefix("192.0.2.1/32"), PhysicalCountry: "CA", Current: true}})

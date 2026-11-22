@@ -87,8 +87,6 @@ func FuseGeo(policy Policy, records []GeoEvidence, anycast bool) (GeoResult, err
 		}
 		v.PhysicalCountry = country(v.PhysicalCountry)
 		v.RegistrationCountry = country(v.RegistrationCountry)
-		v.Region = SafeLabel(v.Region)
-		v.City = SafeLabel(v.City)
 		if v.Prefix.IsValid() {
 			prefix, err := canonicalPrefix(v.Prefix)
 			if err != nil {
@@ -96,7 +94,18 @@ func FuseGeo(policy Policy, records []GeoEvidence, anycast bool) (GeoResult, err
 			}
 			v.Prefix = prefix
 		}
+		// One positive observation supplies both country votes independently.
+		// A policy requiring two families for a region also excludes city and
+		// coordinates, so their labels and coordinate candidates are unused.
+		if len(records) == 1 && policy.GeoSupport[0] > 1 {
+			return geoCountries(v.PhysicalCountry, v.RegistrationCountry), nil
+		}
+		v.Region = SafeLabel(v.Region)
+		v.City = SafeLabel(v.City)
 		byFamily[v.Family] = append(byFamily[v.Family], v)
+	}
+	if len(byFamily) == 0 {
+		return GeoResult{}, nil
 	}
 	selectVotes := func(field func(GeoEvidence) string, eligible func(GeoEvidence) bool) []geoVote {
 		votes := []geoVote{}
@@ -139,15 +148,9 @@ func FuseGeo(policy Policy, records []GeoEvidence, anycast bool) (GeoResult, err
 		return votes
 	}
 	all := func(GeoEvidence) bool { return true }
-	result := GeoResult{}
 	physical, _ := winningPlace(selectVotes(func(v GeoEvidence) string { return v.PhysicalCountry }, all), 1, 0)
 	registration, _ := winningPlace(selectVotes(func(v GeoEvidence) string { return v.RegistrationCountry }, all), 1, 0)
-	if physical != "" {
-		result.PhysicalCountry = &physical
-	}
-	if registration != "" {
-		result.RegistrationCountry = &registration
-	}
+	result := geoCountries(physical, registration)
 	if physical == "" {
 		return result, nil
 	}
@@ -202,6 +205,17 @@ func FuseGeo(policy Policy, records []GeoEvidence, anycast bool) (GeoResult, err
 		result.Coordinates = &candidates[0].value
 	}
 	return result, nil
+}
+
+func geoCountries(physical, registration string) GeoResult {
+	result := GeoResult{}
+	if physical != "" {
+		result.PhysicalCountry = &physical
+	}
+	if registration != "" {
+		result.RegistrationCountry = &registration
+	}
+	return result
 }
 
 type geoVote struct {

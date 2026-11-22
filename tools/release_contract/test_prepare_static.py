@@ -106,7 +106,7 @@ class StaticCandidateTests(unittest.TestCase):
             old_index = (public / "dataset-credits.json").read_bytes()
             (public / "_headers").write_text("/*\n  Content-Security-Policy: default-src 'self'; script-src 'self'; object-src 'none'\n", encoding="utf-8")
             (public / "entry.js").write_text('const label="private-publisher";', encoding="utf-8")
-            with patch("tools.release_contract.prepare_static.inspect_binary", return_value=1), patch("tools.release_contract.prepare_static.known_private_values", return_value=("private-publisher",)):
+            with patch("tools.release_contract.prepare_static.inspect_binary", return_value=1), patch("tools.release_contract.prepare_static.stage_browser_index"), patch("tools.release_contract.prepare_static.known_private_values", return_value=("private-publisher",)):
                 with self.assertRaises(ContractError):
                     prepare(atlas, public, 150)
             self.assertEqual((previous / "current.json").read_bytes(), old_pointer)

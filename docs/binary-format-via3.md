@@ -321,3 +321,23 @@ P0 vectors cover every record width, address encoding, exact/prefix keys,
 dictionary ID 0, explicit false booleans, score 0 versus unrated, reason bits,
 all shard IDs and corruption classes. Executed compressed parity and overlay
 lookup remain P1 requirements; uncompressed vectors do not claim those gates.
+
+
+## Browser routing directory
+
+A packaged current pointer can carry an additional lowercase SHA-256 field
+`browser_sha256`. Its immutable root lives at
+`/_atlas/browser/<browser_sha256>.json`. The root binds the full manifest
+digest, release identity, mode and validity interval to four content-addressed
+directories for IPv4, IPv6, ASN and object descriptors. Original native
+manifests and VIA3 objects remain addressable at their existing paths. Legacy
+pointers use the complete manifest and VIA3 router.
+
+Directories branch on hexadecimal digits of the canonical network-order key.
+A routing leaf stores disjoint inclusive intervals mapped to an ordered set of
+object descriptors. An inventory leaf binds object hashes to kind, partition
+and stored size. Packaging reconstructs every index page from the full manifest
+and its verified router, checks every page byte and rejects unreferenced files.
+The browser verifies each fetched hash, checks object references, enforces the
+release lease and expires all views at the release deadline. An IP Overview loads
+the four fact kinds it displays. A full lookup continues to return all fields.

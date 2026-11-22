@@ -4,7 +4,8 @@ export type Snapshot = { mode: 'production' | 'synthetic'; release_id: string; v
 type Plane = 'ipv4' | 'ipv6' | 'asn' | 'objects'
 type Root = Snapshot & { format_version: number; manifest_sha256: string; roots: Record<Plane, string> }
 type Branch = { type: 'branch'; children: [number, string][] }
-type Objects = { type: 'objects'; objects: ObjectInfo[] }
+type Objects = { type: 'objects'; objects: ObjectInfo[]; references?: [number,number,string][] }
+export const REFERENCE_MINIMUM = 8
 type Routes = { type: 'routes'; objects: ObjectInfo[]; sets: number[][]; routes: [string, string, number][] }
 type Node = Branch | Routes | Objects
 type FetchControl = (digest: string, limit: number, signal?: AbortSignal) => Promise<unknown>
@@ -19,7 +20,7 @@ const integer = (value: unknown, max: number): value is number =>
 export function readRoot(value: unknown, release: string, manifest: string): Root {
   if (!keys(value, ['format_version','manifest_sha256','mode','release_id','roots','valid_from','valid_until'])) return bad()
   const root = value as Root
-  if (root.format_version !== 1 || root.manifest_sha256 !== manifest || root.release_id !== release ||
+  if (![1,2].includes(root.format_version) || root.manifest_sha256 !== manifest || root.release_id !== release ||
       !['production','synthetic'].includes(root.mode) || !keys(root.roots, ['ipv4','ipv6','asn','objects']) || !Object.values(root.roots).every(digest) ||
       !Number.isSafeInteger(root.valid_from) || !Number.isSafeInteger(root.valid_until) || root.valid_from < 0 ||
       root.valid_until <= root.valid_from || root.valid_until - root.valid_from > 720 * 3600) return bad()
@@ -57,11 +58,21 @@ export class LookupIndex {
         previous = row[0]
       }
     } else {
-      if (plane === 'objects' ? node.type !== 'objects' || !keys(node,['type','objects']) : node.type !== 'routes' || !keys(node,['type','objects','routes','sets'])) return bad()
+      const proofFields = this.root.format_version === 2 && Object.hasOwn(node,'references')
+      if (plane === 'objects' ? node.type !== 'objects' || !keys(node,proofFields ? ['type','objects','references'] : ['type','objects']) : node.type !== 'routes' || !keys(node,['type','objects','routes','sets'])) return bad()
       if (!Array.isArray(node.objects) || !node.objects.every(o => this.validInfo(o))) return bad()
       for (const info of node.objects) Object.freeze(info)
       if (node.type === 'objects') {
         if (!node.objects.every((o,i) => o.sha256.startsWith(prefix) && (!i || node.objects[i-1]!.sha256 < o.sha256))) return bad()
+        if (proofFields) {
+          if (!Array.isArray(node.references) || !node.references.length || node.references.length > node.objects.length) return bad()
+          let previous = -1
+          for (const item of node.references) {
+            if (!Array.isArray(item) || item.length !== 3 || !integer(item[0],node.objects.length) || item[0] <= previous ||
+                ![2,4,7,8].includes(node.objects[item[0]]!.kind) || !integer(item[1],18500) || item[1] < REFERENCE_MINIMUM || !digest(item[2])) return bad()
+            previous = item[0]
+          }
+        }
       } else {
         if (!Array.isArray(node.sets) || !Array.isArray(node.routes)) return bad()
         for (const set of node.sets) {
@@ -135,6 +146,19 @@ export class LookupIndex {
       this.components.put(scopeKey(group,key,bits), selected,bytes,this.room(),{group,bits})
     }
     return selected.slice()
+  }
+
+  get hasReferenceProofs(): boolean { return this.root.format_version === 2 }
+
+  async referenceDigest(owner: ObjectInfo, count: number, signal?: AbortSignal): Promise<string> {
+    if (!this.hasReferenceProofs || count < REFERENCE_MINIMUM || count >= 18500) return bad()
+    const {page} = await this.leaf('objects',owner.sha256,signal)
+    if (page?.type !== 'objects') return bad()
+    const index = page.objects.findIndex(o => o.sha256 === owner.sha256), info = page.objects[index]
+    if (!info || info.bytes !== owner.bytes || info.kind !== owner.kind || info.partition !== owner.partition) return bad()
+    const proof = page.references?.find(row => row[0] === index)
+    if (!proof || proof[1] !== count) return bad()
+    return proof[2]
   }
 
   async object(key: string, signal?: AbortSignal): Promise<ObjectInfo | undefined> {

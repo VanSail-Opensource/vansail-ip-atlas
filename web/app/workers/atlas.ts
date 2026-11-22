@@ -1,5 +1,5 @@
 import { COMPONENT_LIMIT, FactComponents, projectPrefix, projectASN, safePrefixDepth, scopeKey } from './factComponents.ts'
-import { LookupIndex, digest, readRoot, type Snapshot, type ObjectInfo } from './lookupIndex.ts'
+import { LookupIndex, REFERENCE_MINIMUM, digest, readRoot, type Snapshot, type ObjectInfo } from './lookupIndex.ts'
 import { decodeZstd } from '../lib/zstd.ts'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { parseInput } from '../lib/query.ts'
@@ -877,8 +877,7 @@ export class AtlasReader {
       resident.shard = shard
       checkAbort(signal); this.current()
       if (shard.kind !== info.kind) return fail('schema')
-      const references = shard.rows(7)
-      for (let p = 0; p < references.length; p += 40) { const target = hex(references.subarray(p + 8, p + 40)); const object = this.inventory.get(target) ?? (this.index ? await this.info(target, signal) : undefined); if (!object || object.kind !== u16(references, p) || object.bytes !== u32(references, p + 4) || target === key) return fail('record') }
+      await this.verifyReferences(shard,info,signal)
       if (info.partition.startsWith('4:') || info.partition.startsWith('6:')) {
         const [address, length] = info.partition.slice(2).split('/'); const partition = new Uint8Array(32); partition[0] = info.partition[0] === '4' ? 4 : 6; partition[1] = Number(length); partition.set(unhex(address!), 4)
         if (!validKey(partition)) return fail('manifest')
@@ -910,7 +909,41 @@ export class AtlasReader {
       ;(bytes.buffer as ArrayBuffer).transfer(0)
     }
   }
-  private async reference(shard: Shard, index: number, signal?: AbortSignal): Promise<Shard> { const objects = shard.rows(7); if (index >= objects.length / 40) return fail('record'); return this.object(hex(objects.subarray(index * 40 + 8, index * 40 + 40)), signal) }
+  private async verifyReferences(shard: Shard, owner: ObjectInfo, signal?: AbortSignal): Promise<void> {
+    const rows = shard.rows(7), count = rows.length / 40, index = this.index
+    if (index?.hasReferenceProofs && count >= REFERENCE_MINIMUM) {
+      const expected = await index.referenceDigest(owner,count,signal)
+      checkAbort(signal); this.current()
+      if (this.index !== index) return fail('expired')
+      const proof = sha256.create()
+      proof.update(new TextEncoder().encode('VIA3-REFERENCES-1\0'))
+      proof.update(unhex(this.pointerHash)); proof.update(unhex(owner.sha256))
+      proof.update(shard.sections.get(7)!)
+      if (hex(proof.digest()) !== expected) return fail('integrity')
+      // Already-known targets must agree immediately. Reading an external row
+      // also checks its actual descriptor before exposing facts from that target.
+      for (let p = 0; p < rows.length; p += 40) {
+        const key = hex(rows.subarray(p+8,p+40)), info = this.inventory.get(key)
+        if (key === owner.sha256 || info && (info.kind !== u16(rows,p) || info.bytes !== u32(rows,p+4))) return fail('record')
+      }
+      return
+    }
+    for (let p = 0; p < rows.length; p += 40) {
+      const key = hex(rows.subarray(p+8,p+40))
+      const info = this.inventory.get(key) ?? (index ? await this.info(key,signal) : undefined)
+      if (!info || info.kind !== u16(rows,p) || info.bytes !== u32(rows,p+4) || key === owner.sha256) return fail('record')
+    }
+  }
+  private async referenceTarget(shard: Shard, ordinal: number, signal?: AbortSignal): Promise<string> {
+    const key = this.referenceHash(shard,ordinal)
+    const info = this.inventory.get(key) ?? await this.info(key,signal)
+    const rows = shard.rows(7), p = ordinal * 40
+    if (info.kind !== u16(rows,p) || info.bytes !== u32(rows,p+4)) return fail('record')
+    return key
+  }
+  private async reference(shard: Shard, ordinal: number, signal?: AbortSignal): Promise<Shard> {
+    return this.object(await this.referenceTarget(shard,ordinal,signal),signal)
+  }
   private referenceHash(shard: Shard, index: number): string {
     const objects = shard.rows(7)
     if (index >= objects.length / 40) return fail('record')
@@ -919,7 +952,7 @@ export class AtlasReader {
   private async label(shard: Shard, row: Uint8Array, p: number, signal?: AbortSignal): Promise<string | null> {
     const object = u32(row,p), id = u32(row,p+4)
     if (object === NONE && id === NONE) return null
-    const hash = this.referenceHash(shard,object), key = hash + '/label/' + id
+    const hash = await this.referenceTarget(shard,object,signal), key = hash + '/label/' + id
     const known = this.components.get<string>(key)
     if (known !== undefined) return known
     const dictionary = await this.object(hash,signal), offsets = dictionary.rows(5), text = dictionary.rows(6)
@@ -1168,7 +1201,7 @@ export class AtlasReader {
     if (count === 0 && cursor === 0) return output
     if (!Number.isSafeInteger(cursor) || cursor < 0 || cursor >= count) return fail('invalid_cursor')
     const page = shard.rows(12).subarray((u32(row, 36) + cursor) * 16, (u32(row, 36) + cursor + 1) * 16)
-    const hash = this.referenceHash(shard,u32(page,0)), first = u32(page,4), total = u32(page,8)
+    const hash = await this.referenceTarget(shard,u32(page,0),signal), first = u32(page,4), total = u32(page,8)
     const key = hash + '/prefix-span/' + first + '/' + total
     const known = this.components.get<readonly string[]>(key)
     if (known) output.prefixes = known.slice()

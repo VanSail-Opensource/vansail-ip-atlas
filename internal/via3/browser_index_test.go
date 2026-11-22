@@ -141,7 +141,7 @@ func TestBrowserIndexRoutedParityAndReproducibility(t *testing.T) {
 	}
 	rootRaw := readBrowserTestPage(t, dest, hash)
 	var root browserRoot
-	if len(rootRaw) > browserRootLimit || strictJSON(rootRaw, &root) != nil || root.ManifestSHA256 != release.Pointer.ManifestSHA256 || root.ReleaseID != release.Manifest.ReleaseID || root.Mode != release.Manifest.Mode || root.ValidFrom != release.Manifest.ValidFrom || root.ValidUntil != release.Manifest.ValidUntil || root.FormatVersion != 1 {
+	if len(rootRaw) > browserRootLimit || strictJSON(rootRaw, &root) != nil || root.ManifestSHA256 != release.Pointer.ManifestSHA256 || root.ReleaseID != release.Manifest.ReleaseID || root.Mode != release.Manifest.Mode || root.ValidFrom != release.Manifest.ValidFrom || root.ValidUntil != release.Manifest.ValidUntil || root.FormatVersion != 2 {
 		t.Fatal("browser root changed release identity")
 	}
 	for _, s := range []string{"0.0.0.0", "203.0.112.255", "203.0.113.0", "203.0.113.1", "203.0.113.255", "203.0.114.0", "203.0.114.21", "203.0.114.255", "203.0.115.0", "255.255.255.255", "::", "2001:db7:ffff:ffff:ffff:ffff:ffff:ffff", "2001:db8::", "2001:db8::1", "2001:db8:ffff:ffff:ffff:ffff:ffff:ffff", "2001:db9::", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"} {

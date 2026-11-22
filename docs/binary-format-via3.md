@@ -336,8 +336,23 @@ pointers use the complete manifest and VIA3 router.
 Directories branch on hexadecimal digits of the canonical network-order key.
 A routing leaf stores disjoint inclusive intervals mapped to an ordered set of
 object descriptors. An inventory leaf binds object hashes to kind, partition
-and stored size. Packaging reconstructs every index page from the full manifest
-and its verified router, checks every page byte and rejects unreferenced files.
+and stored size. Packaging reconstructs each index page from the canonical
+manifest and its verified objects, checks every page byte and rejects
+unreferenced files.
 The browser verifies each fetched hash, checks object references, enforces the
 release lease and expires all views at the release deadline. An IP Overview loads
 the four fact kinds it displays. A full lookup continues to return all fields.
+
+Browser root format version 2 adds optional `references` to an object
+inventory leaf. Each entry is `[source_ordinal, target_count, sha256]`, ordered
+by the source ordinal within that leaf. Every non-router source with at least
+eight directory entries requires a proof. The generator authenticates the
+source container, reconstructs the complete section 7 vector from the
+manifest's target kinds, stored sizes and SHA-256 identities in ordinal order,
+and checks the source bytes against it. The digest covers the ASCII domain
+`VIA3-REFERENCES-1`, a NUL byte, the 32-byte manifest and source digests,
+and the reconstructed vector including its eight-byte little-endian header.
+The browser verifies this digest before using the source. For each accessed
+external target it also checks the stored size and kind against the target's
+authenticated descriptor. Smaller directories and all version 1 lookups
+verify every target descriptor individually.

@@ -835,3 +835,55 @@ test('optional projections yield to accepted full-size inputs and preserve the r
     assert.equal(reader.activeReserved.size,0)
   } finally { reader.clear() }
 })
+
+test('v2 authenticates the complete ordered release directory and resolves only accessed targets', async () => {
+  const manifestHash='a'.repeat(64), owner={sha256:'b'.repeat(64),kind:8,bytes:100,partition:'all'}
+  const vector=new Uint8Array(8+8*40), header=new DataView(vector.buffer)
+  header.setUint32(0,8,true);header.setUint32(4,40,true)
+  const targets=[]
+  for(let i=0;i<8;i++){
+    const p=8+i*40,sha256=(i+1).toString(16).padStart(64,'0')
+    header.setUint16(p,14,true);header.setUint32(p+4,100+i,true);vector.set(Uint8Array.fromHex(sha256),p+8)
+    targets.push({sha256,kind:14,bytes:100+i,partition:'all'})
+  }
+  const expected='06e2b292c41a6172991fc1eddcf8732cefd2de7cc3c418c02f111e90b37330b6'
+  const read=(version=2,objects=[owner],references=[[0,8,expected]])=>{
+    const stats={leaves:0,targets:0}
+    const root={format_version:version,roots:{objects:'c'.repeat(64)}}
+    const reader=new AtlasReader(response,()=>golden.clock,()=>{},()=>0)
+    reader.manifest=golden.manifest;reader.pointerHash=manifestHash;reader.pointerCheckedAt=0
+    reader.index=new LookupIndex(root,async()=>{stats.leaves++;return {type:'objects',objects,...(references?{references}:{})}},()=>true)
+    reader.info=async key=>{stats.targets++;return targets.find(o=>o.sha256===key)}
+    return {reader,stats}
+  }
+  const shard=(bytes=vector)=>new Shard(8,new Map([[7,bytes]]))
+  const {reader,stats}=read()
+  try {
+    await reader.verifyReferences(shard(),owner)
+    assert.equal(stats.leaves,1);assert.equal(stats.targets,0)
+    assert.equal(await reader.referenceTarget(shard(),3),targets[3].sha256)
+    assert.equal(stats.targets,1,'Only the chosen external target was resolved')
+    reader.inventory.set(targets[3].sha256,{...targets[3],bytes:101})
+    await assert.rejects(reader.referenceTarget(shard(),3),{message:'record'})
+    await assert.rejects(reader.verifyReferences(shard(),owner),{message:'record'})
+    reader.inventory.clear()
+    for (const where of [8,12,16,55,88]) {
+      const corrupted=vector.slice();corrupted[where]^=1
+      await assert.rejects(reader.verifyReferences(shard(corrupted),owner),{message:'integrity'})
+    }
+    const wrongOrder=vector.slice()
+    wrongOrder.set(vector.subarray(48,88),8);wrongOrder.set(vector.subarray(8,48),48)
+    await assert.rejects(reader.verifyReferences(shard(wrongOrder),owner),{message:'integrity'})
+    reader.pointerHash='d'.repeat(64)
+    await assert.rejects(reader.verifyReferences(shard(),owner),{message:'integrity'})
+    reader.pointerHash=manifestHash
+    for (const change of [{sha256:'e'.repeat(64)},{partition:'asn:1:2'},{kind:7},{bytes:105}])
+      await assert.rejects(reader.verifyReferences(shard(),{...owner,...change}),{message:'manifest'})
+  } finally {reader.clear()}
+  for (const refs of [null,[],[[0,9,expected]],[[1,8,expected]],[[0,8,expected],[0,8,expected]],[[0,8,'invalid']]]) {
+    const {reader}=read(2,[owner],refs)
+    try { await assert.rejects(reader.verifyReferences(shard(),owner),{message:'manifest'}) } finally {reader.clear()}
+  }
+  const v1=read(1,[owner],null)
+  try {await v1.reader.verifyReferences(shard(),owner);assert.equal(v1.stats.targets,8);assert.equal(v1.stats.leaves,0)} finally {v1.reader.clear()}
+})

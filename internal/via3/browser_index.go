@@ -54,8 +54,9 @@ type browserBranch struct {
 }
 
 type browserObjectLeaf struct {
-	Objects []ObjectInfo `json:"objects"`
-	Type    string       `json:"type"`
+	Objects    []ObjectInfo `json:"objects"`
+	References [][3]any     `json:"references,omitempty"`
+	Type       string       `json:"type"`
 }
 
 type browserRouteLeaf struct {
@@ -66,9 +67,10 @@ type browserRouteLeaf struct {
 }
 
 type browserControlTree struct {
-	ctx   context.Context
-	pages map[string][]byte
-	size  int
+	proofs map[string]browserReferenceProof
+	ctx    context.Context
+	pages  map[string][]byte
+	size   int
 }
 
 func (tree *browserControlTree) add(body []byte, limit int) (string, error) {
@@ -112,8 +114,7 @@ func browserReadFile(path string, limit int) ([]byte, error) {
 	return b, nil
 }
 
-// The router is the only fact object read during projection. All object metadata
-// comes from the original descriptor. Private diagnostic releases keep their
+// Route selection and target identities come from the original router and manifest. Private diagnostic releases keep their
 // original engineering mode and identity in their private browser controls.
 func browserInputs(ctx context.Context, dir string) (browserPointer, Manifest, *Shard, []ObjectInfo, error) {
 	var p browserPointer
@@ -197,7 +198,13 @@ func (tree *browserControlTree) objectTree(objects []ObjectInfo, depth int) (str
 		return "", err
 	}
 	if len(objects) <= 20 {
-		b := canonical(browserObjectLeaf{Objects: objects, Type: "objects"})
+		leaf := browserObjectLeaf{Objects: objects, Type: "objects"}
+		for i, o := range objects {
+			if proof, ok := tree.proofs[o.SHA256]; ok {
+				leaf.References = append(leaf.References, [3]any{i, proof.count, proof.hash})
+			}
+		}
+		b := canonical(leaf)
 		if len(b) <= browserObjectLimit {
 			return tree.add(b, browserObjectLimit)
 		}
@@ -223,7 +230,7 @@ func (tree *browserControlTree) objectTree(objects []ObjectInfo, depth int) (str
 	return tree.add(canonical(node), browserBranchLimit)
 }
 
-func buildBrowserControls(ctx context.Context, atlasRoot string) (*browserControlTree, string, error) {
+func buildBrowserControls(ctx context.Context, atlasRoot, expectedRoot string) (*browserControlTree, string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, "", err
 	}
@@ -231,7 +238,33 @@ func buildBrowserControls(ctx context.Context, atlasRoot string) (*browserContro
 	if err != nil {
 		return nil, "", err
 	}
-	tree := &browserControlTree{ctx: ctx, pages: make(map[string][]byte)}
+	if expectedRoot != "" && p.BrowserSHA256 != "" && p.BrowserSHA256 != expectedRoot {
+		return nil, "", fail("manifest")
+	}
+	if expectedRoot == "" {
+		expectedRoot = p.BrowserSHA256
+	}
+	// Previously staged v1 roots are still verified byte for byte using only
+	// their original router and manifest, independent of new proof availability.
+	if expectedRoot != "" {
+		tree, hash, err := projectBrowserControls(ctx, p, m, router, refs, nil, 1)
+		if err != nil || hash == expectedRoot {
+			return tree, hash, err
+		}
+	}
+	proofs, err := browserReferenceProofs(ctx, atlasRoot, p.ManifestSHA256, m.Objects)
+	if err != nil {
+		return nil, "", err
+	}
+	tree, hash, err := projectBrowserControls(ctx, p, m, router, refs, proofs, 2)
+	if err == nil && expectedRoot != "" && expectedRoot != hash {
+		return nil, "", fail("manifest")
+	}
+	return tree, hash, err
+}
+
+func projectBrowserControls(ctx context.Context, p browserPointer, m Manifest, router *Shard, refs []ObjectInfo, proofs map[string]browserReferenceProof, version int) (*browserControlTree, string, error) {
+	tree := &browserControlTree{ctx: ctx, pages: make(map[string][]byte), proofs: proofs}
 	routes := browserRoutes{router: router, refs: refs, setIDs: make(map[string]int)}
 	v4, v6, asns, err := routes.intervals(ctx)
 	if err != nil {
@@ -250,20 +283,17 @@ func buildBrowserControls(ctx context.Context, atlasRoot string) (*browserContro
 	if root.Objects, err = tree.objectTree(m.Objects, 0); err != nil {
 		return nil, "", err
 	}
-	hash, err := tree.add(canonical(browserRoot{1, p.ManifestSHA256, m.Mode, p.ReleaseID, root, m.ValidFrom, m.ValidUntil}), browserRootLimit)
-	if err == nil && p.BrowserSHA256 != "" && p.BrowserSHA256 != hash {
-		return nil, "", errors.New("browser pointer digest differs from the derived index")
-	}
+	hash, err := tree.add(canonical(browserRoot{version, p.ManifestSHA256, m.Mode, p.ReleaseID, root, m.ValidFrom, m.ValidUntil}), browserRootLimit)
 	return tree, hash, err
 }
 
 // VerifyBrowserIndex re-derives the complete control inventory from the
-// canonical manifest and router, and compares every file in its directory.
+// canonical release inputs and compares every file in its directory.
 func VerifyBrowserIndex(ctx context.Context, atlasRoot, outputDir, rootHash string) error {
 	if !validHash(rootHash) {
 		return fail("manifest")
 	}
-	tree, hash, err := buildBrowserControls(ctx, atlasRoot)
+	tree, hash, err := buildBrowserControls(ctx, atlasRoot, rootHash)
 	if err != nil {
 		return err
 	}
@@ -311,7 +341,7 @@ func (tree *browserControlTree) verify(dir string) error {
 // GenerateBrowserIndex installs a complete, deterministic directory of
 // immutable browser controls. Existing controls are revalidated in place.
 func GenerateBrowserIndex(ctx context.Context, atlasRoot, outputDir string) (string, error) {
-	tree, hash, err := buildBrowserControls(ctx, atlasRoot)
+	tree, hash, err := buildBrowserControls(ctx, atlasRoot, "")
 	if err != nil {
 		return "", err
 	}

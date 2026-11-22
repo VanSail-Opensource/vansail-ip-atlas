@@ -518,6 +518,40 @@ fixtures were rerun at `2026-11-22T14:15:49Z` and bind implementation digest
 Use the complete hosted run for release evidence. The private replay has no
 production intake receipts or authorization to deploy.
 
+## November 22 source and compiler follow-up
+
+The earlier fifteen-source run `45029545267` admitted all fifteen current
+sources. Its 36,478,173 normalized records occupied 374 partitions. It failed
+in ASN-risk materialization after 913,207 ms overall. The source-free artifact
+`14757933457` has SHA-256
+`c22032708e32beb106f936d168ec105edc35d4708c9ae39ac45032f627c54605`.
+The succeeding PR #3 browser run `45031970312` passed all three workloads at
+396,812,288 bytes on Chrome 158. Its timer and resume checks both preserved the
+expired RPKI observation. At this checkpoint the actual-data job on that run
+had completed intake and was compiling.
+
+PR #4 now includes a sixteenth source for explicit community reports of
+phishing at literal IP addresses. The weekly CSV and the publisher manifest
+with publication time, byte count, row count and digest must agree. The
+publisher's static CDN served the preceding edition during verification. The
+manifest's listed original file matched all 307,265 bytes and 2,408 rows of
+the newer edition, including 40 qualifying reports on 37 distinct addresses.
+
+The compiler verifies source record predicates during the authenticated input
+traversal. It packs multiple logical ASN prefix pages into each physical
+object and keeps the original page cursors. On 1,371,704 observed prefixes,
+the packed layout reduced the prefix object count from 5,404 to 2,004 with
+identical returned prefix sequences. It also drops location values that
+repeat their inherited value. An engineering sample of 49,152 geographic
+records produced 35,474 location rows, down from 119,277. All 93,162 sampled
+starts, ends and adjacent addresses returned identical values for geography,
+coordinates and usage. Network and announcement prefixes retain their identity.
+The complete actual corpus and hosted release gates still govern promotion.
+
+All sixteen observed fixtures passed against implementation digest
+`1e2276a77af661f3613360ac02d3e980a93dce96ee9581b262152c23f883335d`
+at `2026-11-22T14:44:42Z`.
+
 ## Resume next
 
 1. Verify the branch and clean checkout. Run strict schemas, Go tests/vet, Python

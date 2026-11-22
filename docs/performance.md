@@ -119,9 +119,9 @@ a pinned, bounded bundled Zstandard decoder after actual Chrome rejected native
 `DecompressionStream('zstd')`. This amends the native-only mechanism, not the VIA3
 codec or public schema. The sole implementation is `fzstd@0.1.1`, pinned with registry
 integrity in the lockfile, wrapped by `web/app/lib/zstd.ts`. No CDN, runtime download,
-alternate codec, native fallback or enrichment API is allowed. Upstream's documented
-streaming interface is inspected and its unchecked frame checksum is independently
-verified by the wrapper; see https://github.com/101arrowz/fzstd.
+alternate codec, native fallback or enrichment API is allowed. The wrapper preflights each frame and verifies its checksum. The pinned patch
+decodes each block using the already written section bytes as its bounded history
+window. This saves an additional allocation of up to 8 MiB per section.
 
 `node tools/hosted/codec-bundled.mjs` is the acceptance probe. It bundles the exact
 local dependency and wrapper, runs golden hashes plus malformed/window/output tests

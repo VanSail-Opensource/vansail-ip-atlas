@@ -1,4 +1,4 @@
-import { Decompress } from 'fzstd'
+import { decompressInto } from 'fzstd'
 
 const MAX_COMPRESSED = 24 * 1024 * 1024
 const MAX_OUTPUT = 64 * 1024 * 1024
@@ -177,20 +177,11 @@ export async function decodeZstd(input: Uint8Array, expectedLength: number): Pro
   const { checksumOffset } = inspectZstdFrame(input, expectedLength)
   // All header-driven bounds above precede both this allocation and the decoder.
   const output = new Uint8Array(expectedLength)
-  let written = 0
-  let previous: ArrayBuffer | null = null
   try {
-    const decoder = new Decompress((chunk) => {
-      // fzstd@0.1.1 allocates each streamed block separately from input and its
-      // history window, but copies it into that window AFTER this callback.
-      // Release only the preceding block, whose history copy is complete.
-      if (previous && previous !== chunk.buffer && previous.byteLength) previous.transfer(0)
-      previous = chunk.buffer as ArrayBuffer
-      if (chunk.length > expectedLength - written) fail('limit', 'Decoder emitted more than declared output')
-      output.set(chunk, written)
-      written += chunk.length
-    })
-    decoder.push(input, true)
+    // Only bytes already emitted into the output are eligible backreferences.
+    // The decoder restricts those views to the frame's validated window.
+    const written = decompressInto(input, output)
+    if (written < 0) fail('limit', 'Decoder emitted more than declared output')
     if (written !== expectedLength) fail('integrity', 'Decoded section length mismatch')
     const checksum = new DataView(input.buffer, input.byteOffset + checksumOffset, 4).getUint32(0, true)
     if (zstdChecksum(output) !== checksum) fail('integrity', 'Frame content checksum mismatch')
@@ -200,9 +191,5 @@ export async function decodeZstd(input: Uint8Array, expectedLength: number): Pro
     output.buffer.transfer(0)
     if (error instanceof ZstdError) throw error
     return fail('input', 'Malformed compressed section')
-  } finally {
-    // push has returned or unwound; its last block is no longer borrowed.
-    const remaining = previous as ArrayBuffer | null
-    if (remaining && remaining.byteLength) remaining.transfer(0)
   }
 }

@@ -61,25 +61,45 @@ class AnswerBudget {
   cellOrigins(count: number): void { if (count > PUBLIC_ORIGINS - this.origins) fail('resource_limit'); this.origins += count; this.charge(count * 16) }
 }
 
+const segmentTypes = ['', 'sequence', 'set', 'confederation_sequence', 'confederation_set']
+type PathSegments = BGPAnswer['paths'][number]['segments']
+type SegmentKey = number | string
+const segmentKeyBytes = (key: SegmentKey) => typeof key === 'number' ? 8 : key.length * 2
+
 /** Per-answer sharing for identical immutable segment values. Public routes are
  * still materialized individually; JSON and structured-clone values are unchanged. */
 export class PathSegmentPool {
-  private values = new Map<string, BGPAnswer['paths'][number]['segments']>()
+  private values = new Map<SegmentKey, PathSegments>()
   keyBytes = 0
   get size(): number { return this.values.size }
-  intern(segments: BGPAnswer['paths'][number]['segments']): BGPAnswer['paths'][number]['segments'] {
-    let key = ''
-    for (const segment of segments) key += `${segment.type}:${segment.asns.join(',')};`
+
+  private get(key: SegmentKey): PathSegments | undefined {
     const found = this.values.get(key)
-    if (found) { this.values.delete(key); this.values.set(key, found); return found }
-    const bytes = key.length * 2
+    if (found) { this.values.delete(key); this.values.set(key, found) }
+    return found
+  }
+
+  private store(key: SegmentKey, segments: PathSegments): PathSegments {
+    const bytes = segmentKeyBytes(key)
     if (bytes > 128 * 1024) return segments
     while (this.values.size >= 256 || this.keyBytes + bytes > 128 * 1024) {
       const oldest = this.values.keys().next().value!
-      this.values.delete(oldest); this.keyBytes -= oldest.length * 2
+      this.values.delete(oldest); this.keyBytes -= segmentKeyBytes(oldest)
     }
     this.values.set(key, segments); this.keyBytes += bytes
     return segments
+  }
+
+  singleton(type: number, asn: number): PathSegments {
+    // The validated type occupies three bits; even the largest u32 ASN is exact.
+    const key = asn * 8 + type
+    return this.get(key) ?? this.store(key, [{ type: segmentTypes[type]!, asns: [asn] }])
+  }
+
+  intern(segments: PathSegments): PathSegments {
+    let key = ''
+    for (const segment of segments) key += `${segment.type}:${segment.asns.join(',')};`
+    return this.get(key) ?? this.store(key, segments)
   }
 }
 /** Exact JSON UTF-8 size for the reader's plain JSON answers, without an
@@ -739,26 +759,33 @@ export class AtlasReader {
         const segments = paths.rows(9); const ints = paths.rows(4)
         for (const row of rows) {
           const first = u32(row, 8), count = u16(row, 12)
-          const path: BGPAnswer['paths'][number] = { origin: asn, asns: [], visibility: ['unknown', 'low', 'medium', 'high'][row[15]!]!, graphEligible: !!(row[14]! & 1), segments: new Array(count) }
+          const offset = first * 12
+          let shared: PathSegments
           let total = 0
-          for (let index = 0; index < count; index++) {
-            const segment = segments.subarray((first + index) * 12, (first + index + 1) * 12)
-            const length = u32(segment, 8), start = u32(segment, 4)
-            budget.path(length)
-            const asns = new Array<number>(length)
-            for (let i = 0; i < length; i++) asns[i] = u32(ints, (start + i) * 4)
-            path.segments[index] = { type: ['', 'sequence', 'set', 'confederation_sequence', 'confederation_set'][segment[0]!]!, asns }
-            total += length
+          if (count === 1 && u32(segments, offset + 8) === 1) {
+            budget.path(1)
+            shared = pathSegments.singleton(segments[offset]!, u32(ints, u32(segments, offset + 4) * 4))
+          } else {
+            const decoded: PathSegments = new Array(count)
+            for (let index = 0; index < count; index++) {
+              const position = offset + index * 12
+              const length = u32(segments, position + 8), start = u32(segments, position + 4)
+              budget.path(length)
+              const asns = new Array<number>(length)
+              for (let i = 0; i < length; i++) asns[i] = u32(ints, (start + i) * 4)
+              decoded[index] = { type: segmentTypes[segments[position]!]!, asns }
+              total += length
+            }
+            shared = pathSegments.intern(decoded)
           }
-          path.segments = pathSegments.intern(path.segments)
           // A single segment already is the complete path. Sharing this array
           // also survives structured clone, avoiding a second array per route.
-          if (count === 1) path.asns = path.segments[0]!.asns
-          else {
-            path.asns = new Array<number>(total)
+          const asns = count === 1 ? shared[0]!.asns : new Array<number>(total)
+          if (count > 1) {
             let next = 0
-            for (const segment of path.segments) for (const asn of segment.asns) path.asns[next++] = asn
+            for (const segment of shared) for (const asn of segment.asns) asns[next++] = asn
           }
+          const path: BGPAnswer['paths'][number] = { origin: asn, asns, visibility: ['unknown', 'low', 'medium', 'high'][row[15]!]!, graphEligible: !!(row[14]! & 1), segments: shared }
           answer.bgp.paths.push(path)
         }
       }

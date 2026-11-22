@@ -102,8 +102,17 @@ def population_groups(samples: object) -> dict:
     return groups
 
 
+def valid_ipv4_coverage(coverage) -> bool:
+    return coverage is None or (type(coverage) is dict
+        and set(coverage) == {"covered_addresses", "network_objects", "router_intervals"}
+        and all(type(count) is int for count in coverage.values())
+        and coverage["covered_addresses"] == 2**32
+        and 1 <= coverage["network_objects"] < 18500
+        and coverage["network_objects"] <= coverage["router_intervals"] <= 2**32)
+
+
 def browser_gates(report: dict) -> dict[str, str]:
-    if (report.get("scope") != "hosted-production-browser-v2" or report.get("mode") != "production"
+    if (report.get("scope") != "hosted-production-browser-v3" or report.get("mode") != "production"
             or report.get("release_scope") != "release-scope-v6" or report.get("errors") != []):
         raise ContractError("production browser evidence has wrong scope or errors")
     if (not HASH.fullmatch(str(report.get("release_id", "")))
@@ -114,6 +123,11 @@ def browser_gates(report: dict) -> dict[str, str]:
     features = report.get("corpus_features", {})
     if type(features) is not dict or set(features) != {"map", "graph"} or any(type(v) is not bool for v in features.values()):
         raise ContractError("candidate map/graph availability is missing")
+    if "corpus_ipv4_network_coverage" not in report:
+        raise ContractError("candidate IPv4 population is missing")
+    coverage = report["corpus_ipv4_network_coverage"]
+    if not valid_ipv4_coverage(coverage):
+        raise ContractError("invalid full IPv4 network coverage")
     groups = population_groups(report.get("populations"))
     components = population_groups(report.get("component_populations", []))
     fixture = report.get("graph_component_fixture", {})
@@ -151,7 +165,7 @@ def browser_gates(report: dict) -> dict[str, str]:
         violation = any(isinstance(row.get("accessibility"), dict) and row["accessibility"].get("violations") for row in [*rows, *component_rows])
         result[prefix + "_accessibility"] = "failed" if violation else "passed" if accessibility else "unmeasured"
         actual_states = len(rows) >= 30
-        unknowns = len(rows) >= 30
+        unknowns = ipv4 = len(rows) >= 30
         for row in rows:
             mapping, graph = row.get("map", {}), row.get("graph", {})
             actual_states &= (type(mapping) is dict and mapping.get("state") == ("observed" if features["map"] else "unavailable")
@@ -161,9 +175,18 @@ def browser_gates(report: dict) -> dict[str, str]:
                 and type(graph.get("observed_routes")) is int and graph["observed_routes"] >= 0
                 and (graph["observed_routes"] > 0 if features["graph"] else graph["visible_nodes"] == 0 and graph["observed_routes"] == 0 and graph.get("empty_state_verified") is True))
             checks = row.get("unknown_states")
-            unknowns &= type(checks) is dict and set(checks) == {"ipv4", "ipv6", "asn"} and all(value is True for value in checks.values())
+            flags = type(checks) is dict and set(checks) == {"ipv4", "ipv6", "asn"}
+            unknowns &= flags and checks["ipv6"] is True and checks["asn"] is True
+            ipv4 &= (flags and "ipv4_network_coverage_verified" in row
+                and (checks["ipv4"] is True and row["ipv4_network_coverage_verified"] is None if coverage is None
+                     else checks["ipv4"] is None and row["ipv4_network_coverage_verified"] is True))
         result[prefix + "_candidate_states"] = "passed" if actual_states else "unmeasured"
-        result[prefix + "_unknown_states"] = "passed" if unknowns else "unmeasured"
+        result[prefix + "_ipv6_asn_unknown_states"] = "passed" if unknowns else "unmeasured"
+        ipv4_gate = "_ipv4_unknown_state" if coverage is None else "_ipv4_network_coverage"
+        result[prefix + ipv4_gate] = "passed" if ipv4 else "unmeasured"
+        synthetic_empty = (fixture_bound and len(component_rows) >= 30 and
+            all(row.get("worker_sha256") == worker and row.get("ipv4_unknown_state_verified") is True for row in component_rows))
+        result[prefix + "_synthetic_ipv4_unknown_state"] = "passed" if synthetic_empty else "unmeasured"
         # Capacity remains the same 24-node workload on the exact emitted code.
         # These isolated synthetic observations never claim real routing coverage.
         graphs = [graph_gate(row.get("graph")) if row.get("worker_sha256") == worker else "unmeasured" for row in component_rows]

@@ -6,11 +6,11 @@ export async function waitForAtlasView(page) {
   await page.locator('.view-page > .status-panel[role=status]').waitFor({state:'hidden'})
 }
 
-export async function visitOwner(page,name,ready) {
+export async function visitOwner(page,name,ready,{synthetic=false}={}) {
   await page.getByRole('navigation',{name:'Atlas views'}).getByRole('link',{name,exact:true}).click()
   await page.getByRole('heading',{name:name==='ASN'?'Autonomous systems':name,exact:true,level:1}).waitFor()
   await waitForAtlasView(page);await page.locator(ready).waitFor()
-  if(await page.locator('.demo-label').count()||await page.getByRole('alert').count())throw new Error('Production owner route unavailable or labelled synthetic')
+  if(Boolean(await page.locator('.demo-label').count())!==synthetic||await page.getByRole('alert').count())throw new Error('Owner route unavailable or labelled with a different release mode')
   for(const [owner,selector]of Object.entries({Overview:'.fact-list','Observed risk':'.quality-layout','Class C':'.ip-grid',BGP:'.bgp-graph',ASN:'.asn-list'}))
     if(owner!==name&&await page.locator(selector).count())throw new Error('A route duplicated another canonical fact owner')
 }

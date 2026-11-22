@@ -38,6 +38,14 @@ public tree. The corpus command derives 10,000 actual indexed queries and explic
 observed and absent strata. Missing routing populations yield tested unknown
 states, not fabricated routes. Graph component capacity is measured separately
 with an explicitly synthetic 24-node fixture against the exact application bytes.
+
+If every IPv4 address selects a network, corpus v3 records that full-domain
+coverage and the native answer for 0.0.0.0. The native benchmark verifies the
+authenticated router intervals and selected network indexes again. The browser
+compares the witness and its /24 with the native answers and checks each owner
+view. Real IPv6 and ASN unknowns and a separate synthetic IPv4 empty-state
+test stay in the browser workload. Only coverage counts enter public reports.
+
 The build harness derives fifteen isolated engineering cases from the exact
 sealed input, instead of requiring manually prepared directories. Warm cases are
 primed before measurement. Rounded one-percent mutations use `max(1,ceil(N/100))`.

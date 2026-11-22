@@ -40,10 +40,10 @@ func TestProductionCorpusRetainsTruthfulSubsetAndUnknowns(t *testing.T) {
 	if err = json.Unmarshal(bytes, &corpus); err != nil {
 		t.Fatal(err)
 	}
-	if corpus.FormatVersion != 2 || corpus.ReleaseID != built.Manifest.ReleaseID || corpus.GraphQuery != nil || corpus.MapQuery != nil || corpus.InteractionQuery != "8.8.8.1" || len(corpus.Queries) != 10000 {
+	if corpus.FormatVersion != 3 || corpus.ReleaseID != built.Manifest.ReleaseID || corpus.GraphQuery != nil || corpus.MapQuery != nil || corpus.InteractionQuery != "8.8.8.1" || len(corpus.Queries) != 10000 {
 		t.Fatalf("incorrect subset corpus: %+v", corpus)
 	}
-	if corpus.UnknownQueries.IPv4 == "" || corpus.UnknownQueries.IPv6 == "" || corpus.UnknownQueries.ASN == "" {
+	if corpus.UnknownQueries.IPv4 == nil || corpus.IPv4Coverage != nil || corpus.UnknownQueries.IPv6 == "" || corpus.UnknownQueries.ASN == "" {
 		t.Fatal("actual unknown coverage missing")
 	}
 	for _, row := range corpus.Availability {
@@ -187,5 +187,57 @@ func TestCorpusParsesActualInheritedPartitionKeys(t *testing.T) {
 		if _, err := corpusPartitionPrefix(invalid); err == nil {
 			t.Fatalf("invalid partition accepted: %s", invalid)
 		}
+	}
+}
+
+func TestProductionCorpusCertifiesCoveredIPv4AndPreservesRealUnknowns(t *testing.T) {
+	root := t.TempDir()
+	prefix := netip.MustParsePrefix("0.0.0.0/0")
+	built, err := via3.Build(t.Context(), via3.CompileInput{Mode: "production", Clock: 1700000000, ValidUntil: 1700003600,
+		ProductionGate: func(context.Context) error { return nil }, Partitions: []via3.PartitionInput{{Partition: "all", PrefixRoutes: []netip.Prefix{prefix},
+			Records: []via3.PublicRecord{{Version: 3, Kind: 4, Prefix: prefix, Network: &via3.NetworkData{Name: "Default network", Origins: []uint32{13335}}},
+				{Version: 3, Kind: 2, Prefix: netip.MustParsePrefix("8.8.8.0/24"), Geo: &via3.GeoData{Country: "US"}}},
+		}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = built.Write(filepath.Join(root, "atlas")); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Mkdir(filepath.Join(root, ".atlas-private"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err = buildProductionCorpus(t.Context(), []string{"-workspace", root, "-atlas", "atlas", "-clock", "1700000001"}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, ".atlas-private", "production-browser-corpus.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c productionCorpus
+	if err = json.Unmarshal(data, &c); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Queries) != 10000 || c.UnknownQueries.IPv4 != nil || c.UnknownQueries.IPv6 == "" || c.UnknownQueries.ASN == "" || !c.IPv4Coverage.Valid(built.Manifest.ReleaseID) {
+		t.Fatal("missing evidence for covered IPv4 population")
+	}
+	if c.IPv4Coverage.NetworkObjects != 1 || c.IPv4Coverage.RouterIntervals != 1 || c.IPv4Coverage.Lookup.Network.Prefix != "0.0.0.0/0" || c.IPv4Coverage.ClassC != nil {
+		t.Fatal("covered witness changed")
+	}
+	r, err := via3.OpenRelease(filepath.Join(root, "atlas"), func() int64 { return 1700000001 })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = c.IPv4Coverage.Verify(t.Context(), r); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range c.Queries {
+		if a, err := netip.ParseAddr(q.Q); err == nil && a.Is4() && q.Stratum == "unknown" {
+			t.Fatal("covered IPv4 labelled unknown")
+		}
+	}
+	c.IPv4Coverage.RouterIntervals++
+	if err = c.IPv4Coverage.Verify(t.Context(), r); err == nil {
+		t.Fatal("invented coverage evidence accepted")
 	}
 }

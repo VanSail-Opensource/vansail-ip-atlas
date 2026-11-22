@@ -16,9 +16,9 @@ def graph():
 
 
 def browser_report():
-    return {"scope": "hosted-production-browser-v2", "release_scope": "release-scope-v6", "mode": "production",
+    return {"scope": "hosted-production-browser-v3", "release_scope": "release-scope-v6", "mode": "production",
         "errors": [], "release_id": "a" * 64, "corpus_release_id": "a" * 64, "corpus_sha256": "b" * 64,
-        "candidate_bundle_sha256": "c" * 64, "corpus_features": {"map": False, "graph": False},
+        "corpus_ipv4_network_coverage": None, "candidate_bundle_sha256": "c" * 64, "corpus_features": {"map": False, "graph": False},
         "corpus_availability": [{"stratum": s, "status": "observed" if s in ("ipv4_lpm", "unknown") else "absent",
             "sampled_queries": 1 if s in ("ipv4_lpm", "unknown") else 0} for s in CORPUS_STRATA],
         "populations": [], "component_populations": [], "worst_case_worker_memory": {"worker_sha256": "d" * 64},
@@ -116,8 +116,8 @@ class AcceptanceTests(unittest.TestCase):
                         "accessibility": {"engine": "axe-core", "violations": [], "incomplete": []},
                         "map": {"state": "unavailable", "unknown_state_verified": True},
                         "graph": {"state": "unavailable", "visible_nodes": 0, "observed_routes": 0, "empty_state_verified": True},
-                        "unknown_states": {"ipv4": True, "ipv6": True, "asn": True}})
-                    report["component_populations"].append({**identity, "worker_sha256": "d" * 64, "graph": graph(),
+                        "ipv4_network_coverage_verified": None, "unknown_states": {"ipv4": True, "ipv6": True, "asn": True}})
+                    report["component_populations"].append({**identity, "ipv4_unknown_state_verified": True, "worker_sha256": "d" * 64, "graph": graph(),
                         "accessibility": {"engine": "axe-core", "violations": [], "incomplete": []}})
         gates = browser_gates(report)
         self.assertTrue(all(value == "passed" for key, value in gates.items() if key.startswith("browser_320_light_")))
@@ -149,7 +149,25 @@ class AcceptanceTests(unittest.TestCase):
         report["populations"][0]["graph"]["visible_nodes"] = 1
         self.assertEqual(browser_gates(report)["browser_320_light_candidate_states"], "unmeasured")
         report["populations"][0]["unknown_states"]["ipv4"] = 1
-        self.assertEqual(browser_gates(report)["browser_320_light_unknown_states"], "unmeasured")
+        self.assertEqual(browser_gates(report)["browser_320_light_ipv4_unknown_state"], "unmeasured")
+
+        report["corpus_ipv4_network_coverage"] = {"covered_addresses": 2**32, "network_objects": 1, "router_intervals": 2}
+        gates = browser_gates(report)
+        self.assertNotIn("browser_320_light_ipv4_unknown_state", gates)
+        self.assertEqual(gates["browser_320_light_ipv4_network_coverage"], "unmeasured")
+        for row in report["populations"]:
+            row["unknown_states"]["ipv4"] = None
+            row["ipv4_network_coverage_verified"] = True
+        self.assertEqual(browser_gates(report)["browser_320_light_ipv4_network_coverage"], "passed")
+        report["populations"][0]["unknown_states"]["ipv6"] = False
+        self.assertEqual(browser_gates(report)["browser_320_light_ipv6_asn_unknown_states"], "unmeasured")
+        report["component_populations"][0]["ipv4_unknown_state_verified"] = None
+        self.assertEqual(browser_gates(report)["browser_320_light_synthetic_ipv4_unknown_state"], "unmeasured")
+        for invalid in ({"covered_addresses": 2**32-1, "network_objects": 1, "router_intervals": 1},
+                        {"covered_addresses": 2**32, "network_objects": True, "router_intervals": 1},
+                        {"covered_addresses": 2**32, "network_objects": 2, "router_intervals": 1}):
+            report["corpus_ipv4_network_coverage"] = invalid
+            with self.assertRaises(ContractError): browser_gates(report)
 
     def test_corpus_absence_and_candidate_identity_cannot_be_asserted_by_flags(self):
         for mutation in ("count", "status", "release", "scope", "duplicate"):

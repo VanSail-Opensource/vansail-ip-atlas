@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	corpusproof "vansail-ip-atlas/internal/corpus"
 	"vansail-ip-atlas/internal/subscription"
 	"vansail-ip-atlas/internal/via3"
 )
@@ -29,15 +30,16 @@ type corpusQuery struct {
 	Stratum string `json:"stratum"`
 }
 type productionCorpus struct {
-	FormatVersion    int                  `json:"format_version"`
-	GraphQuery       *string              `json:"graph_query"`
-	MapQuery         *string              `json:"map_query"`
-	InteractionQuery string               `json:"interaction_query"`
-	Mode             string               `json:"mode"`
-	ReleaseID        string               `json:"release_id"`
-	Availability     []corpusAvailability `json:"availability"`
-	UnknownQueries   corpusUnknowns       `json:"unknown_queries"`
-	Queries          []corpusQuery        `json:"queries"`
+	FormatVersion    int                       `json:"format_version"`
+	GraphQuery       *string                   `json:"graph_query"`
+	MapQuery         *string                   `json:"map_query"`
+	InteractionQuery string                    `json:"interaction_query"`
+	Mode             string                    `json:"mode"`
+	ReleaseID        string                    `json:"release_id"`
+	Availability     []corpusAvailability      `json:"availability"`
+	UnknownQueries   corpusUnknowns            `json:"unknown_queries"`
+	IPv4Coverage     *corpusproof.IPv4Coverage `json:"ipv4_network_coverage"`
+	Queries          []corpusQuery             `json:"queries"`
 }
 type corpusAvailability struct {
 	Stratum        string `json:"stratum"`
@@ -45,9 +47,9 @@ type corpusAvailability struct {
 	SampledQueries int    `json:"sampled_queries"`
 }
 type corpusUnknowns struct {
-	IPv4 string `json:"ipv4"`
-	IPv6 string `json:"ipv6"`
-	ASN  string `json:"asn"`
+	IPv4 *string `json:"ipv4"`
+	IPv6 string  `json:"ipv6"`
+	ASN  string  `json:"asn"`
 }
 
 // Corpus labels come from verified actual indexes/answers. The graph population
@@ -91,7 +93,7 @@ func buildProductionCorpus(ctx context.Context, args []string) error {
 			buckets[stratum] = append(buckets[stratum], q)
 		}
 	}
-	corpus := productionCorpus{FormatVersion: 2, Mode: "production", ReleaseID: release.Manifest.ReleaseID, Queries: []corpusQuery{}}
+	corpus := productionCorpus{FormatVersion: 3, Mode: "production", ReleaseID: release.Manifest.ReleaseID, Queries: []corpusQuery{}}
 	graphCommand := exec.CommandContext(ctx, "node", filepath.Join(root, "tools", "hosted", "corpus-graph.mjs"))
 	graphIn, err := graphCommand.StdinPipe()
 	if err != nil {
@@ -290,22 +292,47 @@ func buildProductionCorpus(ctx context.Context, args []string) error {
 					corpus.UnknownQueries.ASN = q
 				}
 			} else if address, _ := netip.ParseAddr(q); address.Is4() {
-				if corpus.UnknownQueries.IPv4 == "" {
-					corpus.UnknownQueries.IPv4 = q
+				if corpus.UnknownQueries.IPv4 == nil {
+					value := q
+					corpus.UnknownQueries.IPv4 = &value
 				}
 			} else if corpus.UnknownQueries.IPv6 == "" {
 				corpus.UnknownQueries.IPv6 = q
 			}
 		}
 	}
-	if corpus.UnknownQueries.IPv4 == "" || corpus.UnknownQueries.IPv6 == "" || corpus.UnknownQueries.ASN == "" {
+	if corpus.UnknownQueries.IPv4 == nil {
+		coverage, gap, err := corpusproof.InspectIPv4(ctx, release)
+		if err != nil {
+			return err
+		}
+		if gap.IsValid() {
+			q := gap.String()
+			answer, err := release.Lookup(ctx, q)
+			if err != nil {
+				return err
+			}
+			if !corpusUnknown(answer) {
+				return errors.New("no verified IPv4 unknown witness or complete selected network coverage")
+			}
+			add("unknown", q)
+			corpus.UnknownQueries.IPv4 = &q
+		} else {
+			corpus.IPv4Coverage = coverage
+		}
+	}
+	if corpus.UnknownQueries.IPv6 == "" || corpus.UnknownQueries.ASN == "" {
 		return errors.New("verified unknown query population unavailable")
 	}
 	if corpus.MapQuery != nil {
 		corpus.InteractionQuery = *corpus.MapQuery
 	}
 	if corpus.InteractionQuery == "" {
-		corpus.InteractionQuery = corpus.UnknownQueries.IPv4
+		if corpus.UnknownQueries.IPv4 != nil {
+			corpus.InteractionQuery = *corpus.UnknownQueries.IPv4
+		} else {
+			corpus.InteractionQuery = corpus.IPv4Coverage.Lookup.Q
+		}
 	}
 	if err := corpus.selectQueries(buckets); err != nil {
 		return err

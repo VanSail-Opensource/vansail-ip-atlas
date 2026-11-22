@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	corpusproof "vansail-ip-atlas/internal/corpus"
 	"vansail-ip-atlas/internal/via3"
 	querycontract "vansail-ip-atlas/tools/query_contract"
 )
@@ -36,10 +37,11 @@ type corpus struct {
 	InteractionQuery string  `json:"interaction_query"`
 	ReleaseID        string  `json:"release_id"`
 	UnknownQueries   struct {
-		IPv4 string `json:"ipv4"`
-		IPv6 string `json:"ipv6"`
-		ASN  string `json:"asn"`
+		IPv4 *string `json:"ipv4"`
+		IPv6 string  `json:"ipv6"`
+		ASN  string  `json:"asn"`
 	} `json:"unknown_queries"`
+	IPv4Coverage *corpusproof.IPv4Coverage `json:"ipv4_network_coverage"`
 	Availability []struct {
 		Stratum        string `json:"stratum"`
 		Status         string `json:"status"`
@@ -51,7 +53,7 @@ type corpus struct {
 func validateCorpus(c corpus) error {
 	fail := func() error { return errors.New("a versioned real 10000-query subset corpus is required") }
 	digest, err := hex.DecodeString(c.ReleaseID)
-	if c.FormatVersion != 2 || c.Mode != "production" || len(c.Queries) != 10000 || err != nil || len(digest) != 32 {
+	if c.FormatVersion != 3 || c.Mode != "production" || len(c.Queries) != 10000 || err != nil || len(digest) != 32 {
 		return fail()
 	}
 	valid := func(q string) bool {
@@ -71,9 +73,16 @@ func validateCorpus(c corpus) error {
 	if c.GraphQuery != nil && (!valid(*c.GraphQuery) || !strings.HasPrefix(*c.GraphQuery, "AS")) {
 		return fail()
 	}
-	v4, e4 := netip.ParseAddr(c.UnknownQueries.IPv4)
+	if c.UnknownQueries.IPv4 != nil {
+		v4, err := netip.ParseAddr(*c.UnknownQueries.IPv4)
+		if err != nil || !v4.Is4() || !valid(*c.UnknownQueries.IPv4) || c.IPv4Coverage != nil {
+			return fail()
+		}
+	} else if !c.IPv4Coverage.Valid(c.ReleaseID) {
+		return fail()
+	}
 	v6, e6 := netip.ParseAddr(c.UnknownQueries.IPv6)
-	if e4 != nil || !v4.Is4() || e6 != nil || !v6.Is6() || v6.Is4In6() || !valid(c.UnknownQueries.IPv4) || !valid(c.UnknownQueries.IPv6) || !valid(c.UnknownQueries.ASN) || !strings.HasPrefix(c.UnknownQueries.ASN, "AS") {
+	if e6 != nil || !v6.Is6() || v6.Is4In6() || !valid(c.UnknownQueries.IPv6) || !valid(c.UnknownQueries.ASN) || !strings.HasPrefix(c.UnknownQueries.ASN, "AS") {
 		return fail()
 	}
 	strata := fixedStrata()
@@ -94,6 +103,11 @@ func validateCorpus(c corpus) error {
 		if !valid(row.Q) || available[row.Stratum] == 0 {
 			return fail()
 		}
+		if c.IPv4Coverage != nil && row.Stratum == "unknown" {
+			if a, err := netip.ParseAddr(row.Q); err == nil && a.Is4() {
+				return fail()
+			}
+		}
 		counts[row.Stratum][row.Q] = true
 		if row.Stratum != "unknown" {
 			observed++
@@ -104,7 +118,7 @@ func validateCorpus(c corpus) error {
 			return fail()
 		}
 	}
-	if observed == 0 || !counts["unknown"][c.UnknownQueries.IPv4] || !counts["unknown"][c.UnknownQueries.IPv6] || !counts["unknown"][c.UnknownQueries.ASN] {
+	if observed == 0 || (c.UnknownQueries.IPv4 != nil && !counts["unknown"][*c.UnknownQueries.IPv4]) || !counts["unknown"][c.UnknownQueries.IPv6] || !counts["unknown"][c.UnknownQueries.ASN] {
 		return fail()
 	}
 	return nil
@@ -128,6 +142,15 @@ func run() error {
 	if err != nil || len(data) > 4<<20 {
 		return errors.New("lookup corpus exceeds bound")
 	}
+	var presence struct {
+		IPv4Coverage   json.RawMessage `json:"ipv4_network_coverage"`
+		UnknownQueries struct {
+			IPv4 json.RawMessage `json:"ipv4"`
+		} `json:"unknown_queries"`
+	}
+	if err := json.Unmarshal(data, &presence); err != nil || len(presence.IPv4Coverage) == 0 || len(presence.UnknownQueries.IPv4) == 0 {
+		return errors.New("missing IPv4 corpus population")
+	}
 	var c corpus
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
 	decoder.DisallowUnknownFields()
@@ -147,6 +170,11 @@ func run() error {
 	}
 	if release.Manifest.ReleaseID != c.ReleaseID {
 		return errors.New("lookup corpus belongs to another release")
+	}
+	if c.IPv4Coverage != nil {
+		if err = c.IPv4Coverage.Verify(context.Background(), release); err != nil {
+			return err
+		}
 	}
 	var inputBytes int64
 	for _, obj := range release.Manifest.Objects {
@@ -204,26 +232,31 @@ func run() error {
 		return err
 	}
 	digest := sha256.Sum256(data)
+	var coverage *via3.IPv4NetworkCoverage
+	if c.IPv4Coverage != nil {
+		coverage = &c.IPv4Coverage.IPv4NetworkCoverage
+	}
 	report := struct {
-		Timing         string                `json:"timing"`
-		CorpusQueries  int                   `json:"corpus_queries"`
-		Warmups        int                   `json:"warmups"`
-		CorpusSHA256   string                `json:"corpus_sha256"`
-		ReleaseID      string                `json:"release_id"`
-		InputBytes     int64                 `json:"compressed_input_bytes"`
-		Samples        []int64               `json:"samples_ns"`
-		P50            int64                 `json:"p50_ns"`
-		P95            int64                 `json:"p95_ns"`
-		P99            int64                 `json:"p99_ns"`
-		Allocations    uint64                `json:"allocation_count"`
-		AllocatedBytes uint64                `json:"allocated_bytes"`
-		PeakRSS        int64                 `json:"process_peak_rss_bytes"`
-		ScratchBytes   int64                 `json:"temporary_disk_bytes"`
-		Duration       int64                 `json:"runtime_ns"`
-		GoVersion      string                `json:"go_version"`
-		ObjectReads    objectReadDiagnostics `json:"object_reads"`
-		Strata         []stratumDiagnostics  `json:"strata"`
-	}{"individual-indexed-lookups", len(c.Queries), len(c.Queries), hex.EncodeToString(digest[:]), release.Manifest.ReleaseID, inputBytes,
+		Coverage       *via3.IPv4NetworkCoverage `json:"corpus_ipv4_network_coverage"`
+		Timing         string                    `json:"timing"`
+		CorpusQueries  int                       `json:"corpus_queries"`
+		Warmups        int                       `json:"warmups"`
+		CorpusSHA256   string                    `json:"corpus_sha256"`
+		ReleaseID      string                    `json:"release_id"`
+		InputBytes     int64                     `json:"compressed_input_bytes"`
+		Samples        []int64                   `json:"samples_ns"`
+		P50            int64                     `json:"p50_ns"`
+		P95            int64                     `json:"p95_ns"`
+		P99            int64                     `json:"p99_ns"`
+		Allocations    uint64                    `json:"allocation_count"`
+		AllocatedBytes uint64                    `json:"allocated_bytes"`
+		PeakRSS        int64                     `json:"process_peak_rss_bytes"`
+		ScratchBytes   int64                     `json:"temporary_disk_bytes"`
+		Duration       int64                     `json:"runtime_ns"`
+		GoVersion      string                    `json:"go_version"`
+		ObjectReads    objectReadDiagnostics     `json:"object_reads"`
+		Strata         []stratumDiagnostics      `json:"strata"`
+	}{coverage, "individual-indexed-lookups", len(c.Queries), len(c.Queries), hex.EncodeToString(digest[:]), release.Manifest.ReleaseID, inputBytes,
 		samples, sorted[49999], sorted[94999], sorted[98999], after.Mallocs - before.Mallocs, after.TotalAlloc - before.TotalAlloc, peak, 0, duration.Nanoseconds(), runtime.Version(), objectReads, stratumRows}
 	encoded, err := json.Marshal(report)
 	if err != nil {

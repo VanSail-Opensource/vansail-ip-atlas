@@ -11,6 +11,7 @@ import { spawnSync } from 'node:child_process'
 import { graphVisibleNodeCount } from './performance-gates.mjs'
 import { auditAccessibility } from './browser-accessibility.mjs'
 import { visitOwner as owner, submitLookup, waitForAtlasView } from './production-interactions.mjs'
+import { hasMapLocation } from '../../web/app/lib/via3.ts'
 import { parseInput } from '../../web/app/lib/query.ts'
 
 const root = new URL('../../', import.meta.url)
@@ -26,18 +27,28 @@ const corpus = JSON.parse(corpusBytes)
 const validQuery = q => { try { return typeof q === 'string' && parseInput(q).canonical === q } catch { return false } }
 const strata = ['ipv4_exact', 'ipv4_lpm', 'ipv6_exact', 'ipv6_lpm', 'moas', 'sparse_asn', 'dense_asn', 'inherited', 'unknown']
 const keys = (value, expected) => value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).sort().join() === [...expected].sort().join()
-if (!keys(corpus,['format_version','graph_query','interaction_query','map_query','mode','queries','release_id','availability','unknown_queries']) || corpus.format_version !== 2 || corpus.mode !== 'production' || corpus.release_id !== candidate.release_id ||
+function ipv4Population(corpus) {
+  const proof=corpus.ipv4_network_coverage, unknown=corpus.unknown_queries?.ipv4
+  if(proof===null)return validQuery(unknown)&&isIP(unknown)===4
+  return unknown===null&&keys(proof,['covered_addresses','network_objects','router_intervals','lookup','class_c'])&&
+    proof.covered_addresses===2**32&&Number.isSafeInteger(proof.network_objects)&&proof.network_objects>=1&&proof.network_objects<18500&&
+    Number.isSafeInteger(proof.router_intervals)&&proof.router_intervals>=proof.network_objects&&proof.router_intervals<=2**32&&
+    proof.lookup?.kind==='ip'&&proof.lookup.q==='0.0.0.0'&&proof.lookup.releaseId===candidate.release_id&&proof.lookup.synthetic===false&&
+    typeof proof.lookup.network?.prefix==='string'&&(proof.class_c===null||proof.class_c?.prefix==='0.0.0.0/24'&&proof.class_c.cells?.length===256)
+}
+if (!keys(corpus,['format_version','graph_query','interaction_query','map_query','mode','queries','release_id','availability','unknown_queries','ipv4_network_coverage']) || corpus.format_version !== 3 || corpus.mode !== 'production' || corpus.release_id !== candidate.release_id ||
     !Array.isArray(corpus.queries) || corpus.queries.length !== 10000 || !validQuery(corpus.interaction_query) || isIP(corpus.interaction_query) !== 4 ||
     !(corpus.map_query === null || validQuery(corpus.map_query) && isIP(corpus.map_query) === 4 && corpus.map_query === corpus.interaction_query) ||
     !(corpus.graph_query === null || validQuery(corpus.graph_query) && corpus.graph_query.startsWith('AS')) ||
-    !keys(corpus.unknown_queries,['ipv4','ipv6','asn']) || !validQuery(corpus.unknown_queries.ipv4) || isIP(corpus.unknown_queries.ipv4) !== 4 || !validQuery(corpus.unknown_queries.ipv6) || isIP(corpus.unknown_queries.ipv6) !== 6 || !validQuery(corpus.unknown_queries.asn) || !corpus.unknown_queries.asn.startsWith('AS') ||
+    !keys(corpus.unknown_queries,['ipv4','ipv6','asn']) || !ipv4Population(corpus) || !validQuery(corpus.unknown_queries.ipv6) || isIP(corpus.unknown_queries.ipv6) !== 6 || !validQuery(corpus.unknown_queries.asn) || !corpus.unknown_queries.asn.startsWith('AS') ||
     !Array.isArray(corpus.availability) || corpus.availability.length !== strata.length || new Set(corpus.availability.map(row=>row.stratum)).size !== strata.length ||
     corpus.availability.some((row,index)=>!keys(row,['stratum','status','sampled_queries']) || row.stratum !== strata[index] || !['observed','absent'].includes(row.status) || !Number.isInteger(row.sampled_queries) || row.sampled_queries < 0 || row.sampled_queries > 1200 || (row.status === 'observed') !== (row.sampled_queries > 0)) ||
     corpus.queries.some(q => !keys(q,['q','stratum']) || !validQuery(q.q) || !corpus.availability.some(row=>row.stratum === q.stratum && row.status === 'observed')) ||
     corpus.availability.some(row=>row.status === 'observed' && !corpus.queries.some(q=>q.stratum === row.stratum)) ||
     corpus.availability.some(row=>new Set(corpus.queries.filter(q=>q.stratum === row.stratum).map(q=>q.q)).size > row.sampled_queries) ||
     !corpus.availability.some(row=>row.stratum !== 'unknown' && row.status === 'observed') ||
-    Object.values(corpus.unknown_queries).some(q=>!corpus.queries.some(row=>row.stratum === 'unknown' && row.q === q)))
+    corpus.ipv4_network_coverage && corpus.queries.some(row=>row.stratum==='unknown' && isIP(row.q)===4) ||
+    Object.values(corpus.unknown_queries).filter(q=>q!==null).some(q=>!corpus.queries.some(row=>row.stratum === 'unknown' && row.q === q)))
   throw new Error('A versioned 10000-query real-input stratified corpus is required')
 const canonical = value => value === null || typeof value !== 'object' ? JSON.stringify(value) : Array.isArray(value) ? `[${value.map(canonical).join(',')}]` : `{${Object.keys(value).sort().map(key=>`${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -66,9 +77,10 @@ fixtureFiles.set(fixtureCreditsPath,fixtureCredits)
 fixtureFiles.set('/dataset-credits.json',Buffer.from(canonical({format_version:1,current_release_id:fixtureRelease,releases:[{release_id:fixtureRelease,credits_path:fixtureCreditsPath,credits_sha256:fixtureCreditsHash}]})))
 const axeSource = await readFile(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8')
 const tile = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j9zEAAAAASUVORK5CYII=', 'base64')
-const report = { scope:'hosted-production-browser-v2',release_scope:'release-scope-v6',mode:'production',url:base.origin,
+const report = { scope:'hosted-production-browser-v3',release_scope:'release-scope-v6',mode:'production',url:base.origin,
   release_id:candidate.release_id,candidate_bundle_sha256:candidate.candidate_bundle_sha256,
   corpus_release_id:corpus.release_id,corpus_availability:corpus.availability,
+  corpus_ipv4_network_coverage: corpus.ipv4_network_coverage && Object.fromEntries(['covered_addresses','router_intervals','network_objects'].map(k=>[k,corpus.ipv4_network_coverage[k]])),
   corpus_features:{map:corpus.map_query!==null,graph:corpus.graph_query!==null},
   corpus_sha256:createHash('sha256').update(corpusBytes).digest('hex'),browser:null,head_sha:process.env.GITHUB_SHA??null,
   execution_host:{platform:process.platform,arch:process.arch,node:process.versions.node,logical_cpus:cpus().length,memory_bytes:totalmem()},
@@ -195,30 +207,68 @@ async function accessible(page) {
 async function submit(page,q,{synthetic=false}={}) {
   await submitLookup(page,q,{synthetic,releaseId:synthetic?fixtureRelease:candidate.release_id})
 }
-async function noFacts(page,q) {
-  const answer=await page.evaluate(q=>new Promise((resolve,reject)=>{
+async function workerAnswer(page,action,q) {
+  return page.evaluate(({action,q})=>new Promise((resolve,reject)=>{
     const worker=window.__atlasWorkers[0];if(!worker)return reject(new Error('No actual atlas worker'))
     const id=window.__atlasProbeId=(window.__atlasProbeId??0)-1
-    const timer=setTimeout(()=>{worker.removeEventListener('message',receive);reject(new Error('Unknown query timeout'))},30000)
-    const receive=event=>{if(event.data.id!==id)return;clearTimeout(timer);worker.removeEventListener('message',receive);event.data.error?reject(new Error('Unknown query rejected')):resolve(event.data.answer)}
-    worker.addEventListener('message',receive);worker.postMessage({action:'lookup',id,q})
-  }),q)
-  const origins=isIP(q)?[]:[Number(q.slice(2))]
-  if(answer.releaseId!==candidate.release_id||answer.synthetic||answer.geo!==null||answer.network!==null||answer.usage!==null||answer.observedRisk!==null||answer.asns.length||['paths','relationships','tier1'].some(key=>answer.bgp[key].length)||answer.bgp.rpki.some(row=>row.status!=='unavailable')||JSON.stringify(answer.bgp.origins)!==JSON.stringify(origins))throw new Error('Unknown corpus query manufactured facts')
+    const timer=setTimeout(()=>{worker.removeEventListener('message',receive);reject(new Error('Corpus query timeout'))},30000)
+    const receive=event=>{if(event.data.id!==id)return;clearTimeout(timer);worker.removeEventListener('message',receive);event.data.error?reject(new Error('Corpus query rejected')):resolve(event.data.answer)}
+    worker.addEventListener('message',receive);worker.postMessage({action,id,q})
+  }),{action,q})
 }
-async function unknownStates(page) {
-  await submit(page,corpus.unknown_queries.ipv4);await page.locator('.fact-list').waitFor();await noFacts(page,corpus.unknown_queries.ipv4)
+async function noFacts(page,q,synthetic=false) {
+  const answer=await workerAnswer(page,'lookup',q)
+  const origins=isIP(q)?[]:[Number(q.slice(2))]
+  if(answer.releaseId!==(synthetic?fixtureRelease:candidate.release_id)||answer.synthetic!==synthetic||answer.geo!==null||answer.network!==null||answer.usage!==null||answer.observedRisk!==null||answer.asns.length||['paths','relationships','tier1'].some(key=>answer.bgp[key].length)||answer.bgp.rpki.some(row=>row.status!=='unavailable')||JSON.stringify(answer.bgp.origins)!==JSON.stringify(origins))throw new Error('Unknown corpus query manufactured facts')
+}
+async function unknownIPv4(page,q,synthetic=false) {
+  await submit(page,q,{synthetic});await page.locator('.fact-list').waitFor();await noFacts(page,q,synthetic)
   if(!await page.locator('.fact-list dd').evaluateAll(nodes=>nodes.length>0&&nodes.every(node=>node.textContent.trim()==='Unknown'))||await page.locator('.leaflet-container').count())throw new Error('Unknown IPv4 displayed identity or coordinates')
   await page.getByText('No evidenced city location.',{exact:true}).waitFor()
-  await owner(page,'Observed risk','.quality-layout');await page.getByRole('heading',{name:'Unrated',exact:true}).waitFor()
+  await owner(page,'Observed risk','.quality-layout',{synthetic});await page.getByRole('heading',{name:'Unrated',exact:true}).waitFor()
   if(await page.locator('.reason-chip').count()||(await page.locator('.score-value').innerText()).trim()!=='—')throw new Error('Unknown IPv4 displayed scored evidence')
-  await owner(page,'Class C','.ip-grid')
-  const target=page.getByRole('gridcell',{name:`${corpus.unknown_queries.ipv4}, unknown`,exact:true})
+  await owner(page,'Class C','.ip-grid',{synthetic})
+  const target=page.getByRole('gridcell',{name:`${q}, unknown`,exact:true})
   if(await page.getByRole('gridcell').count()!==256||await target.count()!==1||await target.evaluate(node=>node.classList.contains('observed')||node.classList.contains('positive')))throw new Error('Unknown IPv4 cell was treated as observed')
-  await owner(page,'ASN','.asn-list,.status-panel:not([role])');await page.getByText('No origin is evidenced for this query.',{exact:true}).waitFor()
+  await owner(page,'ASN','.asn-list,.status-panel:not([role])',{synthetic});await page.getByText('No origin is evidenced for this query.',{exact:true}).waitFor()
   if(await page.locator('.asn-card').count())throw new Error('Unknown IPv4 displayed an ASN')
-  await owner(page,'BGP','.bgp-controls');await page.getByRole('heading',{name:'No observed origin',exact:true}).waitFor()
+  await owner(page,'BGP','.bgp-controls',{synthetic});await page.getByRole('heading',{name:'No observed origin',exact:true}).waitFor()
   if(await page.locator('.graph-node,.graph-edge').count())throw new Error('Unknown IPv4 invented routing')
+}
+async function coveredIPv4(page,proof) {
+  const expected=proof.lookup, q=expected.q
+  await submit(page,q)
+  await page.locator('.fact-list').waitFor()
+  if(canonical(await workerAnswer(page,'lookup',q))!==canonical(expected))throw new Error('IPv4 coverage witness differs between the native and browser readers')
+  const boolLabel=value=>value==null?null:value?'Yes':'No'
+  const facts={'Country':expected.geo?.country,'Region':expected.geo?.region,'City':expected.usage?.anycast?null:expected.geo?.city,
+    'Registration country':expected.geo?.registrationCountry,'ISP':expected.network.isp,'Usage':expected.usage?.type,'Assignment':expected.usage?.assignment,
+    'Anycast':boolLabel(expected.usage?.anycast),'Directed broadcast':boolLabel(expected.usage?.directedBroadcast)}
+  const visible=await page.locator('.fact-list > div').evaluateAll(rows=>Object.fromEntries(rows.map(row=>[row.querySelector('dt').textContent.trim(),row.querySelector('dd').textContent.trim()])))
+  if(canonical(visible)!==canonical(Object.fromEntries(Object.entries(facts).map(([k,v])=>[k,v??'Unknown']))))throw new Error('IPv4 coverage witness overview differs from its native facts')
+  await page.locator(hasMapLocation(expected)?'.leaflet-container':'.map-empty').waitFor()
+  await owner(page,'Observed risk','.quality-layout')
+  if(expected.observedRisk?.score==null){await page.getByRole('heading',{name:'Unrated',exact:true}).waitFor();if((await page.locator('.score-value').innerText()).trim()!=='—')throw new Error('IPv4 witness acquired an unknown score')}
+  await owner(page,'Class C','.ip-grid')
+  if(canonical(await workerAnswer(page,'classC',q))!==canonical(proof.class_c))throw new Error('IPv4 coverage witness Class C answer differs between readers')
+  const grid=await page.getByRole('gridcell').evaluateAll(cells=>cells.map(cell=>[cell.getAttribute('aria-label'),cell.classList.contains('observed'),cell.classList.contains('positive')]))
+  const expectedGrid=Array.from({length:256},(_,i)=>{
+    const cell=proof.class_c?.cells[i],observed=cell?.observed??false,ip=cell?.ip??`0.0.0.${i}`
+    return [`${ip}, ${observed?'observed':'unknown'}`,observed,Boolean(cell?.reasons.length)]
+  })
+  if(canonical(grid)!==canonical(expectedGrid))throw new Error('IPv4 witness grid displayed different observed evidence')
+  await owner(page,'ASN','.asn-list,.status-panel:not([role])')
+  if(!expected.asns.length)await page.getByText('No origin is evidenced for this query.',{exact:true}).waitFor()
+  const asns=await page.locator('.asn-card .eyebrow').allTextContents()
+  if(canonical(asns)!==canonical(expected.asns.map(a=>`AS${a.asn}`)))throw new Error('IPv4 witness displayed different ASNs')
+  await owner(page,'BGP','.bgp-controls')
+  const origins=await page.getByRole('combobox',{name:'Select announcing origin'}).locator('option').evaluateAll(rows=>rows.map(o=>Number(o.value)))
+  if(canonical(origins)!==canonical(expected.bgp.origins))throw new Error('IPv4 witness displayed different origins')
+  if(!origins.length)await page.getByRole('heading',{name:'No observed origin',exact:true}).waitFor()
+}
+async function unknownStates(page) {
+  if(corpus.unknown_queries.ipv4!==null)await unknownIPv4(page,corpus.unknown_queries.ipv4)
+  else await coveredIPv4(page,corpus.ipv4_network_coverage)
   await submit(page,corpus.unknown_queries.ipv6);await page.locator('.fact-list').waitFor();await noFacts(page,corpus.unknown_queries.ipv6)
   await owner(page,'Class C','.status-panel:not([role])');await page.getByRole('heading',{name:'IPv4 only',exact:true}).waitFor()
   if(await page.getByRole('gridcell').count())throw new Error('Unknown IPv6 acquired a /24')
@@ -226,7 +276,7 @@ async function unknownStates(page) {
   if(await page.locator('.asn-card').count())throw new Error('Unknown ASN displayed aggregate facts')
   await owner(page,'BGP','.bgp-graph svg');await page.getByText('No observed path is available',{exact:true}).waitFor()
   if(await page.locator('.graph-node,.graph-edge,.graph-original').count())throw new Error('Unknown ASN invented a path')
-  return {ipv4:true,ipv6:true,asn:true}
+  return {ipv4:corpus.unknown_queries.ipv4!==null?true:null,ipv6:true,asn:true}
 }
 async function actualGraph(page) {
   await submit(page,corpus.graph_query??corpus.unknown_queries.asn)
@@ -264,6 +314,8 @@ async function componentPopulation(width,theme,index) {
     if(JSON.stringify(layout)!==JSON.stringify(await s.page.locator('.graph-node').evaluateAll(nodes=>nodes.map(node=>node.getAttribute('transform')))))throw new Error('Capacity route focus reconstructed layout')
     row.graph={visible_nodes:24,active_frames:phases};row.accessibility=await accessible(s.page)
     if(row.accessibility.violations.length||row.accessibility.incomplete.length)throw new Error('Graph capacity accessibility incomplete')
+    await unknownIPv4(s.page,'8.8.8.8',true)
+    row.ipv4_unknown_state_verified=true
     await s.settle()
   } finally {report.component_populations.push(row);await s.context.close()}
 }
@@ -291,7 +343,7 @@ try {
       await owner(s.page,'ASN','.asn-list,.status-panel:not([role])');checks.push(await accessible(s.page))
       row.graph=await actualGraph(s.page);checks.push(await accessible(s.page))
       row.completed_routes=['overview','quality','class-c','asn','bgp']
-      row.unknown_states=await unknownStates(s.page);checks.push(await accessible(s.page));await s.settle()
+      row.unknown_states=await unknownStates(s.page);row.ipv4_network_coverage_verified=corpus.ipv4_network_coverage?true:null;checks.push(await accessible(s.page));await s.settle()
       const metric=await s.page.evaluate(()=>window.__atlasProduction)
       row.interaction_cls=metric.cls_supported?metric.cls:null;row.event_timing_supported=metric.event_supported
       row.interaction_durations_ms=metric.event_supported&&metric.trusted_inputs>0?[16,...Object.values(metric.interactions)]:[]

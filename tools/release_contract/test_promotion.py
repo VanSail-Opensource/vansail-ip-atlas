@@ -23,7 +23,13 @@ def archive(entries):
 class TrustedEvidenceTests(unittest.TestCase):
     def test_browser_and_native_measurements_bind_the_same_actual_corpus(self):
         digest = 'a' * 64
-        verify_corpus_binding({'corpus_sha256': digest}, {'go_lookup': {'corpus_sha256': digest}})
+        coverage = {'covered_addresses': 2**32, 'network_objects': 1, 'router_intervals': 2}
+        for proof in (None, coverage):
+            report = {'corpus_sha256': digest, 'corpus_ipv4_network_coverage': proof}
+            verify_corpus_binding(report, {'go_lookup': report})
+        with self.assertRaises(ContractError):
+            verify_corpus_binding({'corpus_sha256': digest, 'corpus_ipv4_network_coverage': None},
+                                  {'go_lookup': {'corpus_sha256': digest, 'corpus_ipv4_network_coverage': coverage}})
         for browser, build in (({}, {}), ({}, {'go_lookup': {}}),
                                ({'corpus_sha256': 'b' * 64}, {'go_lookup': {'corpus_sha256': digest}})):
             with self.subTest(browser=browser, build=build), self.assertRaises(ContractError):

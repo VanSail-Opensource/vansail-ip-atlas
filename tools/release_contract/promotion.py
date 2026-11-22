@@ -22,7 +22,7 @@ import zipfile
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from tools.release_contract.acceptance import browser_gates, build_gates, require_all
+from tools.release_contract.acceptance import browser_gates, build_gates, require_all, valid_ipv4_coverage
 from tools.release_contract.contracts import (ContractError, canonical_bytes, parse_canonical,
     rollback_eligible, sha256, verify_approval)
 from tools.release_contract.prepare_static import inspect_binary, known_private_values, scan_frontend, verify_atlas
@@ -154,6 +154,10 @@ def verify_corpus_binding(browser: dict, build: dict) -> None:
     browser_digest = browser.get('corpus_sha256')
     _hash(native_digest)
     _hash(browser_digest)
+    field = 'corpus_ipv4_network_coverage'
+    if (field not in browser or field not in lookup or not valid_ipv4_coverage(browser[field])
+            or not valid_ipv4_coverage(lookup[field]) or lookup[field] != browser[field]):
+        raise ContractError('native and browser evidence attest different IPv4 populations')
     if native_digest != browser_digest:
         raise ContractError('native and browser evidence use different real query corpora')
 

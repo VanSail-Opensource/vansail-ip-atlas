@@ -20,7 +20,7 @@ def fixture():
         'runtime_ms': 2000, 'cgroup_memory_peak_bytes': 1024**3,
         'memory_events': {key: 0 for key in ('low', 'high', 'max', 'oom', 'oom_kill', 'oom_group_kill')}}
     native = {'timing': 'individual-indexed-lookups', 'corpus_queries': 10000, 'warmups': 10000,
-        'corpus_sha256': 'd'*64, 'release_id': candidate['release_id'], 'compressed_input_bytes': 1,
+        'corpus_sha256': 'd'*64, 'corpus_ipv4_network_coverage': None, 'release_id': candidate['release_id'], 'compressed_input_bytes': 1,
         'samples_ns': [1000]*100000, 'p50_ns': 1000, 'p95_ns': 1000, 'p99_ns': 1000,
         'allocation_count': 1, 'allocated_bytes': 1, 'process_peak_rss_bytes': 1, 'temporary_disk_bytes': 0,
         'runtime_ns': 100000000, 'go_version': 'go1.27.4',

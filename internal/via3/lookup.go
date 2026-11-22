@@ -740,15 +740,23 @@ func (r *Release) rowDestination(ctx context.Context, row []byte, ok bool, kind 
 	if !ok {
 		return nil, nil
 	}
-	ints, _ := r.router.Rows(4)
-	directory, _ := r.router.Rows(7)
+	id, found := r.router.destinationID(row, kind)
+	if !found {
+		return nil, nil
+	}
+	return r.reference(ctx, r.router, id)
+}
+
+func (s *Shard) destinationID(row []byte, kind uint16) (uint32, bool) {
+	ints, _ := s.Rows(4)
+	directory, _ := s.Rows(7)
 	for j := uint32(0); j < uint32(u16(row, 4)); j++ {
 		object := u32(ints, int(u32(row, 0)+j)*4)
 		if u16(directory, int(object)*40) == kind {
-			return r.reference(ctx, r.router, object)
+			return object, true
 		}
 	}
-	return nil, nil
+	return 0, false
 }
 func (r *Release) rowDestinations(ctx context.Context, row []byte, ok bool) (destinationSet, error) {
 	var out destinationSet

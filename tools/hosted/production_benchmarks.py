@@ -10,7 +10,7 @@ import copy
 import json
 import re
 
-from tools.release_contract.acceptance import BUILD_SCENARIOS, CORPUS_STRATA, allocation_gate, build_gates, require_all
+from tools.release_contract.acceptance import BUILD_SCENARIOS, CORPUS_STRATA, allocation_gate, build_gates, require_all, valid_ipv4_coverage
 from tools.release_contract.contracts import ContractError, canonical_bytes, sha256
 
 CASE_SCOPE = 'hosted-production-build-case-v1'
@@ -233,9 +233,9 @@ def validate_budget(report):
 def verify_native_lookup(candidate, native_report):
     """Recompute the unchanged strict 2us p95 gate from all 100000 timings."""
     report = keys(native_report, {'timing', 'corpus_queries', 'warmups', 'corpus_sha256', 'release_id',
-        'compressed_input_bytes', 'samples_ns', 'p50_ns', 'p95_ns', 'p99_ns', 'allocation_count', 'allocated_bytes',
+        'corpus_ipv4_network_coverage', 'compressed_input_bytes', 'samples_ns', 'p50_ns', 'p95_ns', 'p99_ns', 'allocation_count', 'allocated_bytes',
         'process_peak_rss_bytes', 'temporary_disk_bytes', 'runtime_ns', 'go_version', 'object_reads', 'strata'})
-    if (report['release_id'] != candidate.get('release_id') or report['timing'] != 'individual-indexed-lookups'
+    if (not valid_ipv4_coverage(report['corpus_ipv4_network_coverage']) or report['release_id'] != candidate.get('release_id') or report['timing'] != 'individual-indexed-lookups'
             or type(report['corpus_queries']) is not int or report['corpus_queries'] != 10000
             or type(report['warmups']) is not int or report['warmups'] != 10000
             or not isinstance(report['go_version'], str) or re.fullmatch(r'go[0-9]+\.[0-9]+\.[0-9]+', report['go_version']) is None):

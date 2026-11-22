@@ -1,4 +1,4 @@
-import { AtlasClient, type LookupAnswer, type ClassCAnswer } from '~/lib/via3'
+import { AtlasClient, type LookupAnswer, type OverviewAnswer, type ClassCAnswer } from '~/lib/via3'
 import { resolve, validateOrigin } from '~/lib/query'
 import { loadDatasetCredits, type CreditDocument } from '~/lib/datasetCredits'
 import { trackSnapshotTime } from '~/lib/rpkiSnapshot'
@@ -8,7 +8,9 @@ export function useAtlas() {
   const route = useRoute()
   const releaseInfo = useState<{ releaseId: string; validUntil: number; synthetic: boolean } | null>('atlas-release-info', () => null)
   const verifiedCredits = useState<CreditDocument | null>('atlas-dataset-credits', () => null)
-  const data = shallowRef<LookupAnswer | null>(null)
+  const result = shallowRef<LookupAnswer | OverviewAnswer | null>(null)
+  const data = computed(() => result.value && 'bgp' in result.value ? result.value : null)
+  const overview = computed(() => result.value && !('bgp' in result.value) ? result.value : null)
   const classC = shallowRef<ClassCAnswer | null>(null)
   const error = ref('')
   const loading = ref(false)
@@ -26,7 +28,7 @@ export function useAtlas() {
     verifiedCredits.value = null
     serial++
     active?.abort()
-    data.value = null
+    result.value = null
     classC.value = null
     loading.value = false
     error.value = 'This atlas release is no longer eligible. A verified current release is required.'
@@ -35,11 +37,11 @@ export function useAtlas() {
   async function load(background = false) {
     // A time-label update or background verification must not unmount a valid
     // page, resetting graph focus/pan or the selected ASN prefix page.
-    const retained = background && data.value && Date.now() / 1000 < data.value.validUntil ? data.value : null
+    const retained = background && result.value && Date.now() / 1000 < result.value.validUntil ? result.value : null
     if (!retained) {
       releaseInfo.value = null
       verifiedCredits.value = null
-      data.value = null
+      result.value = null
       classC.value = null
     }
     const run = ++serial
@@ -66,12 +68,13 @@ export function useAtlas() {
       atlas ??= new AtlasClient()
       atlas.removeEventListener('invalidate', invalidate)
       atlas.addEventListener('invalidate', invalidate)
-      const answer = await atlas.lookup(state.q, active.signal)
+      const answer = path === '/ip/overview' ? await atlas.overview(state.q, active.signal) : await atlas.lookup(state.q, active.signal)
       let pendingClassC: ClassCAnswer | null = null
       if (run !== serial) return
       if (Date.now() / 1000 >= answer.validUntil) throw new Error('release_expired')
       origin.value = null
       if (state.origin) {
+        if (!('bgp' in answer)) throw new Error('invalid_origin')
         origin.value = Number(state.origin.slice(2))
         validateOrigin(origin.value, answer.bgp.origins)
       }
@@ -93,8 +96,8 @@ export function useAtlas() {
         verifiedCredits.value = credits
       }
       if (Date.now() / 1000 >= answer.validUntil) throw new Error('release_expired')
-      if (!retained || retained.releaseId !== answer.releaseId || retained.q !== answer.q) {
-        data.value = answer
+      if (!retained || retained.releaseId !== answer.releaseId || retained.q !== answer.q || ('bgp' in retained) !== ('bgp' in answer)) {
+        result.value = answer
         classC.value = pendingClassC
       }
       releaseInfo.value = { releaseId: answer.releaseId, validUntil: answer.validUntil, synthetic: answer.synthetic }
@@ -106,7 +109,7 @@ export function useAtlas() {
           : 'The atlas could not be verified. Please try again when a complete release is available.'
       releaseInfo.value = null
       verifiedCredits.value = null
-      data.value = null
+      result.value = null
       classC.value = null
       atlas?.clear()
     } finally { if (run === serial) loading.value = false }
@@ -119,7 +122,7 @@ export function useAtlas() {
     try {
       const page = await atlas.prefixes(`AS${asn}`, cursor, active.signal)
       if (run !== serial || !data.value) return false
-      data.value = { ...data.value, asns: data.value.asns.map(item => item.asn === asn ? { ...item, prefixes: page.prefixes, prefixCursor: page.nextCursor } : item) }
+      result.value = { ...data.value, asns: data.value.asns.map(item => item.asn === asn ? { ...item, prefixes: page.prefixes, prefixCursor: page.nextCursor } : item) }
       return true
     } catch {
       if (run === serial && !active.signal.aborted) invalidate()
@@ -131,7 +134,7 @@ export function useAtlas() {
     ready = true
     stopClock = trackSnapshotTime(value => {
       now.value = value
-      if (data.value && value >= data.value.validUntil) invalidate()
+      if (result.value && value >= result.value.validUntil) invalidate()
     })
     void load()
     interval = setInterval(() => void load(true), 60_000)
@@ -145,5 +148,5 @@ export function useAtlas() {
     document.removeEventListener('visibilitychange', resume)
     atlas?.removeEventListener('invalidate', invalidate)
   })
-  return { data, classC, error, loading, current, origin, prefixBusy, now, loadPrefixes, reload: () => load() }
+  return { data, overview, classC, error, loading, current, origin, prefixBusy, now, loadPrefixes, reload: () => load() }
 }

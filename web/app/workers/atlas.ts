@@ -3,7 +3,7 @@ import { decodeZstd } from '../lib/zstd.ts'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { parseInput } from '../lib/query.ts'
 import type { Input } from '../lib/query.ts'
-import type { LookupAnswer, ClassCAnswer, ASNAnswer, BGPAnswer, ASNPrefixPage, CoverageAnswer } from '../lib/via3.ts'
+import type { LookupAnswer, OverviewAnswer, ClassCAnswer, ASNAnswer, BGPAnswer, ASNPrefixPage, CoverageAnswer } from '../lib/via3.ts'
 
 const MAX_FILE = 24 * 1024 * 1024
 const MAX_SECTION = 64 * 1024 * 1024
@@ -782,6 +782,34 @@ export class AtlasReader {
     }
     return output
   }
+  // Overview needs only place, coordinates, network identity and usage. Both
+  // entry points decode these fields identically, including anycast suppression.
+  private async readOverview(ip: string, dest: Map<number, Shard>, answer: Pick<OverviewAnswer, 'geo' | 'network' | 'usage'>, budget: AnswerBudget, signal?: AbortSignal): Promise<boolean> {
+    let networkOriginsKnown = false
+    const geo = dest.get(2); const geoRow = geo?.prefix(ip)?.row
+    if (geo && geoRow) answer.geo = { country: country(u16(geoRow, 4)), registrationCountry: country(u16(geoRow, 6)), region: await this.label(geo, geoRow, 8, signal), city: await this.label(geo, geoRow, 16, signal), latitude: null, longitude: null, precision: null }
+    const coords = dest.get(3)?.prefix(ip)?.row
+    if (coords && has(coords, 4)) { answer.geo ??= { country: null, registrationCountry: null, region: null, city: null, latitude: null, longitude: null, precision: null }; answer.geo.latitude = i32(coords, 4) / 1000; answer.geo.longitude = i32(coords, 8) / 1000; answer.geo.precision = ['unknown', 'country', 'region', 'city_centroid', 'area'][coords[12]!]! }
+    const network = dest.get(4); const found = network?.prefix(ip)
+    if (network && found) { budget.charge(4096 + 16 * u32(found.row, 8)); answer.network = { prefix: found.prefix, name: await this.label(network, found.row, 16, signal), organization: await this.label(network, found.row, 24, signal), isp: await this.label(network, found.row, 32, signal), origins: this.originList(network, found.row) }; networkOriginsKnown = has(found.row, 19) }
+    const use = dest.get(5)?.prefix(ip)?.row
+    if (use) { answer.usage = { type: usage(use[4]!), assignment: ['unknown', 'native', 'broadcast_or_routed'][use[5]!]!, anycast: has(use, 7) ? !!(use[6]! & 1) : null, directedBroadcast: has(use, 8) ? !!(use[6]! & 2) : null }; if (answer.usage.anycast && answer.geo) { answer.geo.city = null; answer.geo.latitude = null; answer.geo.longitude = null; answer.geo.precision = null } }
+    return networkOriginsKnown
+  }
+  async overview(q: string, signal?: AbortSignal): Promise<OverviewAnswer> {
+    const input = parseInput(q)
+    if (input.kind !== 'ip') return fail('invalid_input')
+    this.beginQuery()
+    try {
+      await this.ready(signal)
+      const manifest = this.current()
+      const answer: OverviewAnswer = { q: input.canonical, kind: 'ip', releaseId: manifest.release_id, synthetic: manifest.mode === 'synthetic', validUntil: manifest.valid_until, geo: null, network: null, usage: null }
+      const dest = await this.destinations(input, signal, [2, 3, 4, 5])
+      await this.readOverview(input.canonical, dest, answer, new AnswerBudget(), signal)
+      checkAbort(signal); this.current(); answerFits(answer)
+      return answer
+    } finally { this.endQuery() }
+  }
   async lookup(q: string, signal?: AbortSignal): Promise<LookupAnswer> {
     const input = parseInput(q); this.beginQuery()
     try { return await this.lookupInput(input, signal) } finally { this.endQuery() }
@@ -792,15 +820,11 @@ export class AtlasReader {
     const answer: LookupAnswer = { q: input.canonical, kind: input.kind, releaseId: manifest.release_id, synthetic: manifest.mode === 'synthetic', validUntil: manifest.valid_until, geo: null, network: null, usage: null, observedRisk: null, asns: [], bgp: { origins: [], paths: [], relationships: [], tier1: [], rpki: [] } }
     let announcement: string | null = null
     if (input.kind === 'ip') {
-      let networkOriginsKnown = false
-      const geo = dest.get(2); const geoRow = geo?.prefix(input.canonical)?.row
-      if (geo && geoRow) answer.geo = { country: country(u16(geoRow, 4)), registrationCountry: country(u16(geoRow, 6)), region: await this.label(geo, geoRow, 8, signal), city: await this.label(geo, geoRow, 16, signal), latitude: null, longitude: null, precision: null }
-      const coords = dest.get(3)?.prefix(input.canonical)?.row
-      if (coords && has(coords, 4)) { answer.geo ??= { country: null, registrationCountry: null, region: null, city: null, latitude: null, longitude: null, precision: null }; answer.geo.latitude = i32(coords, 4) / 1000; answer.geo.longitude = i32(coords, 8) / 1000; answer.geo.precision = ['unknown', 'country', 'region', 'city_centroid', 'area'][coords[12]!]! }
-      const network = dest.get(4); const found = network?.prefix(input.canonical)
-      if (network && found) { budget.charge(4096 + 16 * u32(found.row, 8)); answer.network = { prefix: found.prefix, name: await this.label(network, found.row, 16, signal), organization: await this.label(network, found.row, 24, signal), isp: await this.label(network, found.row, 32, signal), origins: this.originList(network, found.row) }; networkOriginsKnown = has(found.row, 19); if (networkOriginsKnown) announcement = found.prefix; answer.bgp.origins = answer.network.origins }
-      const use = dest.get(5)?.prefix(input.canonical)?.row
-      if (use) { answer.usage = { type: usage(use[4]!), assignment: ['unknown', 'native', 'broadcast_or_routed'][use[5]!]!, anycast: has(use, 7) ? !!(use[6]! & 1) : null, directedBroadcast: has(use, 8) ? !!(use[6]! & 2) : null }; if (answer.usage.anycast && answer.geo) { answer.geo.city = null; answer.geo.latitude = null; answer.geo.longitude = null; answer.geo.precision = null } }
+      const networkOriginsKnown = await this.readOverview(input.canonical, dest, answer, budget, signal)
+      if (answer.network) {
+        answer.bgp.origins = answer.network.origins
+        if (networkOriginsKnown) announcement = answer.network.prefix
+      }
       const quality = dest.get(6)?.prefix(input.canonical)?.row
       if (quality) answer.observedRisk = { coverage: coverageAnswer(quality[11]!, input.canonical.includes(':')), score: has(quality, 9) ? quality[9]! : null, confidence: confidence(quality[10]!), reasons: reasons(u32(quality, 4)), layers: { exact: has(quality, 10) ? u32(quality, 12) / 1e6 : null, prefix: has(quality, 11) ? u32(quality, 16) / 1e6 : null, asn: has(quality, 12) ? u32(quality, 20) / 1e6 : null, neighbors: has(quality, 13) ? u32(quality, 24) / 1e6 : null } }
       const originShard = dest.get(10); const originFound = originShard?.prefix(input.canonical); const originRow = originFound?.row
@@ -917,12 +941,22 @@ if (typeof self !== 'undefined' && typeof window === 'undefined') {
     const { action, id, q, cursor } = event.data
     if (action === 'cancel') { controllers.get(id)?.abort(); return }
     if (action === 'clear') { for (const controller of controllers.values()) controller.abort(); reader.clear(); return }
-    if (!Number.isSafeInteger(id) || typeof q !== 'string' || !['lookup', 'classC', 'prefixes'].includes(action)) return
+    if (!Number.isSafeInteger(id) || typeof q !== 'string' || !['lookup', 'overview', 'classC', 'prefixes'].includes(action)) return
     if (new TextEncoder().encode(q).byteLength > 128) { self.postMessage({ id, error: 'invalid_input' }); return }
     if (controllers.size >= 8) { self.postMessage({ id, error: 'resource_limit' }); return }
     const controller = new AbortController(); controllers.set(id, controller)
     queue = queue.then(async () => {
-      try { checkAbort(controller.signal); const answer = action === 'lookup' ? await reader.lookup(q, controller.signal) : action === 'prefixes' ? await reader.prefixes(q, cursor, controller.signal) : await reader.classC(q, controller.signal); checkAbort(controller.signal); answerFits(answer); self.postMessage({ id, answer }) }
+      try {
+        checkAbort(controller.signal)
+        let answer: LookupAnswer | OverviewAnswer | ClassCAnswer | ASNPrefixPage | null
+        switch (action) {
+          case 'lookup': answer = await reader.lookup(q, controller.signal); break
+          case 'overview': answer = await reader.overview(q, controller.signal); break
+          case 'prefixes': answer = await reader.prefixes(q, cursor, controller.signal); break
+          default: answer = await reader.classC(q, controller.signal)
+        }
+        checkAbort(controller.signal); answerFits(answer); self.postMessage({ id, answer })
+      }
       catch (error) { self.postMessage({ id, error: error instanceof Error ? error.message : 'internal' }) }
       finally { controllers.delete(id) }
     })

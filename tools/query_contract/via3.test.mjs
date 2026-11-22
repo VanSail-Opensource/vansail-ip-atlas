@@ -233,6 +233,36 @@ test('Go and worker canonical lookup answers match exactly', async t => {
   reader.clear()
 })
 
+function overviewFields(answer) {
+  const { q, kind, releaseId, synthetic, validUntil, geo, network, usage } = answer
+  return { q, kind, releaseId, synthetic, validUntil, geo, network, usage }
+}
+
+test('overview reads only its IP facts and referenced dictionaries', async () => {
+  const objectKinds = new Map(golden.objects.map(object => [`/_atlas/objects/${object.info.sha256}.via3`, object.info.kind]))
+  const accessed = new Set()
+  const reader = new AtlasReader((path, options) => {
+    const kind = objectKinds.get(path)
+    if (kind !== undefined) {
+      assert([1, 2, 3, 4, 5, 14].includes(kind), `overview fetched unrelated kind ${kind}`)
+      accessed.add(kind)
+    }
+    return response(path, options)
+  }, () => golden.clock)
+  try {
+    await assert.rejects(reader.overview('AS13335'), { message: 'invalid_input' })
+    assert.equal(accessed.size, 0)
+    for (const vector of golden.vectors.filter(vector => vector.answer.kind === 'ip')) {
+      assert.deepEqual(await reader.overview(vector.q), overviewFields(vector.answer))
+    }
+    assert.deepEqual([...accessed].sort((a, b) => a - b), [1, 2, 3, 4, 5, 14])
+    const empty = await reader.overview('8.8.8.8')
+    assert.deepEqual([empty.geo, empty.network, empty.usage], [null, null, null])
+    assert(!('bgp' in empty) && !('observedRisk' in empty) && !('asns' in empty))
+    await assert.rejects(reader.overview('8.8.8.8', AbortSignal.abort()), { name: 'AbortError' })
+  } finally { reader.clear() }
+})
+
 test('independent fact partitions preserve complete Go/worker lookup and Class C answers', async t => {
   const fixture = JSON.parse(readFileSync(new URL('../../fixtures/bin/grouped-via3.json', import.meta.url), 'utf8'))
   const objects = new Map(fixture.objects.map(object => [`/_atlas/objects/${object.info.sha256}.via3`, new Uint8Array(Buffer.from(object.base64, 'base64'))]))
@@ -246,6 +276,7 @@ test('independent fact partitions preserve complete Go/worker lookup and Class C
     for (const vector of fixture.vectors) await t.test(vector.q, async () => {
       assert.deepEqual(await reader.lookup(vector.q), vector.answer)
       assert.deepEqual(await reader.lookup(vector.q), vector.answer, 'Cached and repeated grouped lookups agree')
+      if (vector.answer.kind === 'ip') assert.deepEqual(await reader.overview(vector.q), overviewFields(vector.answer))
       assert.deepEqual(await reader.classC(vector.q), vector.classC)
     })
   } finally { reader.clear() }

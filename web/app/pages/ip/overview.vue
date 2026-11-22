@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { hasMapLocation } from '~/lib/via3'
-const { data, error, loading, current } = useAtlas()
+const { overview: data, error, loading, current } = useAtlas()
 const facts = computed(() => data.value ? [
   ['Country', data.value.geo?.country], ['Region', data.value.geo?.region], ['City', data.value.usage?.anycast === true ? null : data.value.geo?.city],
   ['Registration country', data.value.geo?.registrationCountry],

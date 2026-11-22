@@ -24,6 +24,7 @@ FIELD_TARGETS = {
     "handle": {"as_name"}, "description": {"organization"}, "country-code": {"asn_country"},
     "network_type": {"usage_type"}, "usage_type": {"usage_type"}, "metadata.category": {"usage_type"},
     "ip": {"reason_flags", "anycast"}, "category": {"reason_flags"}, "type": {"reason_flags"},
+    "properties.addressPrefixes": {"reason_flags"},
     "value": {"reason_flags"}, "tags": {"reason_flags"},
     "as_path": {"bgp_paths"}, "as_relationship": {"as_relationships"},
     "roa": {"rpki_status"}, "roa_asn": {"rpki_status"}, "roa_max_length": {"rpki_status"},

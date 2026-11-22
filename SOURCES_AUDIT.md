@@ -1,8 +1,31 @@
 # VanSail IP Atlas - Production Source Audit
 
-## Current shortlist - 2026-11-15
+## November 22 source coverage
 
-The v6 catalog contains fifteen reviewed entries enabled for attempted intake,
+The reviewed catalog covers all twelve configured detection signals. Each
+source supplies positive observations within its verified scope. Whether a
+given IP has any observation depends on the included edition.
+
+| Facts | Contributing data |
+|---|---|
+| Country, registration, city and coordinates | Sapics, DB-IP and ipapi.is bulk geographic files |
+| ASN identity and contextual usage | Ipverse identity and dated ASN role entries joined to observed origins |
+| Network prefixes, origin ASNs, observed AS paths | RouteViews and RIPE RIS RIB snapshots |
+| AS relationships and Tier-1 candidates | CAIDA directional relationships with observed paths and current snapshot evidence |
+| RPKI | RPKI-client snapshot validated per observed prefix and ASN, retaining both clocks |
+| Anycast | Exact addresses of the IANA root DNS service identities |
+| Malware, botnet, command and control, abuse, scanning and spam | FFraud observations with individually mapped categories |
+| Fraud | Explicit phishing reports from TweetFeed, in the same community evidence family as FFraud |
+| Proxy, datacenter, Tor and VPN | FFraud typed records, Tor exit observations and X4B VPN prefixes where applicable |
+| Hosting | Individual addresses in mature Microsoft Azure App Service allocations |
+
+The public /24 view derives its cells from the admitted address and network
+facts. An unobserved cell carries unknown values. Source qualification,
+runtime coverage and hosted availability are measured for each build.
+
+## November 15 shortlist
+
+On November 15 the v6 catalog contained fifteen reviewed entries enabled for attempted intake,
 including the five replacements below. Active
 permits attempted intake; it is not a current authenticated receipt or production
 approval. Public data uses release-scope-v6 and observed risk. Original compilation
@@ -109,6 +132,27 @@ statement covers protocol registries. The domain root zone is published
 separately and retains its upstream terms.
 [IANA licensing statement](https://www.iana.org/help/licensing-terms) ·
 [ICANN terms](https://www.icann.org/en/data-protection/terms-of-service)
+
+## Microsoft Azure App Service hosting allocations
+
+Microsoft identifies its global AppService tag as the inbound addresses for
+multitenant apps. On November 22 the official November 16 public cloud
+edition contained 3,398 tags. Exactly one global entry matched AppService.
+Of its 1,298 prefixes, 746 IPv4 entries and one IPv6 entry specify a single
+address. The 551 wider CIDRs and regional copies are excluded.
+[Inbound IP documentation](https://learn.microsoft.com/en-us/azure/app-service/app-service-ip-addresses)
+
+The publisher announces new allocations at least a week in advance. All 747
+individual addresses also appeared in the complete November 9 edition, served
+with a November 10 last-modified time. The November 16 file contained
+4,674,207 bytes with SHA-256
+`1e917022f684ca0eb7f53b85753f0206ea3b9140109590e7baa8af0ce11f50d8`.
+The November 9 file contained 4,655,501 bytes with SHA-256
+`e3ac69c59027b0a42d86b7e9ccb2c07dd3eecb95ff94872b451b4bf5456d04cd`.
+The review attributes the data globally and records educational use under
+the publisher's own terms. The holding period and current membership apply
+at each new intake. [Download Center](https://www.microsoft.com/en-us/download/details.aspx?id=56519)
+[Microsoft terms](https://www.microsoft.com/en-us/legal/terms-of-use)
 
 ## Removed production entries; retained independent tests
 

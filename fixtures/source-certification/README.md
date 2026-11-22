@@ -125,3 +125,14 @@ to the IANA root files and the InterNIC root zone maintainer under the
 project's recorded educational-use decision.
 [Root files](https://www.iana.org/domains/root/files) ·
 [Root service semantics](https://www.icann.org/en/rssac/faq)
+
+
+`observed-azure-appservice.json` contains four prefixes from the global AppService entry
+and the complete Austria East regional entry from Microsoft's November 16 service-tag
+file. The four prefixes are the first single-address and wider CIDRs for each
+address family, in their original order. All field values are original.
+The full global tag has 1,298 CIDRs, including 746 individual IPv4
+addresses and one individual IPv6 address.
+The fixture exercises single-edition parsing. Live intake independently
+checks two complete weekly editions before an address can contribute.
+[Microsoft Download Center](https://www.microsoft.com/en-us/download/details.aspx?id=56519)

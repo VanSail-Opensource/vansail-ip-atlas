@@ -1743,7 +1743,11 @@
                 "user",
                 "value",
                 "tags",
-                "tweet_url"
+                "tweet_url",
+                "name",
+                "id",
+                "properties.systemService",
+                "properties.addressPrefixes"
               ]
             },
             "uniqueItems": true,
@@ -7155,6 +7159,18 @@
               },
               "tweet_url": {
                 "type": "null"
+              },
+              "name": {
+                "type": "null"
+              },
+              "id": {
+                "type": "null"
+              },
+              "properties.systemService": {
+                "type": "null"
+              },
+              "properties.addressPrefixes": {
+                "enum": ["reason_flags", null]
               },
               "confirmations": {
                 "type": "null"

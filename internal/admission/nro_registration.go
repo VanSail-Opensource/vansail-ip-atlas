@@ -224,6 +224,20 @@ func parseNRO(ctx context.Context, r io.Reader, s Source, maxRecords int, excerp
 	_, proof.Projection = digest.Sum()
 	return proof, nil
 }
+func validateNROExcerpt(ctx context.Context, input io.Reader, source Source, selected adapter, tested time.Time) (uint64, error) {
+	if selected != nroRegistration || !nroSource(source) || source.Fixture.ContentEncoding != "" && source.Fixture.ContentEncoding != "identity" {
+		return 0, errNRO
+	}
+	proof, err := parseNRO(ctx, input, source, 5000000, true, func(record intelligence.NormalizedRecord) error { return record.Validate() })
+	if err != nil {
+		return 0, err
+	}
+	if proof.Day.After(tested) {
+		return 0, errNRO
+	}
+	return proof.Prefixes, nil
+}
+
 func (e *Engine) verifyNRO(ctx context.Context, path string, digest [32]byte, s Source, now time.Time) (*intelligence.NRORegistrationProof, error) {
 	checksum := filepath.Join(filepath.Dir(path), "nro-checksum")
 	if _, err := e.fetch.Fetch(ctx, nroURL+".sha256", checksum, 256); err != nil {

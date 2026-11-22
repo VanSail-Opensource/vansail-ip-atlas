@@ -351,14 +351,21 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 		if err := mappingProducer(mappings, policy, clock, mappingLengths, true)(ctx, emit); err != nil {
 			return err
 		}
+		qualityWriter := qualityBlockWriter{emit: emit}
+		if len(inputs) == 1 {
+			qualityWriter.scope = inputs[0].scope
+		}
 		if err := regions.visit(ctx, func(p netip.Prefix) error {
 			q, err := engine.Lookup(p.Addr())
 			if err != nil {
 				return err
 			}
 			_, exact := exacts[p.Addr()]
-			return emit(via3.PublicRecord{Version: 3, Kind: 6, Prefix: p, Exact: exact && p.Bits() == p.Addr().BitLen(), Quality: qualityData(q)})
+			return qualityWriter.write(p, exact && p.Bits() == p.Addr().BitLen(), qualityData(q))
 		}); err != nil {
+			return err
+		}
+		if err := qualityWriter.flush(); err != nil {
 			return err
 		}
 		profileKeys := make([]netip.Prefix, 0, len(profiles))

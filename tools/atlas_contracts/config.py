@@ -17,7 +17,7 @@ CONFIG_NAMES = ("sources", "scoring", "tier1", "web", "release-approval")
 MAX_CONFIG_BYTES = 2 * 1024 * 1024
 FIELD_TARGETS = {
     "country_code": {"physical_country", "registration_country"},
-    "allocation_country": {"registration_country"}, "region": {"region"}, "city": {"city"},
+    "cc": {"registration_country"}, "allocation_country": {"registration_country"}, "region": {"region"}, "city": {"city"},
     "coordinates": {"latitude", "longitude", "coordinate_precision"},
     "latitude": {"latitude"}, "longitude": {"longitude"},
     "asn": {"asn", "origins", "bgp_origins"}, "organization": {"organization"}, "isp": {"isp"},

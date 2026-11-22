@@ -1747,7 +1747,11 @@
                 "name",
                 "id",
                 "properties.systemService",
-                "properties.addressPrefixes"
+                "properties.addressPrefixes",
+                "registry",
+                "cc",
+                "start",
+                "status"
               ]
             },
             "uniqueItems": true,
@@ -7169,6 +7173,10 @@
               "properties.systemService": {
                 "type": "null"
               },
+              "registry": {"type": "null"},
+              "cc": {"const": "registration_country"},
+              "start": {"type": "null"},
+              "status": {"type": "null"},
               "properties.addressPrefixes": {
                 "enum": ["reason_flags", null]
               },
@@ -7542,7 +7550,8 @@
                 "enum": [
                   "original",
                   "decoded-csv",
-                  "rpki-client-excerpt"
+                  "rpki-client-excerpt",
+                  "nro-delegated-excerpt"
                 ]
               }
             },

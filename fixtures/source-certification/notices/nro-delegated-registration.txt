@@ -1,0 +1,23 @@
+NRO Extended Statistics Report
+
+Source statistics are published by the Number Resource Organization and
+AFRINIC, APNIC, ARIN, LACNIC and RIPE NCC. VanSail IP Atlas extracts the
+registration country of the organization to which each eligible IP allocation
+or assignment was made. Geographic use of those addresses may differ.
+
+The NRO publishes this report for research into Internet number resources.
+VanSail records the educational-use decision for the five registries'
+contributions. The global report does not specify a uniform open-data license.
+
+APNIC makes its delegated statistics available for download and use on the
+condition that it accepts no liability for loss or damage arising from their
+use. APNIC gives no guarantee of accuracy.
+
+NRO statistics and original report
+https://www.nro.net/about/rirs/statistics/
+
+Original extended-statistics specification
+https://www.arin.net/reference/research/statistics/nro_extended_stats_format.pdf
+
+APNIC conditions supplied with its contribution
+https://ftp.apnic.net/stats/apnic/delegated-apnic-extended-latest

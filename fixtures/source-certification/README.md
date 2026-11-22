@@ -136,3 +136,13 @@ addresses and one individual IPv6 address.
 The fixture exercises single-edition parsing. Live intake independently
 checks two complete weekly editions before an address can contribute.
 [Microsoft Download Center](https://www.microsoft.com/en-us/download/details.aspx?id=56519)
+
+`observed-nro-delegated-stats.txt` preserves nine original lines from the
+November 22, 2026 UTC global edition. It includes the original header, all
+three resource-count summaries, an ASN row, an IANA reservation, an assigned
+IPv4 range, an assigned IPv6 range and an available IPv6 range. Only the
+assigned IPv4 and IPv6 rows produce a registration country, AU and JP
+respectively. The 447-byte excerpt certifies the observed schema. Live intake
+verifies every row of the original report against the header, all three
+summaries and the publisher's SHA-256. [NRO report and scope](https://www.nro.net/about/rirs/statistics/) ·
+[Attribution and source terms](notices/nro-delegated-registration.txt)

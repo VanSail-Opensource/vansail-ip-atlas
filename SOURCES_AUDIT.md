@@ -9,6 +9,7 @@ given IP has any observation depends on the included edition.
 | Facts | Contributing data |
 |---|---|
 | Physical country, region, city and coordinates | Sapics supplies physical country. DB-IP and ipapi.is supply physical country and finer geographic observations. |
+| IP registration country | NRO extended delegation statistics report the recipient’s country for assigned and allocated IPv4 and IPv6 ranges. |
 | ASN identity and contextual usage | Ipverse supplies ASN names, organizations and ASN registration countries. Dated ASN roles join to observed origins. |
 | Network prefixes, origin ASNs, observed AS paths | RouteViews and RIPE RIS RIB snapshots |
 | AS relationships and Tier-1 candidates | CAIDA directional relationships with observed paths and current snapshot evidence |
@@ -19,10 +20,10 @@ given IP has any observation depends on the included edition.
 | Proxy, datacenter, Tor and VPN | FFraud typed records, Tor exit observations and X4B VPN prefixes where applicable |
 | Hosting | Individual addresses in mature Microsoft Azure App Service allocations |
 
-The eighteen-source catalog provides observed network prefixes and origin ASNs.
-IP registration country, network name, network organization, ISP, assignment mode
-and IPv4 directed-broadcast status have no explicit mapping in this edition and
-display as unknown. The ASN identity fields belong to the autonomous system. A
+The nineteen-source catalog provides observed network prefixes, registration
+countries and origin ASNs. Network name, network organization, ISP, assignment
+mode and IPv4 directed-broadcast status display as unknown without an explicit
+address-level mapping. The ASN identity fields belong to the autonomous system. A
 routed prefix supplies no per-address assignment or broadcast classification.
 
 A replay of the retained full FFraud input verified 525,852 abuse, 138,895
@@ -36,6 +37,31 @@ with each publisher update.
 The public /24 view derives its cells from the admitted address and network
 facts. An unobserved cell carries unknown values. Source qualification,
 runtime coverage and hosted availability are measured for each build.
+
+## November 22 IP registration countries
+
+The NRO publishes a global report combining allocations and assignments from
+AFRINIC, APNIC, ARIN, LACNIC and RIPE NCC. Its `cc` field identifies the country
+of the organization receiving the resource. Physical location and the identity
+of the subscriber's ISP require separate evidence.
+[NRO statistics](https://www.nro.net/about/rirs/statistics/) ·
+[Extended report format, section 2.5.1](https://www.arin.net/reference/research/statistics/nro_extended_stats_format.pdf)
+
+The November 22 UTC edition matched the publisher's separate SHA-256,
+`3200dde6fb2943b6a7ae67998c82dd41481ef5735e065ab6976960fdb3ffd641`,
+across 57,208,678 bytes. Its 776,332 records comprise 117,801 ASN, 271,662 IPv4
+and 386,869 IPv6 records. The parser verified all three totals and produced
+264,388 IPv4 and 71,206 IPv6 prefixes with an ISO country across 238 country
+codes. Only eligible address records from the five registries contribute.
+[Original report](https://ftp.ripe.net/pub/stats/ripencc/nro-stats/latest/nro-delegated-stats) ·
+[Publisher checksum](https://ftp.ripe.net/pub/stats/ripencc/nro-stats/latest/nro-delegated-stats.sha256)
+
+The project credits the NRO and the five registries under its recorded
+educational-use decision. APNIC permits use of its contribution subject to
+its liability condition and disclaims any accuracy guarantee. The global file
+does not state a single open-data license covering every contribution.
+[Project notice](fixtures/source-certification/notices/nro-delegated-registration.txt) ·
+[APNIC's published conditions](https://ftp.apnic.net/stats/apnic/delegated-apnic-extended-latest)
 
 ## November 15 shortlist
 

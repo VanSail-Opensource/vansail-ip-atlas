@@ -315,3 +315,30 @@ that source and its dependent output under the existing retention and garbage
 collection rules. Retained generations and no-change cache hits preserve original
 clocks, proofs and exact policy bindings; they never renew observation age. This
 amendment is RPKI-specific and changes no subscription or other item expiry.
+
+## Administrative IP registration countries
+
+The NRO Extended Statistics Report combines delegated resource records from
+AFRINIC, APNIC, ARIN, LACNIC and RIPE NCC. For an assigned or allocated range,
+`cc` is the ISO country of the organization that received the resource. The
+compiler keeps this field separate from IP physical country and ASN country.
+The nine-column original row also contains an administrative identifier and
+source information. These fields stay out of compiled facts.
+[Extended report format, section 2.5.1](https://www.arin.net/reference/research/statistics/nro_extended_stats_format.pdf)
+
+Each intake reads the original global report through EOF and verifies its
+separate SHA-256. The header serial and end date must agree on a UTC edition
+day. All three publisher resource counts must reconcile to the declared total.
+IPv4 lengths count addresses and may require several CIDRs. IPv6 lengths
+count prefix bits. Only eligible rows from the five RIRs with an ISO country
+enter the output. IANA records, ASN rows, empty and pseudo-country values,
+and available or reserved resources contribute no country. The source clock
+is midnight UTC on the edition day. A registry allocation date, a download
+or a cache hit cannot extend it. After withdrawal or publication-age expiry,
+the affected registration-country observations are rebuilt from surviving
+evidence. [NRO statistics](https://www.nro.net/about/rirs/statistics/)
+
+The dataset-wide credit names each registry and the NRO and preserves APNIC's
+accuracy and liability conditions. The project records educational use of the
+original geographic registration facts. Each registry retains its own terms.
+[Project notice](../fixtures/source-certification/notices/nro-delegated-registration.txt)

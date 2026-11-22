@@ -20,11 +20,11 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_actual_catalog_is_blocked_and_has_shared_family(self):
         report = capability_report(self.configs["sources"], utc("2026-11-08T00:00:00Z"), ROOT)
-        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (18, 18, 0))
+        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (19, 19, 0))
         self.assertEqual({s["id"] for s in self.configs["sources"]["sources"] if s["admission"] == "active"}, {
             "sapics-user-country-v4", "sapics-user-country-v6", "sapics-server-country-v4", "ipverse-as-metadata",
             "dbip-lite-direct", "ipapi-free-geo-v4", "ipapi-free-geo-v6", "x4b-vpn-v4", "tor-exits", "ipverse-asn-usage",
-            "ffraud-ip", "iana-root-anycast", "tweetfeed-week", "azure-appservice-public", "routeviews-wide-rib", "ripe-mrt-rrc18", "caida-asrel2", "rpki-client-vrps"})
+            "nro-delegated-registration", "ffraud-ip", "iana-root-anycast", "tweetfeed-week", "azure-appservice-public", "routeviews-wide-rib", "ripe-mrt-rrc18", "caida-asrel2", "rpki-client-vrps"})
         self.assertFalse(report["production_eligible"])
         self.assertEqual(report["schema_version"], 3)
         self.assertEqual(report["release_scope"], "release-scope-v6")
@@ -61,6 +61,26 @@ class ConfigurationTests(unittest.TestCase):
             source["field_mappings"][field] = "reason_flags"
             with self.subTest(field=field), self.assertRaises(ContractError):
                 validate_schema("sources", {**catalog, "sources": [source]})
+
+    def test_delegated_country_is_a_prefix_registration_fact(self):
+        catalog = self.configs["sources"]
+        source = next(row for row in catalog["sources"] if row["id"] == "nro-delegated-registration")
+        self.assertEqual(source["coverage"], {"kind": "positive_only", "scope": "prefix"})
+        self.assertEqual(source["public_fields"], ["registration_country"])
+        self.assertEqual(source["signals"], [])
+        self.assertEqual(source["field_mappings"], {
+            "registry": None, "cc": "registration_country", "type": None,
+            "start": None, "value": None, "status": None,
+        })
+        self.assertEqual(source["publication_proof"], {
+            "kind": "embedded", "locator": source["download"]["url"], "field": "header.serial",
+        })
+        self.assertEqual(source["fixture"]["payload_format"], "nro-delegated-excerpt")
+        for field in ("physical_country", "asn_country", "isp", "organization"):
+            changed = copy.deepcopy(source)
+            changed["field_mappings"]["cc"] = field
+            with self.subTest(field=field), self.assertRaises(ContractError):
+                validate_schema("sources", {**catalog, "sources": [changed]})
 
     def test_azure_appservice_limits_hosting_evidence_to_exact_service_addresses(self):
         catalog = self.configs["sources"]

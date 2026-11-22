@@ -1159,6 +1159,78 @@ sources:
   - spam
   - tor
   - vpn
+- id: nro-delegated-registration
+  evidence_family: nro-rir-delegation
+  source_group: nro-rir-delegation
+  category: geolocation
+  admission: active
+  discovery: https://www.nro.net/about/rirs/statistics/
+  download:
+    url: https://ftp.ripe.net/pub/stats/ripencc/nro-stats/latest/nro-delegated-stats
+    format: text
+    max_compressed_mib: 64
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields: [registry, cc, type, start, value, status]
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: NRO-RIR-extended-statistics-source-terms
+    distribution: user_authorized_educational_use
+    evidence_url: https://www.nro.net/about/rirs/statistics/
+    review_basis: The NRO publishes these statistics for Internet number resource research and
+      analysis. The project records educational use of the five registries' original facts.
+      The global report carries no uniform open-data license. APNIC publishes its own accuracy
+      and liability conditions for its contribution.
+    attribution_required: true
+    attribution:
+      name: Number Resource Organization and the five Regional Internet Registries
+      text: Registration-country observations come from the NRO Extended Statistics Report
+        and the AFRINIC, APNIC, ARIN, LACNIC and RIPE NCC registries. VanSail extracts the
+        registration country of the organization that received each eligible address
+        range. APNIC gives no guarantee of accuracy and accepts no liability for loss or damage
+        arising from use of its statistics.
+      url: https://www.nro.net/about/rirs/statistics/
+      license_url: https://ftp.apnic.net/stats/apnic/delegated-apnic-extended-latest
+  trust:
+    source_weight: 100
+    correlation_group: nro-rir-delegation
+  scope: prefix
+  notes: Parse assigned and allocated IPv4 and IPv6 resources from the five RIRs.
+    Country codes identify the recipient's administrative registration. The header serial
+    supplies the UTC edition day. Require the matching sibling SHA-256 and all three
+    original record totals. Allocation dates and retrieval times cannot renew the edition.
+  publication_proof:
+    kind: embedded
+    locator: https://ftp.ripe.net/pub/stats/ripencc/nro-stats/latest/nro-delegated-stats
+    field: header.serial
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: passed
+    path: fixtures/source-certification/observed-nro-delegated-stats.txt
+    sha256: aced6ceef6c72d453734903456daaed855db45aff3bb8f341e91947c26f91c0c
+    parser: nro-delegated-registration
+    schema: nro-global-extended-v2
+    schema_observed: true
+    tested_at: '2026-11-22T16:35:24Z'
+    synthetic: false
+    payload_format: nro-delegated-excerpt
+  parser:
+    id: nro-delegated-registration
+    schema: nro-global-extended-v2
+    version: 1
+  public_fields: [registration_country]
+  field_mappings:
+    registry: null
+    cc: registration_country
+    type: null
+    start: null
+    value: null
+    status: null
+  signals: []
 - id: azure-appservice-public
   evidence_family: microsoft-azure-appservice
   source_group: microsoft-azure-service-tags

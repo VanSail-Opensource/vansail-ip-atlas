@@ -16,6 +16,8 @@ const relationshipPositionBytes = 16
 // before reading another object, which may reclaim all optional graph indexes.
 type graphComponents struct {
 	positions  [64]relationshipPosition
+	codes      [64]byte
+	verified   *nativePathRelationships
 	graphOwner *objectReference
 	asn        uint32
 	known      bool
@@ -31,7 +33,9 @@ func (c *graphComponents) prepare(s *Shard, asn uint32, g *pathGraph) {
 	if s.disk != nil && s.components().active {
 		c.native = true
 		if cached, ok := s.components().get(s.componentKey(factPathPositions, asn, 0)); ok {
-			positions = cached.([]relationshipPosition)
+			c.verified = cached.(*nativePathRelationships)
+			c.known = true
+			return
 		}
 	}
 	if len(positions) == len(g.pairs) {
@@ -48,10 +52,12 @@ func (r *Release) retainGraphComponents(c *graphComponents, pairs int) {
 	if c.native {
 		if s != nil {
 			// The key fixes the same sorted, deduplicated directed hops. Every
-			// ordinal must still resolve in its own immutable relationship object.
-			positions := make([]relationshipPosition, pairs)
-			copy(positions, c.positions[:pairs])
-			s.components().put(s.componentKey(factPathPositions, c.asn, 0), positions, 24+pairs*relationshipPositionBytes)
+			// source is re-admitted on every use. No public answer is retained.
+			parts := &nativePathRelationships{
+				positions: append([]relationshipPosition(nil), c.positions[:pairs]...),
+				codes:     append([]byte(nil), c.codes[:pairs]...),
+			}
+			s.components().put(s.componentKey(factPathPositions, c.asn, 0), parts, parts.bytes())
 		}
 		return
 	}
@@ -71,7 +77,54 @@ func (r *Release) retainGraphComponents(c *graphComponents, pairs int) {
 	copy(slot.graph.positions, c.positions[:pairs])
 }
 
+// A compact numeric projection of immutable directed relationship rows used by
+// a single verified path graph. Positions include authenticated misses. Repeated
+// use still reacquires each original source and preserves partial-result order.
+type nativePathRelationships struct {
+	positions []relationshipPosition
+	codes     []byte
+}
+
+func (p *nativePathRelationships) bytes() int {
+	return 48 + cap(p.positions)*relationshipPositionBytes + cap(p.codes)
+}
+func edgeCode(relation byte, inferred bool) byte {
+	if inferred {
+		return relation | 8
+	}
+	return relation
+}
+func (r *Release) materializeRelationships(ctx context.Context, pairs []uint64, p *nativePathRelationships) ([]RelationshipAnswer, error) {
+	edges := make([]RelationshipAnswer, 0, len(pairs))
+	if len(p.positions) != len(pairs) || len(p.codes) != len(pairs) {
+		return edges, fail("record")
+	}
+	for i := 0; i < len(pairs); {
+		ref := p.positions[i].ref
+		if ref != nil {
+			s, err := r.objectReference(ctx, ref)
+			if err != nil {
+				return edges, err
+			}
+			if s.Kind != 12 {
+				return edges, fail("record")
+			}
+		}
+		for ; i < len(pairs) && p.positions[i].ref == ref; i++ {
+			if err := ctx.Err(); err != nil {
+				return edges, err
+			}
+			code := p.codes[i]
+			edges = append(edges, RelationshipAnswer{From: uint32(pairs[i] >> 32), To: uint32(pairs[i]), Relation: relationshipName(code & 7), Observed: true, Inferred: code&8 != 0})
+		}
+	}
+	return edges, nil
+}
+
 func (r *Release) relationshipAnswers(ctx context.Context, pairs []uint64, c *graphComponents) ([]RelationshipAnswer, error) {
+	if c.verified != nil {
+		return r.materializeRelationships(ctx, pairs, c.verified)
+	}
 	edges := make([]RelationshipAnswer, 0, len(pairs))
 	for i := 0; i < len(pairs); {
 		if err := ctx.Err(); err != nil {
@@ -93,7 +146,6 @@ func (r *Release) relationshipAnswers(ctx context.Context, pairs []uint64, c *gr
 			}
 		} else {
 			s, err = r.asnDestination(ctx, from, 12)
-
 		}
 		if err != nil {
 			return edges, err
@@ -118,6 +170,7 @@ func (r *Release) relationshipAnswers(ctx context.Context, pairs []uint64, c *gr
 					}
 					if c.graphOwner != nil && !c.known {
 						c.positions[i] = relationshipPosition{ref: s.lookup.owner, ordinal: e.ordinal}
+						c.codes[i] = edgeCode(e.relation, e.inferred)
 					}
 					if e.ordinal != None {
 						edge.Relation = relationshipName(e.relation)
@@ -169,6 +222,9 @@ func (r *Release) relationshipAnswers(ctx context.Context, pairs []uint64, c *gr
 			if row != nil {
 				edge.Relation = relationshipName(row[12])
 				edge.Inferred = row[13]&2 != 0
+				if c.native && c.graphOwner != nil {
+					c.codes[i] = edgeCode(row[12], edge.Inferred)
+				}
 			}
 			if facts != nil {
 				e := nativeEdgeFact{ordinal: ordinal}

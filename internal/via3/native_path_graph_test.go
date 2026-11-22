@@ -44,7 +44,7 @@ func TestNativeGraphComponentsSurviveSourceEvictionAndAnswerMutation(t *testing.
 	key := paths.key
 	key.kind = factPathPositions
 	entry := facts.slots[key]
-	if entry == nil || entry.bytes != componentEntryBytes+24+len(graph.pairs)*relationshipPositionBytes {
+	if entry == nil || entry.bytes != componentEntryBytes+entry.value.(*nativePathRelationships).bytes() || len(entry.value.(*nativePathRelationships).codes) != len(graph.pairs) {
 		t.Fatal("missing or incorrectly charged path relationship ordinals")
 	}
 	owner := paths.key.source.shard.lookup.owner
@@ -58,6 +58,32 @@ func TestNativeGraphComponentsSurviveSourceEvictionAndAnswerMutation(t *testing.
 	second, err := r.Lookup(ctx, "AS13335")
 	if err != nil || !reflect.DeepEqual(second, want) || facts.slots[paths.key] != paths {
 		t.Fatal("eviction or caller mutation changed verified path component", err)
+	}
+	// Even a detached relationship projection must re-admit all contributing
+	// kind-12 sources. A new request cannot spend the accumulated space twice
+	// or bypass the declared original-object ceiling.
+	bundle := entry.value.(*nativePathRelationships)
+	checked := false
+	for _, position := range bundle.positions {
+		if position.ref == nil {
+			continue
+		}
+		ref := position.ref
+		if ref.cache {
+			r.evictReference(ref)
+		}
+		prior := ref.onsite.decoded
+		ref.onsite.decoded = PublicObjectDecoded + 1
+		_, err := r.Lookup(ctx, "AS13335")
+		ref.onsite.decoded = prior
+		if ErrorCode(err) != "resource_limit" {
+			t.Fatal("prepared relationship skipped original source admission", err)
+		}
+		checked = true
+		break
+	}
+	if !checked {
+		t.Fatal("fixture missed a required relationship source")
 	}
 	clock = r.Manifest.ValidUntil
 	if _, err := r.Lookup(ctx, "AS13335"); err == nil {

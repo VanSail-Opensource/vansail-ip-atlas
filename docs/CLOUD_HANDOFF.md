@@ -474,6 +474,24 @@ incremental materialization and bounded fact-group partitioning. Measurements
 from small synthetic inputs remain diagnostic until the complete actual corpus
 passes the original cold, warm, lookup, resource and hosted deployment gates.
 
+## November 22 combined release candidate
+
+PR #4 targets `main` and includes the work from PR #3. The compiler now partitions
+compatible facts together and composes a complete destination list for each router
+boundary. Separate object groups passed the native and TypeScript lookup parity
+tests, including multiple origins, expired RPKI observations and empty-origin
+boundaries. The production browser checks wait for the loading panel while the
+snapshot status stays visible. Incremental builds reuse content-verified spatial
+and compiled partitions. The compiler also avoids repeated identical adjacent
+origin mappings during private seeding while retaining every path observation.
+
+All fifteen observed source fixtures ran before and after certification refresh
+at `2026-11-22T13:49:04Z`. The current implementation hash is
+`b18a84649beb86113c934828af0e88f7f82976058eafa8ffcacff4627c06de45`.
+Hosted intake, actual compilation, indexed lookups and the production deployment
+chain must run on the new revision. Cloudflare still reported only a preview
+deployment on November 22 before this push.
+
 ## Resume next
 
 1. Verify the branch and clean checkout. Run strict schemas, Go tests/vet, Python

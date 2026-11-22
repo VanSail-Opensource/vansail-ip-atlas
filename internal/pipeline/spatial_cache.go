@@ -19,7 +19,7 @@ import (
 	"vansail-ip-atlas/internal/intelligence"
 )
 
-const spatialCacheVersion = 2
+const spatialCacheVersion = 3
 const spatialCacheIndexLimit = 16 << 20
 const spatialCacheEntryLimit = 16384
 const spatialCacheObjectLimit = 32768
@@ -200,10 +200,13 @@ func spatialIndexMAC(key [32]byte, index spatialCacheIndex) [32]byte {
 	index.MAC = [32]byte{}
 	data, _ := json.Marshal(index)
 	mac := hmac.New(sha256.New, key[:])
-	if index.Version == 1 {
+	switch index.Version {
+	case 1:
 		_, _ = mac.Write([]byte("atlas-spatial-cache-v1\x00"))
-	} else {
+	case 2:
 		_, _ = mac.Write([]byte("atlas-spatial-cache-v2\x00"))
+	case 3:
+		_, _ = mac.Write([]byte("atlas-spatial-cache-v3\x00"))
 	}
 	_, _ = mac.Write(data)
 	var out [32]byte
@@ -327,7 +330,7 @@ func (c *spatialCache) readGeneration(ctx context.Context, root string) (spatial
 		return fail()
 	}
 	canonical, err := json.Marshal(index)
-	if err != nil || !bytes.Equal(data, canonical) || (index.Version != 1 && index.Version != spatialCacheVersion) || index.Contract == ([32]byte{}) || len(index.Entries) == 0 || len(index.Entries) > spatialCacheEntryLimit {
+	if err != nil || !bytes.Equal(data, canonical) || (index.Version < 1 || index.Version > spatialCacheVersion) || index.Contract == ([32]byte{}) || len(index.Entries) == 0 || len(index.Entries) > spatialCacheEntryLimit {
 		return fail()
 	}
 	mac := spatialIndexMAC(c.key, index)
@@ -336,7 +339,7 @@ func (c *spatialCache) readGeneration(ctx context.Context, root string) (spatial
 	}
 	files := map[[32]byte]uint64{}
 	for i, entry := range index.Entries {
-		if index.Version == 1 && entry.Packed != nil || index.Version == 2 && entry.Compiled != nil {
+		if !entry.matchesIndexVersion(index.Version) {
 			return fail()
 		}
 		if i > 0 && !spatialEntryLess(index.Entries[i-1], entry) {

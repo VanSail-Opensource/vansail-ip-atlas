@@ -1,7 +1,9 @@
 package pipeline
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"math"
 	"net/netip"
 
@@ -13,9 +15,54 @@ import (
 // have the inventory scope "all". Keep ordinals in the resident cache as well
 // as on disk; expand only one requested or validated subtree at a time.
 type compiledIndexEntry struct {
-	Objects []via3.ObjectInfo    `json:"o"`
-	Routes  []compiledIndexRoute `json:"r"`
+	Objects []via3.ObjectInfo     `json:"o,omitempty"` // signed version 2
+	Table   *compiledIndexObjects `json:"t,omitempty"`
+	Routes  []compiledIndexRoute  `json:"r"`
 }
+
+// Immutable object columns share the same ordinal. The complete SHA-256 bytes
+// appear once per object, in the compiler's original digest order.
+type compiledIndexObjects struct {
+	Hashes []byte   `json:"h"`
+	Sizes  []int    `json:"b"`
+	Kinds  []byte   `json:"k"`
+	Scopes []string `json:"s"`
+}
+
+func packCompiledObjects(objects []via3.ObjectInfo) *compiledIndexObjects {
+	n := len(objects)
+	table := &compiledIndexObjects{
+		Hashes: make([]byte, n*sha256.Size),
+		Sizes:  make([]int, n),
+		Kinds:  make([]byte, n),
+		Scopes: make([]string, n),
+	}
+	for i, object := range objects {
+		// compiledPartitionFiles has already checked the full lowercase hash,
+		// kind, byte count and scope, including the sorted nonduplicate order.
+		_, _ = hex.Decode(table.Hashes[i*sha256.Size:(i+1)*sha256.Size], []byte(object.SHA256))
+		table.Sizes[i], table.Kinds[i], table.Scopes[i] = object.Bytes, byte(object.Kind), object.Partition
+	}
+	return table
+}
+
+func (t *compiledIndexObjects) expand(maximum int) ([]via3.ObjectInfo, error) {
+	n := len(t.Sizes)
+	if n == 0 || n > maximum || len(t.Hashes) != n*sha256.Size || len(t.Kinds) != n || len(t.Scopes) != n {
+		return nil, errSpatialCache
+	}
+	objects := make([]via3.ObjectInfo, n)
+	for i := range objects {
+		objects[i] = via3.ObjectInfo{
+			Bytes:     t.Sizes[i],
+			Kind:      uint16(t.Kinds[i]),
+			Partition: t.Scopes[i],
+			SHA256:    hex.EncodeToString(t.Hashes[i*sha256.Size : (i+1)*sha256.Size]),
+		}
+	}
+	return objects, nil
+}
+
 type compiledIndexRoute struct {
 	Prefix       netip.Prefix `json:"p,omitzero"`
 	ASNDeltas    []byte       `json:"a,omitempty"`
@@ -25,7 +72,10 @@ type compiledIndexRoute struct {
 
 // The caller owns and has validated entry's original shapes and object scopes.
 func packCompiledIndex(entry *compiledPartitionEntry) *compiledIndexEntry {
-	packed := &compiledIndexEntry{Objects: entry.Objects, Routes: make([]compiledIndexRoute, len(entry.Routes))}
+	packed := &compiledIndexEntry{
+		Table:  packCompiledObjects(entry.Objects),
+		Routes: make([]compiledIndexRoute, len(entry.Routes)),
+	}
 	ordinals := make(map[string]uint16, len(entry.Objects))
 	for i, object := range entry.Objects {
 		ordinals[object.SHA256] = uint16(i)
@@ -87,10 +137,24 @@ func unpackCompiledASNs(encoded []byte, limit int) ([]uint32, error) {
 
 func (packed *compiledIndexEntry) expand() (*compiledPartitionEntry, error) {
 	limits := DefaultLimits()
-	if len(packed.Objects) == 0 || len(packed.Objects) > limits.MaxObjects || len(packed.Routes) == 0 || len(packed.Routes) > limits.MaxObjects {
+	if len(packed.Routes) == 0 || len(packed.Routes) > limits.MaxObjects {
 		return nil, errSpatialCache
 	}
-	entry := &compiledPartitionEntry{Objects: packed.Objects, Routes: make([]compiledRoute, len(packed.Routes))}
+	objects := packed.Objects
+	if packed.Table != nil {
+		if objects != nil {
+			return nil, errSpatialCache
+		}
+		var err error
+		objects, err = packed.Table.expand(limits.MaxObjects)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(objects) == 0 || len(objects) > limits.MaxObjects {
+		return nil, errSpatialCache
+	}
+	entry := &compiledPartitionEntry{Objects: objects, Routes: make([]compiledRoute, len(packed.Routes))}
 	remainingASNs := via3.PublicObjectDecoded / 8
 	for i, r := range packed.Routes {
 		if len(r.Destinations) == 0 || len(r.Destinations) > 12 || r.Scopes != nil && len(r.Scopes) != len(r.Destinations) {
@@ -106,10 +170,10 @@ func (packed *compiledIndexEntry) expand() (*compiledPartitionEntry, error) {
 		out.Destinations = make([]via3.ObjectInfo, len(r.Destinations))
 		override := false
 		for j, id := range r.Destinations {
-			if int(id) >= len(packed.Objects) {
+			if int(id) >= len(objects) {
 				return nil, errSpatialCache
 			}
-			d := packed.Objects[id]
+			d := objects[id]
 			if r.Scopes != nil && r.Scopes[j] != "" {
 				if d.Partition != "all" || r.Scopes[j] == "all" {
 					return nil, errSpatialCache
@@ -130,6 +194,13 @@ func (e spatialCacheEntry) packed() spatialCacheEntry {
 	if e.Compiled != nil {
 		e.Packed = packCompiledIndex(e.Compiled)
 		e.Compiled = nil
+	} else if e.Packed != nil && e.Packed.Objects != nil {
+		// Upgrade an authenticated version-2 inventory before comparing it
+		// with entries retained in this generation.
+		p := *e.Packed
+		p.Table = packCompiledObjects(p.Objects)
+		p.Objects = nil
+		e.Packed = &p
 	}
 	return e
 }
@@ -147,4 +218,19 @@ func (e spatialCacheEntry) expanded() (spatialCacheEntry, error) {
 		e.Packed = nil
 	}
 	return e, nil
+}
+
+func (e spatialCacheEntry) matchesIndexVersion(version int) bool {
+	if e.Domain != "compiled" {
+		return e.Packed == nil && e.Compiled == nil
+	}
+	switch version {
+	case 1:
+		return e.Compiled != nil && e.Packed == nil
+	case 2:
+		return e.Compiled == nil && e.Packed != nil && e.Packed.Objects != nil && e.Packed.Table == nil
+	case 3:
+		return e.Compiled == nil && e.Packed != nil && e.Packed.Objects == nil && e.Packed.Table != nil
+	}
+	return false
 }

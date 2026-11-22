@@ -32,6 +32,7 @@ type Capability struct {
 	Required   bool     `json:"required"`
 }
 type SourceStatistics struct {
+	azureHostHash                               [32]byte
 	ID                                          string
 	Records                                     uint64
 	Kinds                                       [9]uint64
@@ -394,6 +395,14 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 		} else if s.Parser.ID == "mrt-table-dump-v2" {
 			return report, nil, errors.New("production MRT snapshot proof missing")
 		}
+		if azureServiceSource(s) != (r.AzureProof != nil) {
+			return report, nil, errors.New("Azure source receipt binding invalid")
+		}
+		if r.AzureProof != nil {
+			if _, err := r.AzureProof.Eligible(state.EvaluatedAt, r.PublishedAt, r.PayloadHash); err != nil || r.ProofKind != "snapshot_metadata" {
+				return report, nil, errors.New("Azure service publication invalid")
+			}
+		}
 		if caidaSource(s) {
 			if r.ProofKind != "embedded" || r.CAIDAProof.Validate(state.EvaluatedAt, r.PublishedAt, r.PayloadHash) != nil {
 				return report, nil, errors.New("production CAIDA content proof invalid")
@@ -479,8 +488,17 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 			if scan.stat.Family != "" && scan.stat.Family != family {
 				return report, nil, errors.New("production evidence independence changed")
 			}
+			if scan.azureHosts != nil {
+				scan.stat.azureHostHash = intelligence.AzureHostSetHash(scan.azureHosts)
+			}
 			stat = scan.stat
 			stat.Family = family
+		}
+		if p := v.Receipt.AzureProof; p != nil {
+			hosts, err := p.Eligible(state.EvaluatedAt, v.Receipt.PublishedAt, v.Receipt.PayloadHash)
+			if err != nil || stat.Records != uint64(len(hosts)) || stat.azureHostHash != intelligence.AzureHostSetHash(hosts) {
+				return report, nil, errors.New("Azure hosting population differs from edition intersection")
+			}
 		}
 		if rootZoneSource(s) && (stat.Records != 2*rootServerCount || stat.Kinds[intelligence.RecordUsage-1] != stat.Records) {
 			return report, nil, errors.New("DNS root address population differs")

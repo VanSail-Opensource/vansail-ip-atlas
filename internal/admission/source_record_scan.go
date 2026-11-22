@@ -3,6 +3,7 @@ package admission
 import (
 	"context"
 	"errors"
+	"net/netip"
 	"time"
 
 	"vansail-ip-atlas/internal/intelligence"
@@ -13,6 +14,7 @@ import (
 // family is checked once all receipt payload aliases are known.
 type sourceRecordScan struct {
 	rootAddresses rootAddressSet
+	azureHosts    map[netip.Addr]bool
 	source        Source
 	clocks        intelligence.SourceRecordClocks
 	now           time.Time
@@ -24,6 +26,9 @@ func newSourceRecordScan(s Source, clocks intelligence.SourceRecordClocks, now t
 	s.Signals = append([]string(nil), s.Signals...)
 	s.PublicFields = append([]string(nil), s.PublicFields...)
 	scan := &sourceRecordScan{source: s, clocks: clocks, now: now, stat: SourceStatistics{ID: clocks.ID, Signals: map[intelligence.Signal]bool{}}}
+	if azureServiceSource(s) {
+		scan.azureHosts = map[netip.Addr]bool{}
+	}
 	if rootZoneSource(s) {
 		scan.rootAddresses = make(rootAddressSet, 2*rootServerCount)
 	}
@@ -35,6 +40,13 @@ func (scan *sourceRecordScan) accept(record intelligence.NormalizedRecord) error
 	if err := record.Validate(); err != nil {
 		return err
 	}
+	if scan.azureHosts != nil {
+		if !intelligence.AzureHostObservation(record) || record.Evidence.Weight != s.Weight || scan.azureHosts[record.Evidence.Address] || len(scan.azureHosts) >= intelligence.MaxAzureServiceHosts {
+			return errors.New("unqualified Azure hosting observation")
+		}
+		scan.azureHosts[record.Evidence.Address] = true
+	}
+
 	stat.Records++
 	stat.Kinds[record.Kind-1]++
 	if stat.Records > 100_000_000 {

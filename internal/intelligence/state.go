@@ -110,12 +110,13 @@ type SourceSnapshot struct {
 	ProofKind                                             string
 	PayloadVerified, SchemaVerified, ImmutableCommitBound bool
 	Records                                               []NormalizedRecord
-	RecordPartitions                                      []RecordPartition `json:",omitempty"`
-	ASNIdentityStats                                      *ASNIdentityStats `json:",omitempty"`
-	MRTProof                                              *MRTSourceProof   `json:",omitempty"`
-	GeoProof                                              *GeoSourceProof   `json:",omitempty"`
-	VRPProof                                              *VRPSourceProof   `json:",omitempty"`
-	CAIDAProof                                            *CAIDASourceProof `json:",omitempty"`
+	RecordPartitions                                      []RecordPartition  `json:",omitempty"`
+	ASNIdentityStats                                      *ASNIdentityStats  `json:",omitempty"`
+	MRTProof                                              *MRTSourceProof    `json:",omitempty"`
+	GeoProof                                              *GeoSourceProof    `json:",omitempty"`
+	VRPProof                                              *VRPSourceProof    `json:",omitempty"`
+	CAIDAProof                                            *CAIDASourceProof  `json:",omitempty"`
+	AzureProof                                            *AzureServiceProof `json:",omitempty"`
 }
 type SourceDecision struct{ ID, State, Reason string }
 type StoredSource struct {
@@ -230,6 +231,14 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 			if snapshot.GeoProof != nil {
 				if _, err := snapshot.GeoProof.ContentHash(); err != nil || snapshot.PublishedAt.After(snapshot.GeoProof.UpstreamClock) || snapshot.GeoProof.UpstreamClock.After(now.Add(24*time.Hour)) {
 					deny("invalid", "geolocation_payload_or_clock_invalid")
+				}
+			}
+			if (id == AzureServiceSourceID) != (snapshot.AzureProof != nil) {
+				deny("invalid", "azure_service_proof_binding_invalid")
+			}
+			if snapshot.AzureProof != nil {
+				if _, err := snapshot.AzureProof.Eligible(now, snapshot.PublishedAt, snapshot.PayloadHash); err != nil || snapshot.ProofKind != "snapshot_metadata" {
+					deny("invalid", "azure_service_proof_invalid")
 				}
 			}
 			if snapshot.CAIDAProof != nil && (snapshot.ProofKind != "embedded" || snapshot.CAIDAProof.Validate(now, snapshot.PublishedAt, snapshot.PayloadHash) != nil) {
@@ -349,6 +358,15 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 			writer = storage.store.Writer(ctx)
 			defer writer.Abort()
 		}
+		var azureHosts map[netip.Addr]bool
+		if snapshot.AzureProof != nil {
+			var err error
+			azureHosts, err = snapshot.AzureProof.Eligible(now, snapshot.PublishedAt, snapshot.PayloadHash)
+			if err != nil {
+				return plan, err
+			}
+		}
+
 		process := func(record NormalizedRecord) error {
 			total++
 			if storage == nil && total > 2_000_000 {
@@ -359,6 +377,12 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 			}
 			if snapshot.VRPProof != nil && snapshot.VRPProof.Version == 2 && record.Kind != RecordVRP {
 				return errors.New("complete VRP observation snapshot contains another record kind")
+			}
+			if azureHosts != nil {
+				if !AzureHostObservation(record) || !azureHosts[record.Evidence.Address] {
+					return errors.New("unqualified Azure service observation")
+				}
+				delete(azureHosts, record.Evidence.Address)
 			}
 			if snapshot.CAIDAProof != nil {
 				if record.Kind != RecordRelationship {
@@ -507,6 +531,10 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 				}
 			}
 		}
+		if len(azureHosts) != 0 {
+			return plan, errors.New("Azure service intersection incomplete")
+		}
+
 		if snapshot.CAIDAProof != nil && caidaCount != snapshot.CAIDAProof.Rows {
 			return plan, errors.New("CAIDA proof differs from retained record count")
 		}
@@ -524,7 +552,7 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 			Snapshot         SourceSnapshot
 			Records          []NormalizedRecord
 			RecordPartitions []RecordPartition `json:",omitempty"`
-		}{policy, SourceSnapshot{ID: id, PayloadHash: snapshot.PayloadHash, ProofPayloadHash: snapshot.ProofPayloadHash, NormalizationPolicyHash: snapshot.NormalizationPolicyHash, ParserVersion: snapshot.ParserVersion, SchemaVersion: snapshot.SchemaVersion, PublishedAt: snapshot.PublishedAt, ContentValidUntil: snapshot.ContentValidUntil, ProofKind: snapshot.ProofKind, PayloadVerified: true, SchemaVerified: true, ImmutableCommitBound: snapshot.ImmutableCommitBound, MRTProof: cloneMRTProof(snapshot.MRTProof), GeoProof: cloneGeoProof(snapshot.GeoProof), VRPProof: cloneVRPProof(snapshot.VRPProof), CAIDAProof: cloneCAIDAProof(snapshot.CAIDAProof)}, records, parts})
+		}{policy, SourceSnapshot{ID: id, PayloadHash: snapshot.PayloadHash, ProofPayloadHash: snapshot.ProofPayloadHash, NormalizationPolicyHash: snapshot.NormalizationPolicyHash, ParserVersion: snapshot.ParserVersion, SchemaVersion: snapshot.SchemaVersion, PublishedAt: snapshot.PublishedAt, ContentValidUntil: snapshot.ContentValidUntil, ProofKind: snapshot.ProofKind, PayloadVerified: true, SchemaVerified: true, ImmutableCommitBound: snapshot.ImmutableCommitBound, MRTProof: cloneMRTProof(snapshot.MRTProof), GeoProof: cloneGeoProof(snapshot.GeoProof), VRPProof: cloneVRPProof(snapshot.VRPProof), CAIDAProof: cloneCAIDAProof(snapshot.CAIDAProof), AzureProof: cloneAzureProof(snapshot.AzureProof)}, records, parts})
 		if err != nil {
 			return plan, err
 		}

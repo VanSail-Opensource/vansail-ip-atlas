@@ -34,8 +34,9 @@ var ErrFetch = errors.New("bulk asset acquisition failed")
 var ErrNotFound = errors.Join(ErrFetch, errors.New("bulk asset not found"))
 
 type Result struct {
-	SHA256 string
-	Bytes  int64
+	LastModified time.Time
+	SHA256       string
+	Bytes        int64
 }
 type Fetcher struct {
 	client              *http.Client
@@ -408,7 +409,8 @@ func (f *Fetcher) Fetch(ctx context.Context, raw, destination string, maxBytes i
 			os.Remove(temp.Name())
 			return Result{}, ErrFetch
 		}
-		return Result{hex.EncodeToString(hash.Sum(nil)), n}, nil
+		modified, _ := http.ParseTime(response.Header.Get("Last-Modified"))
+		return Result{SHA256: hex.EncodeToString(hash.Sum(nil)), Bytes: n, LastModified: modified.UTC()}, nil
 	}
 	return Result{}, ErrFetch
 }

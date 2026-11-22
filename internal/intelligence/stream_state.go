@@ -20,14 +20,15 @@ type SourceReceipt struct {
 	ContentValidUntil                                                   time.Time `json:",omitzero"`
 	ProofKind                                                           string
 	PayloadVerified, SchemaVerified, ImmutableCommitBound, Subscription bool
-	MRTProof                                                            *MRTSourceProof   `json:",omitempty"`
-	GeoProof                                                            *GeoSourceProof   `json:",omitempty"`
-	VRPProof                                                            *VRPSourceProof   `json:",omitempty"`
-	CAIDAProof                                                          *CAIDASourceProof `json:",omitempty"`
+	MRTProof                                                            *MRTSourceProof    `json:",omitempty"`
+	GeoProof                                                            *GeoSourceProof    `json:",omitempty"`
+	VRPProof                                                            *VRPSourceProof    `json:",omitempty"`
+	CAIDAProof                                                          *CAIDASourceProof  `json:",omitempty"`
+	AzureProof                                                          *AzureServiceProof `json:",omitempty"`
 }
 
 func receipt(policy SourcePolicy, snapshot SourceSnapshot) *SourceReceipt {
-	return &SourceReceipt{PayloadHash: snapshot.PayloadHash, ProofPayloadHash: snapshot.ProofPayloadHash, NormalizationPolicyHash: snapshot.NormalizationPolicyHash, ParserVersion: snapshot.ParserVersion, SchemaVersion: snapshot.SchemaVersion, PublishedAt: snapshot.PublishedAt, ContentValidUntil: snapshot.ContentValidUntil, ProofKind: snapshot.ProofKind, PayloadVerified: snapshot.PayloadVerified, SchemaVerified: snapshot.SchemaVerified, ImmutableCommitBound: snapshot.ImmutableCommitBound, Subscription: policy.Subscription, MRTProof: cloneMRTProof(snapshot.MRTProof), GeoProof: cloneGeoProof(snapshot.GeoProof), VRPProof: cloneVRPProof(snapshot.VRPProof), CAIDAProof: cloneCAIDAProof(snapshot.CAIDAProof)}
+	return &SourceReceipt{PayloadHash: snapshot.PayloadHash, ProofPayloadHash: snapshot.ProofPayloadHash, NormalizationPolicyHash: snapshot.NormalizationPolicyHash, ParserVersion: snapshot.ParserVersion, SchemaVersion: snapshot.SchemaVersion, PublishedAt: snapshot.PublishedAt, ContentValidUntil: snapshot.ContentValidUntil, ProofKind: snapshot.ProofKind, PayloadVerified: snapshot.PayloadVerified, SchemaVerified: snapshot.SchemaVerified, ImmutableCommitBound: snapshot.ImmutableCommitBound, Subscription: policy.Subscription, MRTProof: cloneMRTProof(snapshot.MRTProof), GeoProof: cloneGeoProof(snapshot.GeoProof), VRPProof: cloneVRPProof(snapshot.VRPProof), CAIDAProof: cloneCAIDAProof(snapshot.CAIDAProof), AzureProof: cloneAzureProof(snapshot.AzureProof)}
 }
 
 type reconcileStorage struct {

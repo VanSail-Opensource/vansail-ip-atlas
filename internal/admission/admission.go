@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -256,7 +257,17 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		assetURL = dbipPlan.AssetURL
 	}
 	var published, contentValidUntil time.Time
-	if source.Parser.ID == "tweetfeed-week-csv" {
+	var azureProof *intelligence.AzureServiceProof
+	if adapter == azureAppService {
+		azureProof, err = e.fetchAzureService(ctx, payload, source, now)
+		if err != nil {
+			if ctx.Err() != nil {
+				return result, ctx.Err()
+			}
+			return deny("quarantined", "publication_not_payload_bound")
+		}
+		published = azureProof.Editions[0].Day
+	} else if source.Parser.ID == "tweetfeed-week-csv" {
 		published, err = e.fetchTweetFeed(ctx, payload, source, now)
 		if err != nil {
 			return deny("quarantined", "publication_not_payload_bound")
@@ -356,6 +367,13 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 	if adapter == rpkiClientJSON {
 		parserClock = now
 	}
+	var azureHosts map[netip.Addr]bool
+	if azureProof != nil {
+		azureHosts, err = azureProof.Eligible(now, published, hash)
+		if err != nil {
+			return deny("invalid", "azure_service_selection_invalid")
+		}
+	}
 	if partitioned {
 		e.storeMu.Lock()
 		if e.recordStore == nil {
@@ -368,7 +386,16 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		}
 		writer := store.Writer(ctx)
 		defer writer.Abort()
-		err = parsePayloadTo(ctx, file, size, source, adapter, parserClock, 100_000_000, writer.Append, &asnStats)
+		appendRecord := writer.Append
+		if azureHosts != nil {
+			appendRecord = func(record intelligence.NormalizedRecord) error {
+				if record.Evidence != nil && azureHosts[record.Evidence.Address] {
+					return writer.Append(record)
+				}
+				return nil
+			}
+		}
+		err = parsePayloadTo(ctx, file, size, source, adapter, parserClock, 100_000_000, appendRecord, &asnStats)
 		if err == nil {
 			partitions, err = writer.Finish()
 		}
@@ -377,6 +404,15 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		}
 	} else {
 		records, err = parsePayload(ctx, file, size, source, adapter, parserClock, &asnStats)
+		if azureHosts != nil && err == nil {
+			out := records[:0]
+			for _, r := range records {
+				if r.Evidence != nil && azureHosts[r.Evidence.Address] {
+					out = append(out, r)
+				}
+			}
+			records = out
+		}
 	}
 	if err != nil {
 		if ctx.Err() != nil {
@@ -388,6 +424,7 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		ProofPayloadHash: hash, NormalizationPolicyHash: normalizationPolicyHash,
 		ParserVersion: source.Parser.Version, SchemaVersion: 3, PublishedAt: published, ContentValidUntil: contentValidUntil,
 		ProofKind: source.Publication.Kind, PayloadVerified: true, SchemaVerified: true, ImmutableCommitBound: source.Publication.Kind == "github_commit", Records: records, RecordPartitions: partitions}
+	result.Snapshot.AzureProof = azureProof
 	result.Snapshot.GeoProof = geoProof
 	result.Snapshot.VRPProof = vrpProof
 	result.Snapshot.CAIDAProof = caidaProof

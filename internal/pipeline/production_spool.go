@@ -26,6 +26,7 @@ type bulkBucket struct {
 	first, last uint32
 	asn         bool
 	parts       []intelligence.RecordPartition
+	riskDigest  [32]byte
 	active      bool
 	cover       netip.Prefix
 	scattered   [2]*bulkBucket
@@ -140,6 +141,9 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 	source := intelligence.StoredSource{ID: "bounded-materialization", Fingerprint: s.binding, ExpiresAt: s.clock.Add(720 * time.Hour)}
 	var recordBytes []int
 	seen := map[[32]byte]bool{}
+	riskDigest := sha256.New()
+	collectRisk := s.reuse != nil && !withCoverage && !b.asn
+	b.riskDigest = [32]byte{}
 	bytes := 0
 	paths := 0
 	asns := map[uint32]bool{}
@@ -163,6 +167,9 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 		if len(source.Records) >= s.batchRecords || bytes > s.batchBytes {
 			return overflow
 		}
+		if collectRisk && exactRiskInput(record) {
+			_, _ = riskDigest.Write(digest[:])
+		}
 		if record.Kind == intelligence.RecordPath {
 			paths++
 			if paths > 100000 {
@@ -171,7 +178,7 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 		}
 		source.Records = append(source.Records, record)
 		recordBytes = append(recordBytes, size)
-		if record.Origins != nil {
+		if withCoverage && record.Origins != nil {
 			for _, asn := range record.Origins.Origins {
 				asns[asn] = true
 			}
@@ -214,6 +221,9 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 		}); err != nil {
 			return intelligence.BuildState{}, err
 		}
+	}
+	if collectRisk {
+		copy(b.riskDigest[:], riskDigest.Sum(nil))
 	}
 	b.recordBytes = recordBytes
 	return intelligence.BuildState{Version: 1, PolicyHash: s.binding, EvaluatedAt: s.clock, Sources: []intelligence.StoredSource{source}}, nil

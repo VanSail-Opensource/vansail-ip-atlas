@@ -39,8 +39,9 @@ type spatialCacheStream struct {
 	Bytes, DecodedBytes, Records uint64
 }
 type spatialCacheLeaf struct {
-	Split  bool
-	Stream spatialCacheStream
+	RiskInput [32]byte `json:",omitzero"`
+	Split     bool
+	Stream    spatialCacheStream
 }
 type spatialCacheEntry struct {
 	Domain   string
@@ -101,6 +102,9 @@ func spatialCacheFiles(e spatialCacheEntry) (map[[32]byte]uint64, error) {
 	}
 	files := map[[32]byte]uint64{}
 	if e.Key == ([32]byte{}) {
+		return nil, errSpatialCache
+	}
+	if e.Leaf != nil && e.Leaf.RiskInput != ([32]byte{}) && (e.Domain != "risk" || e.Leaf.Split || e.Key == e.Leaf.RiskInput) {
 		return nil, errSpatialCache
 	}
 	if e.Domain == "compiled" {
@@ -174,8 +178,8 @@ func spatialCacheFiles(e spatialCacheEntry) (map[[32]byte]uint64, error) {
 		if e.Seed != nil || e.Scatter != nil || e.Leaf == nil || *e.Leaf != (spatialCacheLeaf{Split: true}) {
 			return nil, errSpatialCache
 		}
-	case "risk", "public", "location":
-		if e.Seed != nil || e.Scatter != nil || e.Leaf == nil || e.Domain == "location" && e.Leaf.Split {
+	case "risk", "risk-input", "public", "location":
+		if e.Seed != nil || e.Scatter != nil || e.Leaf == nil || (e.Domain == "location" || e.Domain == "risk-input") && e.Leaf.Split {
 			return nil, errSpatialCache
 		}
 		s := e.Leaf.Stream
@@ -184,7 +188,7 @@ func spatialCacheFiles(e spatialCacheEntry) (map[[32]byte]uint64, error) {
 				return nil, errSpatialCache
 			}
 		} else {
-			if s.Records == 0 || s.DecodedBytes == 0 || s.DecodedBytes > spatialStreamDecodedLimit || s.Records > s.DecodedBytes/4 || e.Domain == "risk" && s.Records > 200000 || e.Domain == "location" && s.Records > 400000 {
+			if s.Records == 0 || s.DecodedBytes == 0 || s.DecodedBytes > spatialStreamDecodedLimit || s.Records > s.DecodedBytes/4 || (e.Domain == "risk" || e.Domain == "risk-input") && s.Records > 200000 || e.Domain == "location" && s.Records > 400000 {
 				return nil, errSpatialCache
 			}
 			if err := add(s.SHA256, s.Bytes); err != nil {
@@ -479,7 +483,7 @@ func (c *spatialCache) Lookup(ctx context.Context, domain string, key [32]byte) 
 	if err := c.checkRoot(); err != nil {
 		return spatialCacheEntry{}, false, err
 	}
-	if key == ([32]byte{}) || domain != "seed" && domain != "scatter" && domain != "risk" && domain != "public" && domain != "compiled" && domain != "location" && domain != rawSplitDomain {
+	if key == ([32]byte{}) || domain != "seed" && domain != "scatter" && domain != "risk" && domain != "risk-input" && domain != "public" && domain != "compiled" && domain != "location" && domain != rawSplitDomain {
 		return spatialCacheEntry{}, false, errSpatialCache
 	}
 	id := spatialCacheEntryKey{domain, key}

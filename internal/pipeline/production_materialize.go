@@ -366,13 +366,25 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 			}
 			var reuse *bulkLeafReuse
 			if spool.reuse != nil {
-				key, keyErr := spatialReuseKey("risk-dependencies", dependencies)
-				if keyErr != nil {
-					return keyErr
+				scoreKey, err := exactRiskDependencies(policy, clock)
+				if err != nil {
+					return err
 				}
-				reuse = &bulkLeafReuse{domain: "risk", dependencies: key, spool: spool, risk: accumulate}
+				// Physical hits can skip collection together. Joined role rows affect
+				// the full leaf's bounded geometry, although they never enter risk.
+				layoutKey, err := spatialReuseKey("exact-risk-layout", struct {
+					Score [32]byte
+					Usage asnUsageIndex
+				}{scoreKey, spool.usage})
+				if err != nil {
+					return err
+				}
+				reuse = &bulkLeafReuse{domain: "risk", dependencies: layoutKey, riskPolicy: scoreKey, spool: spool, risk: accumulate}
 			}
 			spatial, err = spool.leavesReusing(ctx, spatial, false, reuse, func(bucket *bulkBucket, part intelligence.BuildState) error {
+				if reuse != nil {
+					return reuse.visitRisk(ctx, bucket, part, policy, clock)
+				}
 				prepare := func(engine *intelligence.Engine) error {
 					return engine.WalkExactRisks(ctx, func(address netip.Addr, risk float64, families []string, origins []uint32) error {
 						event := spatialRiskEvent{Address: address, Risk: risk, Families: families, Origins: origins}

@@ -352,6 +352,10 @@ type Engine struct {
 // a withdrawn/stale set cannot leave a prior host's influence in any aggregate.
 // Callers partition large inputs before invoking this bounded partition engine.
 func NewEngine(p Policy, evidence []Evidence, coverage []Coverage, mapping []OriginMapping, now time.Time) (*Engine, error) {
+	return newEngine(p, evidence, coverage, mapping, now, nil)
+}
+
+func newEngine(p Policy, evidence []Evidence, coverage []Coverage, mapping []OriginMapping, now time.Time, visitor *exactRiskVisitor) (*Engine, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
@@ -451,6 +455,9 @@ func NewEngine(p Policy, evidence []Evidence, coverage []Coverage, mapping []Ori
 		addresses = append(addresses, addr)
 	}
 	sort.Slice(addresses, func(i, j int) bool { return addresses[i].Less(addresses[j]) })
+	if visitor != nil {
+		return nil, visitor.walk(p, exacts, addresses, e, now)
+	}
 	type aggregate struct {
 		mass     float64
 		count    int

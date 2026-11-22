@@ -9,13 +9,15 @@ import (
 )
 
 type bulkLeafReuse struct {
-	domain         string
-	dependencies   [32]byte
-	locationPolicy [32]byte
-	spool          *bulkSpool
-	public         func(via3.PublicRecord) error
-	risk           func(spatialRiskEvent) error
-	writer         *spatialStreamWriter
+	domain                string
+	dependencies          [32]byte
+	locationPolicy        [32]byte
+	riskPolicy, riskInput [32]byte
+	riskHit               *spatialCacheLeaf
+	spool                 *bulkSpool
+	public                func(via3.PublicRecord) error
+	risk                  func(spatialRiskEvent) error
+	writer                *spatialStreamWriter
 }
 
 func (r *bulkLeafReuse) recordRisk(event spatialRiskEvent) error {
@@ -31,6 +33,7 @@ func (r *bulkLeafReuse) begin(ctx context.Context) error {
 		return err
 	}
 	r.writer = writer
+	r.riskInput, r.riskHit = [32]byte{}, nil
 	if r.domain == "public" {
 		r.spool.publicRows = 0
 		r.spool.publicStream = writer
@@ -43,21 +46,39 @@ func (r *bulkLeafReuse) finish(ctx context.Context, key [32]byte) (returnErr err
 	r.writer = nil
 	r.spool.publicStream = nil
 	defer func() { returnErr = errors.Join(returnErr, writer.abort()) }()
-	stream, retained, err := writer.finish()
-	if err != nil || !retained {
-		return err
+	var stream spatialCacheStream
+	path := writer.path
+	if r.riskHit != nil {
+		stream = r.riskHit.Stream
+		if stream != (spatialCacheStream{}) {
+			var err error
+			path, err = r.spool.reuse.ObjectPath(stream.SHA256)
+			if err != nil {
+				return err
+			}
+		}
+	} else {
+		var retained bool
+		var err error
+		stream, retained, err = writer.finish()
+		if err != nil || !retained {
+			return err
+		}
 	}
 	if r.domain == "public" && writer.records != r.spool.publicRows {
 		// A direct producer consumer without the compiler's post-validation tap
 		// cannot create a reusable public stream. Its normal output still works.
 		return nil
 	}
-	entry := spatialCacheEntry{Domain: r.domain, Key: key, Leaf: &spatialCacheLeaf{Stream: stream}}
+	entry := spatialCacheEntry{Domain: r.domain, Key: key, Leaf: &spatialCacheLeaf{Stream: stream, RiskInput: r.riskInput}}
 	files := map[[32]byte]string{}
 	if stream != (spatialCacheStream{}) {
-		files[stream.SHA256] = writer.path
+		files[stream.SHA256] = path
 	}
-	_, err = r.spool.reuse.Retain(ctx, entry, files)
+	if err := r.retainRiskInput(ctx, entry, files); err != nil {
+		return err
+	}
+	_, err := r.spool.reuse.Retain(ctx, entry, files)
 	return err
 }
 
@@ -166,6 +187,9 @@ func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, cove
 			}
 			if !entry.Leaf.Split {
 				if err := reuse.replay(ctx, entry.Leaf.Stream); err != nil {
+					return err
+				}
+				if err := reuse.retainRiskInput(ctx, entry, nil); err != nil {
 					return err
 				}
 				if _, err := s.reuse.Retain(ctx, entry, nil); err != nil {

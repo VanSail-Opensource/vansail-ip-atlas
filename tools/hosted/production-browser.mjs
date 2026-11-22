@@ -145,7 +145,18 @@ async function newSample(width,theme,{componentFixture=false}={}) {
   const js=new Map(),jsHashes=new Map(),atlas=[],pending=[]
   context.on('response',response=>{
     const url=new URL(response.url());if(url.origin!==base.origin||(!/\.(?:m?js)$/.test(url.pathname)&&!url.pathname.startsWith('/_atlas/')))return
-    pending.push((async()=>{if(response.status()!==200)throw new Error('Static asset unavailable');const bytes=await response.body();if(/\.(?:m?js)$/.test(url.pathname)){js.set(url.pathname,gzipSync(bytes,{level:9}).length);jsHashes.set(url.pathname,sha256(bytes))}else if(!componentFixture){const sizes=await response.request().sizes();if(!Number.isFinite(sizes.responseBodySize)||sizes.responseBodySize<=0)throw new Error('Wire bytes unavailable');atlas.push({path:url.pathname,body_bytes:sizes.responseBodySize})}})().catch(()=>report.errors.push('Static response accounting failed')))
+    pending.push((async()=>{
+      if(response.status()!==200)throw new Error('Static asset unavailable')
+      if(/\.(?:m?js)$/.test(url.pathname)){
+        const bytes=await response.body()
+        js.set(url.pathname,gzipSync(bytes,{level:9}).length)
+        jsHashes.set(url.pathname,sha256(bytes))
+      }else if(!componentFixture){
+        const sizes=await response.request().sizes()
+        if(!Number.isFinite(sizes.responseBodySize)||sizes.responseBodySize<=0)throw new Error('Wire bytes unavailable')
+        atlas.push({path:url.pathname,body_bytes:sizes.responseBodySize})
+      }
+    })().catch(()=>report.errors.push('Static response accounting failed')))
   })
   const settle=async()=>{await page.waitForLoadState('networkidle');await Promise.all(pending)}
   return {context,page,cdp,js,jsHashes,atlas,settle}

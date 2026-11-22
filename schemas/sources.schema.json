@@ -1738,7 +1738,12 @@
                 "ffraud_score",
                 "confirmations",
                 "category",
-                "type"
+                "type",
+                "date",
+                "user",
+                "value",
+                "tags",
+                "tweet_url"
               ]
             },
             "uniqueItems": true,
@@ -7134,6 +7139,21 @@
                 ]
               },
               "ffraud_score": {
+                "type": "null"
+              },
+              "date": {
+                "type": "null"
+              },
+              "user": {
+                "type": "null"
+              },
+              "value": {
+                "enum": ["reason_flags", null]
+              },
+              "tags": {
+                "enum": ["reason_flags", null]
+              },
+              "tweet_url": {
                 "type": "null"
               },
               "confirmations": {

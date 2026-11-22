@@ -20,11 +20,11 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_actual_catalog_is_blocked_and_has_shared_family(self):
         report = capability_report(self.configs["sources"], utc("2026-11-08T00:00:00Z"), ROOT)
-        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (15, 15, 0))
+        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (16, 16, 0))
         self.assertEqual({s["id"] for s in self.configs["sources"]["sources"] if s["admission"] == "active"}, {
             "sapics-user-country-v4", "sapics-user-country-v6", "sapics-server-country-v4", "ipverse-as-metadata",
             "dbip-lite-direct", "ipapi-free-geo-v4", "ipapi-free-geo-v6", "x4b-vpn-v4", "tor-exits", "ipverse-asn-usage",
-            "ffraud-ip", "routeviews-wide-rib", "ripe-mrt-rrc18", "caida-asrel2", "rpki-client-vrps"})
+            "ffraud-ip", "tweetfeed-week", "routeviews-wide-rib", "ripe-mrt-rrc18", "caida-asrel2", "rpki-client-vrps"})
         self.assertFalse(report["production_eligible"])
         self.assertEqual(report["schema_version"], 3)
         self.assertEqual(report["release_scope"], "release-scope-v6")
@@ -40,6 +40,27 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(report["blocked_required_capability_count"], 7)
         subscriptions = [s for s in self.configs["sources"]["sources"] if s["category"] == "proxy_subscription_ip"]
         self.assertEqual(subscriptions, [])
+
+    def test_community_phishing_reports_share_a_family_and_keep_reporter_data_private(self):
+        catalog = self.configs["sources"]
+        by_id = {source["id"]: source for source in catalog["sources"]}
+        weekly = by_id["tweetfeed-week"]
+        other = by_id["ffraud-ip"]
+        self.assertEqual(weekly["evidence_family"], other["evidence_family"])
+        self.assertEqual(weekly["trust"]["correlation_group"], other["trust"]["correlation_group"])
+        self.assertNotEqual(weekly["source_group"], other["source_group"])
+        self.assertEqual(weekly["coverage"], {"kind": "positive_only", "scope": "exact_ip"})
+        self.assertEqual(weekly["signals"], ["fraud"])
+        self.assertEqual(weekly["public_fields"], ["reason_flags"])
+        self.assertEqual(weekly["field_mappings"], {
+            "date": None, "user": None, "type": None, "value": "reason_flags",
+            "tags": "reason_flags", "tweet_url": None,
+        })
+        for field in ("date", "user", "tweet_url"):
+            source = copy.deepcopy(weekly)
+            source["field_mappings"][field] = "reason_flags"
+            with self.subTest(field=field), self.assertRaises(ContractError):
+                validate_schema("sources", {**catalog, "sources": [source]})
 
     def test_cli_counts_only_required_capabilities_and_preserves_other_release_blocks(self):
         result = subprocess.run([sys.executable, str(ROOT / "tools/validate_blueprint.py"), "--now", "2026-11-08T00:00:00Z", "--require-production"],

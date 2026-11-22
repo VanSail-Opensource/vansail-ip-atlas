@@ -56,6 +56,29 @@ publication lag and exactly one previous archive only after HTTP 404. Corrupt,
 truncated, stale or mismatched successful responses cannot fall back. Actual
 archive URLs and clocks remain sealed privately and are preserved by replay.
 
+## November 22 phishing observations
+
+TweetFeed's November 22 weekly CSV contained 2,406 community reports. Of the
+254 IP rows, 40 explicitly tagged phishing and identified 37 distinct public
+addresses. Their UTC report times ranged from November 16 at 02:27:39 to
+November 22 at 13:00:57. The publisher's manifest bound that revision to
+307,037 bytes and SHA-256
+`72575cac4fcc14ba054ba3010d413bcb7a15220f678f3c581a8f2e4e86ba811d`.
+The captured four-row excerpt contains one qualifying report.
+[Feed documentation](https://tweetfeed.live/feeds/)
+
+Release intake fetches the static weekly CSV from the publisher and checks its
+byte count, row count, digest and publication time against the publisher's
+manifest. During the review, the static server and manifest briefly served
+different revisions. Both must describe the same bytes for intake to succeed.
+Only an explicit phishing tag on a public IP contributes the existing fraud
+reason. The original report time governs its age. Reporter handles, post links,
+domains and URLs are discarded. The two community feeds share one scoring
+family because their report origins can overlap. The source weight of 35
+reflects the publisher's description of the data as community reports.
+TweetFeed releases these feeds under CC0 and makes attribution optional.
+[API and manifest documentation](https://tweetfeed.live/api/) · [Publisher terms](https://tweetfeed.live/tos/)
+
 ## Removed production entries; retained independent tests
 
 All other old catalog entries were removed, including 21 unqualified subscription

@@ -1,7 +1,7 @@
 schema_version: 3
 description: 'VanSail IP Atlas: reviewed download-only production shortlist. Positive observations support
   observed risk; absent categories and stale facts remain unknown. No per-IP provenance; reviewed credits
-  are global only. All fifteen reviewed sources are enabled for attempted intake; authenticated current payloads and every production gate remain required.'
+  are global only. Authenticated current payloads and every production gate remain required.'
 build:
   profile: github-actions-standard
   incremental: true
@@ -1159,6 +1159,65 @@ sources:
   - spam
   - tor
   - vpn
+- id: tweetfeed-week
+  evidence_family: ffraud-original
+  source_group: tweetfeed
+  category: abuse
+  admission: active
+  discovery: https://tweetfeed.live/feeds/
+  download:
+    url: https://tweetfeed.live/feeds/week.csv
+    format: csv
+    max_compressed_mib: 8
+  refresh:
+    interval: 6h
+    max_stale: 720h
+  fields: [date, user, type, value, tags, tweet_url]
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: CC0-1.0
+    distribution: allow
+    evidence_url: https://tweetfeed.live/tos/
+    review_basis: The publisher dedicates the CSV feeds to the public domain under CC0 1.0 and makes attribution optional.
+    attribution_required: false
+  trust:
+    source_weight: 35
+    correlation_group: ffraud-original
+  scope: exact_ip
+  notes: A community report must explicitly tag a literal public IP with phishing. The report supplies one
+    positive fraud observation. Reporter counts cannot increase confidence. The evidence shares a family
+    with FFraud because independence between their community reports is unverified. Each keeps its own
+    source identity and can be withdrawn separately. The original UTC report time governs item age.
+  publication_proof:
+    kind: snapshot_metadata
+    locator: https://api.tweetfeed.live/v1/manifest
+    field: artifacts.week.csv.updated_at
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: passed
+    path: fixtures/source-certification/observed-tweetfeed-week.csv
+    sha256: e42c373d45b2a5da40ecd33a7b42051d632ce3a8f124fca479e0e2e4e550b269
+    parser: tweetfeed-week-csv
+    schema: tweetfeed-six-column-ioc-v1
+    schema_observed: true
+    tested_at: '2026-11-22T14:15:49Z'
+    synthetic: false
+  parser:
+    id: tweetfeed-week-csv
+    schema: tweetfeed-six-column-ioc-v1
+    version: 1
+  public_fields: [reason_flags]
+  field_mappings:
+    date: null
+    user: null
+    type: null
+    value: reason_flags
+    tags: reason_flags
+    tweet_url: null
+  signals: [fraud]
 - id: routeviews-wide-rib
   evidence_family: routeviews-mrt
   source_group: routeviews-mrt

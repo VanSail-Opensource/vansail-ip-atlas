@@ -31,6 +31,14 @@ Runtime state is not stored in YAML. A source may be statically `active` but dyn
 
 The November 15 v6 release catalog has fifteen reviewed sources enabled for attempted intake, including five replacements. The replacements are complete WIDE and RRC18 collector snapshots, CAIDA serial-2 relationships, complete RPKI publisher snapshots, and FFraud observations. Their exact observed fixtures and required global legal assets are present; implementation-bound certification is refreshed only after the integrated Go code is frozen and all fifteen observed fixtures rerun. Active status permits attempted acquisition; facts, coverage and credits require independent admission from complete current source bytes. Static status cannot establish current production coverage. See SOURCES_AUDIT.md.
 
+The November 22 catalog also includes TweetFeed's static weekly CSV. Intake
+matches the complete file to the publisher's manifest and retains each
+qualifying IP report's UTC observation time. A phishing tag contributes the
+existing fraud reason. The reported address must be a literal public IP.
+TweetFeed and FFraud share a scoring family because the original community
+reports may overlap. Each publisher retains its own withdrawal identity.
+[Source audit](../SOURCES_AUDIT.md)
+
 ## Required Source Fields
 
 Every entry declares:

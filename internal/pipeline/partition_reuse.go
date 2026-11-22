@@ -351,12 +351,17 @@ func (c *compiler) partition(path string, s scope) error {
 	}
 	var dependency [32]byte
 	if c.options.partitionDependencies != nil {
-		var err error
-		dependency, err = c.options.partitionDependencies(c.ctx)
+		prefixes, err := c.options.partitionDependencies(c.ctx)
 		if err != nil {
 			return err
 		}
-	} else if c.options.prefixProvider != nil {
+		// Only the ASN aggregate encoder reads the prefix provider. Keep its
+		// full release-wide integrity check even when this group uses only its
+		// own canonical row bytes and the implementation contract.
+		if s.group.contains(8) {
+			dependency = prefixes
+		}
+	} else if c.options.prefixProvider != nil && s.group.contains(8) {
 		return c.partitionFresh(path, s)
 	}
 	info, err := os.Lstat(path)

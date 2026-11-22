@@ -308,7 +308,12 @@ func compiledReviewNext(c *compiler, name string) *compiler {
 }
 
 func TestCompiledReviewCommittedHitBindsActualInputAndPrefixProvider(t *testing.T) {
-	s := scope{asn: true, first: 13000, last: 16000}
+	t.Run("aggregate", func(t *testing.T) { testCompiledProviderBinding(t, aggregateFacts) })
+	t.Run("mixed", func(t *testing.T) { testCompiledProviderBinding(t, allFacts) })
+}
+
+func testCompiledProviderBinding(t *testing.T, group factGroup) {
+	s := scope{asn: true, first: 13000, last: 16000, group: group}
 	records := []via3.PublicRecord{{Version: 3, Kind: 8, ASN: 13335, ASNAggregate: &via3.ASNData{Name: "Synthetic Network"}}}
 	cold, _, _ := compiledReviewFixture(t, records, s)
 	provider := func(prefix string, calls *int) via3.ASNPrefixProvider {
@@ -378,6 +383,9 @@ func TestCompiledReviewCommittedHitBindsActualInputAndPrefixProvider(t *testing.
 			switch mutation {
 			case "fact-group":
 				partitionScope.group = aggregateFacts
+				if s.group == aggregateFacts {
+					partitionScope.group = allFacts
+				}
 			case "provider":
 				current.options.prefixProvider = provider("12.0.0.0/24", &calls)
 				current.options.partitionDependencies = func(context.Context) ([32]byte, error) { return [32]byte{4}, nil }
@@ -643,5 +651,51 @@ func TestCompiledReviewReadAheadDoesNotAuthorizePartialConsumption(t *testing.T)
 				t.Fatal("verified input removal failed or changed accounting", err)
 			}
 		})
+	}
+}
+
+func TestCompiledIPGroupSurvivesUnrelatedASPrefixChange(t *testing.T) {
+	s := scope{prefix: netip.MustParsePrefix("11.0.0.0/24"), group: qualityFacts}
+	rows := []via3.PublicRecord{{Version: 3, Kind: 6, Prefix: s.prefix, Quality: &via3.QualityData{}}}
+	cold, _, _ := compiledReviewFixture(t, rows, s)
+	cold.options.prefixProvider = func(context.Context, uint32, func(netip.Prefix) error) (bool, error) {
+		t.Fatal("quality compiler fetched unrelated external prefixes")
+		return false, nil
+	}
+	binds := 0
+	cold.options.partitionDependencies = func(context.Context) ([32]byte, error) { binds++; return [32]byte{3}, nil }
+	if err := cold.partition(compiledReviewRun(t, cold, rows), s); err != nil {
+		t.Fatal(err)
+	}
+	cache := cold.options.compiledReuse
+	if err := cache.Prepare(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := cache.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := cache.Abort(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := openSpatialCache(t.Context(), cold.options.Workspace, cache.contract, 64<<20, func(uint64) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopened.Abort() })
+	warm := compiledReviewNext(cold, "reopened")
+	warm.options.compiledReuse = reopened
+	warm.options.partitionDependencies = func(context.Context) ([32]byte, error) { binds++; return [32]byte{4}, nil }
+	if err := warm.encoder.Close(); err != nil {
+		t.Fatal(err)
+	} // any unexpected compilation fails
+	if err := warm.partition(compiledReviewRun(t, warm, rows), s); err != nil || !reflect.DeepEqual(warm.objects, cold.objects) || !reflect.DeepEqual(warm.routes, cold.routes) {
+		t.Fatal("unchanged quality output failed to restore", err)
+	}
+	if binds != 2 {
+		t.Fatal("release-wide prefix integrity check was lost", binds)
+	}
+	warm.options.partitionDependencies = func(context.Context) ([32]byte, error) { return [32]byte{}, errSpatialCache }
+	if err := warm.partition(compiledReviewRun(t, warm, rows), s); !errors.Is(err, errSpatialCache) {
+		t.Fatal("corrupt prefix dependency was ignored", err)
 	}
 }

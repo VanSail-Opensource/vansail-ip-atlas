@@ -561,6 +561,10 @@ func decodeRecordFrame(data []byte) (NormalizedRecord, error) {
 	if !utf8.Valid(data) {
 		return record, errors.New("private record UTF-8 invalid")
 	}
+	if geo, ok := decodeWriterGeo(data); ok {
+		record = NormalizedRecord{Version: 3, Kind: RecordGeo, Geo: geo}
+		return record, record.Validate()
+	}
 	if err := jsonv2.Unmarshal(data, &record, json.DefaultOptionsV1(), jsonv2.RejectUnknownMembers(true)); err != nil {
 		return record, err
 	}

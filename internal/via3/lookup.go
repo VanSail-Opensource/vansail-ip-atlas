@@ -169,7 +169,7 @@ type ASNPrefixPage struct {
 	NextCursor *uint32  `json:"nextCursor"`
 }
 
-func (r *Release) prefixPage(ctx context.Context, s *Shard, row []byte, asn, cursor uint32) (ASNPrefixPage, error) {
+func (r *Release) prefixPage(ctx context.Context, s *Shard, row []byte, asn, cursor uint32, descriptor []byte, budget *answerBudget) (ASNPrefixPage, error) {
 	answer := ASNPrefixPage{ASN: asn, Prefixes: []string{}}
 	count := u32(row, 40)
 	if count == 0 && cursor == 0 {
@@ -178,7 +178,15 @@ func (r *Release) prefixPage(ctx context.Context, s *Shard, row []byte, asn, cur
 	if cursor >= count {
 		return answer, fail("invalid_cursor")
 	}
-	p := s.row(12, u32(row, 36)+cursor)
+	p := descriptor
+	if len(p) == 0 {
+		p = s.row(12, u32(row, 36)+cursor)
+	}
+	if budget != nil {
+		if err := budget.charge(64 * int(u32(p, 8))); err != nil {
+			return answer, err
+		}
+	}
 	target, err := r.reference(ctx, s, u32(p, 0))
 	if err != nil {
 		return answer, err
@@ -264,7 +272,7 @@ func (r *Release) prefixes(ctx context.Context, q string, cursor uint32) (ASNPre
 	}
 	if s != nil {
 		if row, ok := s.ASNRecord(asn); ok {
-			return r.prefixPage(ctx, s, row, asn, cursor)
+			return r.prefixPage(ctx, s, row, asn, cursor, nil, nil)
 		}
 	}
 	if cursor != 0 {
@@ -781,7 +789,8 @@ func (s *Shard) ASNRecord(asn uint32) ([]byte, bool) {
 		return s.Record(index), true
 	}
 	if s.disk != nil && s.components().active {
-		return s.cachedASN(asn)
+		row := s.cachedASN(asn).row
+		return row, len(row) != 0
 	}
 	first, _, ok := s.asnBounds(asn)
 	if !ok {
@@ -1155,7 +1164,14 @@ func (r *Release) lookupOnce(ctx context.Context, q string) (result LookupAnswer
 			return answer, err
 		}
 		if s := asndest[8]; s != nil {
-			if row, ok := s.ASNRecord(asn); ok {
+			var row, descriptor []byte
+			if s.disk != nil && s.components().active {
+				f := s.cachedASN(asn)
+				row, descriptor = f.row, f.firstPage
+			} else if found, ok := s.ASNRecord(asn); ok {
+				row = found
+			}
+			if len(row) != 0 {
 				if err := budget.charge(4096); err != nil {
 					return answer, err
 				}
@@ -1186,13 +1202,7 @@ func (r *Release) lookupOnce(ctx context.Context, q string) (result LookupAnswer
 					values.transitDegree = u32(row, 48)
 					a.TransitDegree = &values.transitDegree
 				}
-				if u32(row, 40) > 0 {
-					p := s.row(12, u32(row, 36))
-					if err := budget.charge(64 * int(u32(p, 8))); err != nil {
-						return answer, err
-					}
-				}
-				page, err := r.prefixPage(ctx, s, row, asn, 0)
+				page, err := r.prefixPage(ctx, s, row, asn, 0, descriptor, budget)
 				if err != nil {
 					return answer, err
 				}
@@ -1207,10 +1217,12 @@ func (r *Release) lookupOnce(ctx context.Context, q string) (result LookupAnswer
 			graph := r.pathGraph(s, asn)
 			if graph != nil && graph.fits(budget) {
 				answer.BGP.Paths = graph.appendPaths(answer.BGP.Paths, asn, budget)
-				ordered = append(ordered, graph.pairs...)
 				sortedPairs = len(answer.BGP.Origins) == 1
 				if sortedPairs {
+					ordered = graph.pairs
 					components.prepare(s, asn, graph)
+				} else {
+					ordered = append(ordered, graph.pairs...)
 				}
 			} else {
 				firstPath := len(answer.BGP.Paths)

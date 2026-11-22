@@ -217,22 +217,41 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 	return r.lookupOnce(ctx, q)
 }
 
-func (s *Shard) cachedASN(asn uint32) ([]byte, bool) {
+// The immutable aggregate and its first page descriptor reside in the same
+// signed kind-8 object. Reading them together avoids another private-page
+// access when the regular full lookup opens that first logical page.
+type nativeASNFact struct {
+	row       []byte
+	firstPage []byte
+}
+
+func (s *Shard) cachedASN(asn uint32) nativeASNFact {
 	c := s.components()
 	k := s.componentKey(factASN, asn, 0)
 	if v, ok := c.get(k); ok {
-		row := v.([]byte)
-		return row, len(row) != 0
+		return v.(nativeASNFact)
 	}
 	first, _, ok := s.asnBounds(asn)
-	var row []byte
+	var fact nativeASNFact
 	if ok {
-		row = s.Record(first)
+		fact.row = s.Record(first)
+		if s.Kind == 8 && u32(fact.row, 40) != 0 {
+			fact.firstPage = s.row(12, u32(fact.row, 36))
+		}
+	}
+	if c.active && len(fact.row) == 0 {
+		c.put(k, fact, 48)
+		return fact
 	}
 	if c.active {
-		c.put(k, bytes.Clone(row), len(row)+24)
+		data := make([]byte, len(fact.row)+len(fact.firstPage))
+		copy(data, fact.row)
+		copy(data[len(fact.row):], fact.firstPage)
+		fact.row = data[:len(fact.row):len(fact.row)]
+		fact.firstPage = data[len(fact.row):]
+		c.put(k, fact, 48+len(data))
 	}
-	return row, ok
+	return fact
 }
 func (s *Shard) cachedRPKI(addr netip.Addr, origin uint32, announcement netip.Prefix) ([]byte, bool) {
 	if !announcement.IsValid() || !announcement.Contains(addr.Unmap()) {

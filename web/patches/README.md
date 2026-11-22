@@ -1,23 +1,24 @@
 # Pinned Zstandard buffer ownership patch
 
-`fzstd@0.1.1.patch` retains the upstream package version, registry integrity and
-MIT notice. pnpm binds the patch hash in the frozen lockfile. Both ESM and CommonJS
-entry points receive the same three changes:
+The frozen pnpm lockfile binds the hash of `fzstd@0.1.1.patch` to the upstream
+package and its registry integrity. The MIT notice ships with the dependency.
+The patch applies the same decoder changes to its ESM and CommonJS entry points.
 
-- After either compressed-block scratch copy, detach the old owned scratch
-  buffer. The returned block is an independent copy; input, output and history
-  buffers are unaffected.
-- After a stream's final block has been copied into history, detach that frame's
-  owned history buffer before advancing to the checksum or next frame.
+The Atlas wrapper preflights each frame's size, window, block boundaries and
+checksum trailer, then calls `decompressInto(input, output)` with an independent
+output array. Each block borrows a view of the already written bytes inside the
+frame's window, up to 8 MiB. Match distances and block output stay within those
+bounds. The decoder copies each complete block to the output and releases its
+own block buffer. It reports the actual bytes written and signals overflow
+before copying a block beyond the output.
 
-This preserves the original allocation, zero-initialization and copy semantics;
-it releases backing stores at their last use instead of waiting for garbage
-collection. It adds no decoder API and does not inspect private state from the
-application wrapper. The wrapper still checks actual emitted length and verifies
-the independent frame checksum. Failed frames retain the upstream decoder's
-cleanup behavior; the wrapper separately releases its unpublished output.
+The wrapper checks the actual output length, verifies the frame checksum and
+clears and releases unpublished output on failure. The existing upstream
+one-shot and streaming entry points retain their interfaces. The patch releases
+decoder-owned compressed-block scratch after copying it and releases the stream
+history after the final block.
 
-`ArrayBuffer.transfer` is supported by the required current stable Chrome and
-pinned Node toolchain. Recheck ownership when upgrading fzstd. Codec regressions
-cover retained callback output, split checksums, concatenated streaming frames,
-the 8 MiB history window, forged output lengths and checksum failures.
+The required current stable Chrome and pinned Node toolchain support
+`ArrayBuffer.transfer`. Codec regressions cover input and output ownership,
+retained callback output, split and concatenated frames, the 8 MiB window,
+forged output lengths and checksum failures.

@@ -391,6 +391,38 @@ func TestSingleGeoObservationMatchesIndependentFamilyVote(t *testing.T) {
 	}
 }
 
+func TestGeoPerFamilyFieldVoteTiesAndOverrides(t *testing.T) {
+	policy := testPolicy(t)
+	parent, child := netip.MustParsePrefix("192.0.0.0/16"), netip.MustParsePrefix("192.0.2.0/24")
+	record := func(family string, prefix netip.Prefix, weight float64, physical, registration string) GeoEvidence {
+		return GeoEvidence{Family: family, Prefix: prefix, Weight: weight, PhysicalCountry: physical, RegistrationCountry: registration, Current: true}
+	}
+	base := []GeoEvidence{record("a", parent, 100, "US", "JP"), record("a", child, 80, "GB", ""), record("a", child, 80, "GB", ""), record("b", child, 40, "DE", "FR")}
+	for _, tc := range []struct {
+		name, want string
+		extra      []GeoEvidence
+	}{
+		{"duplicate top vote", "GB", nil},
+		{"disagreeing top votes", "DE", []GeoEvidence{record("a", child, 80, "CA", "")}},
+		{"stronger vote resolves tie", "AU", []GeoEvidence{record("a", child, 80, "CA", ""), record("a", child, 90, "AU", "")}},
+		{"weak disagreement ignored", "GB", []GeoEvidence{record("a", child, 70, "CA", "")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows := append(slices.Clone(base), tc.extra...)
+			for range 2 {
+				for offset := range len(rows) {
+					ordered := append(slices.Clone(rows[offset:]), rows[:offset]...)
+					result, err := FuseGeo(policy, ordered, false)
+					if err != nil || result.PhysicalCountry == nil || *result.PhysicalCountry != tc.want || result.RegistrationCountry == nil || *result.RegistrationCountry != "JP" {
+						t.Fatal("per-family field vote changed", result, err)
+					}
+				}
+				slices.Reverse(rows)
+			}
+		})
+	}
+}
+
 func TestGeoFieldLPMAndMappedPrefixNormalization(t *testing.T) {
 	p := testPolicy(t)
 	index, err := NewGeoIndex(p, []GeoEvidence{{Family: "a", Weight: 90, Prefix: netip.MustParsePrefix("::ffff:192.0.2.0/120"), PhysicalCountry: "US", Current: true}, {Family: "a", Weight: 80, Prefix: netip.MustParsePrefix("192.0.2.1/32"), PhysicalCountry: "CA", Current: true}, {Family: "b", Weight: 80, Prefix: netip.MustParsePrefix("192.0.2.1/32"), PhysicalCountry: "CA", Current: true}})

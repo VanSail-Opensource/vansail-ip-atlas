@@ -124,6 +124,13 @@ func validateCorpus(c corpus) error {
 	return nil
 }
 
+type preparationCost struct {
+	Runtime     int64  `json:"runtime_ns"`
+	Allocated   uint64 `json:"allocated_bytes"`
+	Allocations uint64 `json:"allocation_count"`
+	Reads       int    `json:"source_object_reads"`
+}
+
 func run() error {
 	atlas := flag.String("atlas", "", "qualified production atlas directory")
 	input := flag.String("corpus", "", "private versioned 10000-query corpus")
@@ -165,12 +172,23 @@ func run() error {
 	if err != nil {
 		return errors.New("qualified lookup release unavailable")
 	}
+	defer release.Close()
 	if release.Manifest.Mode != "production" {
 		return errors.New("synthetic lookups cannot qualify production latency")
 	}
 	if release.Manifest.ReleaseID != c.ReleaseID {
 		return errors.New("lookup corpus belongs to another release")
 	}
+	initialReads := release.Reads
+	var prepBefore, prepAfter runtime.MemStats
+	runtime.ReadMemStats(&prepBefore)
+	prepStart := time.Now()
+	if err := release.PrepareNativeIndex(context.Background(), filepath.Dir(*input)); err != nil {
+		return err
+	}
+	prepNS := time.Since(prepStart).Nanoseconds()
+	runtime.ReadMemStats(&prepAfter)
+	preparation := preparationCost{prepNS, prepAfter.TotalAlloc - prepBefore.TotalAlloc, prepAfter.Mallocs - prepBefore.Mallocs, release.Reads - initialReads}
 	if c.IPv4Coverage != nil {
 		if err = c.IPv4Coverage.Verify(context.Background(), release); err != nil {
 			return err
@@ -182,6 +200,7 @@ func run() error {
 	}
 	ctx := context.Background()
 	readsBeforeWarmup := release.Reads
+	pagesBeforeWarmup := release.NativePageReads()
 	// Warm every query once. This exceeds the minimum 1000 warmups and cannot
 	// accidentally label a first object decode as a cached lookup.
 	for _, q := range c.Queries {
@@ -190,11 +209,13 @@ func run() error {
 		}
 	}
 	readsAfterWarmup := release.Reads
+	pagesAfterWarmup := release.NativePageReads()
 	samples := make([]int64, 100000)
 	var before, after runtime.MemStats
 	runtime.GC()
 	runtime.ReadMemStats(&before)
 	readsBeforeTimed := release.Reads
+	pagesBeforeTimed := release.NativePageReads()
 	started := time.Now()
 	for i := range samples {
 		q := c.Queries[i%len(c.Queries)].Q
@@ -209,6 +230,7 @@ func run() error {
 	runtime.ReadMemStats(&after)
 	duration := time.Since(started)
 	readsAfterTimed := release.Reads
+	pagesAfterTimed := release.NativePageReads()
 	sorted := append([]int64(nil), samples...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
 	peak := int64(0)
@@ -227,6 +249,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	pageReads, err := summarizeReads(pagesBeforeWarmup, pagesAfterWarmup, pagesBeforeTimed, pagesAfterTimed)
+	if err != nil {
+		return err
+	}
 	stratumRows, err := summarizeStrata(c.Queries, samples)
 	if err != nil {
 		return err
@@ -238,6 +264,7 @@ func run() error {
 	}
 	report := struct {
 		Coverage       *via3.IPv4NetworkCoverage `json:"corpus_ipv4_network_coverage"`
+		Preparation    preparationCost           `json:"index_preparation"`
 		Timing         string                    `json:"timing"`
 		CorpusQueries  int                       `json:"corpus_queries"`
 		Warmups        int                       `json:"warmups"`
@@ -255,9 +282,10 @@ func run() error {
 		Duration       int64                     `json:"runtime_ns"`
 		GoVersion      string                    `json:"go_version"`
 		ObjectReads    objectReadDiagnostics     `json:"object_reads"`
+		PageReads      objectReadDiagnostics     `json:"index_page_reads"`
 		Strata         []stratumDiagnostics      `json:"strata"`
-	}{coverage, "individual-indexed-lookups", len(c.Queries), len(c.Queries), hex.EncodeToString(digest[:]), release.Manifest.ReleaseID, inputBytes,
-		samples, sorted[49999], sorted[94999], sorted[98999], after.Mallocs - before.Mallocs, after.TotalAlloc - before.TotalAlloc, peak, 0, duration.Nanoseconds(), runtime.Version(), objectReads, stratumRows}
+	}{coverage, preparation, "individual-indexed-lookups", len(c.Queries), len(c.Queries), hex.EncodeToString(digest[:]), release.Manifest.ReleaseID, inputBytes,
+		samples, sorted[49999], sorted[94999], sorted[98999], after.Mallocs - before.Mallocs, after.TotalAlloc - before.TotalAlloc, peak, release.NativeIndexBytes(), duration.Nanoseconds(), runtime.Version(), objectReads, pageReads, stratumRows}
 	encoded, err := json.Marshal(report)
 	if err != nil {
 		return err

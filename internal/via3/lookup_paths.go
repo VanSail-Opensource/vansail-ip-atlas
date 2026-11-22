@@ -20,14 +20,12 @@ func (s *Shard) appendOriginPaths(paths []PathAnswer, asn uint32, budget *answer
 	var planned [maxPaths]layout
 	count, totalASNs, totalSegments := 0, 0, 0
 	var limitErr error
-	segments, _ := s.Rows(9)
-	ints, _ := s.Rows(4)
 plan:
 	for ordinal := first; ordinal < end; ordinal++ {
 		row := s.Record(ordinal)
 		start := int(u32(row, 8))
 		n := int(u16(row, 12))
-		segs := segments[start*12 : (start+n)*12]
+		segs := s.rowSpan(9, uint32(start), uint32(n))
 		pathASNs := 0
 		for off := 0; off < len(segs); off += 12 {
 			length := int(u32(segs, off+8))
@@ -58,9 +56,9 @@ plan:
 			row := plan.segments[index*12 : (index+1)*12]
 			end := start + int(u32(row, 8))
 			values := structured[start:end:end]
-			offset := int(u32(row, 4)) * 4
+			ints := s.rowSpan(4, u32(row, 4), uint32(len(values)))
 			for i := range values {
-				values[i] = u32(ints, offset+4*i)
+				values[i] = u32(ints, 4*i)
 			}
 			segments[index] = SegmentAnswer{Type: []string{"", "sequence", "set", "confederation_sequence", "confederation_set"}[row[0]], ASNs: values}
 			start = end

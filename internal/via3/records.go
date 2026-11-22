@@ -677,17 +677,15 @@ func (s *Shard) findAncestryPrefix(addr netip.Addr, family, maxBits int) ([]byte
 	for section, id := range []uint16{1, 8} {
 		metadata := &s.lookup.prefixes[section]
 		first, end := metadata.families[family], metadata.families[family+1]
-		rows := s.lookup.rows[id]
+
 		i := sort.Search(int(end-first), func(i int) bool {
-			p := (int(first) + i) * 32
-			return bytes.Compare(rows[p+4:p+20], address[:]) > 0
+			return bytes.Compare(s.row(id, first+uint32(i))[4:20], address[:]) > 0
 		})
 		if i == 0 {
 			continue
 		}
-		for ordinal := first + uint32(i) - 1; ordinal != None; ordinal = metadata.parents[ordinal] {
-			p := int(ordinal) * 32
-			row := rows[p : p+32]
+		for ordinal := first + uint32(i) - 1; ordinal != None; ordinal = s.parent(section, ordinal) {
+			row := s.row(id, ordinal)
 			if int(row[1]) > maxBits {
 				continue
 			}
@@ -718,18 +716,20 @@ func (s *Shard) ASNRun(asn uint32) ([][]byte, bool) {
 	return out, true
 }
 func (s *Shard) asnBounds(asn uint32) (uint32, uint32, bool) {
-	index, _ := s.Rows(2)
-	i := sort.Search(len(index)/8, func(i int) bool { return u32(index, i*8) >= asn })
-	if i == len(index)/8 || u32(index, i*8) != asn {
+	count := s.rowCount(2)
+	i := sort.Search(count, func(i int) bool { return u32(s.row(2, uint32(i)), 0) >= asn })
+	if i == count {
 		return 0, 0, false
 	}
-	first := u32(index, i*8+4)
-	records, w := s.Rows(3)
-	end := uint32(len(records) / w)
-	if i+1 < len(index)/8 {
-		end = u32(index, (i+1)*8+4)
+	row := s.row(2, uint32(i))
+	if u32(row, 0) != asn {
+		return 0, 0, false
 	}
-	return first, end, true
+	first := u32(row, 4)
+	if i+1 < count {
+		return first, u32(s.row(2, uint32(i+1)), 4), true
+	}
+	return first, uint32(s.rowCount(3)), true
 }
 func (s *Shard) FindRelationship(from, to uint32) ([]byte, bool) {
 	first, end, ok := s.asnBounds(from)
@@ -744,6 +744,18 @@ func (s *Shard) findRelationshipWithin(first, end, to uint32) ([]byte, bool) {
 }
 
 func (s *Shard) relationshipPosition(first, end, to uint32) ([]byte, uint32, bool) {
+	if s.disk != nil {
+		if s.Kind != 12 || end < first || uint64(end) > uint64(s.rowCount(3)) {
+			return nil, None, false
+		}
+		i := sort.Search(int(end-first), func(i int) bool { return u32(s.Record(first+uint32(i)), 8) >= to })
+		if first+uint32(i) == end {
+			return nil, None, false
+		}
+		pos := first + uint32(i)
+		row := s.Record(pos)
+		return row, pos, u32(row, 8) == to
+	}
 	records, width := s.Rows(3)
 	if width != 16 || end < first || uint64(end) > uint64(len(records)/width) {
 		return nil, None, false
@@ -767,18 +779,17 @@ func (s *Shard) FindRPKI(addr netip.Addr, origin uint32, announcement netip.Pref
 	// other announcements that happen to contain this query address.
 	fillPrefixKey(target, announcement.Masked(), false, 0)
 	for _, id := range []uint16{1, 8} {
-		index, _ := s.Rows(id)
-		count := len(index) / 32
-		first := sort.Search(count, func(i int) bool { return keyCompare(index[i*32:(i+1)*32], target) >= 0 })
-		if first == count || keyCompare(index[first*32:(first+1)*32], target) != 0 {
+		count := s.rowCount(id)
+		first := sort.Search(count, func(i int) bool { return keyCompare(s.row(id, uint32(i)), target) >= 0 })
+		if first == count || keyCompare(s.row(id, uint32(first)), target) != 0 {
 			continue
 		}
-		end := sort.Search(count-first, func(i int) bool { return keyCompare(index[(first+i)*32:(first+i+1)*32], target) > 0 }) + first
-		i := sort.Search(end-first, func(i int) bool { return u32(s.Record(u32(index, (first+i)*32+20)), 4) >= origin })
+		end := sort.Search(count-first, func(i int) bool { return keyCompare(s.row(id, uint32(first+i)), target) > 0 }) + first
+		i := sort.Search(end-first, func(i int) bool { return u32(s.Record(u32(s.row(id, uint32(first+i)), 20)), 4) >= origin })
 		if first+i >= end {
 			return nil, false
 		}
-		row := s.Record(u32(index, (first+i)*32+20))
+		row := s.Record(u32(s.row(id, uint32(first+i)), 20))
 		return row, u32(row, 4) == origin
 	}
 	return nil, false

@@ -11,6 +11,7 @@ import (
 	"flag"
 	"io"
 	"net/netip"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -79,8 +80,15 @@ func buildProductionCorpus(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	defer release.Close()
 	if release.Manifest.Mode != "production" {
 		return errors.New("production corpus requires a production release")
+	}
+	if err := os.MkdirAll(filepath.Dir(destination), 0700); err != nil {
+		return err
+	}
+	if err := release.PrepareNativeIndex(ctx, filepath.Dir(destination)); err != nil {
+		return err
 	}
 	buckets := map[string][]string{}
 	seen := map[string]map[string]bool{}

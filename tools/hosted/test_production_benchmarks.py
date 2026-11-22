@@ -19,11 +19,12 @@ def fixture():
         'workspace_peak_bytes': 1024**3, 'physical_free_low_water_bytes': 4*1024**3, 'errors': [], 'exit_code': 0,
         'runtime_ms': 2000, 'cgroup_memory_peak_bytes': 1024**3,
         'memory_events': {key: 0 for key in ('low', 'high', 'max', 'oom', 'oom_kill', 'oom_group_kill')}}
-    native = {'timing': 'individual-indexed-lookups', 'corpus_queries': 10000, 'warmups': 10000,
+    native = {'index_preparation': dict(runtime_ns=100, allocated_bytes=300, allocation_count=1, source_object_reads=1), 'timing': 'individual-indexed-lookups', 'corpus_queries': 10000, 'warmups': 10000,
         'corpus_sha256': 'd'*64, 'corpus_ipv4_network_coverage': None, 'release_id': candidate['release_id'], 'compressed_input_bytes': 1,
         'samples_ns': [1000]*100000, 'p50_ns': 1000, 'p95_ns': 1000, 'p99_ns': 1000,
         'allocation_count': 1, 'allocated_bytes': 1, 'process_peak_rss_bytes': 1, 'temporary_disk_bytes': 0,
         'runtime_ns': 100000000, 'go_version': 'go1.27.4',
+        'index_page_reads':dict(before_warmup=0,after_warmup=1,before_timed=1,after_timed=3,warmup=1,timed=2),
         'object_reads': dict(before_warmup=1, after_warmup=2, before_timed=2, after_timed=2, warmup=1, timed=0),
         'strata': [{'stratum': name, 'corpus_queries': 5000 if name in ('ipv4_exact', 'unknown') else 0,
             'timed_samples': 50000 if name in ('ipv4_exact', 'unknown') else 0,

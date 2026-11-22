@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -179,23 +178,21 @@ func (r *Release) prefixPage(ctx context.Context, s *Shard, row []byte, asn, cur
 	if cursor >= count {
 		return answer, fail("invalid_cursor")
 	}
-	pages, _ := s.Rows(12)
-	j := u32(row, 36) + cursor
-	p := pages[j*16 : (j+1)*16]
+	p := s.row(12, u32(row, 36)+cursor)
 	target, err := r.reference(ctx, s, u32(p, 0))
 	if err != nil {
 		return answer, err
 	}
-	if target.Kind != 8 || len(target.RowsMust(2)) != 0 || len(target.RowsMust(3)) != 0 || len(target.RowsMust(7)) != 0 || len(target.RowsMust(12)) != 0 {
+	if target.Kind != 8 || target.rowCount(2) != 0 || target.rowCount(3) != 0 || target.rowCount(7) != 0 || target.rowCount(12) != 0 {
 		return answer, fail("record")
 	}
-	rows, _ := target.Rows(11)
+	physicalRows := target.rowCount(11)
 	first, total := u32(p, 4), u32(p, 8)
-	if !rangeOK(first, total, len(rows)/24) {
+	if !rangeOK(first, total, physicalRows) {
 		return answer, fail("record")
 	}
 	answer.Prefixes = make([]string, total)
-	if target.lookup != nil && len(target.lookup.prefixLabels) == len(rows)/24 {
+	if target.lookup != nil && len(target.lookup.prefixLabels) == physicalRows {
 		// Strings are immutable metadata; callers always own their slice and
 		// its mutable headers. No decoded shard bytes back these strings.
 		copy(answer.Prefixes, target.lookup.prefixLabels[first:first+total])
@@ -203,11 +200,11 @@ func (r *Release) prefixPage(ctx context.Context, s *Shard, row []byte, asn, cur
 		copy(answer.Prefixes, labels)
 	} else {
 		for k := first; k < first+total; k++ {
-			key := rows[k*24 : (k+1)*24]
+			key := target.row(11, k)
 			ip, _ := keyAddr(key)
 			answer.Prefixes[k-first] = netip.PrefixFrom(ip, int(key[1])).String()
 		}
-		if physicalRows := len(rows) / 24; physicalRows > prefixPageSize && physicalRows <= prefixObjectRows && s.lookup != nil {
+		if physicalRows > prefixPageSize && physicalRows <= prefixObjectRows && s.lookup != nil {
 			r.retainPrefixSpan(s.lookup.references[u32(p, 0)], first, answer.Prefixes)
 		}
 	}
@@ -218,9 +215,10 @@ func (r *Release) prefixPage(ctx context.Context, s *Shard, row []byte, asn, cur
 	return answer, nil
 }
 func (s *Shard) RowsMust(id uint16) []byte { b, _ := s.Rows(id); return b }
-func (r *Release) Prefixes(ctx context.Context, q string, cursor uint32) (ASNPrefixPage, error) {
+func (r *Release) Prefixes(ctx context.Context, q string, cursor uint32) (result ASNPrefixPage, resultErr error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	defer recoverNativeRead(&resultErr)
 	input, err := querycontract.ParseInput(q)
 	if err != nil || input.Kind != "asn" {
 		return ASNPrefixPage{}, fail("invalid_input")
@@ -272,6 +270,9 @@ type Release struct {
 	activeBytes    int
 	routerBytes    int
 	residentBytes  int
+	native         *nativeIndex
+	closed         bool
+	preparing      bool
 	router         *Shard
 	references     map[string]*objectReference
 	cacheHead      *objectReference
@@ -314,6 +315,7 @@ type objectReference struct {
 	info                 ObjectInfo
 	shard                *Shard
 	size                 int
+	onsite               *indexedShard
 	prefixLabelBytes     int
 	query, cache, router bool
 	previous, next       *objectReference // bounded intrusive FIFO cache links
@@ -430,7 +432,7 @@ func NewRelease(pointerBytes, manifestBytes []byte, load func(string) ([]byte, e
 	if strictJSON(pointerBytes, &pointer) != nil || strictJSON(manifestBytes, &manifest) != nil {
 		return nil, fail("manifest")
 	}
-	if pointer.BrowserSHA256 != "" && !validHash(pointer.BrowserSHA256) || len(pointerBytes) > 4096 || len(manifestBytes) > 4<<20 || !validHash(pointer.ReleaseID) || !validHash(pointer.ManifestSHA256) || pointer.FormatVersion != 3 || manifest.FormatVersion != 3 || manifest.SchemaVersion != 5 || manifest.Codec != "zstd-1" || (manifest.Mode != "synthetic" && manifest.Mode != "production") || len(manifest.Objects) == 0 || len(manifest.Objects) >= 18500 || pointer.ManifestPath != "/_atlas/releases/"+manifest.ReleaseID+"/manifest.json" || pointer.ReleaseID != manifest.ReleaseID || Hash(manifestBytes) != pointer.ManifestSHA256 || manifest.ValidFrom < 0 || manifest.ValidUntil <= manifest.ValidFrom || manifest.ValidUntil-manifest.ValidFrom > 720*3600 || manifest.ValidUntil > 9007199254740991 {
+	if len(pointerBytes) > 4096 || len(manifestBytes) > 4<<20 || !validHash(pointer.ReleaseID) || !validHash(pointer.ManifestSHA256) || pointer.FormatVersion != 3 || manifest.FormatVersion != 3 || manifest.SchemaVersion != 5 || manifest.Codec != "zstd-1" || (manifest.Mode != "synthetic" && manifest.Mode != "production") || len(manifest.Objects) == 0 || len(manifest.Objects) >= 18500 || pointer.ManifestPath != "/_atlas/releases/"+manifest.ReleaseID+"/manifest.json" || pointer.ReleaseID != manifest.ReleaseID || Hash(manifestBytes) != pointer.ManifestSHA256 || manifest.ValidFrom < 0 || manifest.ValidUntil <= manifest.ValidFrom || manifest.ValidUntil-manifest.ValidFrom > 720*3600 || manifest.ValidUntil > 9007199254740991 {
 		return nil, fail("manifest")
 	}
 	desc := Descriptor{Codec: manifest.Codec, FormatVersion: 3, Mode: manifest.Mode, Objects: manifest.Objects, SchemaVersion: 5, ValidFrom: manifest.ValidFrom, ValidUntil: manifest.ValidUntil}
@@ -486,7 +488,7 @@ func OpenRelease(root string, clock func() int64) (*Release, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewRelease(p, m, func(hash string) ([]byte, error) {
+	r, err := NewRelease(p, m, func(hash string) ([]byte, error) {
 		if len(hash) != 64 {
 			return nil, fail("manifest")
 		}
@@ -504,8 +506,15 @@ func OpenRelease(root string, clock func() int64) (*Release, error) {
 		}
 		return io.ReadAll(io.LimitReader(file, MaxFile))
 	}, clock)
+	if err != nil {
+		return nil, err
+	}
+	return r, nil
 }
 func (r *Release) current() error {
+	if r.closed {
+		return fail("closed")
+	}
 	now := r.Clock()
 	if now < r.Manifest.ValidFrom || now >= r.Manifest.ValidUntil {
 		return fail("expired")
@@ -539,6 +548,14 @@ func (r *Release) objectReference(ctx context.Context, reference *objectReferenc
 				return nil, err
 			}
 		}
+		return reference.shard, nil
+	}
+	if reference.onsite != nil {
+		if err := r.admitReference(reference, reference.onsite.decoded); err != nil {
+			return nil, err
+		}
+		reference.shard = &reference.onsite.shard
+		r.cacheReference(reference)
 		return reference.shard, nil
 	}
 	info := reference.info
@@ -637,7 +654,9 @@ func (r *Release) objectReference(ctx context.Context, reference *objectReferenc
 	if s.Kind == 11 || s.Kind == 12 {
 		s.lookup.owner = reference
 	}
-	r.preparePrefixLabels(reference, &s)
+	if !r.preparing {
+		r.preparePrefixLabels(reference, &s)
+	}
 	reference.shard = &s
 	r.cacheReference(reference)
 	return &s, nil
@@ -711,20 +730,19 @@ func (r *Release) label(ctx context.Context, from *Shard, row []byte, p int, tar
 	if dictionary.Kind != 14 {
 		return nil, fail("record")
 	}
-	offsets, _ := dictionary.Rows(5)
-	text, _ := dictionary.Rows(6)
-	if uint64(id)+1 >= uint64(len(offsets)/4) {
+	if uint64(id)+1 >= uint64(dictionary.rowCount(5)) {
 		return nil, fail("record")
 	}
-	return labels.add(text[u32(offsets, int(id)*4):u32(offsets, (int(id)+1)*4)], target)
+	offsets := dictionary.rowSpan(5, id, 2)
+	first, end := u32(offsets, 0), u32(offsets, 4)
+	return labels.add(dictionary.rowSpan(6, first, end-first), target)
 }
 func (s *Shard) ASNRecord(asn uint32) ([]byte, bool) {
-	index, _ := s.Rows(2)
-	i := sort.Search(len(index)/8, func(i int) bool { return u32(index, i*8) >= asn })
-	if i == len(index)/8 || u32(index, i*8) != asn {
+	first, _, ok := s.asnBounds(asn)
+	if !ok {
 		return nil, false
 	}
-	return s.Record(u32(index, i*8+4)), true
+	return s.Record(first), true
 }
 
 type destinationSet [15]*Shard
@@ -904,17 +922,18 @@ func riskValue(row []byte, p int, bit uint, target *float64) *float64 {
 	return target
 }
 func origins(s *Shard, row []byte) []uint32 {
-	ints, _ := s.Rows(4)
+	ints := s.rowSpan(4, u32(row, 4), u32(row, 8))
 	out := make([]uint32, u32(row, 8))
 	for i := range out {
-		out[i] = u32(ints, (int(u32(row, 4))+i)*4)
+		out[i] = u32(ints, i*4)
 	}
 	return out
 }
 
-func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
+func (r *Release) Lookup(ctx context.Context, q string) (result LookupAnswer, resultErr error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	defer recoverNativeRead(&resultErr)
 	input, err := querycontract.ParseInput(q)
 	if err != nil {
 		return LookupAnswer{}, err
@@ -1113,8 +1132,7 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 					a.TransitDegree = &values.transitDegree
 				}
 				if u32(row, 40) > 0 {
-					pages, _ := s.Rows(12)
-					p := pages[u32(row, 36)*16 : (u32(row, 36)+1)*16]
+					p := s.row(12, u32(row, 36))
 					if err := budget.charge(64 * int(u32(p, 8))); err != nil {
 						return answer, err
 					}
@@ -1204,9 +1222,10 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 	return answer, nil
 }
 
-func (r *Release) ClassC(ctx context.Context, q string) (*ClassCAnswer, error) {
+func (r *Release) ClassC(ctx context.Context, q string) (result *ClassCAnswer, resultErr error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	defer recoverNativeRead(&resultErr)
 	if _, err := querycontract.ParseInput(q); err != nil {
 		return nil, err
 	}
@@ -1269,9 +1288,8 @@ func (r *Release) classC(ctx context.Context, q string) (*ClassCAnswer, error) {
 		a[3] = byte(suffix)
 		answer.Cells[suffix] = CellAnswer{IP: netip.AddrFrom4(a).String(), Confidence: "unrated", Coverage: "incomplete", Reasons: []string{}, Usage: "unknown", Origins: []uint32{}}
 	}
-	cells, _ := s.Rows(10)
 	for j := u32(row, 4); j < u32(row, 4)+uint32(u16(row, 8)); j++ {
-		cell := cells[j*32 : (j+1)*32]
+		cell := s.row(10, j)
 		c := &answer.Cells[cell[0]]
 		c.Observed = true
 		c.Confidence = confidence(cell[9])

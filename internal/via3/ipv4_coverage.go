@@ -18,9 +18,10 @@ type IPv4NetworkCoverage struct {
 // routing interval. A kind-4 match always contributes a Network answer. Its
 // more-specific matches can change the values but still contribute a Network.
 // A gap returns its first address and cannot certify absence of unknowns.
-func (r *Release) IPv4NetworkCoverage(ctx context.Context) (IPv4NetworkCoverage, netip.Addr, error) {
+func (r *Release) IPv4NetworkCoverage(ctx context.Context) (coverage IPv4NetworkCoverage, gap netip.Addr, resultErr error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	defer recoverNativeRead(&resultErr)
 	r.beginQuery()
 	defer r.endQuery()
 	var report IPv4NetworkCoverage

@@ -79,12 +79,25 @@ func (r *Release) beginQuery() {
 func (r *Release) releaseReference(reference *objectReference) {
 	if !reference.query && !reference.cache && !reference.router {
 		r.residentBytes -= reference.size
+		if reference.onsite != nil && reference.shard != nil {
+			extra := reference.prefixLabelBytes
+			if graph := reference.shard.lookup.graphIndex; graph != nil {
+				extra += graph.bytes
+			}
+			r.countNativeMetadata(-extra)
+		}
 		reference.size = 0
+		if reference.onsite != nil && reference.shard != nil {
+			r.native.release(reference.onsite)
+		}
 		reference.prefixLabelBytes = 0
 		reference.shard = nil
 	}
 }
 func (r *Release) endQuery() {
+	if r.native != nil {
+		r.native.pages.next()
+	}
 	for _, reference := range r.usedReferences {
 		reference.query = false
 		r.releaseReference(reference)
@@ -158,6 +171,7 @@ func (r *Release) releasePrefixMetadata(reference *objectReference) {
 	if size == 0 {
 		return
 	}
+	r.countNativeMetadata(-size)
 	reference.prefixLabelBytes = 0
 	reference.size -= size
 	r.residentBytes -= size

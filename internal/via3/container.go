@@ -43,6 +43,7 @@ type Section struct {
 type Shard struct {
 	Kind     uint16
 	Sections []Section
+	disk     *indexedShard
 	lookup   *shardLookup // immutable release-side metadata; never serialized
 }
 
@@ -138,6 +139,12 @@ func (s *Shard) unindexedRows(id uint16) ([]byte, int) {
 	return b[8:], int(u32(b, 4))
 }
 func (s *Shard) Record(index uint32) []byte {
+	if s.disk != nil {
+		if uint64(index) >= uint64(s.rowCount(3)) {
+			return nil
+		}
+		return s.row(3, index)
+	}
 	b, w := s.Rows(3)
 	// Widths are u32 on disk. Computing the end in u64 keeps the complete
 	// bound check without a variable-width division on every indexed record.

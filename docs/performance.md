@@ -59,6 +59,18 @@ event cadence and 50-FPS gate. The default readable canvas, four viewport widths
 nonoverlapping circle/label bounds and full-world export are separate UI checks.
 Idle scheduler and injected-CSS diagnostics remain ineligible for acceptance.
 
+Ordinary native lookups open the release lazily. For repeated lookups, the corpus
+builder and hosted benchmark use `PrepareNativeIndex` with private scratch. It
+verifies the immutable source inventory and writes release-specific typed
+component pages with SHA-256 digests. Each lookup checks the digest when reading
+a page. The reader bounds resident pages and admits the same logical public
+shards as the ordinary reader. Closing the reader removes the scratch file.
+
+The native report records preparation time, allocation count and bytes, source
+object reads, measured scratch bytes and whole-process peak RSS. It records
+private component-page reads separately during the full 10,000-query warmup and
+100,000 timed public lookups.
+
 ## Process and disk accounting
 
 Sample the entire process group at 100 ms, including Go, Node, decompression,

@@ -40,6 +40,7 @@ func (r *Release) releaseGraphMetadata(ref *objectReference) {
 		return
 	}
 	size := ref.shard.lookup.graphIndex.bytes
+	r.countNativeMetadata(-size)
 	ref.shard.lookup.graphIndex = nil
 	ref.size -= size
 	r.residentBytes -= size
@@ -52,11 +53,12 @@ func (r *Release) releaseGraphMetadata(ref *objectReference) {
 }
 
 func (r *Release) canRetainGraph(ref *objectReference, bytes int) bool {
-	return ref != nil && ref.query && ref.cache &&
+	return r.mayKeepNativeMetadata(bytes) && ref != nil && ref.query && ref.cache &&
 		bytes <= PublicObjectDecoded-ref.size && bytes <= PublicCacheDecoded-r.cacheBytes && bytes <= PublicLiveDecoded-r.residentBytes
 }
 
 func (r *Release) chargeGraph(ref *objectReference, bytes int) {
+	r.countNativeMetadata(bytes)
 	ref.size += bytes
 	r.residentBytes += bytes
 	r.activeBytes += bytes
@@ -101,18 +103,16 @@ func (r *Release) pathGraph(s *Shard, asn uint32) *pathGraph {
 		if !ok || end-first > 12 {
 			return nil
 		}
-		rows, width := s.Rows(3)
-		segments, _ := s.Rows(9)
-		ints, _ := s.Rows(4)
-		rows = rows[int(first)*width : int(end)*width]
+		const width = 24
+		rows := s.rowSpan(3, first, end-first)
 		nSegs, nASNs, maxPairs := 0, 0, 0
 		for offset := 0; offset < len(rows); offset += width {
 			row := rows[offset : offset+width]
-			start := int(u32(row, 8)) * 12
+			start := u32(row, 8)
 			n := int(u16(row, 12))
 			count := 0
 			for i := 0; i < n; i++ {
-				count += int(u32(segments, start+i*12+8))
+				count += int(u32(s.row(9, start+uint32(i)), 8))
 			}
 			nSegs += n
 			nASNs += count
@@ -128,14 +128,15 @@ func (r *Release) pathGraph(s *Shard, asn uint32) *pathGraph {
 		g := &pathGraph{paths: make([]graphPath, 0, end-first), segments: make([]graphSegment, 0, nSegs), values: make([]uint32, 0, nASNs), pairs: make([]uint64, 0, maxPairs)}
 		for offset := 0; offset < len(rows); offset += width {
 			row := rows[offset : offset+width]
-			start := int(u32(row, 8)) * 12
+			start := u32(row, 8)
 			path := graphPath{first: uint32(len(g.values)), segments: u16(row, 12), visibility: row[15], eligible: row[14]&1 != 0}
 			for i := 0; i < int(path.segments); i++ {
-				seg := segments[start+i*12 : start+(i+1)*12]
-				count, at := u32(seg, 8), int(u32(seg, 4))*4
+				seg := s.row(9, start+uint32(i))
+				count := u32(seg, 8)
+				ints := s.rowSpan(4, u32(seg, 4), count)
 				g.segments = append(g.segments, graphSegment{count, seg[0]})
 				for j := 0; j < int(count); j++ {
-					g.values = append(g.values, u32(ints, at+j*4))
+					g.values = append(g.values, u32(ints, j*4))
 				}
 			}
 			values := g.values[path.first:]

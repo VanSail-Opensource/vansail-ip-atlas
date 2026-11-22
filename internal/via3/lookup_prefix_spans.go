@@ -39,6 +39,7 @@ func prefixSpanBytes(labels []string) int {
 }
 
 func (r *Release) chargeIndexedPrefixes(ref *objectReference, bytes int) {
+	r.countNativeMetadata(bytes)
 	ref.prefixLabelBytes += bytes
 	ref.size += bytes
 	r.cacheBytes += bytes
@@ -64,7 +65,7 @@ func (r *Release) retainPrefixSpan(ref *objectReference, first uint32, labels []
 		newCapacity = max(1, 2*cap(spans))
 	}
 	extra := prefixSpanBytes(labels) + prefixSpanHeaderBytes*newCapacity
-	if extra > PublicObjectDecoded-ref.size || extra > PublicCacheDecoded-r.cacheBytes || extra > PublicLiveDecoded-r.residentBytes {
+	if !r.mayKeepNativeMetadata(extra) || extra > PublicObjectDecoded-ref.size || extra > PublicCacheDecoded-r.cacheBytes || extra > PublicLiveDecoded-r.residentBytes {
 		return
 	}
 	r.chargeIndexedPrefixes(ref, extra)

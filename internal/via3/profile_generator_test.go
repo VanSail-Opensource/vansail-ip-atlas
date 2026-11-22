@@ -40,6 +40,35 @@ func TestMemoryProfileLegalBoundaries(t *testing.T) {
 			}
 		}
 	}
+	objects := make(map[string][]byte, len(release.Objects))
+	for _, object := range release.Objects {
+		objects[object.Info.SHA256] = object.Bytes
+	}
+	reader, err := NewRelease(canonical(release.Pointer), canonical(release.Manifest), func(hash string) ([]byte, error) { return objects[hash], nil }, func() int64 { return 1794000000 })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	if err := reader.PrepareNativeIndex(context.Background(), t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range profile.Cases {
+		answer, err := reader.Lookup(context.Background(), c.Q)
+		if c.ExpectedError != "" {
+			if ErrorCode(err) != c.ExpectedError {
+				t.Fatalf("native indexed %s: %v", c.Name, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("native indexed %s: %v", c.Name, err)
+		}
+		b, err := json.Marshal(answer)
+		if err != nil || len(b) != c.AnswerBytes {
+			t.Fatalf("different complete indexed answer for %s: %d bytes, %v", c.Name, len(b), err)
+		}
+	}
+
 }
 
 func TestMemoryProfileAnswerCalibration(t *testing.T) {

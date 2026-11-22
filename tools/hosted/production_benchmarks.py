@@ -232,7 +232,7 @@ def validate_budget(report):
 
 def verify_native_lookup(candidate, native_report):
     """Recompute the unchanged strict 2us p95 gate from all 100000 timings."""
-    report = keys(native_report, {'timing', 'corpus_queries', 'warmups', 'corpus_sha256', 'release_id',
+    report = keys(native_report, {'index_page_reads', 'index_preparation', 'timing', 'corpus_queries', 'warmups', 'corpus_sha256', 'release_id',
         'corpus_ipv4_network_coverage', 'compressed_input_bytes', 'samples_ns', 'p50_ns', 'p95_ns', 'p99_ns', 'allocation_count', 'allocated_bytes',
         'process_peak_rss_bytes', 'temporary_disk_bytes', 'runtime_ns', 'go_version', 'object_reads', 'strata'})
     if (not valid_ipv4_coverage(report['corpus_ipv4_network_coverage']) or report['release_id'] != candidate.get('release_id') or report['timing'] != 'individual-indexed-lookups'
@@ -243,6 +243,11 @@ def verify_native_lookup(candidate, native_report):
     digest(report['release_id']); digest(report['corpus_sha256'])
     for field in ('compressed_input_bytes', 'allocation_count', 'allocated_bytes', 'process_peak_rss_bytes', 'temporary_disk_bytes', 'runtime_ns'):
         integer(report[field])
+    preparation = keys(report['index_preparation'], {'runtime_ns', 'allocated_bytes', 'allocation_count', 'source_object_reads'})
+    for value in preparation.values():
+        integer(value)
+    if report['temporary_disk_bytes'] >= LIMIT_CONTRACT['scratch_bytes']:
+        fail()
     samples = report['samples_ns']
     if type(samples) is not list or len(samples) != 100000:
         fail()
@@ -252,13 +257,14 @@ def verify_native_lookup(candidate, native_report):
     for rank in (50, 95, 99):
         if integer(report[f'p{rank}_ns']) != ordered[1000*rank-1]:
             fail()
-    reads = keys(report['object_reads'], {'before_warmup', 'after_warmup', 'before_timed', 'after_timed', 'warmup', 'timed'})
-    for value in reads.values():
-        integer(value)
-    if (not reads['before_warmup'] <= reads['after_warmup'] <= reads['before_timed'] <= reads['after_timed']
-            or reads['warmup'] != reads['after_warmup']-reads['before_warmup']
-            or reads['timed'] != reads['after_timed']-reads['before_timed']):
-        fail()
+    for counter in ('object_reads', 'index_page_reads'):
+        reads = keys(report[counter], {'before_warmup', 'after_warmup', 'before_timed', 'after_timed', 'warmup', 'timed'})
+        for value in reads.values():
+            integer(value)
+        if (not reads['before_warmup'] <= reads['after_warmup'] <= reads['before_timed'] <= reads['after_timed']
+                or reads['warmup'] != reads['after_warmup']-reads['before_warmup']
+                or reads['timed'] != reads['after_timed']-reads['before_timed']):
+            fail()
     strata = report['strata']
     if type(strata) is not list or len(strata) != len(CORPUS_STRATA):
         fail()

@@ -199,7 +199,9 @@ func TestScratchLimitAndIndivisibleASNFailWithoutTruncation(t *testing.T) {
 	assertClean(t, opts.Workspace)
 	opts = testOptions(t)
 	opts.Limits.PartitionRecords = 1
-	rows := []via3.PublicRecord{{Version: 3, Kind: 8, ASN: 13335, ASNAggregate: &via3.ASNData{Name: "Network"}}, {Version: 3, Kind: 13, ASN: 13335, Tier1: &via3.TierData{NetworkClass: 0, Stability: 0}}}
+	// Different fact groups now partition independently. Two same-kind facts
+	// for one ASN still cannot split across leaves or be truncated to fit.
+	rows := []via3.PublicRecord{{Version: 3, Kind: 12, ASN: 13335, Relationship: &via3.RelationshipData{To: 3356, Relation: 1, Observed: true, Inferred: true}}, {Version: 3, Kind: 12, ASN: 13335, Relationship: &via3.RelationshipData{To: 174, Relation: 1, Observed: true, Inferred: true}}}
 	if _, err := Build(context.Background(), opts, producer(rows)); err == nil {
 		t.Fatal("single-ASN records silently truncated")
 	}

@@ -239,10 +239,16 @@ func TestClassifyTotalsMatchCompletedFrames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range paths {
-		if path == "" {
-			t.Fatal("fixture must cover IPv4, IPv6 and ASN runs")
+	var spaces [3]bool
+	for _, run := range paths {
+		path := run.path
+		space := 0
+		if run.asn {
+			space = 2
+		} else if run.prefix.Addr().Is6() {
+			space = 1
 		}
+		spaces[space] = true
 		r, err := openRun(path, c.options.Limits.RecordBytes)
 		if err != nil {
 			t.Fatal(err)
@@ -254,6 +260,9 @@ func TestClassifyTotalsMatchCompletedFrames(t *testing.T) {
 			} else if err != nil {
 				t.Fatal(err)
 			}
+			if run.group == allFacts || !run.group.contains(r.record.Kind) {
+				t.Fatal("classification mixed independent fact groups")
+			}
 			measured.records++
 			measured.bytes += r.row.logicalBytes + 512
 		}
@@ -261,6 +270,9 @@ func TestClassifyTotalsMatchCompletedFrames(t *testing.T) {
 		if c.partitionSizes[path] != measured {
 			t.Fatalf("classification totals differ from completed frames: got %+v, want %+v", c.partitionSizes[path], measured)
 		}
+	}
+	if spaces != [3]bool{true, true, true} {
+		t.Fatal("fixture must cover IPv4, IPv6 and ASN runs", spaces)
 	}
 }
 

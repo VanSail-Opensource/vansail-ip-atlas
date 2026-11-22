@@ -226,6 +226,24 @@ test('Go and worker canonical lookup answers match exactly', async t => {
   reader.clear()
 })
 
+test('independent fact partitions preserve complete Go/worker lookup and Class C answers', async t => {
+  const fixture = JSON.parse(readFileSync(new URL('../../fixtures/bin/grouped-via3.json', import.meta.url), 'utf8'))
+  const objects = new Map(fixture.objects.map(object => [`/_atlas/objects/${object.info.sha256}.via3`, new Uint8Array(Buffer.from(object.base64, 'base64'))]))
+  objects.set('/_atlas/current.json', new TextEncoder().encode(canonical(fixture.pointer)))
+  objects.set(fixture.pointer.manifest_path, new TextEncoder().encode(stable(fixture.manifest)))
+  const reader = new AtlasReader(path => {
+    const data = objects.get(path)
+    return Promise.resolve(new Response(data, { status: data ? 200 : 404, headers: { 'content-length': String(data?.length ?? 0) } }))
+  }, () => fixture.clock)
+  try {
+    for (const vector of fixture.vectors) await t.test(vector.q, async () => {
+      assert.deepEqual(await reader.lookup(vector.q), vector.answer)
+      assert.deepEqual(await reader.lookup(vector.q), vector.answer, 'Cached and repeated grouped lookups agree')
+      assert.deepEqual(await reader.classC(vector.q), vector.classC)
+    })
+  } finally { reader.clear() }
+})
+
 test('unknown query only loads the indexed router, not every object', async () => {
   const paths = []
   const reader = new AtlasReader((path, options) => { paths.push(path); return response(path, options) }, () => golden.clock)

@@ -268,20 +268,8 @@ func Build(ctx context.Context, options Options, produce Producer) (Candidate, e
 			return result, c.cause(err)
 		}
 		finishPartition := c.observeBuildStage(StagePartition)
-		for i, path := range groups {
-			if path == "" {
-				continue
-			}
-			var scope scope
-			if i == 0 {
-				scope.prefix = netip.MustParsePrefix("0.0.0.0/0")
-			} else if i == 1 {
-				scope.prefix = netip.MustParsePrefix("::/0")
-			} else {
-				scope.asn = true
-				scope.last = ^uint32(0)
-			}
-			if err := c.partition(path, scope); err != nil {
+		for _, run := range groups {
+			if err := c.partition(run.path, run.scope); err != nil {
 				finishPartition(false)
 				return result, c.cause(err)
 			}
@@ -785,11 +773,11 @@ func (c *compiler) merge(runs []string) (string, error) {
 	}
 }
 
-func (c *compiler) classify(path string) ([3]string, error) {
-	var paths [3]string
-	var sizes [3]partitionSize
-	var files [3]*os.File
-	var writers [3]*privateRunWriter
+func (c *compiler) classify(path string) ([]classifiedRun, error) {
+	var paths [3 * factGroupCount]string
+	var sizes [3 * factGroupCount]partitionSize
+	var files [3 * factGroupCount]*os.File
+	var writers [3 * factGroupCount]*privateRunWriter
 	defer func() {
 		for _, w := range writers {
 			if w != nil {
@@ -804,14 +792,14 @@ func (c *compiler) classify(path string) ([3]string, error) {
 	}()
 	r, err := openRun(path, c.options.Limits.RecordBytes)
 	if err != nil {
-		return paths, err
+		return nil, err
 	}
 	defer r.file.Close()
 	for {
 		if err := r.next(); err == io.EOF {
 			break
 		} else if err != nil {
-			return paths, err
+			return nil, err
 		}
 		record := r.record
 		i := 0
@@ -820,19 +808,24 @@ func (c *compiler) classify(path string) ([3]string, error) {
 		} else if record.Prefix.Addr().Is6() {
 			i = 1
 		}
+		group := groupForKind(record.Kind)
+		if group == allFacts {
+			return nil, errFactGroup
+		}
+		i = i*factGroupCount + int(group) - 1
 		if files[i] == nil {
 			paths[i] = c.next()
 			files[i], err = os.OpenFile(paths[i], os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 			if err != nil {
-				return paths, err
+				return nil, err
 			}
 			writers[i], err = newPrivateRunWriter(c, files[i])
 			if err != nil {
-				return paths, err
+				return nil, err
 			}
 		}
 		if err := c.writeRow(writers[i], r.row); err != nil {
-			return paths, err
+			return nil, err
 		}
 		sizes[i].records++
 		sizes[i].bytes += r.row.logicalBytes + 512
@@ -841,22 +834,29 @@ func (c *compiler) classify(path string) ([3]string, error) {
 	for i, f := range files {
 		if f != nil {
 			if err := writers[i].Flush(); err != nil {
-				return paths, err
+				return nil, err
 			}
 			if err := f.Close(); err != nil {
-				return paths, err
+				return nil, err
 			}
 			c.rememberPartitionSize(paths[i], sizes[i])
 		}
 	}
 	r.file.Close()
 	if err := c.remove(path); err != nil {
-		return paths, err
+		return nil, err
 	}
-	return paths, nil
+	var runs []classifiedRun
+	for i, path := range paths {
+		if path != "" {
+			runs = append(runs, classifiedRun{path, classifiedScope(i)})
+		}
+	}
+	return runs, nil
 }
 
 type scope struct {
+	group       factGroup
 	prefix      netip.Prefix
 	asn         bool
 	first, last uint32
@@ -884,7 +884,7 @@ func (s scope) children() (scope, scope, error) {
 			return scope{}, scope{}, errors.New("single ASN cannot be repacked without truncation")
 		}
 		mid := s.first + (s.last-s.first)/2
-		return scope{asn: true, first: s.first, last: mid}, scope{asn: true, first: mid + 1, last: s.last}, nil
+		return scope{group: s.group, asn: true, first: s.first, last: mid}, scope{group: s.group, asn: true, first: mid + 1, last: s.last}, nil
 	}
 	// A /24 is indivisible because its sparse profile owns all 256 cells.
 	ceiling := s.prefix.Addr().BitLen()
@@ -906,7 +906,7 @@ func (s scope) children() (scope, scope, error) {
 		a[(n-1)/8] |= 1 << uint(7-(n-1)%8)
 		right = netip.AddrFrom16(a)
 	}
-	return scope{prefix: left}, scope{prefix: netip.PrefixFrom(right, n)}, nil
+	return scope{group: s.group, prefix: left}, scope{group: s.group, prefix: netip.PrefixFrom(right, n)}, nil
 }
 
 func (c *compiler) partitionFresh(path string, s scope) error {
@@ -930,6 +930,10 @@ func (c *compiler) partitionFresh(path string, s scope) error {
 			} else if err != nil {
 				r.file.Close()
 				return err
+			}
+			if !s.group.contains(r.record.Kind) {
+				r.file.Close()
+				return errFactGroup
 			}
 			cost := r.row.logicalBytes + 512
 			if len(records) >= c.options.Limits.PartitionRecords || size+cost > c.options.Limits.PartitionBytes {
@@ -1259,6 +1263,10 @@ func (c *compiler) router() error {
 		}
 		return directory[i].SHA256 < directory[j].SHA256
 	})
+	routes, err := composeRoutes(c.routes, uint64(len(directory)))
+	if err != nil {
+		return err
+	}
 	ids := map[string]uint32{}
 	var objectRows [][]byte
 	for i, info := range directory {
@@ -1270,24 +1278,8 @@ func (c *compiler) router() error {
 		objectRows = append(objectRows, row)
 		ids[info.SHA256] = uint32(i)
 	}
-	sort.Slice(c.routes, func(i, j int) bool {
-		a, b := c.routes[i], c.routes[j]
-		if a.prefix.IsValid() != b.prefix.IsValid() {
-			return a.prefix.IsValid()
-		}
-		if a.prefix.IsValid() {
-			if a.prefix.Addr().Is4() != b.prefix.Addr().Is4() {
-				return a.prefix.Addr().Is4()
-			}
-			if a.prefix.Addr() != b.prefix.Addr() {
-				return a.prefix.Addr().Less(b.prefix.Addr())
-			}
-			return a.prefix.Bits() < b.prefix.Bits()
-		}
-		return a.asns[0] < b.asns[0]
-	})
 	var rows, integers, prefixes, asns [][]byte
-	for _, r := range c.routes {
+	for _, r := range routes {
 		row := make([]byte, 16)
 		binary.LittleEndian.PutUint32(row, uint32(len(integers)))
 		binary.LittleEndian.PutUint16(row[4:], uint16(len(r.destinations)))

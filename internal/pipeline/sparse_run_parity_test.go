@@ -16,10 +16,9 @@ import (
 	"vansail-ip-atlas/internal/via3"
 )
 
-// This fixture originally froze dense private-run parity at 34ebd97. The
-// public bytes are re-frozen for the explicit schema5 RPKI clock migration.
-// Counts/partition peaks remain unchanged; the added logical JSON clock fields
-// also change sort-buffer packing, whose exact bound remains asserted below.
+// The grouped partition layout changes public identities, not lookup facts.
+// The answer digest excludes only releaseId and is shared with the original
+// ungrouped schema5 compiler; inventory and logical bounds remain exact.
 type sparseRunParityGolden struct {
 	Release, Manifest, Inventory, Answers string
 	Files, SortRuns, Partitions           int64
@@ -28,14 +27,14 @@ type sparseRunParityGolden struct {
 
 var sparseRunParityGoldens = map[string]sparseRunParityGolden{
 	"count": {
-		Release: "ee8abcd35e20e164c518e9fc05741aeb3554728595bb9d8b53e49c5acf0ac864", Manifest: "f7ab98113a1c41b6a1f789228adab58624d3f15fa6df27b770b90d154d504f60",
-		Inventory: "ad85b942bd217d299df3fc2e12a21f72f866bd1ea61a8b52d8f6faa9435e212a", Answers: "ad752a466bc848b3bd063484fb1037a1566920b607d08a48ecf509c5bb8385b3",
-		Files: 138, SortRuns: 43, Partitions: 84, SortPeak: 8115, PartitionPeak: 15360,
+		Release: "53eb9f2b1c6154439104f8769478aef96bf21adc783199b99b88c1ad12434cdb", Manifest: "ec14f92377754b990a2d2c0e0a91de5b8f78325155fb39ef2a83229598d38e85",
+		Inventory: "37942b060209e584217fd9c6fc2873242920484d2766377c3b0a1b48d9b15627", Answers: "1311fc3c126452fc094777e4787e736bd8ac3ff7139373c0a532c956aa9ab141",
+		Files: 139, SortRuns: 43, Partitions: 91, SortPeak: 8115, PartitionPeak: 15360,
 	},
 	"bytes": {
-		Release: "9b9b0f9f5512288abdb66e05ec84b6caf2b31c81aab7cdbc7e43fc970bbe72f7", Manifest: "0fca65d219e0c6a9039f63c27ea18861da9730e909899870c15d2bbcc9c844eb",
-		Inventory: "80e744b3b0c697b3090208c2be4e286305dcc784612e538e539ee3e71f6bd5a3", Answers: "0ee045b7a941f2e1d9c215068648852e0f75e6697b71a0c4fc249caba7eb017c",
-		Files: 154, SortRuns: 43, Partitions: 100, SortPeak: 8115, PartitionPeak: 9432,
+		Release: "583e52cb5ba398de32db717f31006dbe4a4f819b252490c989ec974dbc933039", Manifest: "e1a8ba7dad52a5eea37130602b91e6094d71a318e3173a350980112edc889d3a",
+		Inventory: "162d4f6d129da3e594a77a11c4941b28aa053224ba5a8ae5143551f98ea774b5", Answers: "1311fc3c126452fc094777e4787e736bd8ac3ff7139373c0a532c956aa9ab141",
+		Files: 155, SortRuns: 43, Partitions: 107, SortPeak: 8115, PartitionPeak: 9432,
 	},
 }
 
@@ -125,6 +124,7 @@ func sparseRunPublicAnswers(t *testing.T, options Options) string {
 		if err != nil {
 			t.Fatal(query, err)
 		}
+		answer.ReleaseID = ""
 		if err = encoder.Encode(answer); err != nil {
 			t.Fatal(err)
 		}
@@ -183,7 +183,7 @@ func TestSparseRunPublicReleaseParity(t *testing.T) {
 					want.SortPeak = 8096
 				}
 				if got != want {
-					t.Fatalf("public release or original logical partitioning changed:\n got %+v\nwant %+v", got, want)
+					t.Fatalf("grouped public release or logical bounds changed:\n got %+v\nwant %+v", got, want)
 				}
 				assertClean(t, options.Workspace)
 			})
@@ -259,9 +259,16 @@ func TestSparseRunRetainsOriginalSortByteBoundary(t *testing.T) {
 }
 
 func TestSparseRunRetainsOriginalPartitionByteBoundary(t *testing.T) {
-	row, denseBytes := sparseRunBoundaryRow(t)
-	tier := via3.PublicRecord{Version: 3, Kind: 13, ASN: row.ASN, Tier1: &via3.TierData{}}
-	data, err := json.Marshal(tier)
+	// Keep the indivisible boundary within one fact group. Independent ASN
+	// kinds no longer need to occupy the same bounded partition.
+	row := via3.PublicRecord{Version: 3, Kind: 12, ASN: 13335, Relationship: &via3.RelationshipData{To: 3356, Relation: 1, Observed: true, Inferred: true}}
+	other := via3.PublicRecord{Version: 3, Kind: 12, ASN: 13335, Relationship: &via3.RelationshipData{To: 174, Relation: 1, Observed: true, Inferred: true}}
+	data, err := json.Marshal(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	denseBytes := int64(len(data))
+	data, err = json.Marshal(other)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,10 +276,10 @@ func TestSparseRunRetainsOriginalPartitionByteBoundary(t *testing.T) {
 	for _, delta := range []int64{0, -1} {
 		t.Run(fmt.Sprint(delta), func(t *testing.T) {
 			options := testOptions(t)
-			options.Limits.RecordBytes = denseBytes
+			options.Limits.RecordBytes = max(1024, denseBytes)
 			options.Limits.SortBytes = logicalBytes
 			options.Limits.PartitionBytes = logicalBytes + delta
-			candidate, err := Build(context.Background(), options, producer([]via3.PublicRecord{row, tier}))
+			candidate, err := Build(context.Background(), options, producer([]via3.PublicRecord{row, other}))
 			if delta == 0 {
 				if err != nil || candidate.Stats.Partitions != 1 || candidate.Stats.PartitionBufferPeak != uint64(logicalBytes) {
 					t.Fatal("exact original partition boundary changed", err)

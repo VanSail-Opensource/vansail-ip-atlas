@@ -78,6 +78,22 @@ func TestCompiledReviewOriginDestinationIsAnIPRoute(t *testing.T) {
 	}
 }
 
+func TestCompiledReviewGroupRejectsUnrelatedFacts(t *testing.T) {
+	s, records := compiledReviewGeo()
+	c, entry, _ := compiledReviewFixture(t, records, s)
+	s.group = qualityFacts
+	if err := c.restoreCompiledPartition(entry, s); !errors.Is(err, errFactGroup) {
+		t.Fatal("restored location facts into quality group", err)
+	}
+	if len(c.objects) != 0 || len(c.routes) != 0 {
+		t.Fatal("unrelated facts escaped group validation")
+	}
+	s.group = locationFacts
+	if err := c.restoreCompiledPartition(entry, s); err != nil {
+		t.Fatal("location facts with a dictionary failed group validation", err)
+	}
+}
+
 func TestCompiledReviewRejectsScopeAndReferenceMutation(t *testing.T) {
 	for _, mutation := range []string{"object-scope", "route-outside-parent", "duplicate-route", "missing-dictionary", "orphan-object", "object-kind", "destination-kind", "noncanonical-scope"} {
 		t.Run(mutation, func(t *testing.T) {
@@ -352,13 +368,16 @@ func TestCompiledReviewCommittedHitBindsActualInputAndPrefixProvider(t *testing.
 			t.Fatal("compiled replay or rebuilt router bytes differ", err)
 		}
 	}
-	for _, mutation := range []string{"provider", "input", "unbound-provider"} {
+	for _, mutation := range []string{"provider", "input", "unbound-provider", "fact-group"} {
 		t.Run(mutation, func(t *testing.T) {
 			current := compiledReviewNext(warm, mutation)
 			var calls int
 			current.options.prefixProvider = provider("11.0.0.0/24", &calls)
 			rows := append([]via3.PublicRecord(nil), records...)
+			partitionScope := s
 			switch mutation {
+			case "fact-group":
+				partitionScope.group = aggregateFacts
 			case "provider":
 				current.options.prefixProvider = provider("12.0.0.0/24", &calls)
 				current.options.partitionDependencies = func(context.Context) ([32]byte, error) { return [32]byte{4}, nil }
@@ -367,13 +386,13 @@ func TestCompiledReviewCommittedHitBindsActualInputAndPrefixProvider(t *testing.
 			case "unbound-provider":
 				current.options.partitionDependencies = nil
 			}
-			if err := current.partition(compiledReviewRun(t, current, rows), s); err != nil || calls == 0 {
+			if err := current.partition(compiledReviewRun(t, current, rows), partitionScope); err != nil || calls == 0 {
 				t.Fatal("changed or unbound semantic input reused compiled output", err, calls)
 			}
 			if err := current.router(); err != nil {
 				t.Fatal(err)
 			}
-			if mutation != "unbound-provider" && reflect.DeepEqual(current.objects, cold.objects) {
+			if (mutation == "provider" || mutation == "input") && reflect.DeepEqual(current.objects, cold.objects) {
 				t.Fatal("changed provider or input produced stale objects")
 			}
 		})

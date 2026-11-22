@@ -350,7 +350,8 @@ func (c *compiler) partition(path string, s scope) error {
 		Prefix              netip.Prefix
 		ASN                 bool
 		First, Last         uint32
-	}{hash, dependency, info.Size(), s.prefix, s.asn, s.first, s.last})
+		Group               factGroup
+	}{hash, dependency, info.Size(), s.prefix, s.asn, s.first, s.last, s.group})
 	if err != nil {
 		return err
 	}
@@ -415,6 +416,11 @@ func (c *compiler) restoreCompiledPartition(entry *compiledPartitionEntry, paren
 	}
 	infos := make(map[string]via3.ObjectInfo, len(entry.Objects))
 	for _, info := range entry.Objects {
+		// Dictionaries can be dependencies of several groups. All fact objects,
+		// including dependent prefix pages, must belong to this subtree.
+		if info.Kind != 14 && !parent.group.contains(info.Kind) {
+			return errFactGroup
+		}
 		infos[info.SHA256] = info
 	}
 	var prefixes []netip.Prefix

@@ -56,7 +56,7 @@ func cloneSpatialFixture(t *testing.T, state intelligence.BuildState) intelligen
 }
 
 func TestSpatialReuseMixedChangesMatchColdMaterialization(t *testing.T) {
-	for _, change := range []string{"city", "global_usage", "relationship", "withdrawal"} {
+	for _, change := range []string{"city", "anycast", "global_usage", "relationship", "withdrawal"} {
 		t.Run(change, func(t *testing.T) {
 			state, policy, _, _, _ := intelligenceFixture(t)
 			// Keep one independently removable side source. Its ASN usage is a
@@ -97,6 +97,13 @@ func TestSpatialReuseMixedChangesMatchColdMaterialization(t *testing.T) {
 					if record.Geo != nil {
 						record.Geo.City = "Changed city"
 						record.Geo.PhysicalCountry = "AU"
+						break
+					}
+				}
+			case "anycast":
+				for _, record := range changed.Sources[0].Records {
+					if record.Usage != nil && record.Usage.Evidence.Anycast != nil {
+						*record.Usage.Evidence.Anycast = false
 						break
 					}
 				}

@@ -16,6 +16,7 @@ import (
 // positive VRP row. It is an engineering input, never source certification.
 // Missing or partial VRP snapshots must leave VRPComplete false.
 type MaterializationInputs struct {
+	locations                              *locationProjection
 	VRPComplete                            bool
 	RPKIObservedAt, RPKICoverageValidUntil time.Time
 	scope                                  netip.Prefix
@@ -349,10 +350,11 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 			}
 		}
 		var mappingScope netip.Prefix
+		var locations *locationProjection
 		if len(inputs) == 1 {
-			mappingScope = inputs[0].scope
+			mappingScope, locations = inputs[0].scope, inputs[0].locations
 		}
-		if err := mappingProducer(mappings, policy, clock, mappingLengths, true, mappingScope)(ctx, emit); err != nil {
+		if err := mappingProducer(mappings, policy, clock, mappingLengths, true, mappingScope, locations)(ctx, emit); err != nil {
 			return err
 		}
 		qualityWriter := qualityBlockWriter{emit: emit}

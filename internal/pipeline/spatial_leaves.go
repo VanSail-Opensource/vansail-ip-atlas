@@ -9,12 +9,13 @@ import (
 )
 
 type bulkLeafReuse struct {
-	domain       string
-	dependencies [32]byte
-	spool        *bulkSpool
-	public       func(via3.PublicRecord) error
-	risk         func(spatialRiskEvent) error
-	writer       *spatialStreamWriter
+	domain         string
+	dependencies   [32]byte
+	locationPolicy [32]byte
+	spool          *bulkSpool
+	public         func(via3.PublicRecord) error
+	risk           func(spatialRiskEvent) error
+	writer         *spatialStreamWriter
 }
 
 func (r *bulkLeafReuse) recordRisk(event spatialRiskEvent) error {
@@ -113,6 +114,11 @@ func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, cove
 				}
 				if _, err := s.reuse.Retain(ctx, entry, nil); err != nil {
 					return err
+				}
+				if reuse.locationPolicy != ([32]byte{}) {
+					if err := s.retainLocations(ctx, bucket, reuse.locationPolicy); err != nil {
+						return err
+					}
 				}
 				leaves = append(leaves, bucket)
 				return nil

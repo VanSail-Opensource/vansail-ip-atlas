@@ -433,16 +433,29 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 		riskPhase(true)
 		spatialPhase := spool.stage(ctx, StageSpatial)
 		var publicReuse *bulkLeafReuse
+		var locationPolicy [32]byte
 		if spool.reuse != nil {
+			locationPolicy, err = spatialReuseKey("location-policy", struct {
+				Policy     intelligence.Policy
+				PolicyHash [32]byte
+			}{policy, state.PolicyHash})
+			if err != nil {
+				return err
+			}
 			dependencies.Contexts = contexts
 			key, keyErr := spatialReuseKey("public-dependencies", dependencies)
 			if keyErr != nil {
 				return keyErr
 			}
-			publicReuse = &bulkLeafReuse{domain: "public", dependencies: key, spool: spool, public: emit}
+			publicReuse = &bulkLeafReuse{domain: "public", dependencies: key, locationPolicy: locationPolicy, spool: spool, public: emit}
 		}
-		spatial, err = spool.leavesReusing(ctx, spatial, true, publicReuse, func(bucket *bulkBucket, part intelligence.BuildState) error {
-			return IntelligenceProducer(part, policy, clock, MaterializationInputs{VRPComplete: completeVRP, RPKIObservedAt: observedAt, RPKICoverageValidUntil: coverageValidUntil, verifiedEmptyVRP: completeVRP, scope: bucket.prefix, contexts: contexts, resolver: relations, encodedLengths: bucket.recordBytes})(ctx, func(record via3.PublicRecord) error {
+		spatial, err = spool.leavesReusing(ctx, spatial, true, publicReuse, func(bucket *bulkBucket, part intelligence.BuildState) (visitErr error) {
+			locations, err := spool.openLocations(ctx, bucket, locationPolicy)
+			if err != nil {
+				return err
+			}
+			defer func() { visitErr = errors.Join(visitErr, locations.close()) }()
+			err = IntelligenceProducer(part, policy, clock, MaterializationInputs{locations: locations, VRPComplete: completeVRP, RPKIObservedAt: observedAt, RPKICoverageValidUntil: coverageValidUntil, verifiedEmptyVRP: completeVRP, scope: bucket.prefix, contexts: contexts, resolver: relations, encodedLengths: bucket.recordBytes})(ctx, func(record via3.PublicRecord) error {
 				if record.Kind >= 8 && record.Kind != 9 {
 					return nil
 				}
@@ -454,6 +467,10 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 				spool.publicRows++
 				return emit(record)
 			})
+			if err != nil {
+				return err
+			}
+			return locations.finish(ctx)
 		})
 		spatialPhase(err == nil)
 		if err != nil {

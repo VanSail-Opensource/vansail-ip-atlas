@@ -43,12 +43,12 @@ func BuildMappings(ctx context.Context, options Options, state intelligence.Buil
 // Empty rows and explicit coordinate tombstones prevent unknown/conflicting
 // child facts from falling through to stale affirmative parent values.
 func MappingProducer(state intelligence.BuildState, policy intelligence.Policy, clock time.Time) Producer {
-	return mappingProducer(state, policy, clock, nil, false, netip.Prefix{})
+	return mappingProducer(state, policy, clock, nil, false, netip.Prefix{}, nil)
 }
 
 // mappingProducer accepts lengths only from IntelligenceProducer's owned,
 // already bounded mapping subset. Exported entry points always encode inputs.
-func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, clock time.Time, encodedLengths []int, omitInherited bool, scope netip.Prefix) Producer {
+func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, clock time.Time, encodedLengths []int, omitInherited bool, scope netip.Prefix, locations *locationProjection) Producer {
 	return func(ctx context.Context, emit func(via3.PublicRecord) error) error {
 		if err := checkOwnedRecordLengths(state, encodedLengths); err != nil {
 			return err
@@ -177,6 +177,7 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 			geo                  via3.GeoData
 			coords               via3.CoordinateData
 			usage                [4]uint8
+			anycast              bool
 		}
 		var packed locationRows
 		emitLocation := emit
@@ -207,27 +208,20 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 			applicableGeo = append(applicableGeo, localGeo...)
 			applicableUsage = append(applicableUsage, localUsage...)
 			u := intelligence.FuseUsage(applicableUsage)
-			g, err := intelligence.FuseGeo(policy, applicableGeo, u.Anycast != nil && *u.Anycast)
+			geoParent := locationValue{coordinates: via3.CoordinateData{Unknown: true}}
+			parentAnycast := false
+			if len(ancestors) > 0 {
+				parent := ancestors[len(ancestors)-1]
+				geoParent = locationValue{parent.geo, parent.coords}
+				parentAnycast = parent.anycast
+			}
+			current.anycast = u.Anycast != nil && *u.Anycast
+			changed := len(localGeo) != 0 || current.anycast != parentAnycast
+			resolved, err := locations.resolve(prefix, policy, applicableGeo, current.anycast, changed, geoParent)
 			if err != nil {
 				return err
 			}
-			geoRecord := via3.GeoData{}
-			if g.PhysicalCountry != nil {
-				geoRecord.Country = *g.PhysicalCountry
-			}
-			if g.RegistrationCountry != nil {
-				geoRecord.RegistrationCountry = *g.RegistrationCountry
-			}
-			if g.Region != nil {
-				geoRecord.Region = *g.Region
-			}
-			if g.City != nil {
-				geoRecord.City = *g.City
-			}
-			coordinates := via3.CoordinateData{Unknown: true}
-			if g.Coordinates != nil {
-				coordinates = via3.CoordinateData{Latitude: g.Coordinates.Latitude, Longitude: g.Coordinates.Longitude, Precision: g.Coordinates.Precision}
-			}
+			geoRecord, coordinates := resolved.geo, resolved.coordinates
 			typeID, _ := usageType(u.Type)
 			assignmentID, _ := assignmentType(u.Assignment)
 			current.geo, current.coords = geoRecord, coordinates

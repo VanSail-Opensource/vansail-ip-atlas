@@ -131,7 +131,7 @@ func (p *nativePages) page(number int) []byte {
 		if (p.pages+1)*rowPageSize+p.borrowed > p.live*rowPageSize {
 			if p.owner != nil && p.owner.native != nil {
 				c := &p.owner.native.facts
-				if c.active && c.touched == p.epoch {
+				if c.active {
 					panic(nativeReadError{retryWithoutComponents})
 				}
 			}
@@ -180,7 +180,7 @@ func (p *nativePages) span(offset int64, n int) []byte {
 	if n > p.live*rowPageSize-p.pages*rowPageSize-p.borrowed {
 		if p.owner != nil && p.owner.native != nil {
 			c := &p.owner.native.facts
-			if c.active && c.touched == p.epoch {
+			if c.active {
 				panic(nativeReadError{retryWithoutComponents})
 			}
 		}

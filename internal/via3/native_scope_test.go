@@ -1,0 +1,70 @@
+package via3
+
+import (
+	"context"
+	"net/netip"
+	"reflect"
+	"testing"
+)
+
+func TestNativePrefixScopesRespectNestedSourcesAndMissingRanges(t *testing.T) {
+	ctx := context.Background()
+	partition := PartitionInput{Partition: "all", PrefixRoutes: []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0")}}
+	for _, fact := range []struct {
+		prefix, country string
+		inherited       bool
+	}{
+		{"0.0.0.0/0", "CA", true}, {"203.0.0.0/16", "US", true}, {"203.0.113.0/24", "DE", false}, {"203.0.113.1/32", "JP", false}, {"203.0.114.0/24", "GB", false},
+		{"2001:db8::/32", "CA", true}, {"2001:db8:100::/48", "US", false}, {"2001:db8:100::1/128", "JP", false},
+	} {
+		partition.Records = append(partition.Records, PublicRecord{Version: 3, Kind: 2, Prefix: netip.MustParsePrefix(fact.prefix), Exact: !fact.inherited && netip.MustParsePrefix(fact.prefix).IsSingleIP(), Inherited: fact.inherited, Geo: &GeoData{Country: fact.country}})
+	}
+	const clock = 1700000000
+	built, err := Build(ctx, CompileInput{Mode: "synthetic", Clock: clock, ValidUntil: clock + 3600, Partitions: []PartitionInput{partition}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	objects := map[string][]byte{}
+	for _, o := range built.Objects {
+		objects[o.Info.SHA256] = o.Bytes
+	}
+	open := func() *Release {
+		r, err := NewRelease(canonical(built.Pointer), canonical(built.Manifest), func(h string) ([]byte, error) { return objects[h], nil }, func() int64 { return clock })
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	normal, index := open(), open()
+	defer normal.Close()
+	defer index.Close()
+	if err := index.PrepareNativeIndex(ctx, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	queries := []string{"0.0.0.0", "255.255.255.255", "203.0.112.255", "203.0.113.0", "203.0.113.1", "203.0.113.2", "203.0.113.255", "203.0.114.0", "203.0.114.255", "203.0.115.0", "::", "2001:db7:ffff:ffff:ffff:ffff:ffff:ffff", "2001:db8::", "2001:db8:ff:ffff:ffff:ffff:ffff:ffff", "2001:db8:100::", "2001:db8:100::1", "2001:db8:100::2", "2001:db8:101::", "2001:db9::", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"}
+	for pass := 0; pass < 3; pass++ {
+		if pass == 2 {
+			index.native.facts.trim(0)
+			if len(index.native.facts.slots) != 0 {
+				t.Fatal("inactive component retained")
+			}
+		}
+		for _, q := range queries {
+			want, err := normal.Lookup(ctx, q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := index.Lookup(ctx, q)
+			if err != nil || !reflect.DeepEqual(got, want) {
+				t.Fatalf("query %s pass %d: %v", q, pass, err)
+			}
+			mutateLookupValue(reflect.ValueOf(&got).Elem())
+		}
+		for i, j := 0, len(queries)-1; i < j; i, j = i+1, j-1 {
+			queries[i], queries[j] = queries[j], queries[i]
+		}
+	}
+	if index.native.facts.bytes == 0 {
+		t.Fatal("test did not exercise cached scopes")
+	}
+}

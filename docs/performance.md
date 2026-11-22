@@ -65,8 +65,17 @@ verifies the immutable source inventory and writes release-specific typed
 component pages with SHA-256 digests. Each lookup checks the digest when reading
 a page. The index stores the first key of a searchable page when it fits the
 cache budget and reads the same key from disk under memory pressure. Announced
-prefix rows carry their canonical display text. The reader bounds resident pages and admits the same logical public
-shards as the ordinary reader. Closing the reader removes the scratch file.
+prefix rows carry their canonical display text. The reader bounds resident
+pages and admits the same logical public shards as the ordinary reader.
+Closing the reader removes the scratch file.
+
+Prepared readers can reuse individual verified rows, dictionary labels,
+prefix lists and per-origin BGP path components. A cached address range
+must have the same longest match across both original prefix indexes.
+All retained components share at most 16 MiB of the existing decoded cache,
+with a 256 KiB ceiling per component. Each lookup re-admits the referenced
+source objects and builds a caller-owned result. If optional components
+crowd out required pages, the ordinary operation retries without them.
 
 The native report records preparation time, allocation count and bytes, source
 object reads, measured scratch bytes and whole-process peak RSS. It records

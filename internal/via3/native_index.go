@@ -174,6 +174,13 @@ func (r *Release) PrepareNativeIndex(ctx context.Context, directory string) erro
 	if err := r.current(); err != nil {
 		return err
 	}
+	stat, err := reader.Stat()
+	if err != nil {
+		return err
+	}
+	if !stat.Mode().IsRegular() || stat.Size() != index.size {
+		return fail("integrity")
+	}
 	index.pages = &nativePages{owner: r, file: reader, total: index.size, dir: stream.pages, routerBytes: r.routerBytes}
 	index.pages.setMetadata(index.fenceBytes)
 	index.facts.pages = index.pages

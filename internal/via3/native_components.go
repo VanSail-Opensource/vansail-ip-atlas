@@ -46,8 +46,8 @@ type nativeComponents struct {
 	slots       map[componentKey]*componentEntry
 	first, last *componentEntry
 	bytes       int
+	peakSlots   int
 	active      bool
-	touched     uint64
 }
 
 var retryWithoutComponents = errors.New("native component working set")
@@ -79,7 +79,6 @@ func (c *nativeComponents) use(e *componentEntry) {
 		c.last = e
 	}
 	e.epoch = c.pages.epoch
-	c.touched = e.epoch
 }
 func (c *nativeComponents) get(k componentKey) (any, bool) {
 	if !c.active {
@@ -103,6 +102,24 @@ func (c *nativeComponents) trim(limit int) {
 		c.bytes -= e.bytes
 		c.pages.setMetadata(-e.bytes)
 	}
+	c.compactSlots()
+}
+func (c *nativeComponents) compactSlots() {
+	count := len(c.slots)
+	if count == 0 {
+		c.slots = nil
+		c.peakSlots = 0
+		return
+	}
+	if count >= c.peakSlots/2 {
+		return
+	}
+	compact := make(map[componentKey]*componentEntry, count)
+	for k, v := range c.slots {
+		compact[k] = v
+	}
+	c.slots = compact
+	c.peakSlots = count
 }
 func (c *nativeComponents) put(k componentKey, v any, owned int) bool {
 	size := componentEntryBytes + owned
@@ -126,6 +143,7 @@ func (c *nativeComponents) put(k componentKey, v any, owned int) bool {
 	}
 	e := &componentEntry{key: k, value: v, bytes: size}
 	c.slots[k] = e
+	c.peakSlots = max(c.peakSlots, len(c.slots))
 	c.bytes += size
 	c.pages.setMetadata(size)
 	c.use(e)

@@ -39,6 +39,16 @@ TweetFeed and FFraud share a scoring family because the original community
 reports may overlap. Each publisher retains its own withdrawal identity.
 [Source audit](../SOURCES_AUDIT.md)
 
+The IANA DNS root zone supplies exact anycast positives for its thirteen
+delegated root identities under the RSSAC operating description. Intake
+compares complete uncompressed text against a separately downloaded gzip
+edition and the publisher checksum. The SOA serial supplies the conservative
+UTC publication day. Delegation and address TTLs and the apex NS signature
+expiration bound the lifetime of the observation. Address-family changes,
+missing identities and ambiguous glue fail verification. Other addresses
+receive no contribution.
+[Source audit](../SOURCES_AUDIT.md)
+
 ## Required Source Fields
 
 Every entry declares:

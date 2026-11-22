@@ -31,6 +31,7 @@ const (
 	riskAdapter
 	torExits
 	ipverseUsageJSON
+	rootServiceZone
 )
 
 // Adapter IDs describe implemented schemas, not source certification. None is
@@ -45,6 +46,8 @@ func selectAdapter(source Source) (adapter, bool) {
 		return 0, false
 	}
 	switch source.Parser.ID {
+	case "root-zone-anycast":
+		return rootServiceZone, rootZoneSource(source)
 	case "tor-exit-addresses":
 		return torExits, torExitSource(source)
 	case "ipverse-asn-usage-json":
@@ -167,6 +170,9 @@ func parsePayloadTo(ctx context.Context, file *os.File, size int64, source Sourc
 	parse := func(_ string, reader io.Reader) error {
 		limits := intelligence.ParseLimits{Bytes: 3 << 30, Records: maxRecords, LineBytes: 1 << 20}
 		switch implementation {
+		case rootServiceZone:
+			_, err := parseRootZone(ctx, reader, maxRecords, emit)
+			return err
 		case torExits:
 			_, err := parseTorExitAddresses(ctx, reader, published, source.MaxAge, maxRecords, emit)
 			return err

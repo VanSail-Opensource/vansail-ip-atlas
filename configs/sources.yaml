@@ -1159,6 +1159,71 @@ sources:
   - spam
   - tor
   - vpn
+- id: iana-root-anycast
+  evidence_family: dns-root-operators
+  source_group: iana-root-zone
+  category: infrastructure
+  admission: active
+  discovery: https://www.iana.org/domains/root/files
+  download:
+    url: https://www.internic.net/domain/root.zone
+    format: text
+    max_compressed_mib: 8
+  refresh:
+    interval: 6h
+    max_stale: 720h
+  fields: [ip, type, observed_at]
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: IANA-InterNIC-root-zone-and-ICANN-terms
+    distribution: user_authorized_educational_use
+    evidence_url: https://www.iana.org/domains/root/files
+    attribution_required: true
+    review_basis: The IANA root files are published by the root zone maintainer through InterNIC.
+      The public-domain statement for IANA protocol registries excludes other data. The project
+      records its educational-use decision and credits the root files and ICANN RSSAC interpretation.
+    attribution:
+      name: IANA DNS Root Zone and ICANN RSSAC
+      text: Root zone address data from the IANA root files, distributed by the root zone maintainer
+        through InterNIC. VanSail extracted the exact addresses of delegated root services. Anycast
+        routing for those identities is documented in the ICANN Root Server System Advisory Committee FAQ.
+        Domain data remains subject to its original terms.
+      url: https://www.iana.org/domains/root/files
+      license_url: https://www.icann.org/en/data-protection/terms-of-service
+  trust:
+    source_weight: 80
+    correlation_group: dns-root-operators
+  scope: exact_ip
+  notes: Match the thirteen root service identities and their one literal IPv4 and IPv6 address each.
+    The SOA serial supplies the conservative publication day. Delegation and glue TTLs and the
+    apex NS signature expiry bound validity. Unrelated address records and adjacent IPs remain unknown.
+  publication_proof:
+    kind: embedded
+    locator: https://www.internic.net/domain/root.zone
+    field: soa.serial
+  coverage:
+    kind: mapping
+    scope: exact_ip
+  fixture:
+    status: passed
+    path: fixtures/source-certification/observed-dns-root-zone.txt
+    sha256: a802d24abf2b75e907b956fa4a3b73da97f4cc32dd888f0f42e556464c6e2ff5
+    parser: root-zone-anycast
+    schema: root-zone-in-soa-glue-v1
+    schema_observed: true
+    tested_at: '2026-11-22T14:44:42Z'
+    synthetic: false
+  parser:
+    id: root-zone-anycast
+    schema: root-zone-in-soa-glue-v1
+    version: 1
+  public_fields: [anycast]
+  field_mappings:
+    ip: anycast
+    type: null
+    observed_at: null
+  signals: []
 - id: tweetfeed-week
   evidence_family: ffraud-original
   source_group: tweetfeed

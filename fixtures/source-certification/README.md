@@ -113,3 +113,15 @@ manifest's exact byte count, digest, full CSV row count and original UTC update
 time on each intake. When the static CDN has another edition, the verifier may
 fetch the exact ready-made CSV named by the current manifest once. Its complete
 hash, size and row count must match before any record can enter the atlas.
+
+
+`observed-dns-root-zone.txt` contains the original 42 selected lines from
+the November 22 root zone with SOA serial `2026112200`. They cover the SOA,
+apex NS set, its signature lifetime, the ZONEMD serial and the A/AAAA glue
+for all thirteen service identities. They exercise all 26 exact-address
+outputs. Production verifies the complete publisher text and gzip
+distributions and the separately published checksum. The fixture is credited
+to the IANA root files and the InterNIC root zone maintainer under the
+project's recorded educational-use decision.
+[Root files](https://www.iana.org/domains/root/files) ·
+[Root service semantics](https://www.icann.org/en/rssac/faq)

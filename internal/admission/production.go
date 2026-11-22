@@ -380,6 +380,9 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 		if s.MaxAge <= 0 || s.MaxAge > 720*time.Hour || r.PublishedAt.IsZero() || r.PublishedAt.After(state.EvaluatedAt.Add(24*time.Hour)) || !now.Before(v.ExpiresAt) || v.ExpiresAt.After(r.PublishedAt.Add(s.MaxAge)) || v.ExpiresAt.After(r.PublishedAt.Add(720*time.Hour)) || r.Subscription && v.ExpiresAt.After(r.PublishedAt.Add(168*time.Hour)) {
 			return report, nil, errors.New("production source receipt expired or extended")
 		}
+		if rootZoneSource(s) && r.ContentValidUntil.IsZero() {
+			return report, nil, errors.New("DNS root zone expiry missing")
+		}
 		if !r.ContentValidUntil.IsZero() && (v.ExpiresAt.After(r.ContentValidUntil) || !now.Before(r.ContentValidUntil)) {
 			return report, nil, errors.New("production content expired or expiry extended")
 		}
@@ -470,11 +473,17 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 					return report, nil, err
 				}
 			}
+			if scan.rootAddresses != nil && !scan.rootAddresses.complete() {
+				return report, nil, errors.New("DNS root address population differs")
+			}
 			if scan.stat.Family != "" && scan.stat.Family != family {
 				return report, nil, errors.New("production evidence independence changed")
 			}
 			stat = scan.stat
 			stat.Family = family
+		}
+		if rootZoneSource(s) && (stat.Records != 2*rootServerCount || stat.Kinds[intelligence.RecordUsage-1] != stat.Records) {
+			return report, nil, errors.New("DNS root address population differs")
 		}
 		if stat.Records == 0 {
 			return report, nil, errors.New("empty production source")

@@ -69,8 +69,11 @@ The captured four-row excerpt contains one qualifying report.
 
 Release intake fetches the static weekly CSV from the publisher and checks its
 byte count, row count, digest and publication time against the publisher's
-manifest. During the review, the static server and manifest briefly served
-different revisions. Both must describe the same bytes for intake to succeed.
+manifest. When the static server lagged behind the manifest, the verifier
+retrieved the manifest's designated publisher CSV once and matched its 2,408
+rows and 307,265 bytes at 14:30:40 UTC. It contained the same 40 qualifying
+reports. The verifier accepts only the complete edition authenticated by the
+manifest.
 Only an explicit phishing tag on a public IP contributes the existing fraud
 reason. The original report time governs its age. Reporter handles, post links,
 domains and URLs are discarded. The two community feeds share one scoring
@@ -78,6 +81,34 @@ family because their report origins can overlap. The source weight of 35
 reflects the publisher's description of the data as community reports.
 TweetFeed releases these feeds under CC0 and makes attribution optional.
 [API and manifest documentation](https://tweetfeed.live/api/) · [Publisher terms](https://tweetfeed.live/tos/)
+
+## Anycast addresses of DNS root services — November 22
+
+ICANN's Root Server System Advisory Committee identifies thirteen root service
+identities, each using anycast routing with one IPv4 and one IPv6 address.
+Intake reads the complete IANA root zone through the published InterNIC files
+and joins only its apex NS identities to their exact A and AAAA records.
+The separate gzip decoded to the same 2,245,813 bytes and SHA-256
+`e004a209dbddd68837f2d0b4b84336b4e42395d385e8cbb46239006eda5bdaa2`.
+The maintainer's checksum also matched. The observed SOA serial `2026112200`
+dates the snapshot to November 22 at 00:00 UTC. The minimum relevant DNS TTL
+bounds these 26 positives to November 28 at 00:00 UTC.
+[Root files](https://www.iana.org/domains/root/files) ·
+[RSSAC FAQ](https://www.icann.org/en/rssac/faq) ·
+[SOA serial convention](https://newgtlds.icann.org/sites/default/files/root-scaling-27jun12-en.pdf)
+
+Other IPs receive no anycast or location assertion from this source. The
+weekly or daily anycast censuses considered during research report measured
+prefixes. Some IPv4 ranges mix unicast and anycast, and published prefix
+measurements do not identify every responding host. This release uses exact
+service addresses for the address-level lookup.
+[University of Twente census methodology](https://github.com/ut-dacs/anycast-census#partial-anycast)
+
+The repository records educational use with global attribution. IANA's CC0
+statement covers protocol registries. The domain root zone is published
+separately and retains its upstream terms.
+[IANA licensing statement](https://www.iana.org/help/licensing-terms) ·
+[ICANN terms](https://www.icann.org/en/data-protection/terms-of-service)
 
 ## Removed production entries; retained independent tests
 

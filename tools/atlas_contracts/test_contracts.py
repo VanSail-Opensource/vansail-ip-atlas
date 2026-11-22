@@ -20,11 +20,11 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_actual_catalog_is_blocked_and_has_shared_family(self):
         report = capability_report(self.configs["sources"], utc("2026-11-08T00:00:00Z"), ROOT)
-        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (16, 16, 0))
+        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (17, 17, 0))
         self.assertEqual({s["id"] for s in self.configs["sources"]["sources"] if s["admission"] == "active"}, {
             "sapics-user-country-v4", "sapics-user-country-v6", "sapics-server-country-v4", "ipverse-as-metadata",
             "dbip-lite-direct", "ipapi-free-geo-v4", "ipapi-free-geo-v6", "x4b-vpn-v4", "tor-exits", "ipverse-asn-usage",
-            "ffraud-ip", "tweetfeed-week", "routeviews-wide-rib", "ripe-mrt-rrc18", "caida-asrel2", "rpki-client-vrps"})
+            "ffraud-ip", "iana-root-anycast", "tweetfeed-week", "routeviews-wide-rib", "ripe-mrt-rrc18", "caida-asrel2", "rpki-client-vrps"})
         self.assertFalse(report["production_eligible"])
         self.assertEqual(report["schema_version"], 3)
         self.assertEqual(report["release_scope"], "release-scope-v6")
@@ -61,6 +61,19 @@ class ConfigurationTests(unittest.TestCase):
             source["field_mappings"][field] = "reason_flags"
             with self.subTest(field=field), self.assertRaises(ContractError):
                 validate_schema("sources", {**catalog, "sources": [source]})
+
+    def test_root_zone_anycast_is_exact_and_only_maps_the_address(self):
+        catalog = self.configs["sources"]
+        root = next(source for source in catalog["sources"] if source["id"] == "iana-root-anycast")
+        self.assertEqual(root["coverage"], {"kind": "mapping", "scope": "exact_ip"})
+        self.assertEqual(root["public_fields"], ["anycast"])
+        self.assertEqual(root["signals"], [])
+        self.assertEqual(root["field_mappings"], {"ip": "anycast", "type": None, "observed_at": None})
+        self.assertEqual(root["publication_proof"], {
+            "kind": "embedded", "locator": root["download"]["url"], "field": "soa.serial",
+        })
+        self.assertTrue(root["license"]["attribution_required"])
+        self.assertEqual(root["license"]["distribution"], "user_authorized_educational_use")
 
     def test_cli_counts_only_required_capabilities_and_preserves_other_release_blocks(self):
         result = subprocess.run([sys.executable, str(ROOT / "tools/validate_blueprint.py"), "--now", "2026-11-08T00:00:00Z", "--require-production"],

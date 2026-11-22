@@ -12,17 +12,22 @@ import (
 // typed records. One family can be observed per source. Its final canonical
 // family is checked once all receipt payload aliases are known.
 type sourceRecordScan struct {
-	source Source
-	clocks intelligence.SourceRecordClocks
-	now    time.Time
-	stat   SourceStatistics
-	err    error
+	rootAddresses rootAddressSet
+	source        Source
+	clocks        intelligence.SourceRecordClocks
+	now           time.Time
+	stat          SourceStatistics
+	err           error
 }
 
 func newSourceRecordScan(s Source, clocks intelligence.SourceRecordClocks, now time.Time) *sourceRecordScan {
 	s.Signals = append([]string(nil), s.Signals...)
 	s.PublicFields = append([]string(nil), s.PublicFields...)
-	return &sourceRecordScan{source: s, clocks: clocks, now: now, stat: SourceStatistics{ID: clocks.ID, Signals: map[intelligence.Signal]bool{}}}
+	scan := &sourceRecordScan{source: s, clocks: clocks, now: now, stat: SourceStatistics{ID: clocks.ID, Signals: map[intelligence.Signal]bool{}}}
+	if rootZoneSource(s) {
+		scan.rootAddresses = make(rootAddressSet, 2*rootServerCount)
+	}
+	return scan
 }
 
 func (scan *sourceRecordScan) accept(record intelligence.NormalizedRecord) error {
@@ -80,7 +85,11 @@ func (scan *sourceRecordScan) accept(record intelligence.NormalizedRecord) error
 	case intelligence.RecordUsage:
 		x := record.Usage.Evidence
 		family = x.Family
-		if !x.Current || !contains(s.PublicFields, "usage_type") {
+		if scan.rootAddresses != nil {
+			if !scan.rootAddresses.add(record.Usage, v.PublishedAt) {
+				return errors.New("production DNS root service binding invalid")
+			}
+		} else if !x.Current || !contains(s.PublicFields, "usage_type") {
 			return errors.New("production usage binding invalid")
 		}
 		if observed := record.Usage.ObservedAt; !observed.IsZero() && (!now.Before(observed.Add(s.MaxAge)) || v.ExpiresAt.After(observed.Add(s.MaxAge))) {

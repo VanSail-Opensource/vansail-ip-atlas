@@ -296,6 +296,12 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		if err == nil {
 			published = caidaProof.FirstObservedAt
 		}
+	} else if adapter == rootServiceZone {
+		var projection rootZoneProjection
+		projection, err = e.verifyRootZone(ctx, payload, hash, size, now)
+		if err == nil {
+			published, contentValidUntil = projection.day, projection.until
+		}
 	} else if adapter == torExits {
 		published, err = verifyTorExitFile(ctx, payload, source, now)
 	} else if adapter == rpkiClientJSON {

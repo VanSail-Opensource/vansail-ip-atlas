@@ -282,7 +282,13 @@ async function actualGraph(page) {
   await submit(page,corpus.graph_query??corpus.unknown_queries.asn)
   await owner(page,'BGP','.bgp-graph svg')
   const original=page.locator('.graph-original');let observed_routes=0
-  if(await original.count()){await original.locator('summary').click();observed_routes=await original.locator('li').count();await original.locator('summary').click()}
+  if(await original.count()){
+    await original.locator('summary').click()
+    const routes=original.locator('li')
+    await routes.first().waitFor()
+    observed_routes=await routes.count()
+    await original.locator('summary').click()
+  }
   const visible_nodes=await page.locator('.graph-node').count()
   if(corpus.graph_query!==null){if(!observed_routes)throw new Error('Observed graph corpus lost its actual paths');return {state:'observed',visible_nodes,observed_routes,empty_state_verified:false}}
   await page.getByText('No observed path is available',{exact:true}).waitFor()

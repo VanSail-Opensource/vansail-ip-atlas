@@ -39,9 +39,9 @@ onBeforeUnmount(() => { serial++; request?.abort() })
 
 <template>
   <div class="dataset-credit-group">
-  <p v-if="document?.mode === 'production' && document.entries.length" class="dataset-credit-links" aria-label="Included dataset credits" data-testid="visible-dataset-credits">
+  <div role="group" v-if="document?.mode === 'production' && document.entries.length" class="dataset-credit-links" aria-label="Included dataset credits" data-testid="visible-dataset-credits">
     <a v-for="entry in document.entries" :key="JSON.stringify(entry)" :href="entry.url" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer"><img v-if="entry.logo && document.verifiedLogos?.[entry.logo.sha256]" :src="document.verifiedLogos[entry.logo.sha256]" :alt="entry.logo.alt" class="dataset-logo" decoding="async">{{ entry.name }}</a>
-  </p>
+  </div>
   <details ref="details" class="dataset-credits" data-testid="dataset-credits" @toggle="toggle">
     <summary>Dataset credits</summary>
     <div class="credits-content" aria-live="polite">

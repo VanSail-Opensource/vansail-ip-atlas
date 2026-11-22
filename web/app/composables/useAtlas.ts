@@ -21,6 +21,7 @@ export function useAtlas() {
   const prefixBusy = ref(false)
   const now = ref(Date.now() / 1000)
   let active: AbortController | undefined
+  let pendingLookup: AbortController | undefined
   let serial = 0
   let interval: ReturnType<typeof setInterval> | undefined
   let stopClock: (() => void) | undefined
@@ -66,6 +67,8 @@ export function useAtlas() {
     }
     current.value = state.q
     loading.value = !retained
+    const controller = active
+    pendingLookup = controller
     try {
       atlas ??= new AtlasClient()
       atlas.removeEventListener('invalidate', invalidate)
@@ -119,7 +122,10 @@ export function useAtlas() {
       result.value = null
       classC.value = null
       atlas?.clear()
-    } finally { if (run === serial) loading.value = false }
+    } finally {
+      if (pendingLookup === controller) pendingLookup = undefined
+      if (run === serial) loading.value = false
+    }
   }
   function resume() { if (document.visibilityState === 'visible') { atlas?.clear(); void load(true) } }
   async function loadPrefixes(asn: number, cursor: number) {
@@ -144,7 +150,10 @@ export function useAtlas() {
       if (result.value && value >= result.value.validUntil) invalidate()
     })
     void load()
-    interval = setInterval(() => void load(true), 60_000)
+    interval = setInterval(() => {
+      // A slow foreground lookup is already checking the current release.
+      if (!pendingLookup || pendingLookup.signal.aborted) void load(true)
+    }, 60_000)
     document.addEventListener('visibilitychange', resume)
   })
   onBeforeUnmount(() => {

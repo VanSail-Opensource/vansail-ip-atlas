@@ -173,19 +173,33 @@ try {
     for (const [view, corruption] of [['quality', 'none'], ['quality', 'document'], ['class-c', 'logo'], ['class-c', 'none']]) {
       const selector = view === 'quality' ? '.quality-layout' : '.class-layout'
       const isolated = await browser.newContext({ serviceWorkers: 'block' })
-      let releaseCredit, requested
+      // Advance only the page's periodic refresh while the authenticated
+      // credit response is still held. Worker clocks and lease checks run
+      // normally, and the original foreground request must remain alive.
+      await isolated.addInitScript(() => {
+        const timer = window.setInterval
+        window.setInterval = function (callback, delay, ...args) {
+          if (delay === 60_000 && typeof callback === 'function') window.__atlasRefresh = () => callback(...args)
+          return timer.call(window, callback, delay, ...args)
+        }
+      })
+      let releaseCredit, requested, creditRequests = 0
       const delay = new Promise(resolve => { releaseCredit = resolve }), started = new Promise(resolve => { requested = resolve })
       try {
         await isolated.route('**/_atlas/current.json', route => route.fulfill({ contentType: 'application/json', body: mockPointer }))
         await isolated.route(`**/_atlas/releases/${releaseId}/manifest.json`, route => route.fulfill({ contentType: 'application/json', body: manifest }))
         await isolated.route('**/dataset-credits.json', route => route.fulfill({ contentType: 'application/json', body: index }))
-        await isolated.route(`**${creditPath}`, async route => { requested(); await delay; await route.fulfill({ contentType: 'application/json', body: corruption === 'document' ? '{}' : document }) })
+        await isolated.route(`**${creditPath}`, async route => { creditRequests++; requested(); await delay; await route.fulfill({ contentType: 'application/json', body: corruption === 'document' ? '{}' : document }) })
         await isolated.route(`**${logo.path}`, route => route.fulfill({ contentType: 'image/png', body: corruption === 'logo' ? Buffer.from('invalid') : Buffer.from(logoFixture.base64, 'base64') }))
         const creditPage = await isolated.newPage()
         await creditPage.goto(`${base}/ip/${view}/?q=203.0.113.1`)
         await Promise.race([started, new Promise((_, reject) => setTimeout(() => reject(new Error('Credit verification did not start')), 20000))])
         assert(await creditPage.getByRole('status').isVisible())
         assert.equal(await creditPage.locator(selector).count(), 0, 'Production facts must wait for credit integrity')
+        await creditPage.evaluate(() => {
+          if (typeof window.__atlasRefresh !== 'function') throw new Error('Periodic refresh was not registered')
+          window.__atlasRefresh()
+        })
         releaseCredit()
         if (corruption !== 'none') {
           await creditPage.getByRole('alert').waitFor()
@@ -193,6 +207,8 @@ try {
         } else {
           await creditPage.locator(selector).waitFor()
           const visible = creditPage.getByTestId('visible-dataset-credits')
+          assert.equal(creditRequests, 1, 'A periodic refresh must not restart an in-flight foreground verification')
+          assert.equal(await visible.getAttribute('role'), 'group')
           assert(await visible.isVisible())
           assert.equal(await visible.locator('a').getAttribute('href'), entry.url)
           assert.equal(await visible.locator('img').getAttribute('src'), 'data:image/png;base64,' + logoFixture.base64)

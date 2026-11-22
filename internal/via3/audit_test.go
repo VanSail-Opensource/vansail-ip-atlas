@@ -309,7 +309,7 @@ func auditReleaseFromFacts(t *testing.T, facts ...Shard) (*Release, map[string][
 	desc := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: infos, SchemaVersion: 5, ValidFrom: 1700000000, ValidUntil: 1700003600}
 	id := Hash(canonical(desc))
 	manifest := Manifest{Codec: desc.Codec, FormatVersion: 3, Mode: desc.Mode, Objects: infos, ReleaseID: id, SchemaVersion: 5, ValidFrom: desc.ValidFrom, ValidUntil: desc.ValidUntil}
-	pointer := Pointer{3, "/_atlas/releases/" + id + "/manifest.json", Hash(canonical(manifest)), id}
+	pointer := Pointer{FormatVersion: 3, ManifestPath: "/_atlas/releases/" + id + "/manifest.json", ManifestSHA256: Hash(canonical(manifest)), ReleaseID: id}
 	reader, err := NewRelease(canonical(pointer), canonical(manifest), func(hash string) ([]byte, error) { return files[hash], nil }, func() int64 { return 1700000001 })
 	if err != nil {
 		t.Fatal(err)
@@ -557,7 +557,7 @@ func auditRelease(t *testing.T, item auditCase) auditReleaseCase {
 	desc := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: objects, SchemaVersion: 5, ValidFrom: 1700000000, ValidUntil: 1700003600}
 	id := Hash(canonical(desc))
 	manifest := Manifest{Codec: desc.Codec, FormatVersion: 3, Mode: desc.Mode, Objects: objects, ReleaseID: id, SchemaVersion: 5, ValidFrom: desc.ValidFrom, ValidUntil: desc.ValidUntil}
-	pointer := Pointer{3, "/_atlas/releases/" + id + "/manifest.json", Hash(canonical(manifest)), id}
+	pointer := Pointer{FormatVersion: 3, ManifestPath: "/_atlas/releases/" + id + "/manifest.json", ManifestSHA256: Hash(canonical(manifest)), ReleaseID: id}
 	return auditReleaseCase{item.name, pointer, manifest, []auditObject{{routerInfo.SHA256, base64.StdEncoding.EncodeToString(encoded)}, {fact.Info.SHA256, base64.StdEncoding.EncodeToString(data)}}, item.query, "record", 1700000001}
 }
 

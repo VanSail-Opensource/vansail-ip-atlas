@@ -36,6 +36,7 @@ type Manifest struct {
 	ValidUntil    int64        `json:"valid_until"`
 }
 type Pointer struct {
+	BrowserSHA256  string `json:"browser_sha256,omitempty"`
 	FormatVersion  int    `json:"format_version"`
 	ManifestPath   string `json:"manifest_path"`
 	ManifestSHA256 string `json:"manifest_sha256"`

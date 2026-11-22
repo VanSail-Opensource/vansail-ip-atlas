@@ -201,8 +201,13 @@ def make_manifest(descriptor: dict) -> tuple[bytes, bytes]:
 
 
 def verify_manifest(manifest_bytes: bytes, pointer_bytes: bytes, now: int) -> dict:
-    pointer = _exact_keys(parse_canonical(pointer_bytes),
-                          {"format_version", "release_id", "manifest_path", "manifest_sha256"}, "pointer")
+    pointer = parse_canonical(pointer_bytes)
+    fields = {"format_version", "release_id", "manifest_path", "manifest_sha256"}
+    if isinstance(pointer, dict) and "browser_sha256" in pointer:
+        if not isinstance(pointer["browser_sha256"], str) or not HASH.fullmatch(pointer["browser_sha256"]):
+            _fail("invalid browser index digest")
+        fields.add("browser_sha256")
+    pointer = _exact_keys(pointer, fields, "pointer")
     manifest = _exact_keys(parse_canonical(manifest_bytes),
                            {"format_version", "schema_version", "codec", "mode", "valid_from",
                             "valid_until", "objects", "release_id"}, "manifest")

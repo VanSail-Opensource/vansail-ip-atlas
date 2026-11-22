@@ -1,3 +1,4 @@
+import { LookupIndex, digest, readRoot, type Snapshot, type ObjectInfo } from './lookupIndex.ts'
 import { decodeZstd } from '../lib/zstd.ts'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { parseInput } from '../lib/query.ts'
@@ -478,10 +479,15 @@ export async function parseShard(bytes: Uint8Array, signal?: AbortSignal): Promi
   }
 }
 
-type ObjectInfo = { bytes: number; kind: number; partition: string; sha256: string }
 type Manifest = { codec: string; format_version: number; mode: 'synthetic' | 'production'; objects: ObjectInfo[]; release_id: string; schema_version: number; valid_from: number; valid_until: number }
-type Pointer = { format_version: number; manifest_path: string; manifest_sha256: string; release_id: string }
-const exactKeys = (value: object, keys: string[]) => Object.keys(value).sort().join(',') === keys.sort().join(',')
+type Pointer = { browser_sha256?: string; format_version: number; manifest_path: string; manifest_sha256: string; release_id: string }
+const exactKeys = (value: object, keys: string[]) => !!value && typeof value === 'object' && !Array.isArray(value) && keys.length === Object.keys(value).length && keys.every(key => Object.hasOwn(value, key))
+function validInfo(object: ObjectInfo): boolean {
+  return exactKeys(object,['bytes','kind','partition','sha256']) && digest(object.sha256) &&
+    Number.isInteger(object.bytes) && object.bytes >= 64 && object.bytes < MAX_FILE &&
+    Number.isInteger(object.kind) && object.kind >= 1 && object.kind <= 14 &&
+    typeof object.partition === 'string' && validPartition(object.partition)
+}
 function canonical(value: unknown): string {
   if (value === null || typeof value === 'boolean') return JSON.stringify(value)
   if (typeof value === 'number') { if (!Number.isSafeInteger(value)) return fail('manifest'); return JSON.stringify(value) }
@@ -549,7 +555,9 @@ export class AtlasReader {
   private clock: () => number
   private invalidate: (reason: string) => void
   private leaseClock: () => number
-  private manifest: Manifest | null = null
+  private manifest: Snapshot | null = null
+  private index: LookupIndex | null = null
+  private indexHash?: string
   private pointerHash = ''
   private inventory = new Map<string, ObjectInfo>()
   private cache = new Map<string, Shard>()
@@ -569,7 +577,7 @@ export class AtlasReader {
   private leaseEpoch = 0
   private revalidateController: AbortController | null = null
   constructor(fetcher: typeof fetch = fetch, clock = () => Math.floor(Date.now() / 1000), invalidate: (reason: string) => void = () => {}, leaseClock = () => performance.now() / 1000) { this.fetcher = fetcher.bind(globalThis); this.clock = clock; this.invalidate = invalidate; this.leaseClock = leaseClock }
-  clear(): void { for (const entry of this.residents.values()) if (entry.shard) releaseDecoded(entry.shard.sections); this.cache.clear(); this.cacheBytes = 0; this.active.clear(); this.activeReserved.clear(); this.activeBytes = 0; this.routerBytes = 0; this.residents.clear(); this.residentBytes = 0; this.manifest = null; this.router = null; this.inventory.clear(); this.pointerHash = ''; this.pointerCheckedAt = -Infinity; this.leaseEpoch++; this.revalidateController?.abort(); if (this.expiryTimer) clearTimeout(this.expiryTimer); if (this.leaseTimer) clearTimeout(this.leaseTimer); if (this.revalidateTimer) clearTimeout(this.revalidateTimer) }
+  clear(): void { for (const entry of this.residents.values()) if (entry.shard) releaseDecoded(entry.shard.sections); this.cache.clear(); this.cacheBytes = 0; this.active.clear(); this.activeReserved.clear(); this.activeBytes = 0; this.routerBytes = 0; this.residents.clear(); this.residentBytes = 0; this.manifest = null; this.index = null; this.indexHash = undefined; this.router = null; this.inventory.clear(); this.pointerHash = ''; this.pointerCheckedAt = -Infinity; this.leaseEpoch++; this.revalidateController?.abort(); if (this.expiryTimer) clearTimeout(this.expiryTimer); if (this.leaseTimer) clearTimeout(this.leaseTimer); if (this.revalidateTimer) clearTimeout(this.revalidateTimer) }
   private releaseResident(key: string): void { const entry = this.residents.get(key); if (entry && !entry.query && !entry.cache && !entry.router) { if (entry.shard) releaseDecoded(entry.shard.sections); this.residentBytes -= entry.size; this.residents.delete(key) } }
   private endQuery(): void { for (const key of this.activeReserved) { const entry = this.residents.get(key); if (entry) { entry.query = false; this.releaseResident(key) } }; this.active.clear(); this.activeReserved.clear(); this.activeBytes = 0 }
   private beginQuery(): void { this.endQuery() }
@@ -586,10 +594,15 @@ export class AtlasReader {
     entry.query = true
     this.activeReserved.add(key); this.activeBytes += size
   }
-  private current(): Manifest { const manifest = this.manifest; if (!manifest || this.clock() < manifest.valid_from || this.clock() >= manifest.valid_until) { this.invalidate('expired'); return fail('expired') }; if (this.leaseClock() - this.pointerCheckedAt >= 60) { this.invalidate('pointer_lease_expired'); return fail('pointer_lease_expired') }; return manifest }
+  private current(): Snapshot { const manifest = this.manifest; if (!manifest || this.clock() < manifest.valid_from || this.clock() >= manifest.valid_until) { this.invalidate('expired'); return fail('expired') }; if (this.leaseClock() - this.pointerCheckedAt >= 60) { this.invalidate('pointer_lease_expired'); return fail('pointer_lease_expired') }; return manifest }
   private pointer(bytes: Uint8Array): Pointer {
     const pointer = parseCanonical<Pointer>(bytes)
-    if (!pointer || !exactKeys(pointer, ['format_version', 'manifest_path', 'manifest_sha256', 'release_id']) || pointer.format_version !== 3 || !/^[0-9a-f]{64}$/.test(pointer.release_id) || !/^[0-9a-f]{64}$/.test(pointer.manifest_sha256) || pointer.manifest_path !== `/_atlas/releases/${pointer.release_id}/manifest.json`) return fail('manifest')
+    const fields = ['format_version', 'manifest_path', 'manifest_sha256', 'release_id']
+    if (pointer && Object.hasOwn(pointer,'browser_sha256')) {
+      if (!digest(pointer.browser_sha256)) return fail('manifest')
+      fields.push('browser_sha256')
+    }
+    if (!pointer || !exactKeys(pointer, fields) || pointer.format_version !== 3 || !/^[0-9a-f]{64}$/.test(pointer.release_id) || !/^[0-9a-f]{64}$/.test(pointer.manifest_sha256) || pointer.manifest_path !== `/_atlas/releases/${pointer.release_id}/manifest.json`) return fail('manifest')
     return pointer
   }
   private armLease(): void {
@@ -609,7 +622,7 @@ export class AtlasReader {
       const pointer = this.pointer(await this.read('/_atlas/current.json', 4096, controller.signal))
       if (epoch !== this.leaseEpoch || controller.signal.aborted) return
       if (!this.manifest || this.clock() >= this.manifest.valid_until) { this.clear(); this.invalidate('expired'); return }
-      if (pointer.manifest_sha256 !== this.pointerHash || pointer.release_id !== this.manifest.release_id) { this.clear(); this.invalidate('release_changed'); return }
+      if (pointer.manifest_sha256 !== this.pointerHash || pointer.browser_sha256 !== this.indexHash || pointer.release_id !== this.manifest.release_id) { this.clear(); this.invalidate('release_changed'); return }
       if (this.leaseClock() - requestAt >= 60) return
       this.pointerCheckedAt = requestAt; this.armLease()
     } catch { /* The existing hard deadline remains armed; failed fetches never renew it. */ }
@@ -635,8 +648,19 @@ export class AtlasReader {
     if (this.manifest && this.leaseClock() - this.pointerCheckedAt < 60) { checkAbort(signal); this.current(); return }
     const requestAt = this.leaseClock()
     const pointer = this.pointer(await this.read('/_atlas/current.json', 4096, signal))
-    if (this.pointerHash === pointer.manifest_sha256 && this.manifest) { this.pointerCheckedAt = requestAt; this.current(); this.armLease(); return }
+    if (this.pointerHash === pointer.manifest_sha256 && this.indexHash === pointer.browser_sha256 && this.manifest?.release_id === pointer.release_id) { this.pointerCheckedAt = requestAt; this.current(); this.armLease(); return }
     if (this.manifest) { this.clear(); this.invalidate('release_changed') }
+    if (pointer.browser_sha256) {
+      const root = readRoot(await this.control(pointer.browser_sha256,1024,signal), pointer.release_id, pointer.manifest_sha256)
+      checkAbort(signal)
+      this.manifest = root
+      this.index = new LookupIndex(root, this.control.bind(this), validInfo)
+      this.indexHash = pointer.browser_sha256
+      this.pointerHash = pointer.manifest_sha256
+      this.pointerCheckedAt = requestAt
+      this.current(); this.armExpiry(); this.armLease()
+      return
+    }
     const bytes = await this.read(pointer.manifest_path, 4 * 1024 * 1024, signal)
     if (await hash(bytes) !== pointer.manifest_sha256) return fail('integrity')
     const manifest = parseCanonical<Manifest>(bytes)
@@ -645,19 +669,43 @@ export class AtlasReader {
     if (await hash(new TextEncoder().encode(canonical(descriptor))) !== manifest.release_id) return fail('manifest')
     let previous = ''; let routerHash = ''
     for (const object of manifest.objects) {
-      if (!exactKeys(object, ['bytes', 'kind', 'partition', 'sha256']) || !/^[0-9a-f]{64}$/.test(object.sha256) || object.sha256 <= previous || !Number.isInteger(object.bytes) || object.bytes < 64 || object.bytes >= MAX_FILE || !Number.isInteger(object.kind) || object.kind < 1 || object.kind > 14 || !validPartition(object.partition)) return fail('manifest')
+      if (!validInfo(object) || object.sha256 <= previous) return fail('manifest')
       previous = object.sha256; this.inventory.set(object.sha256, object)
       if (object.kind === 1) { if (routerHash || object.partition !== 'all') return fail('manifest'); routerHash = object.sha256 }
     }
     if (!routerHash) return fail('manifest')
     this.manifest = manifest; this.pointerHash = pointer.manifest_sha256; this.pointerCheckedAt = requestAt; this.current(); this.router = await this.object(routerHash, signal); this.routerBytes = this.shardBytes(this.router); this.residents.get(routerHash)!.router = true; this.armExpiry(); this.armLease()
   }
+  private async control(key: string, limit: number, signal?: AbortSignal): Promise<unknown> {
+    const bytes = await this.read('/_atlas/browser/' + key + '.json', limit, signal)
+    if (await hash(bytes) !== key) return fail('integrity')
+    return parseCanonical(bytes)
+  }
+  private remember(info: ObjectInfo): void {
+    const previous = this.inventory.get(info.sha256)
+    if (previous) {
+      if (previous.kind !== info.kind || previous.bytes !== info.bytes || previous.partition !== info.partition) fail('manifest')
+    } else {
+      if (this.inventory.size >= 18499) fail('resource_limit')
+      this.inventory.set(info.sha256, info)
+    }
+  }
+  private async info(key: string, signal?: AbortSignal): Promise<ObjectInfo> {
+    const known = this.inventory.get(key)
+    if (known) return known
+    const index = this.index
+    const info = await index?.object(key, signal)
+    this.current()
+    if (!info || index !== this.index) return fail('missing_object')
+    this.remember(info)
+    return info
+  }
   private async object(key: string, signal?: AbortSignal): Promise<Shard> {
     this.current(); checkAbort(signal)
     const active = this.active.get(key); if (active) return active
     const cached = this.cache.get(key)
     if (cached) { this.admit(key, this.shardBytes(cached)); this.active.set(key, cached); if (this.cache.has(key)) { this.cache.delete(key); this.cache.set(key, cached) }; return cached }
-    const info = this.inventory.get(key); if (!info) return fail('missing_object')
+    const info = await this.info(key, signal)
     const stored = await this.persistent.get(key, info.bytes)
     const bytes = stored ?? await this.read(`/_atlas/objects/${key}.via3`, MAX_FILE - 1, signal)
     try {
@@ -672,7 +720,7 @@ export class AtlasReader {
       checkAbort(signal); this.current()
       if (shard.kind !== info.kind) return fail('schema')
       const references = shard.rows(7)
-      for (let p = 0; p < references.length; p += 40) { const target = hex(references.subarray(p + 8, p + 40)); const object = this.inventory.get(target); if (!object || object.kind !== u16(references, p) || object.bytes !== u32(references, p + 4) || target === key) return fail('record') }
+      for (let p = 0; p < references.length; p += 40) { const target = hex(references.subarray(p + 8, p + 40)); const object = this.inventory.get(target) ?? (this.index ? await this.info(target, signal) : undefined); if (!object || object.kind !== u16(references, p) || object.bytes !== u32(references, p + 4) || target === key) return fail('record') }
       if (info.partition.startsWith('4:') || info.partition.startsWith('6:')) {
         const [address, length] = info.partition.slice(2).split('/'); const partition = new Uint8Array(32); partition[0] = info.partition[0] === '4' ? 4 : 6; partition[1] = Number(length); partition.set(unhex(address!), 4)
         if (!validKey(partition)) return fail('manifest')
@@ -706,7 +754,23 @@ export class AtlasReader {
     return textDecoder.decode(text.subarray(u32(offsets, id * 4), u32(offsets, (id + 1) * 4)))
   }
   private originList(shard: Shard, row: Uint8Array): number[] { const ints = shard.rows(4); return Array.from({ length: u32(row, 8) }, (_, index) => u32(ints, (u32(row, 4) + index) * 4)) }
-  private async destinations(input: Input, signal?: AbortSignal, onlyKind?: number): Promise<Map<number, Shard>> {
+  private async destinations(input: Input, signal?: AbortSignal, onlyKind?: number | readonly number[]): Promise<Map<number, Shard>> {
+    const requested = (kind: number) => onlyKind === undefined || (typeof onlyKind === 'number' ? kind === onlyKind : onlyKind.includes(kind))
+    const index = this.index
+    if (index) {
+      const address = input.kind === 'ip' ? addressBytes(input.canonical) : undefined
+      const plane = address ? (address.family === 4 ? 'ipv4' : 'ipv6') : 'asn'
+      const key = address ? hex(address.family === 4 ? address.bytes.subarray(12) : address.bytes) : Number(input.canonical.slice(2)).toString(16).padStart(8,'0')
+      const destinations = await index.routes(plane, key, signal)
+      this.current()
+      if (this.index !== index) return fail('expired')
+      const selected = new Map<number, Shard>()
+      for (const info of destinations) {
+        this.remember(info)
+        if (requested(info.kind)) selected.set(info.kind, await this.object(info.sha256, signal))
+      }
+      return selected
+    }
     const router = this.router!; const row = input.kind === 'ip' ? router.prefix(input.canonical)?.row : router.asn(Number(input.canonical.slice(2)))[0]
     const output = new Map<number, Shard>(); if (!row) return output
     const ints = router.rows(4)
@@ -714,7 +778,7 @@ export class AtlasReader {
     for (let index = 0; index < u16(row, 4); index++) {
       const ordinal = u32(ints, (u32(row, 0) + index) * 4)
       const kind = u16(directory, ordinal * 40)
-      if (onlyKind === undefined || onlyKind === kind) output.set(kind, await this.reference(router, ordinal, signal))
+      if (requested(kind)) output.set(kind, await this.reference(router, ordinal, signal))
     }
     return output
   }

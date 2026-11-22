@@ -22,6 +22,7 @@ from urllib.parse import urlsplit
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from tools.release_contract.browser_index import verified_browser_files
 from tools.release_contract.contracts import (
     ContractError, canonical_bytes, parse_canonical, rollback_eligible, sha256, tree_inventory, verify_manifest,
 )
@@ -63,6 +64,7 @@ def check_candidate(public: Path, report: dict, now: int) -> dict:
         raise ContractError("candidate release differs from report")
     manifest_bytes = (public / "_atlas/releases" / report["release_id"] / "manifest.json").read_bytes()
     manifest = verify_manifest(manifest_bytes, pointer_bytes, now)
+    verified_browser_files(public / "_atlas", pointer)
     if manifest["mode"] != report["mode"]:
         raise ContractError("candidate report and manifest modes differ")
     manifests = list((public / "_atlas/releases").glob("*/manifest.json"))
@@ -198,7 +200,7 @@ def verify_preview(public: Path, report: dict, origin: str, now: int, fetch=None
             if " ".join(headers.get(name, "").split()) != " ".join(value.split()):
                 raise ContractError(f"preview effective header differs: {name}")
         cache = {token.strip() for token in headers.get("cache-control", "").lower().split(",")}
-        if path.startswith(("_atlas/objects/", "_atlas/releases/", "_atlas/credits/", "_atlas/legal/", "_nuxt/")):
+        if path.startswith(("_atlas/objects/", "_atlas/browser/", "_atlas/releases/", "_atlas/credits/", "_atlas/legal/", "_nuxt/")):
             if "immutable" not in cache or "max-age=31536000" not in cache:
                 raise ContractError("immutable preview object cache policy missing")
         elif path in ("_atlas/current.json", "dataset-credits.json") and ("max-age=0" not in cache or "must-revalidate" not in cache):
@@ -206,11 +208,11 @@ def verify_preview(public: Path, report: dict, origin: str, now: int, fetch=None
         return 1
 
     # Pages executes the two control files. The redirect and per-file headers
-    # above verify their effects. Only immutable VIA3 objects run concurrently.
+    # above verify their effects. Only immutable objects and index pages run concurrently.
     entries = (row for row in candidate["entries"] if row[0] not in ("_headers", "_redirects"))
     verified = 0
     with ThreadPoolExecutor(max_workers=INVENTORY_WORKERS) as workers:
-        for objects, rows in groupby(entries, key=lambda row: row[0].startswith("_atlas/objects/")):
+        for objects, rows in groupby(entries, key=lambda row: row[0].startswith(("_atlas/objects/","_atlas/browser/"))):
             if live and objects:
                 # Keep at most one batch in flight, including after a failed check.
                 while batch := tuple(islice(rows, INVENTORY_WORKERS)):

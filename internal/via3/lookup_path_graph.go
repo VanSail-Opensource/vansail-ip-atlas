@@ -205,10 +205,8 @@ func (g *pathGraph) fits(b *answerBudget) bool {
 func (g *pathGraph) appendPaths(paths []PathAnswer, asn uint32, b *answerBudget) []PathAnswer {
 	b.paths += len(g.values)
 	b.bytes += 16*len(g.values) + 128*len(g.segments)
-	paths = slices.Grow(paths, len(g.paths))
-	segments := make([]SegmentAnswer, len(g.segments))
+	paths, segments, values := g.answerStorage(paths)
 	n := len(g.values)
-	values := make([]uint32, 2*n)
 	copy(values, g.values)
 	copy(values[n:], g.values)
 	sj := 0
@@ -226,4 +224,37 @@ func (g *pathGraph) appendPaths(paths []PathAnswer, asn uint32, b *answerBudget)
 		paths = append(paths, path)
 	}
 	return paths
+}
+
+// Most origins have at most twelve short paths. Group the three caller-owned
+// arrays into one allocation for the first origin when the arrays fit. Each
+// row and segment still gets its own bounded slice of numeric values.
+func (g *pathGraph) answerStorage(previous []PathAnswer) ([]PathAnswer, []SegmentAnswer, []uint32) {
+	paths, segments, hops := len(g.paths), len(g.segments), len(g.values)
+	if len(previous) == 0 && cap(previous) == 0 && paths > 0 {
+		switch {
+		case paths == 1 && segments == 1 && hops <= 8:
+			row := new(struct {
+				paths    [1]PathAnswer
+				segments [1]SegmentAnswer
+				values   [16]uint32
+			})
+			return row.paths[:0:paths], row.segments[:segments:segments], row.values[: 2*hops : 2*hops]
+		case paths <= 6 && segments <= 6 && hops <= 24:
+			row := new(struct {
+				paths    [6]PathAnswer
+				segments [6]SegmentAnswer
+				values   [48]uint32
+			})
+			return row.paths[:0:paths], row.segments[:segments:segments], row.values[: 2*hops : 2*hops]
+		case paths <= 12 && segments <= 12 && hops <= 64:
+			row := new(struct {
+				paths    [12]PathAnswer
+				segments [12]SegmentAnswer
+				values   [128]uint32
+			})
+			return row.paths[:0:paths], row.segments[:segments:segments], row.values[: 2*hops : 2*hops]
+		}
+	}
+	return slices.Grow(previous, paths), make([]SegmentAnswer, segments), make([]uint32, 2*hops)
 }

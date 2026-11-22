@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -209,7 +210,10 @@ func TestEmptyOriginsPreserveAbsentAndNormalizedAddressResults(t *testing.T) {
 			}
 		}
 	}
-	engine := Engine{origins: map[netip.Prefix][]uint32{netip.MustParsePrefix("192.0.2.0/24"): {13335, 15169}}}
+	engine, err := NewEngine(testPolicy(t), nil, nil, []OriginMapping{{Prefix: netip.MustParsePrefix("192.0.2.0/24"), Origins: []uint32{13335, 15169}}}, clock())
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := []uint32{13335, 15169}
 	for _, query := range queries[1:4] {
 		got := engine.Origins(query)
@@ -506,5 +510,24 @@ func TestTier1BootstrapStabilityMissingInputsCyclesAndBudget(t *testing.T) {
 	cyclic, _ := DeriveTier1(context.Background(), r, paths, clock(), clock(), "policy", nil, 10000)
 	if cyclic.Eligible {
 		t.Fatal("cyclic graph qualified")
+	}
+}
+
+func TestPrefixLengthsRetainEmptyBoundariesByFamily(t *testing.T) {
+	entries := make(map[netip.Prefix][]uint32)
+	for _, prefix := range []string{"0.0.0.0/0", "192.0.2.0/24", "192.0.2.5/32", "203.0.113.0/24", "::/0", "2001:db8::/32", "2001:db8::1/128"} {
+		entries[netip.MustParsePrefix(prefix)] = nil
+	}
+	entries[netip.Prefix{}] = []uint32{100}
+	depths := indexPrefixLengths(entries)
+	for _, tc := range []struct {
+		address string
+		want    []uint8
+	}{
+		{"192.0.2.5", []uint8{32, 24, 0}}, {"2001:db8::1", []uint8{128, 32, 0}},
+	} {
+		if got := depths.forAddress(netip.MustParseAddr(tc.address)); !slices.Equal(got, tc.want) {
+			t.Fatalf("wrong prefix lengths for %s: %v", tc.address, got)
+		}
 	}
 }

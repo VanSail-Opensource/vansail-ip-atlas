@@ -343,6 +343,9 @@ type Engine struct {
 	asnCoverage             map[uint32]map[string]struct{}
 	neighbors               map[netip.Prefix][]netip.Addr
 	neighborPartialCoverage map[netip.Prefix]bool
+
+	originDepths, evidenceDepths prefixLengths
+	coverageDepths               [4]prefixLengths
 }
 
 // NewEngine recomputes all contexts from the surviving input set. Rebuilding from
@@ -379,6 +382,7 @@ func NewEngine(p Policy, evidence []Evidence, coverage []Coverage, mapping []Ori
 		sort.Slice(origins, func(i, j int) bool { return origins[i] < origins[j] })
 		e.origins[key] = uniqueASNs(origins)
 	}
+	e.originDepths = indexPrefixLengths(e.origins)
 	exacts := map[netip.Addr][]Evidence{}
 	direct := map[uint32][]Evidence{}
 	for _, v := range evidence {
@@ -521,6 +525,10 @@ func NewEngine(p Policy, evidence []Evidence, coverage []Coverage, mapping []Ori
 			e.neighborPartialCoverage[netip.PrefixFrom(prefix.Addr(), 24).Masked()] = true
 		}
 	}
+	e.evidenceDepths = indexPrefixLengths(e.prefix)
+	for i, coverage := range e.coverage {
+		e.coverageDepths[i] = indexPrefixLengths(coverage)
+	}
 	return e, nil
 }
 
@@ -557,14 +565,17 @@ func (e *Engine) Origins(addr netip.Addr) []uint32 {
 	if len(e.origins) == 0 {
 		return nil
 	}
-	for bits := addr.BitLen(); bits >= 0; bits-- {
-		if origins, ok := e.origins[netip.PrefixFrom(addr, bits).Masked()]; ok {
+	for _, bits := range e.originDepths.forAddress(addr) {
+		if origins, ok := e.origins[netip.PrefixFrom(addr, int(bits)).Masked()]; ok {
 			return append([]uint32(nil), origins...)
 		}
 	}
 	return nil
 }
 func (p Policy) layer(records []Evidence, now time.Time) (LayerResult, error) {
+	if len(records) == 0 {
+		return LayerResult{Families: []string{}}, nil
+	}
 	type key struct {
 		signal Signal
 		family string
@@ -650,6 +661,9 @@ func intersect(sets ...map[string]struct{}) map[string]struct{} {
 	return out
 }
 func (e *Engine) complete(layer Scope, addr netip.Addr) map[string]struct{} {
+	if len(e.coverage[layer]) == 0 {
+		return nil
+	}
 	if layer == Neighbors24 {
 		if !addr.Is4() {
 			return map[string]struct{}{}
@@ -657,8 +671,11 @@ func (e *Engine) complete(layer Scope, addr netip.Addr) map[string]struct{} {
 		prefix := netip.PrefixFrom(addr, 24).Masked()
 		if !e.neighborPartialCoverage[prefix] {
 			out := map[string]struct{}{}
-			for bits := 24; bits >= 0; bits-- {
-				for f := range e.coverage[layer][netip.PrefixFrom(addr, bits).Masked()] {
+			for _, bits := range e.coverageDepths[layer].forAddress(addr) {
+				if bits > 24 {
+					continue
+				}
+				for f := range e.coverage[layer][netip.PrefixFrom(addr, int(bits)).Masked()] {
 					out[f] = struct{}{}
 				}
 			}
@@ -685,9 +702,8 @@ func (e *Engine) complete(layer Scope, addr netip.Addr) map[string]struct{} {
 }
 func (e *Engine) coveringFamilies(layer Scope, addr netip.Addr) map[string]struct{} {
 	out := map[string]struct{}{}
-	minBits := addr.BitLen()
-	for bits := minBits; bits >= 0; bits-- {
-		for f := range e.coverage[layer][netip.PrefixFrom(addr, bits).Masked()] {
+	for _, bits := range e.coverageDepths[layer].forAddress(addr) {
+		for f := range e.coverage[layer][netip.PrefixFrom(addr, int(bits)).Masked()] {
 			out[f] = struct{}{}
 		}
 	}
@@ -754,8 +770,8 @@ func (e *Engine) Lookup(addr netip.Addr) (QualityResult, error) {
 	prefixFamilies := e.complete(ExplicitPrefix, addr)
 	neighborFamilies := e.complete(Neighbors24, addr)
 	prefixRecords := []Evidence{}
-	for bits := addr.BitLen(); bits >= 0; bits-- {
-		prefixRecords = append(prefixRecords, e.prefix[netip.PrefixFrom(addr, bits).Masked()]...)
+	for _, bits := range e.evidenceDepths.forAddress(addr) {
+		prefixRecords = append(prefixRecords, e.prefix[netip.PrefixFrom(addr, int(bits)).Masked()]...)
 	}
 	// All records were frozen and decayed against the same explicit build clock.
 	prefix, err := e.policy.layer(prefixRecords, e.buildClock())

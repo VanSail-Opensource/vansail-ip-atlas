@@ -142,6 +142,9 @@ func (r *Release) admitReference(reference *objectReference, size int) error {
 		r.evictReference(r.cacheHead)
 	}
 	if !resident && size > PublicLiveDecoded-r.residentBytes {
+		r.releaseRouterASNs()
+	}
+	if !resident && size > PublicLiveDecoded-r.residentBytes {
 		// Optional formatting metadata must never crowd a required decoded
 		// object out of an otherwise valid query. Returned strings are immutable
 		// copies, so dropping the shard's headers cannot invalidate an answer.

@@ -304,6 +304,7 @@ type shardLookup struct {
 	prefixSpans  []cachedPrefixSpan
 	owner        *objectReference
 	graphIndex   *pathGraphIndex
+	routerASNs   *routerASNDirectory
 }
 
 type prefixLookup struct {
@@ -470,7 +471,7 @@ func NewRelease(pointerBytes, manifestBytes []byte, load func(string) ([]byte, e
 		return nil, err
 	}
 	r.router = router
-	r.routerBytes = decodedSize(router)
+	r.routerBytes = r.references[routerHash].size
 	r.references[routerHash].router = true
 	r.endQuery()
 	return r, nil
@@ -651,6 +652,9 @@ func (r *Release) objectReference(ctx context.Context, reference *objectReferenc
 		}
 	}
 	s.lookup = shardLookupMetadata(&s, references)
+	if s.Kind == 1 {
+		r.prepareRouterASNs(reference, &s)
+	}
 	if s.Kind == 11 || s.Kind == 12 {
 		s.lookup.owner = reference
 	}
@@ -738,6 +742,14 @@ func (r *Release) label(ctx context.Context, from *Shard, row []byte, p int, tar
 	return labels.add(dictionary.rowSpan(6, first, end-first), target)
 }
 func (s *Shard) ASNRecord(asn uint32) ([]byte, bool) {
+	if s.lookup != nil && s.lookup.routerASNs != nil {
+		ordinal, ok := s.lookup.routerASNs.ordinal(asn)
+		if !ok {
+			return nil, false
+		}
+		index := u32(s.lookup.rows[2], int(ordinal)*8+4)
+		return s.Record(index), true
+	}
 	first, _, ok := s.asnBounds(asn)
 	if !ok {
 		return nil, false

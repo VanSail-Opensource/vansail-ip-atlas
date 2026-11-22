@@ -169,7 +169,7 @@ func (r *Release) PrepareNativeIndex(ctx context.Context, directory string) erro
 	if err := r.current(); err != nil {
 		return err
 	}
-	index.pages = &nativePages{file: reader, total: index.size, dir: stream.pages, routerBytes: r.routerBytes}
+	index.pages = &nativePages{owner: r, file: reader, total: index.size, dir: stream.pages, routerBytes: r.routerBytes}
 	index.pages.setMetadata(0)
 	for _, entry := range staged {
 		entry.ref.onsite = entry.component

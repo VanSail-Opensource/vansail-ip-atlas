@@ -20,6 +20,7 @@ type nativePageEntry struct {
 }
 
 type nativePages struct {
+	owner                           *Release
 	routerBytes, metadata, borrowed int
 	file                            *os.File
 	total                           int64
@@ -96,6 +97,15 @@ func (p *nativePages) next() {
 		p.pages--
 	}
 }
+
+// Called only when all ordinary page evictions have failed to admit a
+// required read. Optional indexes must not change which answers fit.
+func (p *nativePages) reclaimOptional() {
+	if p.owner != nil {
+		p.owner.releaseRouterASNs()
+	}
+}
+
 func (p *nativePages) page(number int) []byte {
 	page := p.dir[number].page
 	if page != nil {
@@ -111,6 +121,9 @@ func (p *nativePages) page(number int) []byte {
 		p.unlink(page)
 		p.dir[page.number].page = nil
 	} else {
+		if (p.pages+1)*rowPageSize+p.borrowed > p.live*rowPageSize {
+			p.reclaimOptional()
+		}
 		if (p.pages+1)*rowPageSize+p.borrowed > p.live*rowPageSize {
 			panic(nativeReadError{fail("resource_limit")})
 		}
@@ -150,6 +163,9 @@ func (p *nativePages) span(offset int64, n int) []byte {
 		p.unlink(page)
 		p.dir[page.number].page = nil
 		p.pages--
+	}
+	if n > p.live*rowPageSize-p.pages*rowPageSize-p.borrowed {
+		p.reclaimOptional()
 	}
 	if n > p.live*rowPageSize-p.pages*rowPageSize-p.borrowed {
 		panic(nativeReadError{fail("resource_limit")})

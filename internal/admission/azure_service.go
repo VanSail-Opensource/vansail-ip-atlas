@@ -15,11 +15,12 @@ import (
 	"strings"
 	"time"
 
+	"vansail-ip-atlas/internal/acquire"
 	"vansail-ip-atlas/internal/intelligence"
 	"vansail-ip-atlas/internal/subscription"
 )
 
-const azureDetails = "https://www.microsoft.com/en-us/download/details.aspx?id=56519"
+const azureDetails = acquire.AzureServiceTagsDetailsURL
 const azureEditionBase = "https://download.microsoft.com/download/7/1/d/71d86715-5596-4529-9b13-da13a5de5b63/"
 const azureLimit = 16 << 20
 

@@ -158,3 +158,38 @@ func TestBoundedRetriesAndCancellation(t *testing.T) {
 		t.Fatal("unsafe error output")
 	}
 }
+
+func TestAzureServiceTagsDownloadCenterTransport(t *testing.T) {
+	dir := t.TempDir()
+	f := New()
+	f.githubMetadataToken = "fixture-metadata-only"
+	calls := 0
+	f.client.Transport = roundTrip(func(req *http.Request) (*http.Response, error) {
+		calls++
+		if req.URL.String() != AzureServiceTagsDetailsURL || req.Method != http.MethodGet || req.Header.Get("Authorization") != "" {
+			t.Fatal("metadata request escaped its publisher locator or credential policy")
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader("page")), ContentLength: 4}, nil
+	})
+	if result, err := f.Fetch(t.Context(), AzureServiceTagsDetailsURL, filepath.Join(dir, "published"), 4); err != nil || result.Bytes != 4 || calls != 1 {
+		t.Fatal("fixed publisher metadata page unavailable", err)
+	}
+	for _, raw := range []string{
+		AzureServiceTagsDetailsURL + "&other=1",
+		AzureServiceTagsDetailsURL + "&id=56519",
+		strings.Replace(AzureServiceTagsDetailsURL, "56519", "56518", 1),
+		strings.Replace(AzureServiceTagsDetailsURL, "id=", "%69d=", 1),
+		strings.Replace(AzureServiceTagsDetailsURL, "en-us", "en-gb", 1),
+		strings.Replace(AzureServiceTagsDetailsURL, "www.microsoft.com", "download.microsoft.com", 1),
+		strings.Replace(AzureServiceTagsDetailsURL, "www.microsoft.com", "www.microsoft.com:443", 1),
+	} {
+		if _, err := f.Fetch(t.Context(), raw, filepath.Join(dir, "bad"), 4); !errors.Is(err, ErrFetch) || calls != 1 {
+			t.Fatal("unapproved query reached transport")
+		}
+	}
+	fixed, _ := http.NewRequest(http.MethodGet, AzureServiceTagsDetailsURL, nil)
+	other, _ := http.NewRequest(http.MethodGet, "https://example.com/metadata", nil)
+	if checkRedirect(other, []*http.Request{fixed}) == nil || checkRedirect(fixed, []*http.Request{other}) == nil {
+		t.Fatal("redirect changed the pinned publication metadata origin")
+	}
+}

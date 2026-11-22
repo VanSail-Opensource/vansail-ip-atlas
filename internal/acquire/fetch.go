@@ -26,6 +26,10 @@ import (
 	"vansail-ip-atlas/internal/subscription"
 )
 
+// AzureServiceTagsDetailsURL is the fixed publisher metadata page for Azure Public.
+// Its one stable query is part of the resource identity.
+const AzureServiceTagsDetailsURL = "https://www.microsoft.com/en-us/download/details.aspx?id=56519"
+
 var ErrFetch = errors.New("bulk asset acquisition failed")
 
 // ErrNotFound identifies a header-only HTTP 404, without exposing a URL or
@@ -108,7 +112,7 @@ func validURL(raw string) bool {
 	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" || u.ForceQuery || strings.Contains(u.Hostname(), "%") || (u.Port() != "" && u.Port() != "443") {
 		return false
 	}
-	if u.RawQuery != "" {
+	if u.RawQuery != "" && raw != AzureServiceTagsDetailsURL {
 		if _, ok := ParseGitHubCommitURL(raw); !ok {
 			return false
 		}
@@ -270,9 +274,12 @@ func checkRedirect(request *http.Request, via []*http.Request) error {
 	// Authentication belongs only to the original, narrowly checked metadata URL.
 	request.Header.Del("Authorization")
 	for _, previous := range via {
-		if previous == nil || previous.URL == nil || !validURL(previous.URL.String()) {
+		if previous == nil || previous.URL == nil || previous.URL.String() == AzureServiceTagsDetailsURL || !validURL(previous.URL.String()) {
 			return ErrFetch
 		}
+	}
+	if request.URL.String() == AzureServiceTagsDetailsURL {
+		return ErrFetch
 	}
 	if validURL(request.URL.String()) {
 		return nil

@@ -130,7 +130,7 @@ func TestOwnedRecordLengthsRejectUsageJoinWithSameRecordCount(t *testing.T) {
 	}
 	for _, producer := range []Producer{
 		IntelligenceProducer(state, policy, state.EvaluatedAt, MaterializationInputs{encodedLengths: lengths}),
-		mappingProducer(state, policy, state.EvaluatedAt, lengths),
+		mappingProducer(state, policy, state.EvaluatedAt, lengths, false),
 	} {
 		if err := producer(context.Background(), func(via3.PublicRecord) error { t.Fatal("pre-join owned sizes emitted a record"); return nil }); err == nil || !strings.Contains(err.Error(), "precede ASN usage join") {
 			t.Fatal("pre-join sizes accepted after equal-cardinality rewrite", err)

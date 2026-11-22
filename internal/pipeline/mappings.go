@@ -43,12 +43,12 @@ func BuildMappings(ctx context.Context, options Options, state intelligence.Buil
 // Empty rows and explicit coordinate tombstones prevent unknown/conflicting
 // child facts from falling through to stale affirmative parent values.
 func MappingProducer(state intelligence.BuildState, policy intelligence.Policy, clock time.Time) Producer {
-	return mappingProducer(state, policy, clock, nil)
+	return mappingProducer(state, policy, clock, nil, false)
 }
 
 // mappingProducer accepts lengths only from IntelligenceProducer's owned,
 // already bounded mapping subset. Exported entry points always encode inputs.
-func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, clock time.Time, encodedLengths []int) Producer {
+func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, clock time.Time, encodedLengths []int, omitInherited bool) Producer {
 	return func(ctx context.Context, emit func(via3.PublicRecord) error) error {
 		if err := checkOwnedRecordLengths(state, encodedLengths); err != nil {
 			return err
@@ -174,6 +174,9 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 		type mappingAncestor struct {
 			prefix               netip.Prefix
 			geoStart, usageStart int
+			geo                  via3.GeoData
+			coords               via3.CoordinateData
+			usage                [4]uint8
 		}
 		var ancestors []mappingAncestor
 		var applicableGeo []intelligence.GeoEvidence
@@ -195,7 +198,7 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 			if len(applicableGeo)+len(localGeo) > 8192 || len(applicableUsage)+len(localUsage) > 8192 {
 				return errors.New("mapping boundary working set exceeded")
 			}
-			ancestors = append(ancestors, mappingAncestor{prefix, len(applicableGeo), len(applicableUsage)})
+			current := mappingAncestor{prefix: prefix, geoStart: len(applicableGeo), usageStart: len(applicableUsage)}
 			applicableGeo = append(applicableGeo, localGeo...)
 			applicableUsage = append(applicableUsage, localUsage...)
 			u := intelligence.FuseUsage(applicableUsage)
@@ -220,17 +223,35 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 			if g.Coordinates != nil {
 				coordinates = via3.CoordinateData{Latitude: g.Coordinates.Latitude, Longitude: g.Coordinates.Longitude, Precision: g.Coordinates.Precision}
 			}
-			if err := emit(via3.PublicRecord{Version: 3, Kind: 2, Prefix: prefix, Geo: &geoRecord}); err != nil {
-				return err
-			}
-			if err := emit(via3.PublicRecord{Version: 3, Kind: 3, Prefix: prefix, Coordinates: &coordinates}); err != nil {
-				return err
-			}
 			typeID, _ := usageType(u.Type)
 			assignmentID, _ := assignmentType(u.Assignment)
-			if err := emit(via3.PublicRecord{Version: 3, Kind: 5, Prefix: prefix, Usage: &via3.UsageData{Type: typeID, Assignment: assignmentID, Anycast: u.Anycast, DirectedBroadcast: u.DirectedBroadcast}}); err != nil {
-				return err
+			current.geo, current.coords = geoRecord, coordinates
+			current.usage = [4]uint8{typeID, assignmentID, optionalBoolCode(u.Anycast), optionalBoolCode(u.DirectedBroadcast)}
+			// Public location lookups return the selected values. Only network and
+			// BGP origin answers expose their matching prefix. Retain the first
+			// row of each location kind, including an explicit unknown, and every
+			// change from the nearest ancestor's value.
+			var parent *mappingAncestor
+			if omitInherited && len(ancestors) > 0 {
+				parent = &ancestors[len(ancestors)-1]
 			}
+			if parent == nil || parent.geo != current.geo {
+				if err := emit(via3.PublicRecord{Version: 3, Kind: 2, Prefix: prefix, Geo: &geoRecord}); err != nil {
+					return err
+				}
+			}
+			if parent == nil || parent.coords != current.coords {
+				if err := emit(via3.PublicRecord{Version: 3, Kind: 3, Prefix: prefix, Coordinates: &coordinates}); err != nil {
+					return err
+				}
+			}
+			if parent == nil || parent.usage != current.usage {
+				usageRecord := via3.UsageData{Type: typeID, Assignment: assignmentID, Anycast: u.Anycast, DirectedBroadcast: u.DirectedBroadcast}
+				if err := emit(via3.PublicRecord{Version: 3, Kind: 5, Prefix: prefix, Usage: &usageRecord}); err != nil {
+					return err
+				}
+			}
+			ancestors = append(ancestors, current)
 		}
 		keys = keys[:0]
 		for prefix := range origins {
@@ -258,6 +279,17 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 		}
 		return nil
 	}
+}
+
+// The three possible values must stay distinct in lookup results.
+func optionalBoolCode(value *bool) uint8 {
+	if value == nil {
+		return 0
+	}
+	if *value {
+		return 2
+	}
+	return 1
 }
 
 func usageType(value string) (uint8, bool) {

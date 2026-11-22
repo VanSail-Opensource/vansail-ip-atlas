@@ -348,7 +348,7 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 				return errors.New("invalid intelligence ASN")
 			}
 		}
-		if err := mappingProducer(mappings, policy, clock, mappingLengths)(ctx, emit); err != nil {
+		if err := mappingProducer(mappings, policy, clock, mappingLengths, true)(ctx, emit); err != nil {
 			return err
 		}
 		if err := regions.visit(ctx, func(p netip.Prefix) error {

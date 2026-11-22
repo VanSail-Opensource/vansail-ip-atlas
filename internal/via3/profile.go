@@ -167,6 +167,7 @@ func (r *Release) releasePrefixMetadata(reference *objectReference) {
 		r.cacheBytes -= size
 	}
 	reference.shard.lookup.prefixLabels = nil
+	reference.shard.lookup.prefixSpans = nil
 }
 
 // This optional derived metadata is installed only while a newly decoded

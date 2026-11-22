@@ -199,11 +199,16 @@ func (r *Release) prefixPage(ctx context.Context, s *Shard, row []byte, asn, cur
 		// Strings are immutable metadata; callers always own their slice and
 		// its mutable headers. No decoded shard bytes back these strings.
 		copy(answer.Prefixes, target.lookup.prefixLabels[first:first+total])
+	} else if labels := target.cachedPrefixSpan(first, total); labels != nil {
+		copy(answer.Prefixes, labels)
 	} else {
 		for k := first; k < first+total; k++ {
 			key := rows[k*24 : (k+1)*24]
 			ip, _ := keyAddr(key)
 			answer.Prefixes[k-first] = netip.PrefixFrom(ip, int(key[1])).String()
+		}
+		if physicalRows := len(rows) / 24; physicalRows > prefixPageSize && physicalRows <= prefixObjectRows && s.lookup != nil {
+			r.retainPrefixSpan(s.lookup.references[u32(p, 0)], first, answer.Prefixes)
 		}
 	}
 	if cursor+1 < count {
@@ -286,7 +291,7 @@ type Release struct {
 // payload profile. They are owned and evicted with the shard; measured process
 // RSS includes their allocation. Reference pointers cost one word per directory
 // row; all metadata/slot populations remain bounded by the validated inventory.
-// Optional canonical prefix strings are limited to 256 rows per page and are
+// Optional canonical prefix strings come from validated logical spans and are
 // charged to the same cache/live budgets as their owning decoded shard.
 type shardLookup struct {
 	rows         [13][]byte
@@ -295,6 +300,7 @@ type shardLookup struct {
 	references   []*objectReference
 	prefixes     [2]prefixLookup
 	prefixLabels []string
+	prefixSpans  []cachedPrefixSpan
 }
 
 type prefixLookup struct {
@@ -634,7 +640,7 @@ func (r *Release) objectReference(ctx context.Context, reference *objectReferenc
 
 // Prefix pages normally contain at most 256 rows. Preformat only this bounded
 // case, after complete payload validation, and charge the allocation before it
-// is made. Larger valid objects or a full live arena retain ordinary formatting.
+// is made. Packed files retain only spans that are subsequently requested.
 // Individual strings avoid keeping an entire page alive for a one-prefix answer.
 func (r *Release) preparePrefixLabels(reference *objectReference, shard *Shard) {
 	if shard.Kind != 8 || shard.lookup == nil {
@@ -642,7 +648,7 @@ func (r *Release) preparePrefixLabels(reference *objectReference, shard *Shard) 
 	}
 	rows, _ := shard.Rows(11)
 	count := len(rows) / 24
-	if count == 0 || count > 256 {
+	if count == 0 || count > prefixPageSize {
 		return
 	}
 	// A string header occupies at most 16 bytes on supported Go architectures;
@@ -665,6 +671,7 @@ func (r *Release) preparePrefixLabels(reference *objectReference, shard *Shard) 
 	reference.prefixLabelBytes = used
 	shard.lookup.prefixLabels = labels
 }
+
 func (r *Release) reference(ctx context.Context, from *Shard, index uint32) (*Shard, error) {
 	if from.lookup != nil {
 		if uint64(index) >= uint64(len(from.lookup.references)) {

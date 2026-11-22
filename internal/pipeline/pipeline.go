@@ -595,13 +595,14 @@ func (c *compiler) writeRow(w io.Writer, row encoded) error {
 }
 
 type runReader struct {
-	file      *privateRunFile
-	reader    io.Reader
-	limit     int64
-	row       encoded
-	record    via3.PublicRecord
-	verifyEOF func() error
-	owner     *compiler // set only for authenticated intermediate runs
+	file       *privateRunFile
+	reader     io.Reader
+	limit      int64
+	row        encoded
+	record     via3.PublicRecord
+	verifyEOF  func() error
+	owner      *compiler     // set only for authenticated intermediate runs
+	leafBodies *leafPayloads // immutable scalar bodies within one public encoder call
 }
 
 func openRun(path string, limit int64) (*runReader, error) {
@@ -683,6 +684,8 @@ func (r *runReader) next() error {
 	decode := decodeRunPayload
 	if r.owner != nil {
 		decode = decodeOwnedRunPayload
+	} else if r.leafBodies != nil {
+		decode = r.leafBodies.decode
 	}
 	row, record, err := decode(data, r.limit)
 	if err != nil {
@@ -912,6 +915,9 @@ func (c *compiler) partitionFresh(path string, s scope) error {
 		r, err := c.openCompiledRun(path)
 		if err != nil {
 			return err
+		}
+		if r.file.compressed != nil && r.file.compressed.proof != nil {
+			r.leafBodies = &leafPayloads{}
 		}
 		for {
 			if err := r.next(); err == io.EOF {

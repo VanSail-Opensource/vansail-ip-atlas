@@ -196,3 +196,25 @@ func TestOwnedPartitionLeafVerifiesOriginalSegments(t *testing.T) {
 		t.Fatal("final leaf accepted a different valid segment", err)
 	}
 }
+
+func TestOwnedScatterMustUseOriginalProofOnWritingPass(t *testing.T) {
+	c := proofMergeCompiler(t)
+	c.options.Limits.PartitionRecords = 10
+	group := ownedPartitionFixture(t, c)
+	before := c.used
+	swapped := false
+	c.options.externalScratch = func() uint64 {
+		if !swapped {
+			swapped = true
+			c.runProofs.remove(group.path)
+		}
+		return 0
+	}
+	_, applied, err := c.scatterPartition(group.path, group.scope)
+	if !swapped || applied || !errors.Is(err, errOwnedRunProof) || before != c.used {
+		t.Fatal("scatter accepted a replacement input proof", swapped, applied, err)
+	}
+	if _, err := os.Stat(group.path); err != nil {
+		t.Fatal(err)
+	}
+}

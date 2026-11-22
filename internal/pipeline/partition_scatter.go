@@ -170,6 +170,13 @@ func (c *compiler) scatterPartition(path string, s scope) (runs []scatteredRun, 
 		return nil, false, err
 	}
 	defer r.file.Close()
+	// Both scans of an owned run authenticate each segment and its order and
+	// verify the terminal and underlying EOF against this process-local proof.
+	// The first reader pins the proof until the second reader finishes.
+	var proof *ownedRunProof
+	if r.owner != nil {
+		proof = r.file.compressed.proof
+	}
 	firstHash := sha256.New()
 	for {
 		if err := c.ctx.Err(); err != nil {
@@ -180,7 +187,9 @@ func (c *compiler) scatterPartition(path string, s scope) (runs []scatteredRun, 
 		} else if err != nil {
 			return nil, false, err
 		}
-		hashRunFrame(firstHash, r.row)
+		if proof == nil {
+			hashRunFrame(firstHash, r.row)
+		}
 		var inherited ownedRunFrame
 		if err := tree.count(r.record, r.frame(), &inherited); err != nil {
 			return nil, false, err
@@ -245,10 +254,10 @@ func (c *compiler) scatterPartition(path string, s scope) (runs []scatteredRun, 
 		// No file or accounting mutation has occurred at this fallback point.
 		return nil, false, nil
 	}
-	return c.writeScatter(path, tree, selected, firstHash.Sum(nil))
+	return c.writeScatter(path, tree, selected, proof, firstHash.Sum(nil))
 }
 
-func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scatterNode, digest []byte) (runs []scatteredRun, applied bool, failure error) {
+func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scatterNode, proof *ownedRunProof, digest []byte) (runs []scatteredRun, applied bool, failure error) {
 	before := c.used
 	writers := make([]*ownedRunWriter, len(selected))
 	sizes := make([]partitionSize, len(selected))
@@ -281,6 +290,9 @@ func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scat
 		return runs, false, err
 	}
 	defer r.file.Close()
+	if proof != nil && (r.owner == nil || r.file.compressed.proof != proof) {
+		return runs, false, errOwnedRunProof
+	}
 	secondHash := sha256.New()
 	for {
 		if err := c.ctx.Err(); err != nil {
@@ -291,7 +303,9 @@ func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scat
 		} else if err != nil {
 			return runs, false, err
 		}
-		hashRunFrame(secondHash, r.row)
+		if proof == nil {
+			hashRunFrame(secondHash, r.row)
+		}
 		var inherited ownedRunFrame
 		if err := tree.visitTargets(r.record, func(i int) error {
 			node := selected[i]
@@ -321,7 +335,7 @@ func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scat
 			return runs, false, err
 		}
 	}
-	if !bytes.Equal(secondHash.Sum(nil), digest) {
+	if proof == nil && !bytes.Equal(secondHash.Sum(nil), digest) {
 		return runs, false, errors.New("private run changed during scatter")
 	}
 	for i, node := range selected {

@@ -199,7 +199,11 @@ func decodeCompactRunBody(r via3.PublicRecord, data []byte, limit int64) (encode
 	if len(trimmed) == 0 || trimmed[0] != '{' || jsonv2.Unmarshal(payload, target, json.DefaultOptionsV1(), jsonv2.RejectUnknownMembers(true)) != nil {
 		return encoded{}, r, errCompactRunFrame
 	}
-	logical := compactLogicalBytes(r, len(payload))
+	return compactDecodedFrame(r, data, limit)
+}
+
+func compactDecodedFrame(r via3.PublicRecord, data []byte, limit int64) (encoded, via3.PublicRecord, error) {
+	logical := compactLogicalBytes(r, len(data)-compactRunHeader)
 	if logical > limit {
 		return encoded{}, r, errors.New("private compact frame exceeds original byte limit")
 	}

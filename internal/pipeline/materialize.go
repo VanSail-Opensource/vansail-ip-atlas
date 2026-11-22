@@ -348,7 +348,11 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 				return errors.New("invalid intelligence ASN")
 			}
 		}
-		if err := mappingProducer(mappings, policy, clock, mappingLengths, true)(ctx, emit); err != nil {
+		var mappingScope netip.Prefix
+		if len(inputs) == 1 {
+			mappingScope = inputs[0].scope
+		}
+		if err := mappingProducer(mappings, policy, clock, mappingLengths, true, mappingScope)(ctx, emit); err != nil {
 			return err
 		}
 		qualityWriter := qualityBlockWriter{emit: emit}

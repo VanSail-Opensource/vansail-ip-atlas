@@ -43,12 +43,12 @@ func BuildMappings(ctx context.Context, options Options, state intelligence.Buil
 // Empty rows and explicit coordinate tombstones prevent unknown/conflicting
 // child facts from falling through to stale affirmative parent values.
 func MappingProducer(state intelligence.BuildState, policy intelligence.Policy, clock time.Time) Producer {
-	return mappingProducer(state, policy, clock, nil, false)
+	return mappingProducer(state, policy, clock, nil, false, netip.Prefix{})
 }
 
 // mappingProducer accepts lengths only from IntelligenceProducer's owned,
 // already bounded mapping subset. Exported entry points always encode inputs.
-func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, clock time.Time, encodedLengths []int, omitInherited bool) Producer {
+func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, clock time.Time, encodedLengths []int, omitInherited bool, scope netip.Prefix) Producer {
 	return func(ctx context.Context, emit func(via3.PublicRecord) error) error {
 		if err := checkOwnedRecordLengths(state, encodedLengths); err != nil {
 			return err
@@ -178,6 +178,11 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 			coords               via3.CoordinateData
 			usage                [4]uint8
 		}
+		var packed locationRows
+		emitLocation := emit
+		if omitInherited {
+			emitLocation = packed.collect
+		}
 		var ancestors []mappingAncestor
 		var applicableGeo []intelligence.GeoEvidence
 		var applicableUsage []intelligence.UsageEvidence
@@ -236,22 +241,27 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 				parent = &ancestors[len(ancestors)-1]
 			}
 			if parent == nil || parent.geo != current.geo {
-				if err := emit(via3.PublicRecord{Version: 3, Kind: 2, Prefix: prefix, Geo: &geoRecord}); err != nil {
+				if err := emitLocation(via3.PublicRecord{Version: 3, Kind: 2, Prefix: prefix, Geo: &geoRecord}); err != nil {
 					return err
 				}
 			}
 			if parent == nil || parent.coords != current.coords {
-				if err := emit(via3.PublicRecord{Version: 3, Kind: 3, Prefix: prefix, Coordinates: &coordinates}); err != nil {
+				if err := emitLocation(via3.PublicRecord{Version: 3, Kind: 3, Prefix: prefix, Coordinates: &coordinates}); err != nil {
 					return err
 				}
 			}
 			if parent == nil || parent.usage != current.usage {
 				usageRecord := via3.UsageData{Type: typeID, Assignment: assignmentID, Anycast: u.Anycast, DirectedBroadcast: u.DirectedBroadcast}
-				if err := emit(via3.PublicRecord{Version: 3, Kind: 5, Prefix: prefix, Usage: &usageRecord}); err != nil {
+				if err := emitLocation(via3.PublicRecord{Version: 3, Kind: 5, Prefix: prefix, Usage: &usageRecord}); err != nil {
 					return err
 				}
 			}
 			ancestors = append(ancestors, current)
+		}
+		if omitInherited {
+			if err := packed.emit(ctx, scope, emit); err != nil {
+				return err
+			}
 		}
 		keys = keys[:0]
 		for prefix := range origins {

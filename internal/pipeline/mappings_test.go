@@ -229,7 +229,7 @@ func TestCompactMappingValuesPreserveUnknownsAndNetworkPrefixes(t *testing.T) {
 		o := testOptions(t)
 		o.Limits.PartitionRecords = 6
 		count := 0
-		producer := mappingProducer(state, policy, state.EvaluatedAt, nil, compact)
+		producer := mappingProducer(state, policy, state.EvaluatedAt, nil, compact, netip.Prefix{})
 		_, err := Build(ctx, o, func(ctx context.Context, emit func(via3.PublicRecord) error) error {
 			return producer(ctx, func(r via3.PublicRecord) error { count++; return emit(r) })
 		})

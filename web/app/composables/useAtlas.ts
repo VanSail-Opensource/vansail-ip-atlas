@@ -1,4 +1,4 @@
-import { AtlasClient, type LookupAnswer, type OverviewAnswer, type ClassCAnswer } from '~/lib/via3'
+import { AtlasClient, type LookupAnswer, type OverviewAnswer, type RiskView, type ClassCView, type ClassCAnswer } from '~/lib/via3'
 import { resolve, validateOrigin } from '~/lib/query'
 import { loadDatasetCredits, type CreditDocument } from '~/lib/datasetCredits'
 import { trackSnapshotTime } from '~/lib/rpkiSnapshot'
@@ -8,9 +8,11 @@ export function useAtlas() {
   const route = useRoute()
   const releaseInfo = useState<{ releaseId: string; validUntil: number; synthetic: boolean } | null>('atlas-release-info', () => null)
   const verifiedCredits = useState<CreditDocument | null>('atlas-dataset-credits', () => null)
-  const result = shallowRef<LookupAnswer | OverviewAnswer | null>(null)
+  const result = shallowRef<LookupAnswer | OverviewAnswer | RiskView | ClassCView | null>(null)
   const data = computed(() => result.value && 'bgp' in result.value ? result.value : null)
-  const overview = computed(() => result.value && !('bgp' in result.value) ? result.value : null)
+  const overview = computed(() => result.value && 'geo' in result.value ? result.value : null)
+  const quality = computed(() => result.value && 'observedRisk' in result.value ? result.value : null)
+  const grid = computed(() => result.value && 'profile' in result.value ? result.value : null)
   const classC = shallowRef<ClassCAnswer | null>(null)
   const error = ref('')
   const loading = ref(false)
@@ -68,7 +70,13 @@ export function useAtlas() {
       atlas ??= new AtlasClient()
       atlas.removeEventListener('invalidate', invalidate)
       atlas.addEventListener('invalidate', invalidate)
-      const answer = path === '/ip/overview' ? await atlas.overview(state.q, active.signal) : await atlas.lookup(state.q, active.signal)
+      let answer: LookupAnswer | OverviewAnswer | RiskView | ClassCView
+      switch (path) {
+        case '/ip/overview': answer = await atlas.overview(state.q, active.signal); break
+        case '/ip/quality': answer = await atlas.risk(state.q, active.signal); break
+        case '/ip/class-c': answer = await atlas.classCView(state.q, active.signal); break
+        default: answer = await atlas.lookup(state.q, active.signal)
+      }
       let pendingClassC: ClassCAnswer | null = null
       if (run !== serial) return
       if (Date.now() / 1000 >= answer.validUntil) throw new Error('release_expired')
@@ -78,9 +86,8 @@ export function useAtlas() {
         origin.value = Number(state.origin.slice(2))
         validateOrigin(origin.value, answer.bgp.origins)
       }
-      if (path === '/ip/class-c') {
-        const cells = await atlas.classC(state.q, active.signal)
-        if (run !== serial) return
+      if ('profile' in answer) {
+        const cells = answer.profile
         if (!cells && state.kind === 'ip' && !state.q.includes(':')) {
           const base = state.q.split('.').slice(0, 3).join('.')
           pendingClassC = { prefix: `${base}.0/24`, observedCount: 0, assessedCount: 0, scoredCount: 0, positiveCount: 0, meanObservedRisk: null,
@@ -148,5 +155,5 @@ export function useAtlas() {
     document.removeEventListener('visibilitychange', resume)
     atlas?.removeEventListener('invalidate', invalidate)
   })
-  return { data, overview, classC, error, loading, current, origin, prefixBusy, now, loadPrefixes, reload: () => load() }
+  return { data, overview, quality, grid, classC, error, loading, current, origin, prefixBusy, now, loadPrefixes, reload: () => load() }
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { data, error, loading, current } = useAtlas()
+const { quality: data, error, loading, current } = useAtlas()
 const risk = computed(() => data.value?.observedRisk)
 const layers = computed(() => risk.value ? Object.entries(risk.value.layers) : [])
 const displayedScore = computed(() => risk.value?.score == null ? '—' : risk.value.score === 0 ? '<1' : risk.value.score)

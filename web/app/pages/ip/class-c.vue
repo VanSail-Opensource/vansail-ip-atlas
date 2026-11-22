@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { data, classC, error, loading, current } = useAtlas()
+const { grid: data, classC, error, loading, current } = useAtlas()
 const focused = ref(0)
 const selected = computed(() => classC.value?.cells[focused.value])
 const cells = ref<HTMLButtonElement[]>([])

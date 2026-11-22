@@ -263,6 +263,28 @@ test('overview reads only its IP facts and referenced dictionaries', async () =>
   } finally { reader.clear() }
 })
 
+test('risk and Class C owner views read only their own verified facts', async () => {
+  const byPath = new Map(golden.objects.map(({ info }) => [`/_atlas/objects/${info.sha256}.via3`, info.kind]))
+  for (const view of ['risk','classCView']) {
+    const accessed = new Set()
+    const reader = new AtlasReader((path, options) => {
+      if (byPath.has(path)) accessed.add(byPath.get(path))
+      return response(path, options)
+    }, () => golden.clock)
+    try {
+      await assert.rejects(reader[view]('AS13335'),{message:'invalid_input'})
+      assert.equal(accessed.size,0)
+      for (const vector of golden.vectors.filter(item => item.answer.kind === 'ip')) {
+        const { q, kind, releaseId, synthetic, validUntil } = vector.answer
+        const fields = view === 'risk' ? {observedRisk:vector.answer.observedRisk} : {profile:vector.classC}
+        assert.deepEqual(await reader[view](q),{q,kind,releaseId,synthetic,validUntil,...fields})
+      }
+      assert.deepEqual([...accessed].sort((a,b)=>a-b), view === 'risk' ? [1,6] : [1,4,7])
+      await assert.rejects(reader[view]('8.8.8.8',AbortSignal.abort()),{name:'AbortError'})
+    } finally { reader.clear() }
+  }
+})
+
 test('independent fact partitions preserve complete Go/worker lookup and Class C answers', async t => {
   const fixture = JSON.parse(readFileSync(new URL('../../fixtures/bin/grouped-via3.json', import.meta.url), 'utf8'))
   const objects = new Map(fixture.objects.map(object => [`/_atlas/objects/${object.info.sha256}.via3`, new Uint8Array(Buffer.from(object.base64, 'base64'))]))

@@ -42,6 +42,8 @@ for (const fixture of ['synthetic-via3', 'grouped-via3']) {
         if (entry.answer.kind === 'ip') {
           const {releaseId,validUntil,synthetic,q,geo,usage,network,kind} = entry.answer
           assert.deepEqual(await reader.overview(q),{releaseId,validUntil,synthetic,q,geo,usage,network,kind})
+          assert.deepEqual(await reader.risk(q),{releaseId,validUntil,synthetic,q,kind,observedRisk:entry.answer.observedRisk})
+          assert.deepEqual(await reader.classCView(q),{releaseId,validUntil,synthetic,q,kind,profile:entry.classC})
         }
       }
       assert(calls.has('/_atlas/browser/' + digest + '.json'))

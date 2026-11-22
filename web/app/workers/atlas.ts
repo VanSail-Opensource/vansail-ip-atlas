@@ -3,7 +3,7 @@ import { decodeZstd } from '../lib/zstd.ts'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { parseInput } from '../lib/query.ts'
 import type { Input } from '../lib/query.ts'
-import type { LookupAnswer, OverviewAnswer, ClassCAnswer, ASNAnswer, BGPAnswer, ASNPrefixPage, CoverageAnswer } from '../lib/via3.ts'
+import type { AddressView, ClassCView, LookupAnswer, OverviewAnswer, QualityAnswer, RiskView, ClassCAnswer, ASNAnswer, BGPAnswer, ASNPrefixPage, CoverageAnswer } from '../lib/via3.ts'
 
 const MAX_FILE = 24 * 1024 * 1024
 const MAX_SECTION = 64 * 1024 * 1024
@@ -550,6 +550,20 @@ class ObjectCache {
   }
 }
 
+
+function riskAt(shard: Shard | undefined, address: string): QualityAnswer | null {
+  const row = shard?.prefix(address)?.row
+  if (!row) return null
+  const layer = (bit: number, offset: number) => has(row, bit) ? u32(row, offset) / 1e6 : null
+  return {
+    coverage: coverageAnswer(row[11]!, address.includes(':')),
+    score: has(row, 9) ? row[9]! : null,
+    confidence: confidence(row[10]!),
+    reasons: reasons(u32(row, 4)),
+    layers: { exact: layer(10,12), prefix: layer(11,16), asn: layer(12,20), neighbors: layer(13,24) },
+  }
+}
+
 /** Indexed reader used only in the worker; injected fetch/clock support parity tests. */
 export class AtlasReader {
   private fetcher: typeof fetch
@@ -797,14 +811,38 @@ export class AtlasReader {
     if (use) { answer.usage = { type: usage(use[4]!), assignment: ['unknown', 'native', 'broadcast_or_routed'][use[5]!]!, anycast: has(use, 7) ? !!(use[6]! & 1) : null, directedBroadcast: has(use, 8) ? !!(use[6]! & 2) : null }; if (answer.usage.anycast && answer.geo) { answer.geo.city = null; answer.geo.latitude = null; answer.geo.longitude = null; answer.geo.precision = null } }
     return networkOriginsKnown
   }
+  private addressView(input: Input): AddressView {
+    const manifest = this.current()
+    return { q: input.canonical, kind: 'ip', releaseId: manifest.release_id, synthetic: manifest.mode === 'synthetic', validUntil: manifest.valid_until }
+  }
+  async risk(q: string, signal?: AbortSignal): Promise<RiskView> {
+    const input = parseInput(q)
+    if (input.kind !== 'ip') return fail('invalid_input')
+    this.beginQuery()
+    try {
+      await this.ready(signal)
+      const dest = await this.destinations(input, signal, 6)
+      checkAbort(signal)
+      return { ...this.addressView(input), observedRisk: riskAt(dest.get(6), input.canonical) }
+    } finally { this.endQuery() }
+  }
+  async classCView(q: string, signal?: AbortSignal): Promise<ClassCView> {
+    const input = parseInput(q)
+    if (input.kind !== 'ip') return fail('invalid_input')
+    this.beginQuery()
+    try {
+      const profile = await this.classCInput(input,signal)
+      checkAbort(signal)
+      return { ...this.addressView(input), profile }
+    } finally { this.endQuery() }
+  }
   async overview(q: string, signal?: AbortSignal): Promise<OverviewAnswer> {
     const input = parseInput(q)
     if (input.kind !== 'ip') return fail('invalid_input')
     this.beginQuery()
     try {
       await this.ready(signal)
-      const manifest = this.current()
-      const answer: OverviewAnswer = { q: input.canonical, kind: 'ip', releaseId: manifest.release_id, synthetic: manifest.mode === 'synthetic', validUntil: manifest.valid_until, geo: null, network: null, usage: null }
+      const answer: OverviewAnswer = { ...this.addressView(input), geo: null, network: null, usage: null }
       const dest = await this.destinations(input, signal, [2, 3, 4, 5])
       await this.readOverview(input.canonical, dest, answer, new AnswerBudget(), signal)
       checkAbort(signal); this.current(); answerFits(answer)
@@ -826,8 +864,7 @@ export class AtlasReader {
         answer.bgp.origins = answer.network.origins
         if (networkOriginsKnown) announcement = answer.network.prefix
       }
-      const quality = dest.get(6)?.prefix(input.canonical)?.row
-      if (quality) answer.observedRisk = { coverage: coverageAnswer(quality[11]!, input.canonical.includes(':')), score: has(quality, 9) ? quality[9]! : null, confidence: confidence(quality[10]!), reasons: reasons(u32(quality, 4)), layers: { exact: has(quality, 10) ? u32(quality, 12) / 1e6 : null, prefix: has(quality, 11) ? u32(quality, 16) / 1e6 : null, asn: has(quality, 12) ? u32(quality, 20) / 1e6 : null, neighbors: has(quality, 13) ? u32(quality, 24) / 1e6 : null } }
+      answer.observedRisk = riskAt(dest.get(6), input.canonical)
       const originShard = dest.get(10); const originFound = originShard?.prefix(input.canonical); const originRow = originFound?.row
       if (originShard && originRow && has(originRow, 19)) { budget.charge(16 * u32(originRow, 8)); const values = this.originList(originShard, originRow); if (networkOriginsKnown && (answer.network!.origins.length !== values.length || values.some((value, index) => value !== answer.network!.origins[index]))) return fail('record'); answer.bgp.origins = values; announcement = originFound!.prefix }
     } else answer.bgp.origins = [Number(input.canonical.slice(2))]
@@ -942,17 +979,19 @@ if (typeof self !== 'undefined' && typeof window === 'undefined') {
     const { action, id, q, cursor } = event.data
     if (action === 'cancel') { controllers.get(id)?.abort(); return }
     if (action === 'clear') { for (const controller of controllers.values()) controller.abort(); reader.clear(); return }
-    if (!Number.isSafeInteger(id) || typeof q !== 'string' || !['lookup', 'overview', 'classC', 'prefixes'].includes(action)) return
+    if (!Number.isSafeInteger(id) || typeof q !== 'string' || !['lookup', 'overview', 'risk', 'classCView', 'classC', 'prefixes'].includes(action)) return
     if (new TextEncoder().encode(q).byteLength > 128) { self.postMessage({ id, error: 'invalid_input' }); return }
     if (controllers.size >= 8) { self.postMessage({ id, error: 'resource_limit' }); return }
     const controller = new AbortController(); controllers.set(id, controller)
     queue = queue.then(async () => {
       try {
         checkAbort(controller.signal)
-        let answer: LookupAnswer | OverviewAnswer | ClassCAnswer | ASNPrefixPage | null
+        let answer: LookupAnswer | OverviewAnswer | RiskView | ClassCView | ClassCAnswer | ASNPrefixPage | null
         switch (action) {
           case 'lookup': answer = await reader.lookup(q, controller.signal); break
           case 'overview': answer = await reader.overview(q, controller.signal); break
+          case 'risk': answer = await reader.risk(q, controller.signal); break
+          case 'classCView': answer = await reader.classCView(q, controller.signal); break
           case 'prefixes': answer = await reader.prefixes(q, cursor, controller.signal); break
           default: answer = await reader.classC(q, controller.signal)
         }

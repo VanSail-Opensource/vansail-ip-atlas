@@ -108,7 +108,30 @@ func (c *compiler) openCompiledRun(path string) (*runReader, error) {
 		}
 		binding.captures = append(binding.captures, capture)
 	}
-	return openRunBound(path, c.options.Limits.RecordBytes, binding)
+	reader, err := openRunBound(path, c.options.Limits.RecordBytes, binding)
+	if err != nil {
+		return nil, err
+	}
+	proof := c.runProofs.lookup(path)
+	if proof == nil {
+		return reader, nil
+	}
+	info, err := reader.file.Stat()
+	if err == nil {
+		err = proof.checkFile(info)
+	}
+	if err == nil && reader.file.compressed == nil {
+		err = errors.New("canonical run framing changed")
+	}
+	if err != nil {
+		reader.file.Close()
+		return nil, err
+	}
+	if err := reader.file.compressed.attachProof(proof); err != nil {
+		reader.file.Close()
+		return nil, err
+	}
+	return reader, nil
 }
 
 func cloneCompiledPartition(value *compiledPartitionEntry) *compiledPartitionEntry {

@@ -608,35 +608,19 @@ func openRun(path string, limit int64) (*runReader, error) {
 	return openRunBound(path, limit, nil)
 }
 
-// openIntermediateRun can use metadata only for a run whose original bytes
-// came from this build's closed canonical writer. All other paths use the
-// ordinary strict reader, including the final classified runs and cache inputs.
+// Only verified bytes created by this compilation may skip decoding the body
+// during merge or partition planning. Final leaves use openCompiledRun directly,
+// which checks the same segment and capture identities and decodes every body.
 func (c *compiler) openIntermediateRun(path string) (*runReader, error) {
-	reader, err := openRun(path, c.options.Limits.RecordBytes)
-	if err != nil {
-		return nil, err
+	reader, err := c.openCompiledRun(path)
+	if err == nil && reader.file.compressed != nil && reader.file.compressed.proof != nil {
+		reader.owner = c
 	}
-	proof := c.runProofs.lookup(path)
-	if proof == nil {
-		return reader, nil
-	}
-	info, err := reader.file.Stat()
-	if err == nil {
-		err = proof.checkFile(info)
-	}
-	if err == nil && reader.file.compressed == nil {
-		err = errors.New("canonical run framing changed")
-	}
-	if err != nil {
-		reader.file.Close()
-		return nil, err
-	}
-	if err := reader.file.compressed.attachProof(proof); err != nil {
-		reader.file.Close()
-		return nil, err
-	}
-	reader.owner = c
-	return reader, nil
+	return reader, err
+}
+
+func (r *runReader) frame() ownedRunFrame {
+	return ownedRunFrame{owner: r.owner, row: r.row}
 }
 
 func openRunBound(path string, limit int64, binding *compiledRunBinding) (*runReader, error) {
@@ -750,12 +734,7 @@ func (c *compiler) mergeGroup(paths []string) (string, error) {
 				return "", errors.New("conflicting fused fact identity")
 			}
 		} else {
-			if r.owner != nil {
-				err = w.AppendCanonical(ownedRunFrame{owner: r.owner, row: r.row})
-			} else {
-				err = w.AppendUnproved(r.row)
-			}
-			if err != nil {
+			if err := w.appendFrame(r.frame()); err != nil {
 				return "", err
 			}
 			previous = r.row
@@ -803,20 +782,9 @@ func (c *compiler) merge(runs []string) (string, error) {
 func (c *compiler) classify(path string) ([]classifiedRun, error) {
 	var paths [3 * factGroupCount]string
 	var sizes [3 * factGroupCount]partitionSize
-	var files [3 * factGroupCount]*os.File
-	var writers [3 * factGroupCount]*privateRunWriter
-	defer func() {
-		for _, w := range writers {
-			if w != nil {
-				_ = w.Close()
-			}
-		}
-		for _, f := range files {
-			if f != nil {
-				f.Close()
-			}
-		}
-	}()
+	var writers [3 * factGroupCount]*ownedRunWriter
+	completed := false
+	defer func() { c.closePartitionWriters(writers[:], paths[:], completed) }()
 	r, err := c.openIntermediateRun(path)
 	if err != nil {
 		return nil, err
@@ -840,30 +808,23 @@ func (c *compiler) classify(path string) ([]classifiedRun, error) {
 			return nil, errFactGroup
 		}
 		i = i*factGroupCount + int(group) - 1
-		if files[i] == nil {
+		if writers[i] == nil {
 			paths[i] = c.next()
-			files[i], err = os.OpenFile(paths[i], os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-			if err != nil {
-				return nil, err
-			}
-			writers[i], err = newPrivateRunWriter(c, files[i])
+			writers[i], err = c.newOwnedRunWriter(paths[i])
 			if err != nil {
 				return nil, err
 			}
 		}
-		if err := c.writeRow(writers[i], r.row); err != nil {
+		if err := writers[i].appendFrame(r.frame()); err != nil {
 			return nil, err
 		}
 		sizes[i].records++
 		sizes[i].bytes += r.row.logicalBytes + 512
 		c.stats.UniqueRecords++
 	}
-	for i, f := range files {
-		if f != nil {
-			if err := writers[i].Flush(); err != nil {
-				return nil, err
-			}
-			if err := f.Close(); err != nil {
+	for i, w := range writers {
+		if w != nil {
+			if err := w.Finish(); err != nil {
 				return nil, err
 			}
 			c.rememberPartitionSize(paths[i], sizes[i])
@@ -879,6 +840,7 @@ func (c *compiler) classify(path string) ([]classifiedRun, error) {
 			runs = append(runs, classifiedRun{path, classifiedScope(i)})
 		}
 	}
+	completed = true
 	return runs, nil
 }
 
@@ -1072,21 +1034,10 @@ func compact(values []uint32) []uint32 {
 func (c *compiler) split(path string, children *[2]scope) ([2]string, error) {
 	var paths [2]string
 	var sizes [2]partitionSize
-	var files [2]*os.File
-	var writers [2]*privateRunWriter
-	defer func() {
-		for _, w := range writers {
-			if w != nil {
-				_ = w.Close()
-			}
-		}
-		for _, f := range files {
-			if f != nil {
-				f.Close()
-			}
-		}
-	}()
-	r, err := c.openCompiledRun(path)
+	var writers [2]*ownedRunWriter
+	completed := false
+	defer func() { c.closePartitionWriters(writers[:], paths[:], completed) }()
+	r, err := c.openIntermediateRun(path)
 	if err != nil {
 		return paths, err
 	}
@@ -1114,54 +1065,32 @@ func (c *compiler) split(path string, children *[2]scope) ([2]string, error) {
 				cover = netip.PrefixFrom(cover.Addr(), cover.Bits()-1).Masked()
 			}
 		}
+		var inherited ownedRunFrame
 		for i, child := range children {
-			copy := record
-			if child.asn {
-				if record.ASN < child.first || record.ASN > child.last {
-					continue
-				}
-			} else if record.Prefix.Bits() < child.prefix.Bits() && record.Prefix.Contains(child.prefix.Addr()) {
-				if record.Kind == 7 || record.Exact {
-					return paths, errors.New("profile or exact row cannot become an inherited overlay")
-				}
-				copy.Inherited = true
-			} else if !child.prefix.Contains(record.Prefix.Addr()) {
+			frame, keep, err := scatterRow(record, r.frame(), child, &inherited)
+			if err != nil {
+				return paths, err
+			}
+			if !keep {
 				continue
 			}
-			// Most rows only move to a narrower run. Their validated frame
-			// already has the canonical bytes; only a newly inherited overlay
-			// changes the record and needs encoding again.
-			row := r.row
-			if copy.Inherited != record.Inherited {
-				row, err = reencodeRunRecord(copy, r.row)
-				if err != nil {
-					return paths, err
-				}
-			}
-			if files[i] == nil {
+			if writers[i] == nil {
 				paths[i] = c.next()
-				files[i], err = os.OpenFile(paths[i], os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-				if err != nil {
-					return paths, err
-				}
-				writers[i], err = newPrivateRunWriter(c, files[i])
+				writers[i], err = c.newOwnedRunWriter(paths[i])
 				if err != nil {
 					return paths, err
 				}
 			}
-			if err := c.writeRow(writers[i], row); err != nil {
+			if err := writers[i].appendFrame(frame); err != nil {
 				return paths, err
 			}
 			sizes[i].records++
-			sizes[i].bytes += row.logicalBytes + 512
+			sizes[i].bytes += frame.row.logicalBytes + 512
 		}
 	}
-	for i, f := range files {
-		if f != nil {
-			if err := writers[i].Flush(); err != nil {
-				return paths, err
-			}
-			if err := f.Close(); err != nil {
+	for i, w := range writers {
+		if w != nil {
+			if err := w.Finish(); err != nil {
 				return paths, err
 			}
 			c.rememberPartitionSize(paths[i], sizes[i])
@@ -1202,6 +1131,7 @@ func (c *compiler) split(path string, children *[2]scope) ([2]string, error) {
 			children[i].prefix = cover
 		}
 	}
+	completed = true
 	return paths, nil
 }
 

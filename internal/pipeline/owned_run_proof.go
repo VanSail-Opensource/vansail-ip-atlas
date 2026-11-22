@@ -158,7 +158,7 @@ func (c *compiler) newOwnedRunWriter(path string) (*ownedRunWriter, error) {
 	}
 	codec, err := newPrivateRunWriter(c, f)
 	if err != nil {
-		return nil, errors.Join(err, f.Close())
+		return nil, errors.Join(err, f.Close(), os.Remove(path))
 	}
 	w := &ownedRunWriter{owner: c, file: f, codec: codec, proof: c.runProofs.begin(path)}
 	if w.proof != nil {
@@ -192,6 +192,13 @@ func (w *ownedRunWriter) AppendCanonical(f ownedRunFrame) error {
 func (w *ownedRunWriter) AppendUnproved(row encoded) error {
 	w.disableProof()
 	return w.appendRow(row)
+}
+
+func (w *ownedRunWriter) appendFrame(f ownedRunFrame) error {
+	if f.owner == nil {
+		return w.AppendUnproved(f.row)
+	}
+	return w.AppendCanonical(f)
 }
 
 func (w *ownedRunWriter) appendRow(row encoded) error {
@@ -269,4 +276,17 @@ func (w *ownedRunWriter) Close() error {
 		w.file = nil
 	}
 	return errors.Join(codecErr, fileErr)
+}
+
+// Several classified or split outputs can finish in turn. If a later output
+// or input removal fails, retire even the proofs that finished earlier.
+func (c *compiler) closePartitionWriters(writers []*ownedRunWriter, paths []string, completed bool) {
+	for i, w := range writers {
+		if w != nil {
+			_ = w.Close()
+			if !completed {
+				c.runProofs.remove(paths[i])
+			}
+		}
+	}
 }

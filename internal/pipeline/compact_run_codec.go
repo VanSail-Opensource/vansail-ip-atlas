@@ -13,10 +13,10 @@ import (
 	"vansail-ip-atlas/internal/via3"
 )
 
-// Only the private sort transport changes. Common scalar fields use a closed
-// 32-byte header; the selected union retains its exact JSON bytes and strict
-// decoder. Every read still validates the complete payload. Public VIA3 and the
-// original dense JSON record/sort/partition budgets are unchanged.
+// The private sort transport uses a closed 32-byte scalar header. The selected
+// union retains its exact JSON bytes. Final leaves and unproved runs decode
+// the complete payload. Planning may reuse the canonical writer's segment
+// proof, with the same dense JSON record, sort and partition budgets.
 const compactRunMarker = "ATCP\x01\x00\x00\x00"
 const compactRunHeader = 32
 

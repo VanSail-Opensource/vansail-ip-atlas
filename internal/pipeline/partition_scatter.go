@@ -45,21 +45,20 @@ func scatterTree(s scope, depth int) *scatterNode {
 
 // The same canonical inherited bytes apply to every descendant where this row
 // is an overlay. Fitting ancestors keep their original non-inherited bytes.
-func scatterRow(record via3.PublicRecord, row encoded, target scope, inherited *encoded) (encoded, bool, error) {
+func scatterRow(record via3.PublicRecord, row ownedRunFrame, target scope, inherited *ownedRunFrame) (ownedRunFrame, bool, error) {
 	if target.asn {
 		return row, record.ASN >= target.first && record.ASN <= target.last, nil
 	}
 	if record.Prefix.Bits() < target.prefix.Bits() && record.Prefix.Contains(target.prefix.Addr()) {
 		if record.Kind == 7 || record.Exact {
-			return encoded{}, false, errors.New("profile or exact row cannot become an inherited overlay")
+			return ownedRunFrame{}, false, errors.New("profile or exact row cannot become an inherited overlay")
 		}
 		if !record.Inherited {
-			if inherited.data == nil {
-				record.Inherited = true
+			if inherited.row.data == nil {
 				var err error
-				*inherited, err = reencodeRunRecord(record, row)
+				*inherited, err = row.inherited(record)
 				if err != nil {
-					return encoded{}, false, err
+					return ownedRunFrame{}, false, err
 				}
 			}
 			return *inherited, true, nil
@@ -69,14 +68,14 @@ func scatterRow(record via3.PublicRecord, row encoded, target scope, inherited *
 	return row, target.prefix.Contains(record.Prefix.Addr()), nil
 }
 
-func (node *scatterNode) count(record via3.PublicRecord, row encoded, inherited *encoded) error {
+func (node *scatterNode) count(record via3.PublicRecord, row ownedRunFrame, inherited *ownedRunFrame) error {
 	selected, keep, err := scatterRow(record, row, node.scope, inherited)
 	if err != nil || !keep {
 		return err
 	}
 	node.size.records++
-	node.size.bytes += selected.logicalBytes + 512
-	node.wireBytes += selected.frameBytes()
+	node.size.bytes += selected.row.logicalBytes + 512
+	node.wireBytes += selected.row.frameBytes()
 	if node.asn {
 		if node.first == 0 || record.ASN < node.first {
 			node.first = record.ASN
@@ -154,7 +153,7 @@ func hashRunFrame(h hash.Hash, row encoded) {
 	_ = writeRunFrame(h, row)
 }
 
-// scatterPartition amortizes up to four binary split passes into two strict
+// scatterPartition amortizes up to four binary split passes into two verified
 // scans. It selects the original first-fitting logical scopes, not a fixed
 // sixteen-way partition. Actual binary size/profile checks remain in partition.
 func (c *compiler) scatterPartition(path string, s scope) (runs []scatteredRun, applied bool, failure error) {
@@ -166,7 +165,7 @@ func (c *compiler) scatterPartition(path string, s scope) (runs []scatteredRun, 
 	if tree.children[0] == nil {
 		return nil, false, nil
 	}
-	r, err := c.openCompiledRun(path)
+	r, err := c.openIntermediateRun(path)
 	if err != nil {
 		return nil, false, err
 	}
@@ -182,8 +181,8 @@ func (c *compiler) scatterPartition(path string, s scope) (runs []scatteredRun, 
 			return nil, false, err
 		}
 		hashRunFrame(firstHash, r.row)
-		var inherited encoded
-		if err := tree.count(r.record, r.row, &inherited); err != nil {
+		var inherited ownedRunFrame
+		if err := tree.count(r.record, r.frame(), &inherited); err != nil {
 			return nil, false, err
 		}
 	}
@@ -251,8 +250,7 @@ func (c *compiler) scatterPartition(path string, s scope) (runs []scatteredRun, 
 
 func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scatterNode, digest []byte) (runs []scatteredRun, applied bool, failure error) {
 	before := c.used
-	files := make([]*os.File, len(selected))
-	writers := make([]*privateRunWriter, len(selected))
+	writers := make([]*ownedRunWriter, len(selected))
 	sizes := make([]partitionSize, len(selected))
 	wireBytes := make([]int64, len(selected))
 	runs = make([]scatteredRun, len(selected))
@@ -262,11 +260,6 @@ func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scat
 				_ = w.Close()
 			}
 		}
-		for _, file := range files {
-			if file != nil {
-				_ = file.Close()
-			}
-		}
 		if !applied {
 			for _, run := range runs {
 				if run.path != "" {
@@ -274,6 +267,7 @@ func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scat
 						failure = errors.Join(failure, err)
 					}
 					delete(c.partitionSizes, run.path)
+					c.runProofs.remove(run.path)
 				}
 			}
 			c.used = before
@@ -282,7 +276,7 @@ func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scat
 			}
 		}
 	}()
-	r, err := c.openCompiledRun(path)
+	r, err := c.openIntermediateRun(path)
 	if err != nil {
 		return runs, false, err
 	}
@@ -298,34 +292,30 @@ func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scat
 			return runs, false, err
 		}
 		hashRunFrame(secondHash, r.row)
-		var inherited encoded
+		var inherited ownedRunFrame
 		if err := tree.visitTargets(r.record, func(i int) error {
 			node := selected[i]
-			row, keep, err := scatterRow(r.record, r.row, node.scope, &inherited)
+			frame, keep, err := scatterRow(r.record, r.frame(), node.scope, &inherited)
 			if err != nil {
 				return err
 			}
 			if !keep {
 				return nil
 			}
-			if files[i] == nil {
+			if writers[i] == nil {
 				target := c.next()
-				files[i], err = os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+				writers[i], err = c.newOwnedRunWriter(target)
 				if err != nil {
 					return err
 				}
 				runs[i] = scatteredRun{target, node.scope}
-				writers[i], err = newPrivateRunWriter(c, files[i])
-				if err != nil {
-					return err
-				}
 			}
-			if err := c.writeRow(writers[i], row); err != nil {
+			if err := writers[i].appendFrame(frame); err != nil {
 				return err
 			}
 			sizes[i].records++
-			sizes[i].bytes += row.logicalBytes + 512
-			wireBytes[i] += row.frameBytes()
+			sizes[i].bytes += frame.row.logicalBytes + 512
+			wireBytes[i] += frame.row.frameBytes()
 			return nil
 		}); err != nil {
 			return runs, false, err
@@ -335,13 +325,10 @@ func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scat
 		return runs, false, errors.New("private run changed during scatter")
 	}
 	for i, node := range selected {
-		if files[i] == nil || sizes[i] != node.size || wireBytes[i] != node.wireBytes {
+		if writers[i] == nil || sizes[i] != node.size || wireBytes[i] != node.wireBytes {
 			return runs, false, errors.New("public scatter totals changed")
 		}
-		if err := writers[i].Flush(); err != nil {
-			return runs, false, err
-		}
-		if err := files[i].Close(); err != nil {
+		if err := writers[i].Finish(); err != nil {
 			return runs, false, err
 		}
 		c.rememberPartitionSize(runs[i].path, sizes[i])

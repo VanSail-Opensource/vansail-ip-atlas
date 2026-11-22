@@ -9,8 +9,9 @@ import (
 // ownedRunFrame carries canonical transport bytes created in this compilation.
 // It is not a public-fact semantic approval. The bytes have no accessor and
 // never alias caller records, decoded payloads or a reusable reader buffer.
-// The only factories are normalization+encoding below and an authenticated
-// compiler-owned run reader. Final leaves still use the strict payload decoder.
+// An owned frame originates in the canonical encoder or an authenticated reader.
+// Changing an overlay strictly decodes its original payload before re-encoding.
+// A nil owner marks a fallback frame that can never establish a segment proof.
 type ownedRunFrame struct {
 	owner *compiler
 	row   encoded
@@ -34,6 +35,25 @@ func (c *compiler) newCanonicalRunFrame(input via3.PublicRecord) (ownedRunFrame,
 func (f ownedRunFrame) ownedBy(c *compiler) bool {
 	return c != nil && f.owner == c && f.row.compact && !f.row.sparse &&
 		len(f.row.key) == 32 && len(f.row.data) > compactRunHeader && f.row.logicalBytes > 0
+}
+
+// In a planning scan the record can contain only header fields. Reconstruct
+// the complete original payload before changing its inheritance flag. A strict
+// fallback keeps its original representation and never gains a proof.
+func (f ownedRunFrame) inherited(record via3.PublicRecord) (ownedRunFrame, error) {
+	if f.owner != nil {
+		_, original, err := decodeCompactRunPayload(f.row.data, f.owner.options.Limits.RecordBytes)
+		if err != nil {
+			return ownedRunFrame{}, err
+		}
+		record = original
+	}
+	record.Inherited = true
+	row, err := reencodeRunRecord(record, f.row)
+	if err != nil {
+		return ownedRunFrame{}, err
+	}
+	return ownedRunFrame{owner: f.owner, row: row}, nil
 }
 
 // This is usable only after an original process-local segment proof has

@@ -414,68 +414,18 @@ func (encoder *PublicEncoder) CompilePartition(ctx context.Context, input Partit
 		if dictionaryUsed {
 			references = append(references, dict)
 		}
-		// ASN prefix page objects precede their aggregate; each page has <=256 rows.
-		type prefixPageSpan struct {
-			object       BuiltObject
-			first, count uint32
-		}
 		pagesByASN := make(map[uint32][]prefixPageSpan)
 		prefixKnownByASN := make(map[uint32]bool)
 		if kind == 8 {
-			type ownedPrefix struct {
-				asn uint32
-				key []byte
-			}
-			pending := make([]ownedPrefix, 0, 256)
-			flush := func() error {
-				if len(pending) == 0 {
-					return nil
-				}
-				sort.Slice(pending, func(i, j int) bool {
-					if order := keyCompare(pending[i].key, pending[j].key); order != 0 {
-						return order < 0
-					}
-					return pending[i].asn < pending[j].asn
-				})
-				var rows [][]byte
-				positions := map[uint32][]uint32{}
-				var previous []byte
-				for _, value := range pending {
-					if previous == nil || keyCompare(previous, value.key) != 0 {
-						row := make([]byte, 24)
-						copy(row[:20], value.key[:20])
-						rows = append(rows, row)
-						previous = value.key
-					}
-					position := uint32(len(rows) - 1)
-					list := positions[value.asn]
-					if len(list) == 0 || list[len(list)-1] != position {
-						positions[value.asn] = append(list, position)
-					}
-				}
+			packer := prefixPagePacker{byASN: pagesByASN, write: func(rows [][]byte) (BuiltObject, error) {
 				page := newShard(8)
 				page.set(11, Vector(24, rows...))
 				object, err := add(page, "all")
-				if err != nil {
-					return err
+				if err == nil {
+					references = append(references, object)
 				}
-				references = append(references, object)
-				for asn, list := range positions {
-					first, last := list[0], list[0]
-					appendSpan := func() { pagesByASN[asn] = append(pagesByASN[asn], prefixPageSpan{object, first, last - first + 1}) }
-					for _, position := range list[1:] {
-						if position == last+1 {
-							last = position
-						} else {
-							appendSpan()
-							first, last = position, position
-						}
-					}
-					appendSpan()
-				}
-				pending = make([]ownedPrefix, 0, 256)
-				return nil
-			}
+				return object, err
+			}}
 			for _, record := range records {
 				var previous netip.Prefix
 				emitPrefix := func(prefix netip.Prefix) error {
@@ -496,11 +446,7 @@ func (encoder *PublicEncoder) CompilePartition(ctx context.Context, input Partit
 							return fail("partition_budget")
 						}
 					}
-					pending = append(pending, ownedPrefix{record.ASN, key})
-					if len(pending) == 256 {
-						return flush()
-					}
-					return nil
+					return packer.append(record.ASN, key)
 				}
 				if input.PrefixProvider != nil {
 					if len(record.ASNAggregate.Prefixes) > 0 {
@@ -529,7 +475,7 @@ func (encoder *PublicEncoder) CompilePartition(ctx context.Context, input Partit
 					}
 				}
 			}
-			if err := flush(); err != nil {
+			if err := packer.finish(); err != nil {
 				return out, err
 			}
 		}
@@ -885,7 +831,7 @@ func (encoder *PublicEncoder) CompilePartition(ctx context.Context, input Partit
 					p32(row, 40, uint32(len(pagesByASN[r.ASN])))
 					for _, page := range pagesByASN[r.ASN] {
 						p := make([]byte, 16)
-						p32(p, 0, objectID(page.object))
+						p32(p, 0, objectID(*page.object))
 						p32(p, 4, page.first)
 						p32(p, 8, page.count)
 						pageRows = append(pageRows, p)

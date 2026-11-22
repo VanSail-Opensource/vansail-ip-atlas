@@ -30,6 +30,7 @@ type nativeIndexFile struct {
 type indexSpan struct{ offset, size int }
 
 type indexedShard struct {
+	slot                      uint16
 	scopes                    [2][]*componentEntry
 	pages                     *nativePages
 	base                      int64
@@ -184,7 +185,8 @@ func (r *Release) PrepareNativeIndex(ctx context.Context, directory string) erro
 	index.pages = &nativePages{owner: r, file: reader, total: index.size, dir: stream.pages, routerBytes: r.routerBytes}
 	index.pages.setMetadata(index.fenceBytes)
 	index.facts.pages = index.pages
-	for _, entry := range staged {
+	for i, entry := range staged {
+		entry.component.slot = uint16(i)
 		entry.ref.onsite = entry.component
 		entry.component.pages = index.pages
 		entry.component.shard.disk = entry.component

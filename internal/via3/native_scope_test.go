@@ -45,7 +45,7 @@ func TestNativePrefixScopesRespectNestedSourcesAndMissingRanges(t *testing.T) {
 	for pass := 0; pass < 3; pass++ {
 		if pass == 2 {
 			index.native.facts.trim(0)
-			if len(index.native.facts.slots) != 0 {
+			if index.native.facts.first != nil || index.native.facts.bytes != 0 {
 				t.Fatal("inactive component retained")
 			}
 		}
@@ -66,5 +66,33 @@ func TestNativePrefixScopesRespectNestedSourcesAndMissingRanges(t *testing.T) {
 	}
 	if index.native.facts.bytes == 0 {
 		t.Fatal("test did not exercise cached scopes")
+	}
+}
+
+func TestCompactFactKeyKeepsEverySelectorDistinct(t *testing.T) {
+	seen := map[uint64]componentKey{}
+	for _, slot := range []uint16{0, 1, 18498} {
+		s := &indexedShard{slot: slot}
+		for _, k := range []componentKind{factLabel, factPrefixes, factASN, factEdge, factRPKI, factOrigins, factIP, factPaths, factPathPositions} {
+			for _, a := range []uint32{0, 1, 1<<22 - 1, 1 << 22, 1<<32 - 1} {
+				for _, b := range []uint32{0, 1, 1<<13 - 1, 1 << 13, 1<<22 - 1, 1 << 22} {
+					key := componentKey{source: s, kind: k, a: a, b: b}
+					n, ok := key.integerKey()
+					if k == factIP || k == factRPKI || k == factEdge && (a >= 1<<22 || b >= 1<<22) || k != factEdge && b >= 1<<13 {
+						if ok {
+							t.Fatal("lossy compact key accepted", k, a, b)
+						}
+						continue
+					}
+					if !ok {
+						t.Fatal("short selector unexpectedly fell back", k)
+					}
+					if prior, found := seen[n]; found {
+						t.Fatal("distinct component selectors collided", key, prior)
+					}
+					seen[n] = key
+				}
+			}
+		}
 	}
 }

@@ -28,7 +28,8 @@ func TestNativeGraphComponentsSurviveSourceEvictionAndAnswerMutation(t *testing.
 	}
 	facts := &r.native.facts
 	var paths *componentEntry
-	for key, entry := range facts.slots {
+	for entry := facts.first; entry != nil; entry = entry.next {
+		key := entry.key
 		if key.kind == factPaths && key.a == 13335 {
 			paths = entry
 			break
@@ -43,7 +44,7 @@ func TestNativeGraphComponentsSurviveSourceEvictionAndAnswerMutation(t *testing.
 	}
 	key := paths.key
 	key.kind = factPathPositions
-	entry := facts.slots[key]
+	entry := facts.find(key)
 	if entry == nil || entry.bytes != componentEntryBytes+entry.value.(*nativePathRelationships).bytes() || len(entry.value.(*nativePathRelationships).codes) != len(graph.pairs) {
 		t.Fatal("missing or incorrectly charged path relationship ordinals")
 	}
@@ -56,7 +57,7 @@ func TestNativeGraphComponentsSurviveSourceEvictionAndAnswerMutation(t *testing.
 	}
 	mutateLookupValue(reflect.ValueOf(&first).Elem())
 	second, err := r.Lookup(ctx, "AS13335")
-	if err != nil || !reflect.DeepEqual(second, want) || facts.slots[paths.key] != paths {
+	if err != nil || !reflect.DeepEqual(second, want) || facts.find(paths.key) != paths {
 		t.Fatal("eviction or caller mutation changed verified path component", err)
 	}
 	// Even a detached relationship projection must re-admit all contributing

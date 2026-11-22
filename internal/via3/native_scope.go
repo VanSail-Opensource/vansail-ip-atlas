@@ -122,7 +122,7 @@ func (s *Shard) cachedPoint(ip netip.Addr) ([]byte, netip.Prefix, bool) {
 		scopes = d.scopes[family]
 		pos := sort.Search(len(scopes), func(i int) bool { return bytes.Compare(scopes[i].key.address[:], key.address[:]) >= 0 })
 		if pos == len(scopes) || scopes[pos].key.address != key.address {
-			d.scopes[family] = slices.Insert(scopes, pos, c.slots[key])
+			d.scopes[family] = slices.Insert(scopes, pos, c.find(key))
 		}
 	}
 	return row, winner, ok

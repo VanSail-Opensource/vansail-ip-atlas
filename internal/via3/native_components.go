@@ -42,12 +42,14 @@ type componentEntry struct {
 	previous, next *componentEntry
 }
 type nativeComponents struct {
-	pages       *nativePages
-	slots       map[componentKey]*componentEntry
-	first, last *componentEntry
-	bytes       int
-	peakSlots   int
-	active      bool
+	pages        *nativePages
+	slots        map[componentKey]*componentEntry
+	integers     map[uint64]*componentEntry
+	peakIntegers int
+	first, last  *componentEntry
+	bytes        int
+	peakSlots    int
+	active       bool
 }
 
 var retryWithoutComponents = errors.New("native component working set")
@@ -80,11 +82,39 @@ func (c *nativeComponents) use(e *componentEntry) {
 	}
 	e.epoch = c.pages.epoch
 }
+
+// Every prepared object has a distinct (<18,500) immutable manifest slot.
+// The short path is an injective representation of the full kind/source/key;
+// out-of-range values and address selectors retain their full structural key.
+func (k componentKey) integerKey() (uint64, bool) {
+	var selector uint64
+	switch k.kind {
+	case factLabel, factPrefixes, factASN, factOrigins, factPaths, factPathPositions:
+		if k.b >= 1<<13 {
+			return 0, false
+		}
+		selector = uint64(k.a)<<13 | uint64(k.b)
+	case factEdge:
+		if k.a >= 1<<22 || k.b >= 1<<22 {
+			return 0, false
+		}
+		selector = uint64(k.a)<<22 | uint64(k.b)
+	default:
+		return 0, false
+	}
+	return uint64(k.source.slot)<<49 | uint64(k.kind)<<45 | selector, true
+}
+func (c *nativeComponents) find(k componentKey) *componentEntry {
+	if i, ok := k.integerKey(); ok {
+		return c.integers[i]
+	}
+	return c.slots[k]
+}
 func (c *nativeComponents) get(k componentKey) (any, bool) {
 	if !c.active {
 		return nil, false
 	}
-	e := c.slots[k]
+	e := c.find(k)
 	if e == nil {
 		return nil, false
 	}
@@ -98,35 +128,40 @@ func (c *nativeComponents) trim(limit int) {
 		if e.key.kind == factIP {
 			e.key.source.dropScope(e)
 		}
-		delete(c.slots, e.key)
+		if i, short := e.key.integerKey(); short {
+			delete(c.integers, i)
+		} else {
+			delete(c.slots, e.key)
+		}
 		c.bytes -= e.bytes
 		c.pages.setMetadata(-e.bytes)
 	}
-	c.compactSlots()
+	compactComponentMap(&c.slots, &c.peakSlots)
+	compactComponentMap(&c.integers, &c.peakIntegers)
 }
-func (c *nativeComponents) compactSlots() {
-	count := len(c.slots)
+func compactComponentMap[K comparable](table *map[K]*componentEntry, peak *int) {
+	count := len(*table)
 	if count == 0 {
-		c.slots = nil
-		c.peakSlots = 0
+		*table = nil
+		*peak = 0
 		return
 	}
-	if count >= c.peakSlots/2 {
+	if count >= *peak/2 {
 		return
 	}
-	compact := make(map[componentKey]*componentEntry, count)
-	for k, v := range c.slots {
-		compact[k] = v
+	out := make(map[K]*componentEntry, count)
+	for k, v := range *table {
+		out[k] = v
 	}
-	c.slots = compact
-	c.peakSlots = count
+	*table = out
+	*peak = count
 }
 func (c *nativeComponents) put(k componentKey, v any, owned int) bool {
 	size := componentEntryBytes + owned
 	if !c.active || size > nativeComponentEntryLimit {
 		return false
 	}
-	if e := c.slots[k]; e != nil {
+	if e := c.find(k); e != nil {
 		c.use(e)
 		return true
 	}
@@ -138,12 +173,20 @@ func (c *nativeComponents) put(k componentKey, v any, owned int) bool {
 	if size > limit-c.bytes || !c.pages.owner.mayKeepNativeMetadata(size) {
 		return false
 	}
-	if c.slots == nil {
-		c.slots = make(map[componentKey]*componentEntry)
-	}
 	e := &componentEntry{key: k, value: v, bytes: size}
-	c.slots[k] = e
-	c.peakSlots = max(c.peakSlots, len(c.slots))
+	if i, short := k.integerKey(); short {
+		if c.integers == nil {
+			c.integers = make(map[uint64]*componentEntry)
+		}
+		c.integers[i] = e
+		c.peakIntegers = max(c.peakIntegers, len(c.integers))
+	} else {
+		if c.slots == nil {
+			c.slots = make(map[componentKey]*componentEntry)
+		}
+		c.slots[k] = e
+		c.peakSlots = max(c.peakSlots, len(c.slots))
+	}
 	c.bytes += size
 	c.pages.setMetadata(size)
 	c.use(e)

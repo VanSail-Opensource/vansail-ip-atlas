@@ -96,6 +96,9 @@ func (c *nativeComponents) trim(limit int) {
 	for c.bytes > limit && c.first != nil && c.first.epoch != c.pages.epoch {
 		e := c.first
 		c.unlink(e)
+		if e.key.kind == factIP {
+			e.key.source.dropScope(e)
+		}
 		delete(c.slots, e.key)
 		c.bytes -= e.bytes
 		c.pages.setMetadata(-e.bytes)
@@ -139,7 +142,7 @@ func (s *Shard) components() *nativeComponents { return &s.disk.pages.owner.nati
 func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.native == nil {
+	if r.native == nil || PublicCacheDecoded-r.native.pages.routerBytes-r.native.fenceBytes < componentEntryBytes+rowPageSize {
 		return r.lookupOnce(ctx, q)
 	}
 	c := &r.native.facts

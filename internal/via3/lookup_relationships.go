@@ -60,6 +60,7 @@ func (r *Release) relationshipAnswers(ctx context.Context, pairs []uint64, c *gr
 		var s *Shard
 		var err error
 		var first, end uint32
+		boundsLoaded := false
 		var source *objectReference
 		if c.known {
 			source = c.positions[i].ref
@@ -71,9 +72,7 @@ func (r *Release) relationshipAnswers(ctx context.Context, pairs []uint64, c *gr
 			}
 		} else {
 			s, err = r.asnDestination(ctx, from, 12)
-			if err == nil && s != nil {
-				first, end, _ = s.asnBounds(from)
-			}
+
 		}
 		if err != nil {
 			return edges, err
@@ -85,6 +84,28 @@ func (r *Release) relationshipAnswers(ctx context.Context, pairs []uint64, c *gr
 			to := uint32(pairs[i])
 			edge := RelationshipAnswer{From: from, To: to, Relation: "unknown", Observed: true}
 			var row []byte
+			var facts *nativeComponents
+			var key componentKey
+			ordinal := None
+			if s != nil && s.disk != nil && s.components().active {
+				facts = s.components()
+				key = s.componentKey(factEdge, from, to)
+				if v, ok := facts.get(key); ok {
+					e := v.(nativeEdgeFact)
+					if c.known && (c.positions[i].ref != source || c.positions[i].ordinal != e.ordinal) {
+						return edges, fail("record")
+					}
+					if c.graphOwner != nil && !c.known {
+						c.positions[i] = relationshipPosition{ref: s.lookup.owner, ordinal: e.ordinal}
+					}
+					if e.ordinal != None {
+						edge.Relation = relationshipName(e.relation)
+						edge.Inferred = e.inferred
+					}
+					edges = append(edges, edge)
+					continue
+				}
+			}
 			if c.known {
 				pos := c.positions[i]
 				if pos.ref != source {
@@ -94,6 +115,7 @@ func (r *Release) relationshipAnswers(ctx context.Context, pairs []uint64, c *gr
 					if s == nil {
 						return edges, fail("record")
 					}
+					ordinal = pos.ordinal
 					row = s.Record(pos.ordinal)
 					if len(row) != 16 || u32(row, 4) != from || u32(row, 8) != to {
 						return edges, fail("record")
@@ -108,10 +130,14 @@ func (r *Release) relationshipAnswers(ctx context.Context, pairs []uint64, c *gr
 					if pos.ref == nil {
 						c.graphOwner = nil
 					}
+					if !boundsLoaded {
+						first, end, _ = s.asnBounds(from)
+						boundsLoaded = true
+					}
 					if first < end {
-						found, ordinal, ok := s.relationshipPosition(first, end, to)
+						found, at, ok := s.relationshipPosition(first, end, to)
 						if ok {
-							row, pos.ordinal = found, ordinal
+							row, pos.ordinal, ordinal = found, at, at
 						}
 					}
 				}
@@ -120,11 +146,29 @@ func (r *Release) relationshipAnswers(ctx context.Context, pairs []uint64, c *gr
 				}
 			}
 			if row != nil {
-				edge.Relation = []string{"unknown", "transit_upstream", "peer", "customer", "sibling"}[row[12]]
+				edge.Relation = relationshipName(row[12])
 				edge.Inferred = row[13]&2 != 0
+			}
+			if facts != nil {
+				e := nativeEdgeFact{ordinal: ordinal}
+				if row != nil {
+					e.relation = row[12]
+					e.inferred = edge.Inferred
+				}
+				facts.put(key, e, 16)
 			}
 			edges = append(edges, edge)
 		}
 	}
 	return edges, nil
+}
+
+type nativeEdgeFact struct {
+	ordinal  uint32
+	relation byte
+	inferred bool
+}
+
+func relationshipName(v byte) string {
+	return [...]string{"unknown", "transit_upstream", "peer", "customer", "sibling"}[v]
 }

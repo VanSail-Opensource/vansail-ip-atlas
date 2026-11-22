@@ -622,6 +622,10 @@ func (s *Shard) FindPrefix(addr netip.Addr) ([]byte, string, bool) {
 	return row, prefix.String(), true
 }
 func (s *Shard) findPrefix(addr netip.Addr) ([]byte, netip.Prefix, bool) {
+	if s.disk != nil && s.components().active && (s.Kind >= 2 && s.Kind <= 6 || s.Kind == 10) {
+		return s.cachedPoint(addr)
+	}
+
 	return s.findPrefixWithin(addr, addr.Unmap().BitLen())
 }
 

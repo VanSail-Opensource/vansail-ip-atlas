@@ -30,6 +30,7 @@ type nativeIndexFile struct {
 type indexSpan struct{ offset, size int }
 
 type indexedShard struct {
+	scopes                    [2][]*componentEntry
 	pages                     *nativePages
 	base                      int64
 	length, decoded           int

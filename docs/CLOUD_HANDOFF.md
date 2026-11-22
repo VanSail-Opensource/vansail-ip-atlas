@@ -552,6 +552,26 @@ All sixteen observed fixtures passed against implementation digest
 `1e2276a77af661f3613360ac02d3e980a93dce96ee9581b262152c23f883335d`
 at `2026-11-22T14:44:42Z`.
 
+## November 22 production candidate with seventeen sources
+
+The draft release branch includes the IANA root-server service addresses in
+addition to the sixteen-source catalog. All 26 exact addresses returned true
+for anycast in the offline qualification. All 52 immediate neighbors returned
+unknown. The full seventeen observed parser fixtures passed at
+`2026-11-22T15:05:55Z` against implementation
+`83c1907ccd2cb1dd7e3f9e7216109edd6db0f7523216ea86a6ba63beebfb6091`.
+
+The previous fifteen-source hosted run
+[45031970312](https://github.com/VanSail-Opensource/vansail-ip-atlas/actions/runs/45031970312)
+completed contracts, codec and current Chrome checks. Its actual-data job
+admitted 36,478,172 rows and exhausted its 35-minute limit during output
+partitioning. The new candidate folds complete matching location siblings,
+represents complete quality subnets with a verified default and overrides,
+and verifies the identities of compiler-created intermediate partitions.
+An engineering replay of the complete earlier corpus with the quality changes
+produced 5,888 objects totaling 119,479,954 bytes. This replay does not prove
+that the official current candidate fits the deadline.
+
 ## Resume next
 
 1. Verify the branch and clean checkout. Run strict schemas, Go tests/vet, Python

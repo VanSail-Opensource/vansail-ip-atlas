@@ -1,4 +1,4 @@
-# Production CI cloud handoff — 2026-11-15
+# Production CI cloud handoff — 2026-11-22
 
 Continue the full production and website release in
 `VanSail-Opensource/vansail-ip-atlas`, branch `codex/production-release-v6`.
@@ -601,6 +601,33 @@ the combined compiler at `2026-11-22T15:34:17Z`, implementation
 `8dd590654eda03ff8589b29abff3ca2bb782b2378004095875a3de7948e24819`.
 Native full-answer lookup latency, the five build scenarios, hosted preview
 and production promotion still require their exact-candidate measurements.
+
+## November 22 eighteen-source candidate
+
+The seventeen-source hosted build admitted all 17 sources, compiled 36,478,122
+normalized rows in 18 minutes 22.83 seconds, and passed independent production
+receipt verification. It produced 113,063,331 bytes of public database objects.
+Its corpus check still expected an unobserved IPv4 address. The corrected
+coverage check described above is on both current release branches.
+[Seventeen-source run](https://github.com/VanSail-Opensource/vansail-ip-atlas/actions/runs/45036710348)
+
+The eighteenth source supplies 747 individual Microsoft Azure App Service
+hosting addresses present across two mature weekly editions. The source audit
+records the evidence and counts for all twelve detection signals. The production
+downloader accepts the exact reviewed Download Center locator and checks the
+dated files independently. All eighteen observed parser fixtures passed at
+`2026-11-22T15:54:17Z` against implementation
+`cba4a95460fa8a3761ec4cb8036b0801c2fa95ff4e15396eb6b2cf35d2c16470`.
+[Source audit](../SOURCES_AUDIT.md)
+
+The native reader can prepare authenticated, file-backed component pages for
+repeated complete lookups. On a retained engineering release the new path
+returned matching complete answers for every one of 10,000 queries. Across
+100,000 timed calls the p95 was 182.85 microseconds. The release ceiling is
+2 microseconds. The original hosted benchmark and the independent percentile
+check still apply. The website now loads only the data needed by the risk and
+Class C pages. All 22 local Chrome site regressions passed. As of this checkpoint
+the production hostname returned HTTP 404 and Pages had no canonical deployment.
 
 ## Resume next
 

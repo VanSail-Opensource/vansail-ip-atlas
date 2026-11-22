@@ -111,17 +111,19 @@ def observed_input_diagnostics(root: Path, now: int | None = None):
         return unavailable
 
 
-def verify_lookup_measurement(report):
+def verify_lookup_measurement(report, *, diagnostics=None):
     if (type(report) is not dict or report.get('timing') != 'individual-indexed-lookups'
             or report.get('corpus_queries') != 10000 or report.get('warmups') != 10000):
         raise ContractError('actual indexed lookup population is incomplete')
     samples = report.get('samples_ns')
     if (type(samples) is not list or len(samples) != 100000
-            or any(type(value) is not int or value < 0 for value in samples)):
+            or any(type(value) is not int or not 0 <= value <= 2**63 - 1 for value in samples)):
         raise ContractError('actual indexed lookup samples are incomplete')
     p95 = sorted(samples)[94999]
     if type(report.get('p95_ns')) is not int or report['p95_ns'] != p95:
         raise ContractError('indexed lookup percentile differs from observations')
+    if diagnostics is not None:
+        diagnostics['lookup_p95_ns'] = p95
     if p95 >= 2000:
         raise ContractError('indexed lookup exceeds the original two-microsecond ceiling')
     return p95
@@ -154,7 +156,7 @@ def main():
         measurement = ROOT / 'reports/production-lookup-integration.json'
         run(['go', 'run', './tools/hosted/lookupbench', '-atlas', atlas, '-corpus', corpus,
              '-report', measurement])
-        report['lookup_p95_ns'] = verify_lookup_measurement(json.loads(read_private(measurement, 8 << 20)))
+        verify_lookup_measurement(json.loads(read_private(measurement, 8 << 20)), diagnostics=report)
         report['passed'] = True
     finally:
         report_path.parent.mkdir(parents=True, exist_ok=True)

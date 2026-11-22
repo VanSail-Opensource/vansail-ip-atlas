@@ -22,12 +22,15 @@ class ActualLookupGateTests(unittest.TestCase):
             verify_lookup_measurement(self.report(2000))
         report = self.report(2500)
         report['p95_ns'] = 1999
+        diagnostics = {}
         with self.assertRaises(ContractError):
-            verify_lookup_measurement(report)
+            verify_lookup_measurement(report, diagnostics=diagnostics)
+        self.assertNotIn('lookup_p95_ns', diagnostics)
 
     def test_missing_or_non_integer_observations_cannot_pass(self):
         for mutate in (lambda value: value['samples_ns'].pop(),
                        lambda value: value['samples_ns'].__setitem__(0, True),
+                       lambda value: value['samples_ns'].__setitem__(0, 2**63),
                        lambda value: value.update(corpus_queries=1)):
             report = self.report(1000)
             mutate(report)
@@ -53,6 +56,7 @@ class ActualLookupGateTests(unittest.TestCase):
                             check.main()
                 report = json.loads((root / 'reports/production-data-check.json').read_bytes())
                 self.assertIs(report['passed'], passed)
+                self.assertEqual(report['lookup_p95_ns'], lookup_ns)
                 self.assertEqual(report['compile_runtime_ms'], 2)
                 self.assertIs(type(report['compile_runtime_ms']), int)
                 self.assertEqual(report['observed_input'], {'status': 'unavailable'})

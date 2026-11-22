@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import test from 'node:test'
-import { AtlasReader, parseShard, hash, answerJSONBytes, PathSegmentPool, prefixKeyValid, comparePrefixKeys, partitionContains } from '../../web/app/workers/atlas.ts'
+import { AtlasReader, Shard, parseShard, hash, answerJSONBytes, PathSegmentPool, prefixKeyValid, comparePrefixKeys, partitionContains } from '../../web/app/workers/atlas.ts'
+import { FactComponents, safePrefixDepth, scopeKey, COMPONENT_LIMIT } from '../../web/app/workers/factComponents.ts'
+import { intervalDepth, LookupIndex } from '../../web/app/workers/lookupIndex.ts'
 import { hasMapLocation } from '../../web/app/lib/via3.ts'
 import { rpkiSnapshotTiming, trackSnapshotTime } from '../../web/app/lib/rpkiSnapshot.ts'
 
@@ -472,9 +474,11 @@ test('schema reuse binds each reload to the complete original bytes and release 
     assert(!schemas.has(sibling), 'A matching slot alone proves nothing')
     schemas.remember(sibling)
     assert(!schemas.has(digest)); assert(schemas.has(sibling))
+    reader.components.clear() // Exercise a raw-object reload, including reauthentication.
     reader.evictCache(key)
     assert.deepEqual(await reader.lookup('203.0.113.1'), answer)
     assert(schemas.has(digest)); assert(!schemas.has(sibling))
+    reader.components.clear() // Exercise a raw-object reload, including reauthentication.
     reader.evictCache(key)
 
     const info = reader.inventory.get(key)
@@ -675,5 +679,159 @@ test('worker fetches only destination kinds used by each operation and verifies 
   try {
     await assert.rejects(reader.lookup(golden.vectors[0].q), { message: 'integrity' })
     await assert.rejects(reader.classC(golden.vectors[0].q), { message: 'integrity' })
+  } finally { reader.clear() }
+})
+
+test('detached component data reproduces complete native answers after raw shard eviction', async () => {
+  let fetches = 0
+  const reader = new AtlasReader((path, opts) => { fetches++; return response(path, opts) }, () => golden.clock)
+  try {
+    for (const v of golden.vectors) assert.deepEqual(await reader.lookup(v.q), v.answer)
+    for (const key of [...reader.cache.keys()]) reader.evictCache(key)
+    const before = fetches
+    for (const v of golden.vectors.toReversed()) {
+      const answer = await reader.lookup(v.q)
+      assert.deepEqual(answer, v.answer)
+      answer.bgp.origins.pop()
+      answer.bgp.paths[0]?.asns.pop()
+      answer.bgp.paths[0]?.segments[0]?.asns.pop()
+      answer.asns[0]?.prefixes.pop()
+      answer.network?.origins.pop()
+      assert.deepEqual(await reader.lookup(v.q), v.answer)
+    }
+    assert.equal(fetches, before)
+    assert(reader.components.bytes > 0 && reader.components.bytes <= COMPONENT_LIMIT)
+    reader.clear()
+    assert.equal(reader.components.bytes, 0)
+  } finally { reader.clear() }
+})
+
+test('component cells preserve exact, parent, child and absent selections on both address families', () => {
+  const vector = (width, chunks) => {
+    const buf = new Uint8Array(8 + width * chunks.length), header = new DataView(buf.buffer)
+    header.setUint32(0, chunks.length, true); header.setUint32(4, width, true)
+    chunks.forEach((c,i) => buf.set(c,8+i*width))
+    return buf
+  }
+  for (const family of [4,6]) {
+    const width = family === 4 ? 32 : 128
+    const base = Uint8Array.fromHex(family === 4 ? '000000000000000000000000c0000200' : '20010db8000000000000000000000000')
+    const input = n => family === 4 ? '192.0.2.'+n : '2001:db8::'+n.toString(16)
+    const address = n => { const b = base.slice(); b[15] = n; return b }
+    for (const broad of [false,true]) {
+      const specs = [[0,width-6,0],[32,width-3,0],[39,width,0],[39,width,1],[64,width-2,0],[191,width,1],[255,width,1]]
+      if (broad) specs.unshift([0,width-8,0])
+      const sections = new Map(), keys = [], overlay = [], records = []
+      for (const [n,bits,exact] of specs) {
+        const key = new Uint8Array(32); key[0]=family; key[1]=bits; key[2]=exact; key.set(address(n),4)
+        new DataView(key.buffer).setUint32(20,records.length,true)
+        ;(broad && bits===width-8 ? overlay : keys).push(key)
+        records.push(Uint8Array.of(records.length+1))
+      }
+      sections.set(1,vector(32,keys)); sections.set(8,vector(32,overlay)); sections.set(3,vector(1,records))
+      const shard = new Shard(3,sections), cache = new FactComponents(), group = 'source/'+family
+      for (let i = 0; i < 256; i++) {
+        const n = i*71%256, bytes = address(n), hex = bytes.subarray(family===4?12:0).toHex()
+        const match = shard.prefix(input(n)), winner = match?.row[0] ?? -1
+        const known = cache.prefix(group,hex)
+        if (known !== undefined) assert.equal(known,winner,'cached cell masked another winner')
+        else {
+          const bits = safePrefixDepth(shard,family,bytes,match)
+          const mask = 2 ** Math.min(8,width-bits)
+          const lo = n-n%mask
+          for (let other=lo; other<lo+mask; other++) assert.equal(shard.prefix(input(other))?.row[0]??-1,winner)
+          assert(cache.put(scopeKey(group,hex,bits),winner,16,COMPONENT_LIMIT,{group,bits}))
+        }
+        cache.endQuery()
+      }
+    }
+  }
+})
+
+test('verified route ranges cache only the aligned covered cell and certified gaps', async () => {
+  const data = {bytes:100,kind:2,partition:'all',sha256:'d'.repeat(64)}
+  const leaf = {type:'routes',objects:[data],sets:[[0]],routes:[['00000010','00000027',0],['0000003d','0000003f',0]]}
+  const components = new FactComponents()
+  const index = new LookupIndex({roots:{asn:'0'.repeat(64)}}, async () => leaf, () => true, components, () => COMPONENT_LIMIT)
+  for (let i=0; i<256; i++) {
+    const n=i*71%256, key=n.toString(16).padStart(8,'0')
+    assert.deepEqual(await index.routes('asn',key), n>=16 && n<=39 || n>=61 && n<=63 ? [data] : [])
+    index.cache.clear()
+    components.endQuery()
+  }
+  assert.equal(intervalDepth('fffffffffffffffffffffffffffffffe','fffffffffffffffffffffffffffffffd','ffffffffffffffffffffffffffffffff'),127)
+  assert.equal(intervalDepth('ffffffff','00000000','ffffffff'),0)
+  assert.equal(intervalDepth('00000001','00000001','00000001'),32)
+})
+
+test('projected full lookups authenticate optional destinations on their first use', async () => {
+  for (const [kind,q,key,plane] of [[7,'203.0.113.1','cb007101','ipv4'],[9,'203.0.113.1','cb007101','ipv4'],[12,'AS13335','00003417','asn']]) {
+    const source = golden.objects.find(o=>o.info.kind===kind)
+    const controls = new Map()
+    const add = page => {
+      const bytes = new TextEncoder().encode(stable(page)), hash = createHash('sha256').update(bytes).digest('hex')
+      controls.set('/_atlas/browser/'+hash+'.json',bytes)
+      return hash
+    }
+    const route = add({type:'routes',objects:[source.info],sets:[[0]],routes:[[key,key,0]]})
+    const empty = add({type:'routes',objects:[],sets:[],routes:[]})
+    const roots = {asn:empty,ipv4:empty,ipv6:empty,objects:add({type:'objects',objects:[]}),[plane]:route}
+    const browser = add({format_version:1,manifest_sha256:golden.pointer.manifest_sha256,mode:'synthetic',release_id:golden.pointer.release_id,roots,valid_from:golden.manifest.valid_from,valid_until:golden.manifest.valid_until})
+    controls.set('/_atlas/current.json',new TextEncoder().encode(stable({...golden.pointer,browser_sha256:browser})))
+    const path='/_atlas/objects/'+source.info.sha256+'.via3', bytes = files.get(path).slice()
+    bytes[bytes.length-1]^=1; controls.set(path,bytes)
+    const reader = new AtlasReader(async path=>new Response(controls.get(path),{status:controls.has(path)?200:404}),()=>golden.clock)
+    try { await assert.rejects(reader.lookup(q),{message:'integrity'}) } finally { reader.clear() }
+  }
+})
+
+test('component admission and query pins share the existing resident budget', () => {
+  const cache = new FactComponents()
+  assert(cache.put('x',true,10000,11000))
+  assert(!cache.put('y',false,10000,11000))
+  cache.trim(0)
+  assert(cache.bytes>=10000)
+  cache.endQuery(); cache.trim(0)
+  assert.equal(cache.bytes,0); assert.equal(cache.get('x'),undefined)
+  assert(!cache.put('large','',256*1024,COMPONENT_LIMIT))
+  const reader = new AtlasReader(response,()=>golden.clock)
+  try {
+    const word=1024*1024
+    reader.components.put('bounded',true,2000,COMPONENT_LIMIT)
+    reader.admit('a',32*word); reader.admit('b',32*word)
+    assert.throws(()=>reader.admit('c',32*word),{message:'resource_limit'})
+    reader.components.endQuery()
+    reader.admit('c',32*word)
+    assert.equal(reader.components.bytes,0)
+  } finally {reader.clear()}
+})
+
+test('optional projections yield to accepted full-size inputs and preserve the raw limit on cache hits', async () => {
+  const reader = new AtlasReader(response, () => golden.clock)
+  const full = 12 * 1024 * 1024, hashes = 'abcdefgh'.split('').map(c => c.repeat(64))
+  const a = hashes[0]
+  try {
+    let attempts = 0
+    await reader.runQuery(async () => {
+      attempts++
+      reader.admit(a,full)
+      reader.rememberComponent(a+'/verified',true,64)
+      for (const hash of hashes.slice(1)) reader.admit(hash,full)
+    })
+    assert.equal(attempts,2)
+    assert.equal(reader.components.suspended,false)
+    await reader.runQuery(async () => {
+      reader.admit(a,full)
+      assert(reader.rememberComponent(a+'/verified',true,64))
+    })
+    attempts = 0
+    await assert.rejects(reader.runQuery(async () => {
+      attempts++
+      assert(reader.components.get(a+'/verified'))
+      for (const hash of hashes.slice(1)) reader.admit(hash,full)
+      reader.admit('i'.repeat(64),1)
+    }),{message:'resource_limit'})
+    assert.equal(attempts,1,'A genuine original-source bound is final')
+    assert.equal(reader.activeReserved.size,0)
   } finally { reader.clear() }
 })

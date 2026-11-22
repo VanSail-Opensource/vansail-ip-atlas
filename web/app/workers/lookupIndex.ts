@@ -1,3 +1,4 @@
+import { FactComponents, scopeKey } from './factComponents.ts'
 export type ObjectInfo = { bytes: number; kind: number; partition: string; sha256: string }
 export type Snapshot = { mode: 'production' | 'synthetic'; release_id: string; valid_from: number; valid_until: number }
 type Plane = 'ipv4' | 'ipv6' | 'asn' | 'objects'
@@ -30,7 +31,11 @@ export class LookupIndex {
   private readonly root: Root
   private readonly read: FetchControl
   private readonly validInfo: (info: ObjectInfo) => boolean
-  constructor(root: Root, read: FetchControl, validInfo: (info: ObjectInfo) => boolean) {
+  private readonly components?: FactComponents
+  private readonly room: () => number
+  constructor(root: Root, read: FetchControl, validInfo: (info: ObjectInfo) => boolean, components?: FactComponents, room = () => 0) {
+    this.components = components
+    this.room = room
     this.root = root
     this.read = read
     this.validInfo = validInfo
@@ -54,6 +59,7 @@ export class LookupIndex {
     } else {
       if (plane === 'objects' ? node.type !== 'objects' || !keys(node,['type','objects']) : node.type !== 'routes' || !keys(node,['type','objects','routes','sets'])) return bad()
       if (!Array.isArray(node.objects) || !node.objects.every(o => this.validInfo(o))) return bad()
+      for (const info of node.objects) Object.freeze(info)
       if (node.type === 'objects') {
         if (!node.objects.every((o,i) => o.sha256.startsWith(prefix) && (!i || node.objects[i-1]!.sha256 < o.sha256))) return bad()
       } else {
@@ -85,36 +91,70 @@ export class LookupIndex {
     return node
   }
 
-  private async leaf(plane: Plane, key: string, signal?: AbortSignal): Promise<Objects | Routes | undefined> {
+  private async leaf(plane: Plane, key: string, signal?: AbortSignal): Promise<{ page?: Objects | Routes; prefix: string }> {
     let hash = this.root.roots[plane]
     for (let depth = 0; depth <= key.length; depth++) {
       const page = await this.node(hash, plane, key.slice(0,depth), key.length, signal)
-      if (page.type !== 'branch') return page
+      if (page.type !== 'branch') return {page,prefix:key.slice(0,depth)}
       const child = page.children.find(([digit]) => digit === parseInt(key[depth]!,16))
-      if (!child) return
+      if (!child) return {prefix:key.slice(0,depth+1)}
       hash = child[1]
     }
     return bad()
   }
 
   async routes(plane: Exclude<Plane,'objects'>, key: string, signal?: AbortSignal): Promise<ObjectInfo[]> {
-    const leaf = await this.leaf(plane, key, signal)
-    if (!leaf) return []
-    if (leaf.type !== 'routes') return bad()
-    let lo = 0, hi = leaf.routes.length
-    while (lo < hi) {
-      const mid = (lo + hi) >>> 1
-      if (leaf.routes[mid]![1] < key) lo = mid + 1
-      else hi = mid
+    const group = this.root.roots[plane] + '/' + plane
+    const known = this.components?.prefix<ObjectInfo[]>(group,key)
+    if (known) return known.slice()
+    const {page,prefix} = await this.leaf(plane,key,signal)
+    let first = prefix.padEnd(key.length,'0'), last = prefix.padEnd(key.length,'f')
+    let selected: ObjectInfo[] = []
+    if (page) {
+      if (page.type !== 'routes') return bad()
+      let lo = 0, hi = page.routes.length
+      while (lo < hi) {
+        const mid = (lo + hi) >>> 1
+        if (page.routes[mid]![1] < key) lo = mid + 1
+        else hi = mid
+      }
+      const row = page.routes[lo]
+      if (row && row[0] <= key) {
+        first = row[0]; last = row[1]
+        selected = page.sets[row[2]]!.map(i => page.objects[i]!)
+      } else {
+        // Every point in the gap has the same empty route, limited to the
+        // prefix whose authenticated leaf or absent branch we just traversed.
+        if (lo) first = (BigInt('0x'+page.routes[lo-1]![1])+1n).toString(16).padStart(key.length,'0')
+        if (row) last = (BigInt('0x'+row[0])-1n).toString(16).padStart(key.length,'0')
+      }
     }
-    const row = leaf.routes[lo]
-    return row && row[0] <= key ? leaf.sets[row[2]]!.map(index => leaf.objects[index]!) : []
+    if (this.components && !this.components.suspended) {
+      const bits = intervalDepth(key,first,last)
+      const bytes = 128 + selected.reduce((sum,o) => sum + 128 + 2*(o.sha256.length+o.partition.length),0)
+      this.components.put(scopeKey(group,key,bits), selected,bytes,this.room(),{group,bits})
+    }
+    return selected.slice()
   }
 
   async object(key: string, signal?: AbortSignal): Promise<ObjectInfo | undefined> {
-    const leaf = await this.leaf('objects', key, signal)
+    const {page:leaf} = await this.leaf('objects', key, signal)
     if (!leaf) return
     if (leaf.type !== 'objects') return bad()
     return leaf.objects.find(info => info.sha256 === key)
   }
+}
+
+// Largest aligned cell around the queried key contained in the verified
+// inclusive interval. Fixed-width strings keep IPv6 and full ASN precision.
+export function intervalDepth(key: string, low: string, high: string): number {
+  const width = key.length * 4, value = BigInt('0x'+key)
+  const first = BigInt('0x'+low), last = BigInt('0x'+high)
+  let lo = 0, hi = width
+  while (lo < hi) {
+    const bits = (lo + hi) >>> 1, mask = (1n << BigInt(width - bits)) - 1n
+    if ((value & ~mask) >= first && (value | mask) <= last) hi = bits
+    else lo = bits + 1
+  }
+  return lo
 }

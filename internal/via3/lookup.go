@@ -196,6 +196,8 @@ func (r *Release) prefixPage(ctx context.Context, s *Shard, row []byte, asn, cur
 		// Strings are immutable metadata; callers always own their slice and
 		// its mutable headers. No decoded shard bytes back these strings.
 		copy(answer.Prefixes, target.lookup.prefixLabels[first:first+total])
+	} else if target.disk != nil && total > 0 {
+		target.disk.prefixStrings(first, total, answer.Prefixes)
 	} else if labels := target.cachedPrefixSpan(first, total); labels != nil {
 		copy(answer.Prefixes, labels)
 	} else {

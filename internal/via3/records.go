@@ -678,9 +678,8 @@ func (s *Shard) findAncestryPrefix(addr netip.Addr, family, maxBits int) ([]byte
 		metadata := &s.lookup.prefixes[section]
 		first, end := metadata.families[family], metadata.families[family+1]
 
-		i := sort.Search(int(end-first), func(i int) bool {
-			return bytes.Compare(s.row(id, first+uint32(i))[4:20], address[:]) > 0
-		})
+		block, first := s.prefixBlock(section, family, id, address, first, end)
+		i := sort.Search(len(block)/32, func(i int) bool { return bytes.Compare(block[i*32+4:i*32+20], address[:]) > 0 })
 		if i == 0 {
 			continue
 		}
@@ -716,18 +715,18 @@ func (s *Shard) ASNRun(asn uint32) ([][]byte, bool) {
 	return out, true
 }
 func (s *Shard) asnBounds(asn uint32) (uint32, uint32, bool) {
-	count := s.rowCount(2)
-	i := sort.Search(count, func(i int) bool { return u32(s.row(2, uint32(i)), 0) >= asn })
-	if i == count {
+	block, base := s.asnBlock(asn)
+	i := sort.Search(len(block)/8, func(i int) bool { return u32(block, i*8) >= asn })
+	if i == len(block)/8 || u32(block, i*8) != asn {
 		return 0, 0, false
 	}
-	row := s.row(2, uint32(i))
-	if u32(row, 0) != asn {
-		return 0, 0, false
+	first := u32(block, i*8+4)
+	if i+1 < len(block)/8 {
+		return first, u32(block, (i+1)*8+4), true
 	}
-	first := u32(row, 4)
-	if i+1 < count {
-		return first, u32(s.row(2, uint32(i+1)), 4), true
+	next := base + uint32(i) + 1
+	if next < uint32(s.rowCount(2)) {
+		return first, u32(s.row(2, next), 4), true
 	}
 	return first, uint32(s.rowCount(3)), true
 }
@@ -778,13 +777,13 @@ func (s *Shard) FindRPKI(addr netip.Addr, origin uint32, announcement netip.Pref
 	// RPKI is keyed by the selected actual announcement, not by an LPM over
 	// other announcements that happen to contain this query address.
 	fillPrefixKey(target, announcement.Masked(), false, 0)
-	for _, id := range []uint16{1, 8} {
+	for section, id := range []uint16{1, 8} {
 		count := s.rowCount(id)
-		first := sort.Search(count, func(i int) bool { return keyCompare(s.row(id, uint32(i)), target) >= 0 })
+		first := s.rpkiBound(section, id, target, false)
 		if first == count || keyCompare(s.row(id, uint32(first)), target) != 0 {
 			continue
 		}
-		end := sort.Search(count-first, func(i int) bool { return keyCompare(s.row(id, uint32(first+i)), target) > 0 }) + first
+		end := s.rpkiBound(section, id, target, true)
 		i := sort.Search(end-first, func(i int) bool { return u32(s.Record(u32(s.row(id, uint32(first+i)), 20)), 4) >= origin })
 		if first+i >= end {
 			return nil, false

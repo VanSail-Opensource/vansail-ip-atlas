@@ -3,7 +3,6 @@ package via3
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/binary"
 	"errors"
 	"io"
 	"os"
@@ -15,10 +14,11 @@ import (
 // The row-page cache remains within the native deployment envelope. Each
 // request also pays the complete logical public object admission charge.
 type nativeIndex struct {
-	resource *nativeIndexFile
-	cleanup  runtime.Cleanup
-	size     int64
-	pages    *nativePages
+	fenceBudget, fenceBytes int
+	resource                *nativeIndexFile
+	cleanup                 runtime.Cleanup
+	size                    int64
+	pages                   *nativePages
 }
 
 type nativeIndexFile struct {
@@ -29,12 +29,15 @@ type nativeIndexFile struct {
 type indexSpan struct{ offset, size int }
 
 type indexedShard struct {
-	pages           *nativePages
-	base            int64
-	length, decoded int
-	shard           Shard
-	sections        [13]indexSpan
-	parents         [2]indexSpan
+	pages                     *nativePages
+	base                      int64
+	length, decoded           int
+	shard                     Shard
+	sections                  [13]indexSpan
+	prefixFences              [2][2][][16]byte
+	rpkiFences                [2][][20]byte
+	asnFences                 []uint32
+	prefixOffsets, prefixText indexSpan
 }
 
 func closeNativeIndex(f *nativeIndexFile) error {
@@ -117,7 +120,7 @@ func (r *Release) PrepareNativeIndex(ctx context.Context, directory string) erro
 		return err
 	}
 	resource := &nativeIndexFile{file: reader, path: path}
-	index := &nativeIndex{resource: resource}
+	index := &nativeIndex{resource: resource, fenceBudget: max(0, PublicCacheDecoded-r.routerBytes-rowPageSize)}
 	stream := &nativeIndexWriter{file: writer}
 	type objectIndex struct {
 		ref       *objectReference
@@ -170,7 +173,7 @@ func (r *Release) PrepareNativeIndex(ctx context.Context, directory string) erro
 		return err
 	}
 	index.pages = &nativePages{owner: r, file: reader, total: index.size, dir: stream.pages, routerBytes: r.routerBytes}
-	index.pages.setMetadata(0)
+	index.pages.setMetadata(index.fenceBytes)
 	for _, entry := range staged {
 		entry.ref.onsite = entry.component
 		entry.component.pages = index.pages
@@ -232,11 +235,25 @@ func (index *nativeIndex) append(writer *nativeIndexWriter, s *Shard) (*indexedS
 		return span
 	}
 	for _, section := range s.Sections {
+		rowStart := base + int64(onsite.length) + 8
+		if section.ID == 1 || section.ID == 2 || section.ID == 8 {
+			// Large searchable vectors begin on a page boundary. A smaller
+			// searchable vector needs padding only if it would straddle two.
+			n := len(section.Data) - 8
+			if n >= rowPageSize || int(rowStart%rowPageSize)+n > rowPageSize {
+				reserve(int((-rowStart) & (rowPageSize - 1)))
+			}
+		}
 		onsite.sections[section.ID] = reserve(len(section.Data))
 	}
 	for i, parents := range s.lookup.prefixes {
 		derived.prefixes[i].families = parents.families
-		onsite.parents[i] = reserve(4 * len(parents.parents))
+
+	}
+	prefixes, _ := s.Rows(11)
+	if len(prefixes) > 0 {
+		onsite.prefixOffsets = reserve((len(prefixes)/24 + 1) * 4)
+		onsite.prefixText = reserve(prefixTextSize(prefixes))
 	}
 	// The native index shares the hosted 10 GiB scratch ceiling. Reserve the
 	// full object before writing its first byte, including all typed vector and ancestry bytes.
@@ -247,23 +264,47 @@ func (index *nativeIndex) append(writer *nativeIndexWriter, s *Shard) (*indexedS
 	if err := checkIndexSpace(writer.file, end-index.size); err != nil {
 		return nil, err
 	}
+	onsite.buildFences(s, index)
+	var zeros [rowPageSize]byte
+	pos := 0
 	for _, section := range s.Sections {
-		if err := writer.write(section.Data); err != nil {
+		span := onsite.sections[section.ID]
+		if err := writer.write(zeros[:span.offset-pos]); err != nil {
 			return nil, err
 		}
-	}
-	const batch = 4096
-	var buf [batch]byte
-	for _, parents := range s.lookup.prefixes {
-		for j := 0; j < len(parents.parents); {
-			n := min(batch/4, len(parents.parents)-j)
-			for k, value := range parents.parents[j : j+n] {
-				binary.LittleEndian.PutUint32(buf[k*4:], value)
+		if (section.ID == 1 || section.ID == 8) && s.Kind != 9 {
+			// Private search rows store their parent next to the address. Keep the
+			// original authenticated public vector untouched throughout preparation.
+			k := 0
+			if section.ID == 8 {
+				k = 1
 			}
-			if err := writer.write(buf[:n*4]); err != nil {
+			if err := writer.write(section.Data[:8]); err != nil {
 				return nil, err
 			}
-			j += n
+			rows := section.Data[8:]
+			parents := s.lookup.prefixes[k].parents
+			var buffer [rowPageSize]byte
+			for i := 0; i < len(parents); {
+				count := min(prefixBlockRows, len(parents)-i)
+				part := buffer[:count*32]
+				copy(part, rows[i*32:(i+count)*32])
+				for j, parent := range parents[i : i+count] {
+					p32(part, j*32+24, parent)
+				}
+				if err := writer.write(part); err != nil {
+					return nil, err
+				}
+				i += count
+			}
+		} else if err := writer.write(section.Data); err != nil {
+			return nil, err
+		}
+		pos = span.offset + span.size
+	}
+	if len(prefixes) > 0 {
+		if err := writePrefixText(writer, prefixes); err != nil {
+			return nil, err
 		}
 	}
 	index.size = end

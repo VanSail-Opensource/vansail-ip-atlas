@@ -103,6 +103,7 @@ func (p *nativePages) next() {
 func (p *nativePages) reclaimOptional() {
 	if p.owner != nil {
 		p.owner.releaseRouterASNs()
+		p.owner.releaseNativeFences()
 	}
 }
 
@@ -208,7 +209,11 @@ func (s *Shard) rowSpan(id uint16, first, count uint32) []byte {
 }
 func (s *Shard) parent(section int, ordinal uint32) uint32 {
 	if s.disk != nil {
-		return u32(s.disk.pages.span(s.disk.base+int64(s.disk.parents[section].offset)+int64(ordinal)*4, 4), 0)
+		id := uint16(1)
+		if section == 1 {
+			id = 8
+		}
+		return u32(s.row(id, ordinal), 24)
 	}
 	return s.lookup.prefixes[section].parents[ordinal]
 }

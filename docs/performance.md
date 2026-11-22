@@ -63,7 +63,9 @@ Ordinary native lookups open the release lazily. For repeated lookups, the corpu
 builder and hosted benchmark use `PrepareNativeIndex` with private scratch. It
 verifies the immutable source inventory and writes release-specific typed
 component pages with SHA-256 digests. Each lookup checks the digest when reading
-a page. The reader bounds resident pages and admits the same logical public
+a page. The index stores the first key of a searchable page when it fits the
+cache budget and reads the same key from disk under memory pressure. Announced
+prefix rows carry their canonical display text. The reader bounds resident pages and admits the same logical public
 shards as the ordinary reader. Closing the reader removes the scratch file.
 
 The native report records preparation time, allocation count and bytes, source

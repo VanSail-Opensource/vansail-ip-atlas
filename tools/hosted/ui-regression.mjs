@@ -311,7 +311,9 @@ try {
       // Let Nuxt's hydration/idle scheduling finish before controlling timers.
       await snapshot.clock.pauseAt(await snapshot.evaluate(() => Date.now() + 1000))
       assert.match(await valid.innerText(), /Snapshot result: valid/)
-      assert.match(await invalid.innerText(), /Snapshot result: invalid.*Expired snapshot/)
+      assert.match(await invalid.innerText(), /Snapshot result: invalid.*Coverage expired/)
+      assert.deepEqual(await invalid.locator('dt').allTextContents(), ['Observed', 'Coverage expiry'])
+      assert.deepEqual(await valid.locator('dt').allTextContents(), ['Observed', 'Authorization expiry'])
       assert.equal(await valid.locator('.rpki-expired').count(), 0)
       const clocks = await valid.locator('dd').allTextContents()
       assert.equal(clocks.length, 2)
@@ -333,6 +335,7 @@ try {
       await snapshot.clock.setSystemTime(expiry - 1000)
       await snapshot.clock.runFor(1000)
       await valid.locator('.rpki-expired').waitFor()
+      assert.match(await valid.innerText(), /Snapshot result: valid.*Authorization expired/)
       await checkPreserved()
       // A tab suspended across the deadline must refresh immediately on resume.
       await snapshot.clock.setSystemTime(expiry - 1000)

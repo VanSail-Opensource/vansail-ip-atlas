@@ -664,6 +664,26 @@ The production hostname still returned HTTP 404 with no canonical Pages
 deployment. Authenticated exact-main release, the 15 isolated build benchmarks,
 preview verification and production promotion remain outstanding.
 
+## November 23 nineteen-source candidate
+
+The nineteenth source is the official NRO compilation of all five RIRs'
+delegation statistics. Its November 22 UTC edition supplied 335,594 IP
+prefixes with a registration country across 238 ISO codes. In a private
+Chrome check, the new source gave 1.0.0.1 a registration country of AU and
+2001:200::1 a registration country of JP. Physical location and ISP remained
+unknown in that source-only build. Overview also shows the matched network
+prefix, network name and network organization when the address lookup supplies
+them. All 22 browser regressions passed.
+[Reviewed input and measured coverage](../SOURCES_AUDIT.md)
+
+All 19 observed fixtures passed on November 22 at `16:42:08Z` against
+`0a6625bde3fa6f6124fd80147e1baecdd233d6af9cdd11c5d1052fce398dbd7e`.
+The next native reader returned the same full answers as the independent reader
+on all 10,000 engineering queries. Local p95 reached 16.03 microseconds
+on a retained fifteen-source release. The original 2-microsecond limit still
+applies. Source qualification and release gates must run on the complete
+nineteen-source candidate before its production deployment.
+
 ## Resume next
 
 1. Verify the branch and clean checkout. Run strict schemas, Go tests/vet, Python

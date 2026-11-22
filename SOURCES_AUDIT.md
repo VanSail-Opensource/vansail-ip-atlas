@@ -26,6 +26,14 @@ mode and IPv4 directed-broadcast status display as unknown without an explicit
 address-level mapping. The ASN identity fields belong to the autonomous system. A
 routed prefix supplies no per-address assignment or broadcast classification.
 
+Operator geofeeds report the location of a prefix. Their standard fields do
+not identify how a customer address was assigned. An IPv4 directed-broadcast
+classification needs the subnet at the destination interface. For example,
+both addresses on a point-to-point /31 can identify hosts. The project leaves
+these fields unknown when it has only a registration or an observed route.
+[Geofeed fields](https://www.rfc-editor.org/rfc/rfc8805.html#section-2.1) ·
+[IPv4 point-to-point addressing](https://www.rfc-editor.org/rfc/rfc3021.html#section-2.1)
+
 A replay of the retained full FFraud input verified 525,852 abuse, 138,895
 botnet, 681,160 command-and-control, 32,216 malware, 7,828 scanning and
 265,550 spam observations. It also verified 66,220 datacenter, 83,110 proxy,

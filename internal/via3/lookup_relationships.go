@@ -19,6 +19,7 @@ type graphComponents struct {
 	graphOwner *objectReference
 	asn        uint32
 	known      bool
+	native     bool
 }
 
 func (c *graphComponents) prepare(s *Shard, asn uint32, g *pathGraph) {
@@ -26,17 +27,37 @@ func (c *graphComponents) prepare(s *Shard, asn uint32, g *pathGraph) {
 		return
 	}
 	c.graphOwner, c.asn = s.lookup.owner, asn
-	if len(g.positions) == len(g.pairs) {
-		copy(c.positions[:], g.positions)
+	positions := g.positions
+	if s.disk != nil && s.components().active {
+		c.native = true
+		if cached, ok := s.components().get(s.componentKey(factPathPositions, asn, 0)); ok {
+			positions = cached.([]relationshipPosition)
+		}
+	}
+	if len(positions) == len(g.pairs) {
+		copy(c.positions[:], positions)
 		c.known = true
 	}
 }
 
 func (r *Release) retainGraphComponents(c *graphComponents, pairs int) {
-	if c.known || c.graphOwner == nil || !r.canRetainGraph(c.graphOwner, pairs*relationshipPositionBytes) {
+	if c.known || c.graphOwner == nil {
 		return
 	}
 	s := c.graphOwner.shard
+	if c.native {
+		if s != nil {
+			// The key fixes the same sorted, deduplicated directed hops. Every
+			// ordinal must still resolve in its own immutable relationship object.
+			positions := make([]relationshipPosition, pairs)
+			copy(positions, c.positions[:pairs])
+			s.components().put(s.componentKey(factPathPositions, c.asn, 0), positions, 24+pairs*relationshipPositionBytes)
+		}
+		return
+	}
+	if !r.canRetainGraph(c.graphOwner, pairs*relationshipPositionBytes) {
+		return
+	}
 	if s == nil || s.lookup == nil || s.lookup.graphIndex == nil {
 		return
 	}

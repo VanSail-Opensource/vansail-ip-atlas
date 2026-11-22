@@ -75,7 +75,13 @@ func (r *Release) pathGraph(s *Shard, asn uint32) *pathGraph {
 		return nil
 	}
 	ref := s.lookup.owner
-	if ref == nil || !ref.cache || !ref.query {
+	if ref == nil || !ref.query {
+		return nil
+	}
+	if s.disk != nil && s.components().active {
+		return r.nativePathGraph(s, asn)
+	}
+	if !ref.cache {
 		return nil
 	}
 	index := s.lookup.graphIndex
@@ -99,58 +105,86 @@ func (r *Release) pathGraph(s *Shard, asn uint32) *pathGraph {
 		if !r.canRetainGraph(ref, graphHeaderBytes) {
 			return nil
 		}
-		first, end, ok := s.asnBounds(asn)
-		if !ok || end-first > 12 {
-			return nil
-		}
-		const width = 24
-		rows := s.rowSpan(3, first, end-first)
-		nSegs, nASNs, maxPairs := 0, 0, 0
-		for offset := 0; offset < len(rows); offset += width {
-			row := rows[offset : offset+width]
-			start := u32(row, 8)
-			n := int(u16(row, 12))
-			count := 0
-			for i := 0; i < n; i++ {
-				count += int(u32(s.row(9, start+uint32(i)), 8))
+		slot.graph = buildPathGraph(s, asn, func(size int) bool {
+			if !r.canRetainGraph(ref, size) {
+				return false
 			}
-			nSegs += n
-			nASNs += count
-			if row[14]&1 != 0 {
-				maxPairs += max(0, count-1)
-			}
-		}
-		size := graphHeaderBytes + 12*int(end-first) + 8*nSegs + 4*nASNs + 8*maxPairs
-		if nASNs > PublicPathASNs || !r.canRetainGraph(ref, size) {
-			return nil
-		}
-		r.chargeGraph(ref, size)
-		g := &pathGraph{paths: make([]graphPath, 0, end-first), segments: make([]graphSegment, 0, nSegs), values: make([]uint32, 0, nASNs), pairs: make([]uint64, 0, maxPairs)}
-		for offset := 0; offset < len(rows); offset += width {
-			row := rows[offset : offset+width]
-			start := u32(row, 8)
-			path := graphPath{first: uint32(len(g.values)), segments: u16(row, 12), visibility: row[15], eligible: row[14]&1 != 0}
-			for i := 0; i < int(path.segments); i++ {
-				seg := s.row(9, start+uint32(i))
-				count := u32(seg, 8)
-				ints := s.rowSpan(4, u32(seg, 4), count)
-				g.segments = append(g.segments, graphSegment{count, seg[0]})
-				for j := 0; j < int(count); j++ {
-					g.values = append(g.values, u32(ints, j*4))
-				}
-			}
-			values := g.values[path.first:]
-			path.count = uint32(len(values))
-			g.paths = append(g.paths, path)
-			if path.eligible {
-				g.pairs = appendPathPairs(g.pairs, values)
-			}
-		}
-		slices.Sort(g.pairs)
-		g.pairs = slices.Compact(g.pairs)
-		slot.graph = g
+			r.chargeGraph(ref, size)
+			return true
+		})
 	}
 	return slot.graph
+}
+
+// A prepared native release can retain independent per-origin numeric paths
+// across source-row eviction. The map key always identifies the verified path
+// object as well as the origin. No public answer aliases the cached arrays.
+func (r *Release) nativePathGraph(s *Shard, asn uint32) *pathGraph {
+	cache := s.components()
+	key := s.componentKey(factPaths, asn, 0)
+	if existing, ok := cache.get(key); ok {
+		return existing.(*pathGraph)
+	}
+	graph := buildPathGraph(s, asn, func(size int) bool {
+		total := componentEntryBytes + size
+		return total <= nativeComponentEntryLimit && r.mayKeepNativeMetadata(total)
+	})
+	if graph != nil && cache.put(key, graph, graph.bytes()) {
+		return graph
+	}
+	return nil
+}
+
+func buildPathGraph(s *Shard, asn uint32, reserve func(int) bool) *pathGraph {
+	first, end, ok := s.asnBounds(asn)
+	if !ok || end-first > 12 {
+		return nil
+	}
+	const width = 24
+	rows := s.rowSpan(3, first, end-first)
+	nSegs, nASNs, maxPairs := 0, 0, 0
+	for offset := 0; offset < len(rows); offset += width {
+		row := rows[offset : offset+width]
+		start := u32(row, 8)
+		n := int(u16(row, 12))
+		count := 0
+		for i := 0; i < n; i++ {
+			count += int(u32(s.row(9, start+uint32(i)), 8))
+		}
+		nSegs += n
+		nASNs += count
+		if row[14]&1 != 0 {
+			maxPairs += max(0, count-1)
+		}
+	}
+	size := graphHeaderBytes + 12*int(end-first) + 8*nSegs + 4*nASNs + 8*maxPairs
+	if nASNs > PublicPathASNs || !reserve(size) {
+		return nil
+	}
+	g := &pathGraph{paths: make([]graphPath, 0, end-first), segments: make([]graphSegment, 0, nSegs), values: make([]uint32, 0, nASNs), pairs: make([]uint64, 0, maxPairs)}
+	for offset := 0; offset < len(rows); offset += width {
+		row := rows[offset : offset+width]
+		start := u32(row, 8)
+		path := graphPath{first: uint32(len(g.values)), segments: u16(row, 12), visibility: row[15], eligible: row[14]&1 != 0}
+		for i := 0; i < int(path.segments); i++ {
+			seg := s.row(9, start+uint32(i))
+			count := u32(seg, 8)
+			ints := s.rowSpan(4, u32(seg, 4), count)
+			g.segments = append(g.segments, graphSegment{count, seg[0]})
+			for j := 0; j < int(count); j++ {
+				g.values = append(g.values, u32(ints, j*4))
+			}
+		}
+		values := g.values[path.first:]
+		path.count = uint32(len(values))
+		g.paths = append(g.paths, path)
+		if path.eligible {
+			g.pairs = appendPathPairs(g.pairs, values)
+		}
+	}
+	slices.Sort(g.pairs)
+	g.pairs = slices.Compact(g.pairs)
+	return g
 }
 
 func appendPathPairs(pairs []uint64, values []uint32) []uint64 {

@@ -646,11 +646,13 @@ func (s *bulkSpool) seedStable(ctx context.Context, workspace string, state inte
 			}
 			return writers[category].Append(record)
 		}
+		adjacent := seedOriginAppender{emit: appendRecord}
 		err := intelligence.WalkStoredSource(ctx, workspace, source, func(record intelligence.NormalizedRecord) error {
 			if remaining == 0 {
 				return errors.New("seed input partition count differs")
 			}
 			if current == nil {
+				adjacent.reset()
 				current = &seedGroup{entry: spatialCacheEntry{Domain: "seed", Seed: &spatialCacheSeed{}}}
 				if s.reuse != nil && len(source.RecordPartitions) > 0 {
 					key, err := spatialReuseKey("seed", source.RecordPartitions[partIndex])
@@ -667,7 +669,11 @@ func (s *bulkSpool) seedStable(ctx context.Context, workspace string, state inte
 					}
 				}
 			}
-			if err := s.seedRecord(record, appendRecord); err != nil {
+			emit := appendRecord
+			if !current.hit {
+				emit = adjacent.append
+			}
+			if err := s.seedRecord(record, emit); err != nil {
 				return err
 			}
 			remaining--
@@ -827,10 +833,32 @@ func (s *bulkSpool) seedCold(ctx context.Context, workspace string, state intell
 	}
 	s.usage = asnUsageIndex{}
 	for _, source := range state.Sources {
+		adjacent := seedOriginAppender{emit: func(category int, value intelligence.NormalizedRecord) error {
+			return writers[category].Append(value)
+		}}
+		partIndex := 0
+		var remaining uint64
+		if len(source.RecordPartitions) != 0 {
+			remaining = source.RecordPartitions[0].Records
+		}
 		if err := intelligence.WalkStoredSource(ctx, workspace, source, func(record intelligence.NormalizedRecord) error {
-			return s.seedRecord(record, func(category int, value intelligence.NormalizedRecord) error {
-				return writers[category].Append(value)
-			})
+			if len(source.RecordPartitions) != 0 && remaining == 0 {
+				return errors.New("seed input partition count differs")
+			}
+			if err := s.seedRecord(record, adjacent.append); err != nil {
+				return err
+			}
+			if len(source.RecordPartitions) != 0 {
+				remaining--
+				if remaining == 0 {
+					adjacent.reset()
+					partIndex++
+					if partIndex < len(source.RecordPartitions) {
+						remaining = source.RecordPartitions[partIndex].Records
+					}
+				}
+			}
+			return nil
 		}); err != nil {
 			return nil, nil, err
 		}

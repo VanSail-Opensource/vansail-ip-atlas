@@ -14,6 +14,7 @@ import (
 // The row-page cache remains within the native deployment envelope. Each
 // request also pays the complete logical public object admission charge.
 type nativeIndex struct {
+	facts                   nativeComponents
 	fenceBudget, fenceBytes int
 	resource                *nativeIndexFile
 	cleanup                 runtime.Cleanup
@@ -174,6 +175,7 @@ func (r *Release) PrepareNativeIndex(ctx context.Context, directory string) erro
 	}
 	index.pages = &nativePages{owner: r, file: reader, total: index.size, dir: stream.pages, routerBytes: r.routerBytes}
 	index.pages.setMetadata(index.fenceBytes)
+	index.facts.pages = index.pages
 	for _, entry := range staged {
 		entry.ref.onsite = entry.component
 		entry.component.pages = index.pages

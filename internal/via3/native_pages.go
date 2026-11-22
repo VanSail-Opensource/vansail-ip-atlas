@@ -104,6 +104,9 @@ func (p *nativePages) reclaimOptional() {
 	if p.owner != nil {
 		p.owner.releaseRouterASNs()
 		p.owner.releaseNativeFences()
+		if p.owner.native != nil {
+			p.owner.native.facts.trim(0)
+		}
 	}
 }
 
@@ -126,6 +129,12 @@ func (p *nativePages) page(number int) []byte {
 			p.reclaimOptional()
 		}
 		if (p.pages+1)*rowPageSize+p.borrowed > p.live*rowPageSize {
+			if p.owner != nil && p.owner.native != nil {
+				c := &p.owner.native.facts
+				if c.active && c.touched == p.epoch {
+					panic(nativeReadError{retryWithoutComponents})
+				}
+			}
 			panic(nativeReadError{fail("resource_limit")})
 		}
 		page = &nativePage{data: make([]byte, rowPageSize)}
@@ -169,6 +178,12 @@ func (p *nativePages) span(offset int64, n int) []byte {
 		p.reclaimOptional()
 	}
 	if n > p.live*rowPageSize-p.pages*rowPageSize-p.borrowed {
+		if p.owner != nil && p.owner.native != nil {
+			c := &p.owner.native.facts
+			if c.active && c.touched == p.epoch {
+				panic(nativeReadError{retryWithoutComponents})
+			}
+		}
 		panic(nativeReadError{fail("resource_limit")})
 	}
 	p.borrowed += n

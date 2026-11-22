@@ -197,7 +197,16 @@ func (r *Release) prefixPage(ctx context.Context, s *Shard, row []byte, asn, cur
 		// its mutable headers. No decoded shard bytes back these strings.
 		copy(answer.Prefixes, target.lookup.prefixLabels[first:first+total])
 	} else if target.disk != nil && total > 0 {
-		target.disk.prefixStrings(first, total, answer.Prefixes)
+		c := target.components()
+		key := target.componentKey(factPrefixes, first, total)
+		if v, ok := c.get(key); ok {
+			copy(answer.Prefixes, v.([]string))
+		} else {
+			target.disk.prefixStrings(first, total, answer.Prefixes)
+			if c.active {
+				c.put(key, slices.Clone(answer.Prefixes), prefixSpanBytes(answer.Prefixes)+24)
+			}
+		}
 	} else if labels := target.cachedPrefixSpan(first, total); labels != nil {
 		copy(answer.Prefixes, labels)
 	} else {
@@ -740,9 +749,27 @@ func (r *Release) label(ctx context.Context, from *Shard, row []byte, p int, tar
 	if uint64(id)+1 >= uint64(dictionary.rowCount(5)) {
 		return nil, fail("record")
 	}
+	var c *nativeComponents
+	var key componentKey
+	if dictionary.disk != nil {
+		c = dictionary.components()
+		if c.active {
+			key = dictionary.componentKey(factLabel, id, 0)
+			if v, ok := c.get(key); ok {
+				return labels.addKnown(v.(string), target)
+			}
+		}
+	}
 	offsets := dictionary.rowSpan(5, id, 2)
 	first, end := u32(offsets, 0), u32(offsets, 4)
-	return labels.add(dictionary.rowSpan(6, first, end-first), target)
+	value := dictionary.rowSpan(6, first, end-first)
+	if c != nil && c.active {
+		text := string(value)
+		if c.put(key, text, len(text)+16) {
+			return labels.addKnown(text, target)
+		}
+	}
+	return labels.add(value, target)
 }
 func (s *Shard) ASNRecord(asn uint32) ([]byte, bool) {
 	if s.lookup != nil && s.lookup.routerASNs != nil {
@@ -752,6 +779,9 @@ func (s *Shard) ASNRecord(asn uint32) ([]byte, bool) {
 		}
 		index := u32(s.lookup.rows[2], int(ordinal)*8+4)
 		return s.Record(index), true
+	}
+	if s.disk != nil && s.components().active {
+		return s.cachedASN(asn)
 	}
 	first, _, ok := s.asnBounds(asn)
 	if !ok {
@@ -937,17 +967,27 @@ func riskValue(row []byte, p int, bit uint, target *float64) *float64 {
 	return target
 }
 func origins(s *Shard, row []byte) []uint32 {
+	var c *nativeComponents
+	var key componentKey
+	if s.disk != nil && u32(row, 8) != 0 {
+		c = s.components()
+		key = s.componentKey(factOrigins, u32(row, 4), u32(row, 8))
+		if v, ok := c.get(key); ok {
+			return slices.Clone(v.([]uint32))
+		}
+	}
 	ints := s.rowSpan(4, u32(row, 4), u32(row, 8))
 	out := make([]uint32, u32(row, 8))
 	for i := range out {
 		out[i] = u32(ints, i*4)
 	}
+	if c != nil && c.active {
+		c.put(key, slices.Clone(out), len(out)*4+24)
+	}
 	return out
 }
 
-func (r *Release) Lookup(ctx context.Context, q string) (result LookupAnswer, resultErr error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+func (r *Release) lookupOnce(ctx context.Context, q string) (result LookupAnswer, resultErr error) {
 	defer recoverNativeRead(&resultErr)
 	input, err := querycontract.ParseInput(q)
 	if err != nil {

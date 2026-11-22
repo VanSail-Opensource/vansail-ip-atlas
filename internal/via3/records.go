@@ -768,6 +768,12 @@ func (s *Shard) relationshipPosition(first, end, to uint32) ([]byte, uint32, boo
 	return row, first + uint32(i), u32(row, 8) == to
 }
 func (s *Shard) FindRPKI(addr netip.Addr, origin uint32, announcement netip.Prefix) ([]byte, bool) {
+	if s.disk != nil && s.components().active {
+		return s.cachedRPKI(addr, origin, announcement)
+	}
+	return s.findRPKIRow(addr, origin, announcement)
+}
+func (s *Shard) findRPKIRow(addr netip.Addr, origin uint32, announcement netip.Prefix) ([]byte, bool) {
 	addr = addr.Unmap()
 	if !addr.IsValid() || !announcement.IsValid() || !announcement.Contains(addr) {
 		return nil, false

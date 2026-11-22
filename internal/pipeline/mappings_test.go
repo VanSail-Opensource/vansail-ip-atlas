@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"crypto/sha256"
+	"maps"
 	"net/netip"
 	"os"
 	"slices"
@@ -94,6 +95,43 @@ func TestMappingMaterializationParentFallbackConflictAnycastAndMOAS(t *testing.T
 }
 func str(value string) *string     { return &value }
 func sameString(a, b *string) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }
+
+func TestMappingAncestorStackRestoresParentsAcrossBranchesAndFamilies(t *testing.T) {
+	state, policy := mappingFixture(t)
+	state.Sources = state.Sources[:1]
+	source := &state.Sources[0]
+	source.Records = nil
+	expected := map[string]string{
+		"0.0.0.0/0": "US", "8.0.0.0/8": "DE", "8.0.0.0/16": "BR",
+		"8.0.0.0/24": "BR", "8.1.0.0/24": "DE", "9.0.0.0/8": "US",
+		"::/0": "CA", "2001:db8::/32": "FR", "2001:db8::/48": "FR",
+		"2001:db9::/32": "CA",
+	}
+	for _, p := range []string{"0.0.0.0/0", "8.0.0.0/8", "8.0.0.0/16", "::/0", "2001:db8::/32"} {
+		source.Records = append(source.Records, intelligence.NormalizedRecord{
+			Version: 3, Kind: intelligence.RecordGeo, Geo: &intelligence.GeoEvidence{
+				Family: source.ID, Prefix: netip.MustParsePrefix(p), PhysicalCountry: expected[p], Weight: 100, Current: true,
+			},
+		})
+	}
+	for _, p := range []string{"8.0.0.0/24", "8.1.0.0/24", "9.0.0.0/8", "2001:db8::/48", "2001:db9::/32"} {
+		source.Records = append(source.Records, intelligence.NormalizedRecord{
+			Version: 3, Kind: intelligence.RecordUsage, Usage: &intelligence.ScopedUsage{
+				Prefix: netip.MustParsePrefix(p), Evidence: intelligence.UsageEvidence{Family: source.ID, Type: "business", Current: true},
+			},
+		})
+	}
+	got := map[string]string{}
+	err := MappingProducer(state, policy, state.EvaluatedAt)(context.Background(), func(row via3.PublicRecord) error {
+		if row.Geo != nil {
+			got[row.Prefix.String()] = row.Geo.Country
+		}
+		return nil
+	})
+	if err != nil || !maps.Equal(got, expected) {
+		t.Fatalf("inherited mapping across nested siblings and families: got %v, err %v", got, err)
+	}
+}
 
 func TestMappingWithdrawalRetractsParentCityAndCoordinates(t *testing.T) {
 	state, policy := mappingFixture(t)

@@ -168,20 +168,36 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 			keys = append(keys, prefix)
 		}
 		sortPrefixes(keys)
+		// Address order, with the shortest prefix first on a tie, visits each
+		// ancestor before its descendants and keeps its entire subtree together.
+		// Remember the applicable evidence at each level of the active chain.
+		type mappingAncestor struct {
+			prefix               netip.Prefix
+			geoStart, usageStart int
+		}
+		var ancestors []mappingAncestor
+		var applicableGeo []intelligence.GeoEvidence
+		var applicableUsage []intelligence.UsageEvidence
 		for _, prefix := range keys {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			var applicableGeo []intelligence.GeoEvidence
-			var applicableUsage []intelligence.UsageEvidence
-			for bits := 0; bits <= prefix.Bits(); bits++ {
-				ancestor := netip.PrefixFrom(prefix.Addr(), bits).Masked()
-				if len(applicableGeo)+len(geo[ancestor]) > 8192 || len(applicableUsage)+len(usage[ancestor]) > 8192 {
-					return errors.New("mapping boundary working set exceeded")
+			for len(ancestors) > 0 {
+				last := ancestors[len(ancestors)-1]
+				if last.prefix.Contains(prefix.Addr()) {
+					break
 				}
-				applicableGeo = append(applicableGeo, geo[ancestor]...)
-				applicableUsage = append(applicableUsage, usage[ancestor]...)
+				applicableGeo = applicableGeo[:last.geoStart]
+				applicableUsage = applicableUsage[:last.usageStart]
+				ancestors = ancestors[:len(ancestors)-1]
 			}
+			localGeo, localUsage := geo[prefix], usage[prefix]
+			if len(applicableGeo)+len(localGeo) > 8192 || len(applicableUsage)+len(localUsage) > 8192 {
+				return errors.New("mapping boundary working set exceeded")
+			}
+			ancestors = append(ancestors, mappingAncestor{prefix, len(applicableGeo), len(applicableUsage)})
+			applicableGeo = append(applicableGeo, localGeo...)
+			applicableUsage = append(applicableUsage, localUsage...)
 			u := intelligence.FuseUsage(applicableUsage)
 			g, err := intelligence.FuseGeo(policy, applicableGeo, u.Anycast != nil && *u.Anycast)
 			if err != nil {

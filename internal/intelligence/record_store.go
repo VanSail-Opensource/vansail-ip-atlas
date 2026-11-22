@@ -330,6 +330,23 @@ func (w *RecordWriter) finishPartition() error {
 	}
 	part := RecordPartition{Bytes: w.size, Records: w.count, Codec: "zstd-v1", DecodedBytes: w.decoded}
 	copy(part.SHA256[:], w.digest.Sum(nil))
+	if err := w.installPartition(part); err != nil {
+		return err
+	}
+	w.parts = append(w.parts, part)
+	w.file = nil
+	w.buffer = nil
+	w.size = 0
+	w.decoded = 0
+	w.count = 0
+	return nil
+}
+
+// Inspect and install the destination while holding the same lock as imports.
+// Two concurrent writers finishing identical bytes charge one file.
+func (w *RecordWriter) installPartition(part RecordPartition) error {
+	w.store.mu.Lock()
+	defer w.store.mu.Unlock()
 	destination := filepath.Join(w.store.root, partitionName(part))
 	if info, err := os.Lstat(destination); err == nil {
 		if !info.Mode().IsRegular() || info.Size() != part.Bytes {
@@ -341,30 +358,21 @@ func (w *RecordWriter) finishPartition() error {
 		if err = os.Remove(w.file.Name()); err != nil {
 			return err
 		}
-		w.store.release(w.size)
+		w.store.disk -= w.size
 	} else if !os.IsNotExist(err) {
 		return err
 	} else {
-		w.store.mu.Lock()
 		if w.store.objects >= maxRecordPartitions {
-			w.store.mu.Unlock()
 			return errors.New("private partition inventory exceeded")
 		}
 		err = os.Rename(w.file.Name(), destination)
 		if err == nil {
 			w.store.objects++
 		}
-		w.store.mu.Unlock()
 		if err != nil {
 			return err
 		}
 	}
-	w.parts = append(w.parts, part)
-	w.file = nil
-	w.buffer = nil
-	w.size = 0
-	w.decoded = 0
-	w.count = 0
 	return nil
 }
 func (w *RecordWriter) Finish() ([]RecordPartition, error) {

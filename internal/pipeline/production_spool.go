@@ -709,13 +709,19 @@ func (s *bulkSpool) seedStable(ctx context.Context, workspace string, state inte
 		// Cache adoption follows the complete strict source walk, including every
 		// final framing/count/hash check. Side effects were reconstructed above
 		// for hits and misses alike; no stored flag substitutes for source data.
+		var imports [][]intelligence.RecordPartition
+		for _, group := range groups {
+			if group.hit {
+				imports = append(imports, group.entry.Seed.Parts[:]...)
+			}
+		}
+		if len(imports) != 0 {
+			if err := s.importCachedGroups(ctx, imports); err != nil {
+				return nil, nil, err
+			}
+		}
 		for _, group := range groups {
 			for i, parts := range group.entry.Seed.Parts {
-				if group.hit {
-					if err := s.importCachedParts(ctx, parts); err != nil {
-						return nil, nil, err
-					}
-				}
 				categories[i] = append(categories[i], parts...)
 			}
 			if s.reuse != nil && group.entry.Key != ([32]byte{}) {

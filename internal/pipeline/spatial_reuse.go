@@ -6,9 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/netip"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -73,56 +71,38 @@ func (s *bulkSpool) verifyParts(ctx context.Context, parts []intelligence.Record
 
 // Cached normalized streams are imported as ordinary immutable objects. They
 // never acquire the process-local canonical-frame capability of a live writer.
-func (s *bulkSpool) importCachedParts(ctx context.Context, parts []intelligence.RecordPartition) error {
-	if len(parts) == 0 {
-		return ctx.Err()
-	}
+func (s *bulkSpool) importCachedGroups(ctx context.Context, groups [][]intelligence.RecordPartition) error {
 	if s.reuse == nil {
 		return errors.New("spatial cache is unavailable")
+	}
+	// Take an actual inventory before the batch. The store then reserves each
+	// new object and verifies every imported or preexisting destination. No
+	// writers, garbage collection or cache staging run during this batch.
+	count := 0
+	for _, parts := range groups {
+		for _, part := range parts {
+			if count%128 == 0 {
+				if err := s.refresh(); err != nil {
+					return err
+				}
+			}
+			from, err := s.reuse.ObjectPath(part.SHA256)
+			if err != nil {
+				return err
+			}
+			if err := s.store.ImportPartition(ctx, from, part); err != nil {
+				return err
+			}
+			count++
+		}
+	}
+	if count == 0 {
+		return ctx.Err()
 	}
 	if err := s.refresh(); err != nil {
 		return err
 	}
-	for _, part := range parts {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		from, err := s.reuse.ObjectPath(part.SHA256)
-		if err != nil {
-			return err
-		}
-		to := filepath.Join(s.root, ".atlas-private", "records-v2", hex.EncodeToString(part.SHA256[:])+".records")
-		if _, err = os.Lstat(to); err == nil {
-			continue // the full descriptor and actual bytes are verified below
-		} else if !os.IsNotExist(err) {
-			return err
-		}
-		used := s.external() + s.pathBytes + s.store.DiskBytes()
-		if part.Bytes <= 0 || used >= s.maximum || uint64(part.Bytes) >= s.maximum-used {
-			return errors.New("cached normalized objects exceed scratch budget")
-		}
-		if err = os.Link(from, to); err != nil {
-			input, err := os.Open(from)
-			if err != nil {
-				return err
-			}
-			output, err := os.OpenFile(to, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-			if err != nil {
-				_ = input.Close()
-				return err
-			}
-			n, copyErr := io.Copy(output, io.LimitReader(&cacheContextReader{ctx: ctx, r: input}, part.Bytes+1))
-			err = errors.Join(copyErr, input.Close(), output.Close())
-			if err != nil || n != part.Bytes {
-				return errors.Join(err, errors.New("cached normalized object length differs"))
-			}
-		}
-		// Refresh after each imported object so the next reservation includes it.
-		if err := s.refresh(); err != nil {
-			return err
-		}
-	}
-	return s.verifyParts(ctx, parts)
+	return ctx.Err()
 }
 
 func (s *bulkSpool) cachePartFiles(groups ...[]intelligence.RecordPartition) map[[32]byte]string {
@@ -181,16 +161,16 @@ func (s *bulkSpool) scatterTerminals(ctx context.Context, parent *bulkBucket, te
 			if value.Prefix != terminal[i].prefix {
 				return errors.New("cached scatter scope differs")
 			}
-			if hit {
-				if err := s.importCachedParts(ctx, value.Parts); err != nil {
-					return err
-				}
-			}
 			terminal[i].parts = append(terminal[i].parts, value.Parts...)
 			if value.Cover.IsValid() {
 				terminal[i].cover = bulkPrefixCover(terminal[i].cover, value.Cover)
 			}
 			retained = append(retained, value.Parts)
+		}
+		if hit {
+			if err := s.importCachedGroups(ctx, retained); err != nil {
+				return err
+			}
 		}
 		if s.reuse != nil {
 			if _, err := s.reuse.Retain(ctx, entry, s.cachePartFiles(retained...)); err != nil {

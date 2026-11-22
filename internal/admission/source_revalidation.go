@@ -60,15 +60,22 @@ func validateSourceSet(ctx context.Context, root string, catalog []Source, now t
 	if err != nil {
 		return state, report, nil, err
 	}
-	return validateAuthenticatedSourceSet(ctx, canonical, catalog, state, now, binding, catalogHash, certification, verified)
+	return validateAuthenticatedSourceSet(ctx, canonical, catalog, state, now, binding, catalogHash, certification, verified, nil)
 }
 
-func validateVerifiedSourceSet(ctx context.Context, root string, catalog []Source, now time.Time, binding [32]byte, verified *intelligence.VerifiedPrivateState) (intelligence.BuildState, CapabilityReport, *sourceValidation, error) {
+func validateVerifiedSourceSet(ctx context.Context, root string, catalog []Source, now time.Time, binding [32]byte, verified *intelligence.VerifiedPrivateState, scan *VerifiedSourceRecords) (intelligence.BuildState, CapabilityReport, *sourceValidation, error) {
 	var state intelligence.BuildState
 	var report CapabilityReport
 	canonical, catalogHash, err := sourceValidationIdentity(root, catalog)
 	if err != nil {
 		return state, report, nil, err
+	}
+	var records map[string]*sourceRecordScan
+	if scan != nil {
+		if scan.PrivateState() != verified || scan.catalogHash != catalogHash || !now.Equal(scan.now) {
+			return state, report, nil, errors.New("verified source record controls differ")
+		}
+		records = scan.records
 	}
 	certification, err := CertificationFingerprint(ctx, canonical, catalog)
 	if err != nil {
@@ -78,11 +85,11 @@ func validateVerifiedSourceSet(ctx context.Context, root string, catalog []Sourc
 	if err != nil {
 		return state, report, nil, err
 	}
-	return validateAuthenticatedSourceSet(ctx, canonical, catalog, state, now, binding, catalogHash, certification, verified)
+	return validateAuthenticatedSourceSet(ctx, canonical, catalog, state, now, binding, catalogHash, certification, verified, records)
 }
 
-func validateAuthenticatedSourceSet(ctx context.Context, canonical string, catalog []Source, state intelligence.BuildState, now time.Time, binding, catalogHash, certification [32]byte, verified *intelligence.VerifiedPrivateState) (intelligence.BuildState, CapabilityReport, *sourceValidation, error) {
-	report, stats, err := RevalidateStoredSources(ctx, canonical, catalog, state, now, binding)
+func validateAuthenticatedSourceSet(ctx context.Context, canonical string, catalog []Source, state intelligence.BuildState, now time.Time, binding, catalogHash, certification [32]byte, verified *intelligence.VerifiedPrivateState, collected map[string]*sourceRecordScan) (intelligence.BuildState, CapabilityReport, *sourceValidation, error) {
+	report, stats, err := revalidateStoredSources(ctx, canonical, catalog, state, now, binding, nil, collected)
 	if err != nil {
 		return state, report, nil, err
 	}
@@ -117,7 +124,7 @@ func (v *sourceValidation) revalidate(ctx context.Context, root string, catalog 
 	if err != nil {
 		return state, report, err
 	}
-	report, _, err = revalidateStoredSources(ctx, canonical, catalog, state, now, binding, v.statistics)
+	report, _, err = revalidateStoredSources(ctx, canonical, catalog, state, now, binding, v.statistics, nil)
 	if err != nil {
 		return state, report, err
 	}

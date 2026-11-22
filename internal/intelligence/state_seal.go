@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 type stateSeal struct {
@@ -204,7 +205,7 @@ type VerifiedPrivateState struct {
 // VerifyPrivateStateSeal, then returns a handle scoped to that root and exact
 // authenticated identity. The returned state is independently owned by callers.
 func VerifyPrivateState(ctx context.Context, workspace string, policyHash [32]byte) (*VerifiedPrivateState, BuildState, error) {
-	return newVerifiedPrivateState(ctx, workspace, policyHash, nil)
+	return newVerifiedPrivateState(ctx, workspace, policyHash, nil, nil)
 }
 
 // VerifyPrivateStateForTier1 performs the same complete semantic verification,
@@ -213,10 +214,38 @@ func VerifyPrivateState(ctx context.Context, workspace string, policyHash [32]by
 // errors remain deferred until the authenticated observation records its attempt.
 // General source verification does not allocate or retain this graph.
 func VerifyPrivateStateForTier1(ctx context.Context, workspace string, policyHash [32]byte) (*VerifiedPrivateState, BuildState, error) {
-	return newVerifiedPrivateState(ctx, workspace, policyHash, &tier1Discovery{relations: NewRelationships(true)})
+	return VerifyPrivateStateForTier1WithRecords(ctx, workspace, policyHash, nil)
 }
 
-func newVerifiedPrivateState(ctx context.Context, workspace string, policyHash [32]byte, discovery *tier1Discovery) (*VerifiedPrivateState, BuildState, error) {
+// SourceRecordClocks contains value copies of the authenticated metadata used
+// by the per-record admission predicates. It exposes no mutable state or seals.
+type SourceRecordClocks struct {
+	ID                                        string
+	ExpiresAt, PublishedAt, ContentValidUntil time.Time
+	VRP                                       VRPSourceProof
+}
+
+func (s StoredSource) RecordClocks() SourceRecordClocks {
+	c := SourceRecordClocks{ID: s.ID, ExpiresAt: s.ExpiresAt}
+	if r := s.Receipt; r != nil {
+		c.PublishedAt = r.PublishedAt
+		c.ContentValidUntil = r.ContentValidUntil
+		if r.VRPProof != nil {
+			c.VRP = *r.VRPProof
+		}
+	}
+	return c
+}
+
+// VerifyPrivateStateForTier1WithRecords additionally sends each owned typed
+// record to an optional observer after structural validation and Tier-1
+// discovery. Observers cannot suppress records or mark a source as verified.
+// Their results are usable only when the entire sealed input walk succeeds.
+func VerifyPrivateStateForTier1WithRecords(ctx context.Context, workspace string, policyHash [32]byte, visit func(SourceRecordClocks) func(NormalizedRecord)) (*VerifiedPrivateState, BuildState, error) {
+	return newVerifiedPrivateState(ctx, workspace, policyHash, &tier1Discovery{relations: NewRelationships(true)}, visit)
+}
+
+func newVerifiedPrivateState(ctx context.Context, workspace string, policyHash [32]byte, discovery *tier1Discovery, visit func(SourceRecordClocks) func(NormalizedRecord)) (*VerifiedPrivateState, BuildState, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, BuildState{}, err
 	}
@@ -232,7 +261,7 @@ func newVerifiedPrivateState(ctx context.Context, workspace string, policyHash [
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return nil, BuildState{}, errors.New("verified private state root invalid")
 	}
-	state, identity, err := verifyPrivateStateCollect(ctx, root, policyHash, nil, discovery)
+	state, identity, err := verifyPrivateStateCollect(ctx, root, policyHash, nil, discovery, visit)
 	if err != nil {
 		return nil, BuildState{}, err
 	}
@@ -360,10 +389,10 @@ func readAuthenticatedPrivateState(ctx context.Context, workspace string, policy
 }
 
 func verifyPrivateState(ctx context.Context, workspace string, policyHash [32]byte, expected *privateStateIdentity) (BuildState, privateStateIdentity, error) {
-	return verifyPrivateStateCollect(ctx, workspace, policyHash, expected, nil)
+	return verifyPrivateStateCollect(ctx, workspace, policyHash, expected, nil, nil)
 }
 
-func verifyPrivateStateCollect(ctx context.Context, workspace string, policyHash [32]byte, expected *privateStateIdentity, discovery *tier1Discovery) (BuildState, privateStateIdentity, error) {
+func verifyPrivateStateCollect(ctx context.Context, workspace string, policyHash [32]byte, expected *privateStateIdentity, discovery *tier1Discovery, visit func(SourceRecordClocks) func(NormalizedRecord)) (BuildState, privateStateIdentity, error) {
 	fail := func() (BuildState, privateStateIdentity, error) {
 		return BuildState{}, privateStateIdentity{}, errors.New("private state seal invalid; reviewed intake required")
 	}
@@ -408,9 +437,16 @@ func verifyPrivateStateCollect(ctx context.Context, workspace string, policyHash
 			if discovery != nil {
 				discovery.sources = append(discovery.sources, tier1SourceDiscovery{})
 			}
+			var observe func(NormalizedRecord)
+			if visit != nil {
+				observe = visit(source.RecordClocks())
+			}
 			err = WalkStoredSource(ctx, workspace, source, func(record NormalizedRecord) error {
 				if discovery != nil {
 					discovery.collect(index, record)
+				}
+				if observe != nil {
+					observe(record)
 				}
 				// The full authenticated structural scan must continue even after a
 				// Tier-1-specific error. No history exists until this scan succeeds.

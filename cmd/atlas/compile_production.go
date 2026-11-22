@@ -115,13 +115,15 @@ func compileProduction(ctx context.Context, args []string) (returnErr error) {
 	if err = runCompilePhase(ctx, phaseReceipt, func() error { return writeJSON(destination, r) }); err != nil {
 		return err
 	}
-	if err = runCompilePhase(ctx, phaseRetention, func() error { return engine.RetainVerifiedPrivateStateSeal(ctx, binding.policyHash, verified) }); err != nil {
+	if err = runCompilePhase(ctx, phaseRetention, func() error {
+		return engine.RetainVerifiedPrivateStateSeal(ctx, binding.policyHash, verified.PrivateState())
+	}); err != nil {
 		_ = os.Remove(destination)
 		return err
 	}
 	// This checks the already persisted observation. Output success cannot
 	// advance or suppress source-derived continuity.
-	if err = runCompilePhase(ctx, phaseHistory, func() error { return verified.VerifyTier1ObservationHistory(ctx, root, tier1) }); err != nil {
+	if err = runCompilePhase(ctx, phaseHistory, func() error { return verified.PrivateState().VerifyTier1ObservationHistory(ctx, root, tier1) }); err != nil {
 		_ = os.Remove(destination)
 		return err
 	}
@@ -132,7 +134,7 @@ func compileProduction(ctx context.Context, args []string) (returnErr error) {
 		return errors.New("written production receipt differs from compiler output")
 	}
 	if err = runCompilePhase(ctx, phaseSeal, func() error {
-		return verified.SealProductionReceipt(ctx, root, binding.policyHash, receiptBytes, binding.stateHash, sha256.Sum256(manifestBytes), time.Unix(candidate.Manifest.ValidUntil, 0).UTC())
+		return verified.PrivateState().SealProductionReceipt(ctx, root, binding.policyHash, receiptBytes, binding.stateHash, sha256.Sum256(manifestBytes), time.Unix(candidate.Manifest.ValidUntil, 0).UTC())
 	}); err != nil {
 		_ = os.Remove(destination)
 		return err
@@ -143,7 +145,7 @@ func compileProduction(ctx context.Context, args []string) (returnErr error) {
 
 // Mint before observation, then keep the pending/failed source epoch ahead of
 // capability qualification. No materialization outcome can suppress history.
-func observeVerifiedCurrentTier1(ctx context.Context, root string, now time.Time) (*intelligence.QualifiedTier1, *intelligence.VerifiedPrivateState, error) {
+func observeVerifiedCurrentTier1(ctx context.Context, root string, now time.Time) (*intelligence.QualifiedTier1, *admission.VerifiedSourceRecords, error) {
 	configHash, sourceBytes, err := intakeConfigHash(root)
 	if err != nil {
 		return nil, nil, err
@@ -157,14 +159,14 @@ func observeVerifiedCurrentTier1(ctx context.Context, root string, now time.Time
 		return nil, nil, err
 	}
 	binding := sha256.Sum256(append(append([]byte("intake-policy-v1\x00"), configHash[:]...), certification[:]...))
-	verified, state, err := intelligence.VerifyPrivateStateForTier1(ctx, root, binding)
+	verified, state, err := admission.VerifySourceRecordsForTier1(ctx, root, catalog, now, binding)
 	if err != nil {
 		return nil, nil, err
 	}
 	if !state.EvaluatedAt.Equal(now) {
 		return nil, nil, errors.New("Tier-1 observation requires the exact intake clock")
 	}
-	tier1, err := verified.ObserveTier1State(ctx, root, binding, now)
+	tier1, err := verified.PrivateState().ObserveTier1State(ctx, root, binding, now)
 	return tier1, verified, err
 }
 

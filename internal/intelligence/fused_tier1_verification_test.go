@@ -228,3 +228,42 @@ func BenchmarkTier1VerifiedSetup100kGeo(b *testing.B) {
 		})
 	}
 }
+
+func TestFusedRecordObserverCannotChangeInlineStateOrTier1Discovery(t *testing.T) {
+	f := newReceiptSealFixture(t)
+	f.state.Sources[0].RecordPartitions = nil
+	f.state.Sources[0].Records = []NormalizedRecord{
+		{Version: 3, Kind: RecordRelationship, Relationship: &RelationshipRecord{100, 200, Customer}},
+		{Version: 3, Kind: RecordPath, Path: &ScopedPath{Prefix: netip.MustParsePrefix("192.0.2.0/24"), Observation: PathObservation{Origin: 100, Current: true, Family: "synthetic", OriginOutward: true, Segments: []PathSegment{{ASSequence, []uint32{100, 200}}}}}},
+	}
+	f.saveState(t)
+	ctx := context.Background()
+	want, _, err := VerifyPrivateStateForTier1(ctx, f.root, f.binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows int
+	visit := func(clocks SourceRecordClocks) func(NormalizedRecord) {
+		clocks.VRP.ObservedAt = time.Time{}
+		clocks.ID = "edited"
+		return func(record NormalizedRecord) {
+			rows++
+			if record.Relationship != nil {
+				record.Relationship.To = 999
+				record.Relationship.Relation = Peer
+			}
+			if record.Path != nil {
+				record.Path.Observation.Current = false
+				record.Path.Observation.Segments[0].ASNs[0] = 999
+			}
+		}
+	}
+	got, state, err := VerifyPrivateStateForTier1WithRecords(ctx, f.root, f.binding, visit)
+	if err != nil || rows != 2 || !reflect.DeepEqual(got.tier1, want.tier1) || !reflect.DeepEqual(state, f.state) {
+		t.Fatal("observer changed sealed input or discovery", err)
+	}
+	next, err := got.Revalidate(ctx)
+	if err != nil || !reflect.DeepEqual(next, f.state) {
+		t.Fatal("observer changed subsequent seal validation", err)
+	}
+}

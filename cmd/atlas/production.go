@@ -92,7 +92,7 @@ func loadProductionBinding(ctx context.Context, root string, now time.Time) (pro
 	return loadProductionBindingAtHash(ctx, root, now, nil)
 }
 
-func loadVerifiedProductionBinding(ctx context.Context, root string, now time.Time, verified *intelligence.VerifiedPrivateState) (productionBinding, error) {
+func loadVerifiedProductionBinding(ctx context.Context, root string, now time.Time, verified *admission.VerifiedSourceRecords) (productionBinding, error) {
 	b, err := loadProductionControls(ctx, root, now)
 	if err != nil {
 		return b, err
@@ -103,7 +103,7 @@ func loadVerifiedProductionBinding(ctx context.Context, root string, now time.Ti
 	}
 	b.stateHash = b.currentStateHash
 	qualificationPhase := beginCompilePhase(ctx, phaseQualification)
-	b.qualification, err = admission.QualifyProductionStateVerified(ctx, root, b.catalog, now, b.policyHash, verified)
+	b.qualification, err = verified.Qualify(ctx, root, b.catalog, now, b.policyHash)
 	qualificationPhase(err == nil)
 	if err != nil {
 		return b, err

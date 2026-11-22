@@ -72,16 +72,7 @@ type ProductionQualification struct {
 }
 
 func QualifyProductionState(ctx context.Context, root string, catalog []Source, now time.Time, binding [32]byte) (*ProductionQualification, error) {
-	state, report, validation, err := validateSourceSet(ctx, root, catalog, now, binding)
-	if err != nil {
-		return nil, err
-	}
-	q, err := qualificationFromReport(state, report)
-	if err != nil {
-		return nil, err
-	}
-	q.validation = validation
-	return q, nil
+	return qualifyValidatedSourceSet(validateSourceSet(ctx, root, catalog, now, binding))
 }
 
 // QualifyProductionStateVerified accepts only an opaque handle minted by a
@@ -89,7 +80,10 @@ func QualifyProductionState(ctx context.Context, root string, catalog []Source, 
 // seal/key/state and every chunk before the unchanged source-semantic admission
 // pass. This lets Tier-1 observation precede unrelated capability failures.
 func QualifyProductionStateVerified(ctx context.Context, root string, catalog []Source, now time.Time, binding [32]byte, verified *intelligence.VerifiedPrivateState) (*ProductionQualification, error) {
-	state, report, validation, err := validateVerifiedSourceSet(ctx, root, catalog, now, binding, verified)
+	return qualifyValidatedSourceSet(validateVerifiedSourceSet(ctx, root, catalog, now, binding, verified, nil))
+}
+
+func qualifyValidatedSourceSet(state intelligence.BuildState, report CapabilityReport, validation *sourceValidation, err error) (*ProductionQualification, error) {
 	if err != nil {
 		return nil, err
 	}
@@ -329,13 +323,13 @@ func RightsDigests(s Source) (string, *string, error) {
 // actual records. It accepts neither caller success flags nor a release manifest
 // as proof of source coverage. The caller must first verify the private seal.
 func RevalidateStoredSources(ctx context.Context, root string, catalog []Source, state intelligence.BuildState, now time.Time, binding [32]byte) (CapabilityReport, []SourceStatistics, error) {
-	return revalidateStoredSources(ctx, root, catalog, state, now, binding, nil)
+	return revalidateStoredSources(ctx, root, catalog, state, now, binding, nil, nil)
 }
 
 // Only sourceValidation supplies prior statistics, after authenticating its
 // exact original state and checking every current normalized object byte.
 // Source controls, certification, deadlines and dependencies still run below.
-func revalidateStoredSources(ctx context.Context, root string, catalog []Source, state intelligence.BuildState, now time.Time, binding [32]byte, prior map[string]SourceStatistics) (CapabilityReport, []SourceStatistics, error) {
+func revalidateStoredSources(ctx context.Context, root string, catalog []Source, state intelligence.BuildState, now time.Time, binding [32]byte, prior map[string]SourceStatistics, collected map[string]*sourceRecordScan) (CapabilityReport, []SourceStatistics, error) {
 	var report CapabilityReport
 	if state.Version != 2 || state.PolicyHash != binding || binding == ([32]byte{}) || now.IsZero() || state.EvaluatedAt.After(now) || len(state.Sources) > 1000 {
 		return report, nil, errors.New("production requires current sealed intake")
@@ -452,125 +446,35 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 				return report, nil, errors.New("production source dependency missing")
 			}
 		}
-		stat := SourceStatistics{ID: s.ID, Family: find(s.Family), Signals: map[intelligence.Signal]bool{}}
-		var vrpMinimumExpiry time.Time
+		family := find(s.Family)
+		var stat SourceStatistics
 		if prior != nil {
 			previous, ok := prior[s.ID]
-			if !ok || previous.ID != stat.ID || previous.Family != stat.Family {
+			if !ok || previous.ID != s.ID || previous.Family != family {
 				return report, nil, errors.New("verified source statistics differ from current controls")
 			}
 			stat = previous
-			vrpMinimumExpiry = previous.VRPCoverageValidUntil
-		} else if err := intelligence.WalkStoredSource(ctx, root, v, func(record intelligence.NormalizedRecord) error {
-			if err := record.Validate(); err != nil {
-				return err
-			}
-			stat.Records++
-			stat.Kinds[record.Kind-1]++
-			if stat.Records > 100_000_000 {
-				return errors.New("production normalized record budget exceeded")
-			}
-			family := ""
-			switch record.Kind {
-			case intelligence.RecordEvidence:
-				x := record.Evidence
-				family = x.Family
-				canonical, ok := intelligence.CanonicalSignal(x.Signal)
-				allowed := false
-				for _, signal := range s.Signals {
-					p, ok := intelligence.CanonicalSignal(intelligence.Signal(signal))
-					allowed = allowed || ok && p == canonical
+		} else {
+			var scan *sourceRecordScan
+			if collected != nil {
+				scan = collected[v.ID]
+				if scan == nil || scan.stat.ID != v.ID {
+					return report, nil, errors.New("verified source records missing")
 				}
-				if !ok || !allowed || !x.Current || !x.SourcePublishedAt.Equal(v.Receipt.PublishedAt) || !contains(s.PublicFields, "reason_flags") {
-					return errors.New("production evidence binding invalid")
+				if scan.err != nil {
+					return report, nil, scan.err
 				}
-				itemClock := x.SourcePublishedAt
-				if !x.ItemPublishedAt.IsZero() && x.ItemPublishedAt.Before(itemClock) {
-					itemClock = x.ItemPublishedAt
-				}
-				maximum := s.MaxAge
-				if x.SubscriptionLiteral && maximum > 168*time.Hour {
-					maximum = 168 * time.Hour
-				}
-				if !now.Before(itemClock.Add(maximum)) || v.ExpiresAt.After(itemClock.Add(maximum)) {
-					return errors.New("production dated evidence expiry extended")
-				}
-				stat.Signals[canonical] = true
-				stat.Exact = stat.Exact || x.Scope == intelligence.Exact
-			case intelligence.RecordCoverage:
-				x := record.Coverage
-				family = x.Family
-				if !x.Current || x.Complete && s.Coverage != "complete" {
-					return errors.New("production coverage binding invalid")
-				}
-			case intelligence.RecordGeo:
-				x := record.Geo
-				family = x.Family
-				if !x.Current || x.PhysicalCountry != "" && !contains(s.PublicFields, "physical_country") || x.Region != "" && !contains(s.PublicFields, "region") || x.City != "" && !contains(s.PublicFields, "city") || x.Coordinates != nil && (!contains(s.PublicFields, "latitude") || !contains(s.PublicFields, "longitude")) {
-					return errors.New("production geographic field binding invalid")
-				}
-				stat.Country = stat.Country || x.PhysicalCountry != ""
-				stat.City = stat.City || x.PhysicalCountry != "" && x.Region != "" && x.City != ""
-				stat.Coordinates = stat.Coordinates || x.PhysicalCountry != "" && x.Region != "" && x.City != "" && x.Coordinates != nil
-			case intelligence.RecordUsage:
-				x := record.Usage.Evidence
-				family = x.Family
-				if !x.Current || !contains(s.PublicFields, "usage_type") {
-					return errors.New("production usage binding invalid")
-				}
-				if observed := record.Usage.ObservedAt; !observed.IsZero() && (!now.Before(observed.Add(s.MaxAge)) || v.ExpiresAt.After(observed.Add(s.MaxAge))) {
-					return errors.New("production usage item expiry extended")
-				}
-				stat.Usage = stat.Usage || x.Type != "" && x.Type != "unknown"
-			case intelligence.RecordOrigins:
-				if !contains(s.PublicFields, "origins") && !contains(s.PublicFields, "bgp_origins") {
-					return errors.New("production origin binding invalid")
-				}
-				if len(record.Origins.Origins) > 0 {
-					stat.OriginObservations++
-				} else {
-					stat.UnknownOriginBoundaries++
-				}
-			case intelligence.RecordVRP:
-				if !contains(s.PublicFields, "rpki_status") {
-					return errors.New("production VRP binding invalid")
-				}
-				until := record.VRP.ValidUntil
-				if proof := v.Receipt.VRPProof; proof != nil && proof.Version == 2 {
-					if until.IsZero() || !proof.ObservedAt.Before(until) || until.Before(proof.CoverageValidUntil) {
-						return errors.New("production VRP observation expiry binding invalid")
-					}
-					if vrpMinimumExpiry.IsZero() || until.Before(vrpMinimumExpiry) {
-						vrpMinimumExpiry = until
-					}
-				} else if !until.IsZero() {
-					if v.Receipt.ContentValidUntil.IsZero() || until.Before(v.Receipt.ContentValidUntil) || !now.Before(until) {
-						return errors.New("production VRP expiry binding invalid")
-					}
-				} else if s.Parser.ID == "rpki-client-json" {
-					return errors.New("production VRP expiry missing")
-				}
-			case intelligence.RecordPath:
-				family = record.Path.Observation.Family
-				if !record.Path.Observation.Current || !contains(s.PublicFields, "bgp_paths") {
-					return errors.New("production path binding invalid")
-				}
-			case intelligence.RecordRelationship:
-				if !contains(s.PublicFields, "as_relationships") {
-					return errors.New("production relationship binding invalid")
-				}
-			case intelligence.RecordASNIdentity:
-				family = record.ASNIdentity.Family
-				if !record.ASNIdentity.Current || !contains(s.PublicFields, "asn") {
-					return errors.New("production ASN identity binding invalid")
+			} else {
+				scan = newSourceRecordScan(s, v.RecordClocks(), now)
+				if err := intelligence.WalkStoredSource(ctx, root, v, scan.accept); err != nil {
+					return report, nil, err
 				}
 			}
-			if family != "" && family != stat.Family {
-				return errors.New("production evidence independence changed")
+			if scan.stat.Family != "" && scan.stat.Family != family {
+				return report, nil, errors.New("production evidence independence changed")
 			}
-			return nil
-		}); err != nil {
-			return report, nil, err
+			stat = scan.stat
+			stat.Family = family
 		}
 		if stat.Records == 0 {
 			return report, nil, errors.New("empty production source")
@@ -584,7 +488,7 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 			retained := proof.AcceptedRows
 			if proof.Version == 2 {
 				retained = proof.RetainedRows
-				if !vrpMinimumExpiry.Equal(proof.CoverageValidUntil) {
+				if !stat.VRPCoverageValidUntil.Equal(proof.CoverageValidUntil) {
 					return report, nil, errors.New("complete VRP observation expiry differs from retained records")
 				}
 				stat.VRPObservedAt, stat.VRPCoverageValidUntil = proof.ObservedAt, proof.CoverageValidUntil

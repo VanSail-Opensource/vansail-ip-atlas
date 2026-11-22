@@ -110,4 +110,6 @@ artifact with SHA-256
 `72575cac4fcc14ba054ba3010d413bcb7a15220f678f3c581a8f2e4e86ba811d`.
 The fixture supports schema tests. Production separately requires the publisher
 manifest's exact byte count, digest, full CSV row count and original UTC update
-time on each intake.
+time on each intake. When the static CDN has another edition, the verifier may
+fetch the exact ready-made CSV named by the current manifest once. Its complete
+hash, size and row count must match before any record can enter the atlas.

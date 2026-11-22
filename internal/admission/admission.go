@@ -255,7 +255,13 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		}
 		assetURL = dbipPlan.AssetURL
 	}
-	if _, err := e.fetch.Fetch(ctx, assetURL, payload, source.MaxCompressedBytes); err != nil {
+	var published, contentValidUntil time.Time
+	if source.Parser.ID == "tweetfeed-week-csv" {
+		published, err = e.fetchTweetFeed(ctx, payload, source, now)
+		if err != nil {
+			return deny("quarantined", "publication_not_payload_bound")
+		}
+	} else if _, err := e.fetch.Fetch(ctx, assetURL, payload, source.MaxCompressedBytes); err != nil {
 		if ctx.Err() != nil {
 			return result, ctx.Err()
 		}
@@ -265,7 +271,6 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 	if err != nil {
 		return deny("invalid", "payload_integrity_failed")
 	}
-	var published, contentValidUntil time.Time
 	var geoProof *intelligence.GeoSourceProof
 	var vrpProof *intelligence.VRPSourceProof
 	var caidaProof *intelligence.CAIDASourceProof
@@ -300,7 +305,7 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		if err == nil {
 			vrpProof = &intelligence.VRPSourceProof{Version: 2, Rows: uint64(proof.Rows), RetainedRows: uint64(proof.RetainedRows), ObservedAt: proof.BuiltAt, EvaluatedAt: now, CoverageValidUntil: proof.CoverageValidUntil}
 		}
-	} else {
+	} else if published.IsZero() {
 		metadata := filepath.Join(quarantine, "publication")
 		if _, err := e.fetch.Fetch(ctx, source.Publication.Locator, metadata, 4<<20); err != nil {
 			if ctx.Err() != nil {
@@ -308,9 +313,7 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 			}
 			return deny("quarantined", "publication_metadata_unavailable")
 		}
-		if source.Parser.ID == "tweetfeed-week-csv" {
-			published, err = verifyTweetFeedFile(ctx, metadata, payload, hash, size, now)
-		} else if source.Publication.Kind == "github_commit" {
+		if source.Publication.Kind == "github_commit" {
 			published, err = e.verifyCommit(ctx, metadata, quarantine, source, hash, size, now)
 		} else {
 			published, err = verifyReleaseFile(ctx, metadata, source.URL, hash, size, now)

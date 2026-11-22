@@ -85,11 +85,19 @@ func TestTweetFeedRejectsIncompleteOrChangedRows(t *testing.T) {
 	}
 }
 
+func verifyTweetFeedTestFile(ctx context.Context, meta, payload string, digest [32]byte, size int64, now time.Time) (time.Time, error) {
+	proof, err := readTweetFeedManifest(ctx, meta, now)
+	if err != nil || proof.size != size || proof.digest != digest {
+		return time.Time{}, errors.New("weekly test edition differs")
+	}
+	return proof.published, proof.verify(ctx, payload)
+}
+
 func TestTweetFeedManifestBindsRowsDigestAndClock(t *testing.T) {
 	b := []byte(tweetTestRow)
 	hash := sha256.Sum256(b)
 	now := time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC)
-	artifact := fmt.Sprintf(`{"name":"week.csv","path":"week.csv","format":"csv","window":"week","bytes":%d,"rows":1,"sha256":"%s","updated_at":"2026-11-03T00:00:00Z"}`, len(b), hashString(hash))
+	artifact := fmt.Sprintf(`{"url":"`+tweetFeedOrigin+`","name":"week.csv","path":"week.csv","format":"csv","window":"week","bytes":%d,"rows":1,"sha256":"%s","updated_at":"2026-11-03T00:00:00Z"}`, len(b), hashString(hash))
 	manifest := `{"schema_version":1,"generated_at":"2026-11-04T00:00:00Z","artifacts":[` + artifact + `]}`
 	p := t.TempDir()
 	asset := filepath.Join(p, "asset")
@@ -101,7 +109,7 @@ func TestTweetFeedManifestBindsRowsDigestAndClock(t *testing.T) {
 		name, doc string
 		valid     bool
 	}{
-		{"valid", manifest, true}, {"different clock type", strings.Replace(manifest, "updated_at", "fetched_at", 1), false},
+		{"valid", manifest, true}, {"unreviewed origin", strings.Replace(manifest, tweetFeedOrigin, "https://example.invalid/new.csv", 1), false}, {"different clock type", strings.Replace(manifest, "updated_at", "fetched_at", 1), false},
 		{"renewed manifest only", strings.Replace(manifest, "2026-11-04", "2026-11-07", 1), true},
 		{"duplicate record", strings.Replace(manifest, artifact, artifact+","+artifact, 1), false}, {"changed hash", strings.Replace(manifest, hashString(hash), strings.Repeat("0", 64), 1), false},
 		{"different size", strings.Replace(manifest, fmt.Sprintf(`"bytes":%d`, len(b)), `"bytes":2`, 1), false}, {"wrong row count", strings.Replace(manifest, `"rows":1`, `"rows":2`, 1), false},
@@ -112,7 +120,7 @@ func TestTweetFeedManifestBindsRowsDigestAndClock(t *testing.T) {
 			if err := os.WriteFile(meta, []byte(tc.doc), 0600); err != nil {
 				t.Fatal(err)
 			}
-			actual, err := verifyTweetFeedFile(context.Background(), meta, asset, hash, int64(len(b)), now)
+			actual, err := verifyTweetFeedTestFile(context.Background(), meta, asset, hash, int64(len(b)), now)
 			if tc.valid {
 				if err != nil || actual.Format(time.RFC3339) != "2026-11-03T00:00:00Z" {
 					t.Fatal(actual, err)
@@ -131,6 +139,20 @@ func TestTweetFeedManifestBindsRowsDigestAndClock(t *testing.T) {
 	res, err := engine.Ingest(context.Background(), s, clock, binding)
 	if err != nil || res.Snapshot == nil || len(res.Snapshot.Records) != 1 || !res.Snapshot.PublishedAt.Equal(time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)) || fetch.calls != 2 {
 		t.Fatal("weekly source did not complete normal admission", res.Decision, err)
+	}
+	// The live static endpoint and manifest can be an edition apart. Only
+	// the exact publisher-listed origin matching the current digest can recover.
+	fetch.assets[tweetFeedCSV] = []byte(strings.Replace(string(b), "1.1.1.1", "1.1.1.2", 1))
+	fetch.assets[tweetFeedOrigin] = b
+	before := fetch.calls
+	recovered, recoverErr := engine.Ingest(context.Background(), s, clock, binding)
+	if recoverErr != nil || recovered.Snapshot == nil || fetch.calls-before != 3 || recovered.Snapshot.PayloadHash != hash || recovered.Snapshot.Records[0].Evidence.Address != netip.MustParseAddr("1.1.1.1") {
+		t.Fatal("current publisher edition failed to recover", recovered.Decision, recoverErr)
+	}
+	fetch.assets[tweetFeedOrigin] = fetch.assets[tweetFeedCSV]
+	stale, staleErr := engine.Ingest(context.Background(), s, clock, binding)
+	if staleErr != nil || stale.Snapshot != nil || stale.Decision.State != "quarantined" {
+		t.Fatal("mismatched alternate admitted", stale.Decision, staleErr)
 	}
 	updated, err := intelligence.Reconcile(intelligence.BuildState{}, []intelligence.SourcePolicy{res.Policy}, []intelligence.SourceSnapshot{*res.Snapshot}, clock, binding)
 	if err != nil || len(updated.State.Sources) != 1 {
@@ -159,7 +181,7 @@ func TestTweetFeedPrivateCompleteCapture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	published, err := verifyTweetFeedFile(ctx, filepath.Join(dir, "manifest.json"), payload, digest, size, time.Now().UTC())
+	published, err := verifyTweetFeedTestFile(ctx, filepath.Join(dir, "manifest.json"), payload, digest, size, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}

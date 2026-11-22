@@ -6,18 +6,22 @@ import { auditAccessibility } from './browser-accessibility.mjs'
 
 async function emit(result) {
   const document = {}, calls = []
+  let frames = 0
   const page = { async evaluate(value) {
     calls.push(value)
-    if (typeof value === 'string') return
-    return runInNewContext(`(${value.toString()})()`, { document, window: { axe: { async run(root, options) {
+    if (typeof value === 'string') {
+      assert.equal(frames, 2, 'Audit evaluation must follow the interaction paint')
+      return
+    }
+    return runInNewContext(`(${value.toString()})()`, { document, requestAnimationFrame: callback => { frames++; callback() }, window: { axe: { async run(root, options) {
       assert.equal(root, document)
       assert.deepEqual(JSON.parse(JSON.stringify(options)), { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa'] } })
       return result
     } } } })
   } }
   const report = await auditAccessibility(page, 'isolated axe source fixture')
-  assert.equal(calls.length, 2)
-  assert.equal(calls[0], 'isolated axe source fixture')
+  assert.equal(calls.length, 3)
+  assert.equal(calls[1], 'isolated axe source fixture')
   return JSON.parse(JSON.stringify(report))
 }
 

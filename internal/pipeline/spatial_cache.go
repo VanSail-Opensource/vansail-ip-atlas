@@ -170,6 +170,10 @@ func spatialCacheFiles(e spatialCacheEntry) (map[[32]byte]uint64, error) {
 				return nil, err
 			}
 		}
+	case rawSplitDomain:
+		if e.Seed != nil || e.Scatter != nil || e.Leaf == nil || *e.Leaf != (spatialCacheLeaf{Split: true}) {
+			return nil, errSpatialCache
+		}
 	case "risk", "public", "location":
 		if e.Seed != nil || e.Scatter != nil || e.Leaf == nil || e.Domain == "location" && e.Leaf.Split {
 			return nil, errSpatialCache
@@ -475,7 +479,7 @@ func (c *spatialCache) Lookup(ctx context.Context, domain string, key [32]byte) 
 	if err := c.checkRoot(); err != nil {
 		return spatialCacheEntry{}, false, err
 	}
-	if key == ([32]byte{}) || domain != "seed" && domain != "scatter" && domain != "risk" && domain != "public" && domain != "compiled" && domain != "location" {
+	if key == ([32]byte{}) || domain != "seed" && domain != "scatter" && domain != "risk" && domain != "public" && domain != "compiled" && domain != "location" && domain != rawSplitDomain {
 		return spatialCacheEntry{}, false, errSpatialCache
 	}
 	id := spatialCacheEntryKey{domain, key}

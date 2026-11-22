@@ -1,6 +1,7 @@
 package intelligence
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -273,5 +274,51 @@ func TestCanonicalPartitionCannotAdoptExistingNoncanonicalObjects(t *testing.T) 
 	caps, err = writer.FinishCanonical()
 	if err != nil || len(caps) != 1 || caps[0].Descriptor() == part {
 		t.Fatalf("writer failed to produce separate canonical identity: %#v %v", caps, err)
+	}
+}
+
+func TestValidatedRecordPrefixAuthenticatesTheUnreadPhysicalSuffix(t *testing.T) {
+	for _, n := range []int{40, 200} {
+		root := t.TempDir()
+		store, err := NewRecordStore(root, DefaultRecordStoreLimits())
+		if err != nil {
+			t.Fatal(err)
+		}
+		row, err := json.Marshal(canonicalTestRecord())
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Force an unread suffix in both serial and two-batch decoding.
+		frame := append(row, bytes.Repeat([]byte(" "), 4096)...)
+		body := []byte(recordHeader)
+		for range n {
+			body = binary.LittleEndian.AppendUint32(body, uint32(len(frame)))
+			body = append(body, frame...)
+		}
+		part := RecordPartition{SHA256: sha256.Sum256(body), Bytes: int64(len(body)), Records: uint64(n)}
+		path := filepath.Join(store.root, partitionName(part))
+		if err = os.WriteFile(path, body, 0600); err != nil {
+			t.Fatal(err)
+		}
+		source := StoredSource{RecordPartitions: []RecordPartition{part}}
+		if err := WalkStoredSource(t.Context(), root, source, func(NormalizedRecord) error { return ErrVerifyRecordPrefix }); !errors.Is(err, ErrVerifyRecordPrefix) {
+			t.Fatal("unchanged prefix did not authenticate", err)
+		}
+		err = WalkStoredSource(t.Context(), root, source, func(NormalizedRecord) error {
+			f, err := os.OpenFile(path, os.O_WRONLY, 0600)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = f.WriteAt([]byte{0}, part.Bytes-1); err != nil {
+				t.Fatal(err)
+			}
+			if err = f.Close(); err != nil {
+				t.Fatal(err)
+			}
+			return ErrVerifyRecordPrefix
+		})
+		if err == nil || errors.Is(err, ErrVerifyRecordPrefix) {
+			t.Fatal("changed physical suffix authenticated the early stop", err)
+		}
 	}
 }

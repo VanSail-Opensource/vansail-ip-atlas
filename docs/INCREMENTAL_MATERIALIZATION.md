@@ -7,12 +7,13 @@ observation, current input, final candidate and resource gates still run.
 
 ## Dependency boundaries
 
-The private `spatial-cache-v1` inventory has five separate domains:
+The private `spatial-cache-v1` inventory records separate dependencies for each stage.
 
 | Domain | Reused work | Required identity |
 | --- | --- | --- |
 | Seed | Category streams for one original normalized partition | Complete original partition descriptor, including byte hash and counters |
 | Scatter | Four-level spatial redistribution for one input partition | Complete ordered input descriptors and parent prefix |
+| Raw split | Subdivision required by the distinct raw records before adding ASN roles or coverage | Scope, ordered physical partition descriptors and collection limits. Each hit verifies the current bytes of every input object. |
 | Risk | A fitting leaf's ordered exact-address risk events, or its split decision | Scope, ordered descriptors, fit limits, policy, evaluation clock, global usage and coverage |
 | Public | A fitting leaf's public records, or its split decision | Risk dependencies, final global ASN contexts, RPKI completeness, publisher observation time and coverage deadline |
 | Compiled | Final public objects and routes for a public partition subtree | Actual complete public-run bytes, scope and actual ASN prefix-provider bytes and index |

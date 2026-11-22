@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/bits"
 	"net/netip"
 	"os"
@@ -18,6 +19,7 @@ import (
 )
 
 var errBulkPartition = errors.New("normalized working partition requires subdivision")
+var errRawBulkPartition = fmt.Errorf("raw spatial input exceeds collection limit: %w: %w", errBulkPartition, intelligence.ErrVerifyRecordPrefix)
 
 type bulkBucket struct {
 	prefix      netip.Prefix
@@ -130,6 +132,10 @@ func (s *bulkSpool) finish(writer *intelligence.RecordWriter) ([]intelligence.Re
 	return parts, nil
 }
 func (s *bulkSpool) collect(ctx context.Context, b *bulkBucket, withCoverage bool) (intelligence.BuildState, error) {
+	return s.collectRaw(ctx, b, withCoverage, errBulkPartition)
+}
+
+func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage bool, overflow error) (intelligence.BuildState, error) {
 	b.recordBytes = nil
 	source := intelligence.StoredSource{ID: "bounded-materialization", Fingerprint: s.binding, ExpiresAt: s.clock.Add(720 * time.Hour)}
 	var recordBytes []int
@@ -155,12 +161,12 @@ func (s *bulkSpool) collect(ctx context.Context, b *bulkBucket, withCoverage boo
 		seen[digest] = true
 		bytes += 2*size + 1024
 		if len(source.Records) >= s.batchRecords || bytes > s.batchBytes {
-			return errBulkPartition
+			return overflow
 		}
 		if record.Kind == intelligence.RecordPath {
 			paths++
 			if paths > 100000 {
-				return errBulkPartition
+				return overflow
 			}
 		}
 		source.Records = append(source.Records, record)
@@ -175,6 +181,7 @@ func (s *bulkSpool) collect(ctx context.Context, b *bulkBucket, withCoverage boo
 	if err := s.walkOwned(ctx, b.parts, add); err != nil {
 		return intelligence.BuildState{}, err
 	}
+	overflow = errBulkPartition
 	if !b.asn && len(s.usage) > 0 {
 		origins := map[netip.Prefix][]uint32{}
 		for _, r := range source.Records {
@@ -572,7 +579,7 @@ func (s *bulkSpool) leaves(ctx context.Context, roots []*bulkBucket, coverage bo
 		if len(b.parts) == 0 {
 			return nil
 		}
-		state, err := s.collect(ctx, b, coverage)
+		state, err := s.collectWithSplitProof(ctx, b, coverage)
 		if errors.Is(err, errBulkPartition) {
 			var left, right *bulkBucket
 			if b.asn {

@@ -78,6 +78,62 @@ func (r *bulkLeafReuse) replay(ctx context.Context, stream spatialCacheStream) e
 	return r.spool.replayRisk(ctx, stream, r.risk)
 }
 
+const rawSplitDomain = "raw-split"
+
+// Small buckets take the normal collect path without a second cache lookup.
+// Overlapping records can overstate this estimate. Only collect itself may
+// certify that the distinct raw records actually overflow.
+func (s *bulkSpool) mayOverflowRaw(parts []intelligence.RecordPartition) bool {
+	var records, cost int64
+	for _, p := range parts {
+		size := p.DecodedBytes
+		if p.Codec == "" {
+			size = p.Bytes
+		}
+		records += int64(p.Records)
+		cost += 2*size + 1024*int64(p.Records)
+		if records > int64(s.batchRecords) || records > 100_000 || cost > int64(s.batchBytes) {
+			return true
+		}
+	}
+	return false
+}
+
+// Raw records are added and deduplicated before any optional role or coverage
+// join. If they already overflow, every clock and role assignment must split
+// this exact ordered input at the same geometry and working-set limits.
+func (s *bulkSpool) collectWithSplitProof(ctx context.Context, b *bulkBucket, coverage bool) (intelligence.BuildState, error) {
+	if s.reuse == nil || !s.mayOverflowRaw(b.parts) {
+		return s.collect(ctx, b, coverage)
+	}
+	key, err := s.leafKey(rawSplitDomain, b, false, [32]byte{})
+	if err != nil {
+		return intelligence.BuildState{}, err
+	}
+	entry, hit, err := s.reuse.Lookup(ctx, rawSplitDomain, key)
+	if err != nil {
+		return intelligence.BuildState{}, err
+	}
+	if hit {
+		if err := s.verifyParts(ctx, b.parts); err != nil {
+			return intelligence.BuildState{}, err
+		}
+		if _, err := s.reuse.Retain(ctx, entry, nil); err != nil {
+			return intelligence.BuildState{}, err
+		}
+		b.recordBytes = nil
+		return intelligence.BuildState{}, errRawBulkPartition
+	}
+	state, err := s.collectRaw(ctx, b, coverage, errRawBulkPartition)
+	if errors.Is(err, errRawBulkPartition) {
+		entry = spatialCacheEntry{Domain: rawSplitDomain, Key: key, Leaf: &spatialCacheLeaf{Split: true}}
+		if _, keepErr := s.reuse.Retain(ctx, entry, nil); keepErr != nil {
+			return intelligence.BuildState{}, keepErr
+		}
+	}
+	return state, err
+}
+
 func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, coverage bool, reuse *bulkLeafReuse, visit func(*bulkBucket, intelligence.BuildState) error) ([]*bulkBucket, error) {
 	if reuse == nil || s.reuse == nil {
 		return s.leaves(ctx, roots, coverage, visit)
@@ -127,7 +183,7 @@ func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, cove
 				return err
 			}
 		} else {
-			state, err := s.collect(ctx, bucket, coverage)
+			state, err := s.collectWithSplitProof(ctx, bucket, coverage)
 			if err == nil {
 				if err := reuse.begin(ctx); err != nil {
 					return err
@@ -145,9 +201,11 @@ func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, cove
 			if !errors.Is(err, errBulkPartition) {
 				return err
 			}
-			entry = spatialCacheEntry{Domain: reuse.domain, Key: key, Leaf: &spatialCacheLeaf{Split: true}}
-			if _, err := s.reuse.Retain(ctx, entry, nil); err != nil {
-				return err
+			if !errors.Is(err, errRawBulkPartition) {
+				entry = spatialCacheEntry{Domain: reuse.domain, Key: key, Leaf: &spatialCacheLeaf{Split: true}}
+				if _, err := s.reuse.Retain(ctx, entry, nil); err != nil {
+					return err
+				}
 			}
 		}
 		var left, right *bulkBucket

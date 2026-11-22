@@ -29,6 +29,11 @@ type RecordPartition struct {
 	DecodedBytes int64  `json:",omitempty"`
 }
 
+// ErrVerifyRecordPrefix requests a validated early stop from a record callback.
+// The walker returns the callback's marked error only after hashing the physical
+// suffix on the same read that supplied the decoded prefix.
+var ErrVerifyRecordPrefix = errors.New("verify consumed record prefix")
+
 // CanonicalPartition is a process-local capability for the exact canonical
 // records emitted by a successful RecordWriter. It conveys no source approval
 // or freshness, and cannot be reconstructed from a persisted descriptor.
@@ -480,7 +485,29 @@ func walkPartitionFrames(ctx context.Context, root string, part RecordPartition,
 		return err
 	}
 	parsedHash := sha256.New()
-	var logical io.Reader = &recordContextReader{ctx, io.TeeReader(io.LimitReader(file, part.Bytes), parsedHash)}
+	physical := &recordContextReader{ctx, io.TeeReader(io.LimitReader(file, part.Bytes), parsedHash)}
+	var logical io.Reader = physical
+	finishRead := func(result error) error {
+		if result != nil {
+			if !errors.Is(result, ErrVerifyRecordPrefix) {
+				return result
+			}
+			// Buffered compressed bytes are already in parsedHash. Drain the
+			// unread physical suffix without decoding unused logical frames.
+			if _, readErr := io.Copy(io.Discard, physical); readErr != nil {
+				return readErr
+			}
+		}
+		var parsedDigest [32]byte
+		copy(parsedDigest[:], parsedHash.Sum(nil))
+		if parsedDigest != part.SHA256 {
+			return errors.New("private partition changed while reading")
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return result
+	}
 	decodedBytes := part.Bytes
 	if part.Codec == "zstd-v1" {
 		var outer [len(compressedRecordHeader)]byte
@@ -505,7 +532,7 @@ func walkPartitionFrames(ctx context.Context, root string, part RecordPartition,
 	if part.Records > recordDecodeBatchFrames {
 		count, err = walkRecordDecodeBatches(ctx, buffer, remaining, part.Records, emit)
 		if err != nil {
-			return err
+			return finishRead(err)
 		}
 	} else {
 		for remaining > 0 {
@@ -534,7 +561,7 @@ func walkPartitionFrames(ctx context.Context, root string, part RecordPartition,
 				return err
 			}
 			if err = emit(record, data); err != nil {
-				return err
+				return finishRead(err)
 			}
 			count++
 		}
@@ -545,12 +572,7 @@ func walkPartitionFrames(ctx context.Context, root string, part RecordPartition,
 	if _, err = buffer.ReadByte(); err != io.EOF {
 		return errors.New("private partition decoded length or checksum invalid")
 	}
-	var parsedDigest [32]byte
-	copy(parsedDigest[:], parsedHash.Sum(nil))
-	if parsedDigest != part.SHA256 {
-		return errors.New("private partition changed while reading")
-	}
-	return ctx.Err()
+	return finishRead(nil)
 }
 
 // Decode only independently owned, complete frames. Both scheduling paths keep

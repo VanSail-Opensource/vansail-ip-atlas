@@ -521,3 +521,26 @@ test('owned cached compressed bytes are released after success, corruption and c
   }
   for (const object of golden.objects) assert.equal(await hash(files.get(`/_atlas/objects/${object.info.sha256}.via3`)), object.info.sha256)
 })
+
+test('worker fetches only destination kinds used by each operation and verifies them when read', async () => {
+  const byPath = new Map(golden.objects.map(({ info }) => [`/_atlas/objects/${info.sha256}.via3`, info.kind]))
+  const checkReadKinds = async (allowed, run) => {
+    const reader = new AtlasReader((path, options) => {
+      if (byPath.has(path)) assert.ok(allowed.includes(byPath.get(path)), `Unexpected object kind ${byPath.get(path)}`)
+      return response(path, options)
+    }, () => golden.clock)
+    try { await run(reader) } finally { reader.clear() }
+  }
+  await checkReadKinds([1, 8], reader => reader.prefixes('AS13335', 0))
+  await checkReadKinds([1, 7, 4], reader => reader.classC('203.0.113.1'))
+  const reader = new AtlasReader(async (path, options) => {
+    if (byPath.get(path) !== 7) return response(path, options)
+    const bytes = files.get(path).slice()
+    bytes[bytes.length - 1] ^= 1
+    return new Response(bytes, { status: 200 })
+  }, () => golden.clock)
+  try {
+    await assert.rejects(reader.lookup(golden.vectors[0].q), { message: 'integrity' })
+    await assert.rejects(reader.classC(golden.vectors[0].q), { message: 'integrity' })
+  } finally { reader.clear() }
+})

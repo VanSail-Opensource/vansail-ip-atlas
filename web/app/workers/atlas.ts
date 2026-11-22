@@ -686,11 +686,16 @@ export class AtlasReader {
     return textDecoder.decode(text.subarray(u32(offsets, id * 4), u32(offsets, (id + 1) * 4)))
   }
   private originList(shard: Shard, row: Uint8Array): number[] { const ints = shard.rows(4); return Array.from({ length: u32(row, 8) }, (_, index) => u32(ints, (u32(row, 4) + index) * 4)) }
-  private async destinations(input: Input, signal?: AbortSignal): Promise<Map<number, Shard>> {
+  private async destinations(input: Input, signal?: AbortSignal, onlyKind?: number): Promise<Map<number, Shard>> {
     const router = this.router!; const row = input.kind === 'ip' ? router.prefix(input.canonical)?.row : router.asn(Number(input.canonical.slice(2)))[0]
     const output = new Map<number, Shard>(); if (!row) return output
     const ints = router.rows(4)
-    for (let index = 0; index < u16(row, 4); index++) { const shard = await this.reference(router, u32(ints, (u32(row, 0) + index) * 4), signal); output.set(shard.kind, shard) }
+    const directory = router.rows(7)
+    for (let index = 0; index < u16(row, 4); index++) {
+      const ordinal = u32(ints, (u32(row, 0) + index) * 4)
+      const kind = u16(directory, ordinal * 40)
+      if (onlyKind === undefined || onlyKind === kind) output.set(kind, await this.reference(router, ordinal, signal))
+    }
     return output
   }
   async lookup(q: string, signal?: AbortSignal): Promise<LookupAnswer> {
@@ -698,7 +703,7 @@ export class AtlasReader {
     try { return await this.lookupInput(input, signal) } finally { this.endQuery() }
   }
   private async lookupInput(input: Input, signal?: AbortSignal): Promise<LookupAnswer> {
-    const budget = new AnswerBudget(); await this.ready(signal); const manifest = this.current(); const dest = await this.destinations(input, signal)
+    const budget = new AnswerBudget(); await this.ready(signal); const manifest = this.current(); const dest = input.kind === 'ip' ? await this.destinations(input, signal) : new Map<number, Shard>()
     const pathSegments = new PathSegmentPool()
     const answer: LookupAnswer = { q: input.canonical, kind: input.kind, releaseId: manifest.release_id, synthetic: manifest.mode === 'synthetic', validUntil: manifest.valid_until, geo: null, network: null, usage: null, observedRisk: null, asns: [], bgp: { origins: [], paths: [], relationships: [], tier1: [], rpki: [] } }
     let announcement: string | null = null
@@ -768,7 +773,7 @@ export class AtlasReader {
     }
     const pairs = new Map<string, [number, number]>()
     for (const path of answer.bgp.paths) if (path.graphEligible) for (let index = 1; index < path.asns.length; index++) { const from = path.asns[index - 1]!; const to = path.asns[index]!; if (from !== to) pairs.set(`${from}:${to}`, [from, to]) }
-    for (const [from, to] of [...pairs.values()].sort(([a, b], [c, d]) => a - c || b - d)) { checkAbort(signal); budget.charge(256); const related = await this.destinations({ kind: 'asn', canonical: `AS${from}` }, signal); const row = related.get(12)?.relationship(from, to); answer.bgp.relationships.push({ from, to, relation: row ? ['unknown', 'transit_upstream', 'peer', 'customer', 'sibling'][row[12]!]! : 'unknown', observed: true, inferred: !!row && !!(row[13]! & 2) }) }
+    for (const [from, to] of [...pairs.values()].sort(([a, b], [c, d]) => a - c || b - d)) { checkAbort(signal); budget.charge(256); const related = await this.destinations({ kind: 'asn', canonical: `AS${from}` }, signal, 12); const row = related.get(12)?.relationship(from, to); answer.bgp.relationships.push({ from, to, relation: row ? ['unknown', 'transit_upstream', 'peer', 'customer', 'sibling'][row[12]!]! : 'unknown', observed: true, inferred: !!row && !!(row[13]! & 2) }) }
     checkAbort(signal); this.current(); answerFits(answer); return answer
   }
   private async prefixPage(shard: Shard, row: Uint8Array, asn: number, cursor: number, signal?: AbortSignal): Promise<ASNPrefixPage> {
@@ -792,7 +797,7 @@ export class AtlasReader {
     try { return await this.prefixesInput(input, cursor, signal) } finally { this.endQuery() }
   }
   private async prefixesInput(input: Input, cursor: number, signal?: AbortSignal): Promise<ASNPrefixPage> {
-    await this.ready(signal); const dest = await this.destinations(input, signal); const asn = Number(input.canonical.slice(2)); const shard = dest.get(8); const row = shard?.asn(asn)[0]
+    await this.ready(signal); const dest = await this.destinations(input, signal, 8); const asn = Number(input.canonical.slice(2)); const shard = dest.get(8); const row = shard?.asn(asn)[0]
     if (!shard || !row) { if (cursor !== 0) return fail('invalid_cursor'); return { asn, prefixes: [], nextCursor: null } }
     const answer = await this.prefixPage(shard, row, asn, cursor, signal); checkAbort(signal); this.current(); return answer
   }
@@ -802,7 +807,7 @@ export class AtlasReader {
   }
   private async classCInput(input: Input, signal?: AbortSignal): Promise<ClassCAnswer | null> {
     const budget = new AnswerBudget(); budget.charge(256 * 512); await this.ready(signal); this.current(); if (input.kind !== 'ip' || input.canonical.includes(':')) return null
-    const dest = await this.destinations(input, signal); const shard = dest.get(7); const found = shard?.prefix(input.canonical)
+    const dest = await this.destinations(input, signal, 7); const shard = dest.get(7); const found = shard?.prefix(input.canonical)
     if (!shard || !found) return null
     const row = found.row; const base = input.canonical.split('.').slice(0, 3).join('.')
     const answer: ClassCAnswer = { prefix: found.prefix, cells: Array.from({ length: 256 }, (_, suffix) => ({ ip: `${base}.${suffix}`, observed: false, observedRiskScore: null, confidence: 'unrated', coverage: 'incomplete' as const, reasons: [], usage: 'unknown', origins: [] })), observedCount: u16(row, 8), assessedCount: u16(row, 10), positiveCount: u16(row, 12), scoredCount: u16(row, 14), meanObservedRisk: has(row, 22) ? row[20]! : null }

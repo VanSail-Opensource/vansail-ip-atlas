@@ -244,11 +244,11 @@ func (r *Release) prefixes(ctx context.Context, q string, cursor uint32) (ASNPre
 	}
 	asn64, _ := strconv.ParseUint(input.Canonical[2:], 10, 32)
 	asn := uint32(asn64)
-	dest, err := r.destinations(ctx, input)
+	s, err := r.asnDestination(ctx, asn, 8)
 	if err != nil {
 		return ASNPrefixPage{}, err
 	}
-	if s := dest[8]; s != nil {
+	if s != nil {
 		if row, ok := s.ASNRecord(asn); ok {
 			return r.prefixPage(ctx, s, row, asn, cursor)
 		}
@@ -717,17 +717,6 @@ func (s *Shard) ASNRecord(asn uint32) ([]byte, bool) {
 
 type destinationSet [15]*Shard
 
-func (r *Release) destinations(ctx context.Context, input querycontract.Input) (destinationSet, error) {
-	var row []byte
-	var ok bool
-	if input.Kind == "ip" {
-		row, _, ok = r.router.findPrefix(netip.MustParseAddr(input.Canonical))
-	} else {
-		n, _ := strconv.ParseUint(input.Canonical[2:], 10, 32)
-		return r.asnDestinations(ctx, uint32(n))
-	}
-	return r.rowDestinations(ctx, row, ok)
-}
 func (r *Release) asnDestinations(ctx context.Context, asn uint32) (destinationSet, error) {
 	row, ok := r.router.ASNRecord(asn)
 	return r.rowDestinations(ctx, row, ok)
@@ -737,6 +726,10 @@ func (r *Release) asnDestinations(ctx context.Context, asn uint32) (destinationS
 // object for every observed adjacency would decode and pin unrelated data.
 func (r *Release) asnDestination(ctx context.Context, asn uint32, kind uint16) (*Shard, error) {
 	row, ok := r.router.ASNRecord(asn)
+	return r.rowDestination(ctx, row, ok, kind)
+}
+
+func (r *Release) rowDestination(ctx context.Context, row []byte, ok bool, kind uint16) (*Shard, error) {
 	if !ok {
 		return nil, nil
 	}
@@ -1217,11 +1210,11 @@ func (r *Release) classC(ctx context.Context, q string) (*ClassCAnswer, error) {
 	if !addr.Is4() {
 		return nil, nil
 	}
-	dest, err := r.destinations(ctx, input)
+	routed, _, known := r.router.findPrefix(addr)
+	s, err := r.rowDestination(ctx, routed, known, 7)
 	if err != nil {
 		return nil, err
 	}
-	s := dest[7]
 	if s == nil {
 		return nil, nil
 	}

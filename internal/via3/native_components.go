@@ -39,6 +39,7 @@ type componentEntry struct {
 	value          any
 	bytes          int
 	epoch          uint64
+	recent         bool
 	previous, next *componentEntry
 }
 type nativeComponents struct {
@@ -50,6 +51,7 @@ type nativeComponents struct {
 	bytes        int
 	peakSlots    int
 	active       bool
+	allPinned    uint64
 }
 
 var retryWithoutComponents = errors.New("native component working set")
@@ -67,20 +69,22 @@ func (c *nativeComponents) unlink(e *componentEntry) {
 	}
 	e.previous, e.next = nil, nil
 }
+
+// A cache hit marks the component used in this operation. Move or remove
+// entries only on pressure; the two-pass clock drops unpinned, unused entries
+// before recently used entries. No lookup writes another component's links.
 func (c *nativeComponents) use(e *componentEntry) {
-	if c.last != e {
-		if e.previous != nil || e.next != nil || c.first == e {
-			c.unlink(e)
-		}
-		e.previous = c.last
-		if c.last == nil {
-			c.first = e
-		} else {
-			c.last.next = e
-		}
-		c.last = e
-	}
 	e.epoch = c.pages.epoch
+	e.recent = true
+}
+func (c *nativeComponents) append(e *componentEntry) {
+	e.previous = c.last
+	if c.last == nil {
+		c.first = e
+	} else {
+		c.last.next = e
+	}
+	c.last = e
 }
 
 // Every prepared object has a distinct (<18,500) immutable manifest slot.
@@ -122,19 +126,34 @@ func (c *nativeComponents) get(k componentKey) (any, bool) {
 	return e.value, true
 }
 func (c *nativeComponents) trim(limit int) {
-	for c.bytes > limit && c.first != nil && c.first.epoch != c.pages.epoch {
-		e := c.first
-		c.unlink(e)
-		if e.key.kind == factIP {
-			e.key.source.dropScope(e)
+	if c.bytes <= limit || c.first == nil || c.allPinned != 0 && c.allPinned == c.pages.epoch {
+		return
+	}
+	for pass := 0; pass < 2 && c.bytes > limit; pass++ {
+		for e := c.first; e != nil && c.bytes > limit; {
+			next := e.next
+			if e.epoch != c.pages.epoch {
+				if limit != 0 && e.recent && pass == 0 {
+					e.recent = false
+				} else {
+					c.unlink(e)
+					if e.key.kind == factIP {
+						e.key.source.dropScope(e)
+					}
+					if i, short := e.key.integerKey(); short {
+						delete(c.integers, i)
+					} else {
+						delete(c.slots, e.key)
+					}
+					c.bytes -= e.bytes
+					c.pages.setMetadata(-e.bytes)
+				}
+			}
+			e = next
 		}
-		if i, short := e.key.integerKey(); short {
-			delete(c.integers, i)
-		} else {
-			delete(c.slots, e.key)
-		}
-		c.bytes -= e.bytes
-		c.pages.setMetadata(-e.bytes)
+	}
+	if c.bytes > limit {
+		c.allPinned = c.pages.epoch
 	}
 	compactComponentMap(&c.slots, &c.peakSlots)
 	compactComponentMap(&c.integers, &c.peakIntegers)
@@ -189,6 +208,7 @@ func (c *nativeComponents) put(k componentKey, v any, owned int) bool {
 	}
 	c.bytes += size
 	c.pages.setMetadata(size)
+	c.append(e)
 	c.use(e)
 	return true
 }

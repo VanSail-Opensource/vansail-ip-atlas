@@ -96,3 +96,43 @@ func TestCompactFactKeyKeepsEverySelectorDistinct(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeComponentPressureHonorsPinsAndSecondChance(t *testing.T) {
+	index := &nativeIndex{}
+	pages := &nativePages{epoch: 1}
+	r := &Release{native: index}
+	pages.owner = r
+	index.pages = pages
+	facts := &index.facts
+	facts.pages = pages
+	facts.active = true
+	source := &indexedShard{slot: 1}
+	key := func(i uint32) componentKey { return componentKey{source: source, kind: factASN, a: i} }
+	for i := uint32(1); i <= 4; i++ {
+		if !facts.put(key(i), i, 0) {
+			t.Fatal("test component rejected")
+		}
+	}
+	facts.trim(0)
+	if facts.bytes != 4*componentEntryBytes || pages.metadata != facts.bytes {
+		t.Fatal("query-pinned component evicted")
+	}
+	pages.next()
+	// Populate the clock and then explicitly access an older position. This
+	// entry stays pinned while a less recently used unpinned position is removed.
+	facts.find(key(2)).recent = false
+	facts.get(key(1))
+	facts.trim(3 * componentEntryBytes)
+	if facts.find(key(1)) == nil || facts.find(key(2)) != nil || facts.find(key(3)) == nil {
+		t.Fatal("clock discarded a pinned or recently used entry")
+	}
+	facts.trim(0)
+	if facts.bytes != componentEntryBytes || pages.metadata != facts.bytes {
+		t.Fatal("failed to reclaim all unpinned entries")
+	}
+	pages.next()
+	facts.trim(0)
+	if facts.bytes != 0 || pages.metadata != 0 || facts.first != nil || facts.last != nil || facts.integers != nil {
+		t.Fatal("inactive component directory or storage remains")
+	}
+}

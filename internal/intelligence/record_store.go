@@ -122,6 +122,14 @@ type RecordStore struct {
 // DiskBytes includes existing immutable objects and reserved in-flight bytes.
 func (s *RecordStore) DiskBytes() uint64 { s.mu.Lock(); defer s.mu.Unlock(); return uint64(s.disk) }
 
+// RemainingPartitionSlots reports headroom from the latest inventory and
+// every object installed since. Writers still enforce the hard limit.
+func (s *RecordStore) RemainingPartitionSlots() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return maxRecordPartitions - s.objects
+}
+
 func recordDirectory(workspace string, create bool) (string, error) {
 	root, err := filepath.Abs(workspace)
 	if err != nil {

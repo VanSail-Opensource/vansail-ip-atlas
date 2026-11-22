@@ -115,15 +115,27 @@ func (s *bulkSpool) cachePartFiles(groups ...[]intelligence.RecordPartition) map
 	return files
 }
 
-func (s *bulkSpool) scatterTerminals(ctx context.Context, parent *bulkBucket, terminal []*bulkBucket) error {
-	groups := [][]intelligence.RecordPartition{parent.parts}
-	if s.reuse != nil {
-		groups = make([][]intelligence.RecordPartition, len(parent.parts))
-		for i, part := range parent.parts {
-			groups[i] = []intelligence.RecordPartition{part}
-		}
+// scatterGroupSize keeps independently reusable batches at the two family
+// roots, where a source change is cheapest to isolate. Every deeper scope
+// streams its ordered inputs through one writer per terminal. Keeping separate
+// tails for every input at every four-bit descent multiplies small files while
+// the first spatial pass retains all finished leaves for the second pass.
+func scatterGroupSize(parent *bulkBucket, terminals, freeSlots int, reuse bool) int {
+	n := len(parent.parts)
+	if n == 0 || !reuse || parent.prefix.Bits() != 0 {
+		return max(1, n)
 	}
-	for _, parts := range groups {
+	// Budget the extra tail files across root groups against 1/32 of the
+	// remaining slots. Under pressure, use one shared group, the minimum
+	// necessary to scatter the input. Writers charge all actual files.
+	groups := max(1, freeSlots/(32*terminals))
+	return max(1, (n+groups-1)/groups)
+}
+
+func (s *bulkSpool) scatterTerminals(ctx context.Context, parent *bulkBucket, terminal []*bulkBucket) error {
+	groupSize := scatterGroupSize(parent, len(terminal), s.store.RemainingPartitionSlots(), s.reuse != nil)
+	for offset := 0; offset < len(parent.parts); offset += groupSize {
+		parts := parent.parts[offset:min(len(parent.parts), offset+groupSize)]
 		entry := spatialCacheEntry{Domain: "scatter", Scatter: &spatialCacheScatter{}}
 		hit := false
 		if s.reuse != nil {

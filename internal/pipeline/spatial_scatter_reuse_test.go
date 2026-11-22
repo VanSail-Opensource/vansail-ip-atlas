@@ -38,7 +38,7 @@ func TestSpatialScatterReusePreservesBroadInheritedRowsAndExactNeighbors(t *test
 	state.Sources[0].Records = append(state.Sources[0].Records, state.Sources[0].Records[0])
 	root := t.TempDir()
 	type result struct{ scopes, rows []string }
-	run := func(value intelligence.BuildState, cached bool) result {
+	run := func(value intelligence.BuildState, cached bool, batch int) result {
 		t.Helper()
 		workspace := root
 		if !cached {
@@ -49,7 +49,7 @@ func TestSpatialScatterReusePreservesBroadInheritedRowsAndExactNeighbors(t *test
 			t.Fatal(err)
 		}
 		defer os.RemoveAll(spool.root)
-		spool.batchRecords = 20
+		spool.batchRecords = batch
 		if cached {
 			value = partitionSpatialFixture(t, workspace, value)
 			spool.reuse, err = openSpatialCache(ctx, workspace, [32]byte{9}, 64<<20, func(uint64) bool { return true })
@@ -106,11 +106,35 @@ func TestSpatialScatterReusePreservesBroadInheritedRowsAndExactNeighbors(t *test
 		return out
 	}
 	for phase := 0; phase < 2; phase++ {
-		cached, cold := run(state, true), run(state, false)
+		cached, cold := run(state, true, 20), run(state, false, 20)
 		if !reflect.DeepEqual(cached, cold) || len(cached.scopes) != 2 || cached.scopes[0] != "0.0.0.0/1" || cached.scopes[1] != "128.0.0.0/1" {
 			t.Fatal("cached per-input scatter changed inherited-row dedupe, first-fitting scope or public bytes", phase, cached.scopes, cold.scopes)
 		}
 		state = cloneSpatialFixture(t, state)
 		state.Sources[0].Records[2].Geo.City = "Changed"
+	}
+
+	// Force a second scatter below /4, with an inherited multi-origin parent
+	// and an explicit empty child. A changed city rebuilds only affected
+	// stream groups. The ordinary coalesced path supplies the complete oracle.
+	for _, origin := range []intelligence.OriginMapping{
+		{Prefix: netip.MustParsePrefix("8.0.0.0/8"), Origins: []uint32{13335, 15169}},
+		{Prefix: netip.MustParsePrefix("8.0.0.0/24")},
+	} {
+		state.Sources[0].Records = append(state.Sources[0].Records, intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordOrigins, Origins: &origin})
+	}
+	for phase := 0; phase < 2; phase++ {
+		cached, cold := run(state, true, 12), run(state, false, 12)
+		deep := false
+		for _, scope := range cached.scopes {
+			if netip.MustParsePrefix(scope).Bits() > 4 {
+				deep = true
+			}
+		}
+		if !deep || !reflect.DeepEqual(cached, cold) {
+			t.Fatal("deep grouped scatter changed inherited origins or exact neighbor facts", phase)
+		}
+		state = cloneSpatialFixture(t, state)
+		state.Sources[0].Records[2].Geo.City = "Another City"
 	}
 }

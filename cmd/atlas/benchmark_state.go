@@ -50,6 +50,7 @@ type benchmarkMarker struct {
 // The benchmark transforms an isolated copy, never the authenticated intake or
 // its seals. Every output is engineering, including its unmodified warm-up.
 func benchmarkState(ctx context.Context, args []string) (returnErr error) {
+	ctx = withCompilePhases(ctx, os.Stderr)
 	fs := flag.NewFlagSet("benchmark-state", flag.ContinueOnError)
 	workspace := fs.String("workspace", ".", "authenticated source workspace")
 	out := fs.String("out", "", "isolated directory beneath workspace/build-private")
@@ -80,7 +81,9 @@ func benchmarkState(ctx context.Context, args []string) (returnErr error) {
 	// Use the production compiler's exact process-local validation path. The
 	// observed source epoch precedes unrelated capability failures, while the
 	// opaque handle rechecks every object byte before source qualification.
+	tierPhase := beginCompilePhase(ctx, phaseTier1)
 	tier, verified, err := observeVerifiedCurrentTier1(ctx, root, baseClock)
+	tierPhase(err == nil)
 	if err != nil {
 		return err
 	}
@@ -227,6 +230,8 @@ func benchmarkState(ctx context.Context, args []string) (returnErr error) {
 		return err
 	}
 	options := pipeline.Options{PrivateLabelValues: admission.PrivateLabelValues(binding.catalog), Workspace: destination, Output: filepath.Join(destination, "build-private", "result"), Mode: "engineering", Clock: report.Clock, ValidUntil: validUntil.Unix(), Limits: pipeline.DefaultLimits()}
+	options.ObserveStage = beginPipelinePhase
+	options.ObserveCounters = reportPipelineCounters
 	options.InputGate = func(checkCtx context.Context) error {
 		current, e := privateStateHash(checkCtx, root)
 		if e != nil || current != binding.stateHash {

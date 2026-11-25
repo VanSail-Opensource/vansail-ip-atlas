@@ -602,7 +602,7 @@ type runReader struct {
 	record     via3.PublicRecord
 	verifyEOF  func() error
 	owner      *compiler     // set only for authenticated intermediate runs
-	leafBodies *leafPayloads // immutable scalar bodies within one public encoder call
+	leafBodies *leafPayloads // immutable scalar bodies within one leaf scan
 }
 
 func openRun(path string, limit int64) (*runReader, error) {

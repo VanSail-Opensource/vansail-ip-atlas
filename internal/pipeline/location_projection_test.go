@@ -123,7 +123,7 @@ func TestLocationProjectionRejectsInvalidChanges(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			p := locationProjection{scope: scope, hit: true, rows: &runReader{reader: &buf, limit: DefaultLimits().RecordBytes}, entry: spatialCacheEntry{Leaf: &spatialCacheLeaf{Stream: spatialCacheStream{Records: uint64(len(tc.rows)), DecodedBytes: uint64(buf.Len())}}}}
+			p := locationProjection{scope: scope, hit: true, rows: &runReader{reader: &buf, limit: DefaultLimits().RecordBytes, leafBodies: &leafPayloads{}}, entry: spatialCacheEntry{Leaf: &spatialCacheLeaf{Stream: spatialCacheStream{Records: uint64(len(tc.rows)), DecodedBytes: uint64(buf.Len())}}}}
 			err := p.advance()
 			if err == nil {
 				_, err = p.resolve(tc.current, intelligence.Policy{}, nil, false, tc.changed, locationValue{coordinates: via3.CoordinateData{Unknown: true}})

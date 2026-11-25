@@ -66,15 +66,19 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 		if err := policy.Validate(); err != nil {
 			return err
 		}
-		geo := map[netip.Prefix][]intelligence.GeoEvidence{}
-		usage := map[netip.Prefix][]intelligence.UsageEvidence{}
+		type boundaryVotes struct {
+			geoCount int
+			geo      []intelligence.GeoEvidence
+			usage    []intelligence.UsageEvidence
+		}
+		boundaries := map[netip.Prefix]boundaryVotes{}
+		replayingLocations := locations != nil && locations.hit
 		origins := map[netip.Prefix][]uint32{}
 		type labels struct {
 			name, organization       string
 			hasName, hasOrganization bool
 		}
 		networkLabels := map[netip.Prefix]labels{}
-		boundaries := map[netip.Prefix]struct{}{}
 		seen := map[string]struct{}{}
 		var bytes, count int
 		for _, source := range state.Sources {
@@ -144,8 +148,12 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 					if !v.Current {
 						return errors.New("mapping state contains noncurrent geo record")
 					}
-					geo[prefix] = append(geo[prefix], v)
-					boundaries[prefix] = struct{}{}
+					votes := boundaries[prefix]
+					votes.geoCount++
+					if !replayingLocations {
+						votes.geo = append(votes.geo, v)
+					}
+					boundaries[prefix] = votes
 				case intelligence.RecordUsage:
 					v := record.Usage.Evidence
 					if !v.Current || v.Family == "" {
@@ -157,8 +165,9 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 					if _, ok := assignmentType(v.Assignment); !ok {
 						return errors.New("invalid normalized assignment")
 					}
-					usage[prefix] = append(usage[prefix], v)
-					boundaries[prefix] = struct{}{}
+					votes := boundaries[prefix]
+					votes.usage = append(votes.usage, v)
+					boundaries[prefix] = votes
 				case intelligence.RecordNetworkOrganization:
 					current := networkLabels[prefix]
 					current.organization = consistentNetworkLabel(current.hasOrganization, current.organization, record.NetworkOrganization.Organization)
@@ -205,6 +214,7 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 		}
 		var ancestors []mappingAncestor
 		var applicableGeo []intelligence.GeoEvidence
+		var geoCount int
 		var applicableUsage []intelligence.UsageEvidence
 		for _, prefix := range keys {
 			if err := ctx.Err(); err != nil {
@@ -215,17 +225,21 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 				if last.prefix.Contains(prefix.Addr()) {
 					break
 				}
-				applicableGeo = applicableGeo[:last.geoStart]
+				geoCount = last.geoStart
+				if !replayingLocations {
+					applicableGeo = applicableGeo[:geoCount]
+				}
 				applicableUsage = applicableUsage[:last.usageStart]
 				ancestors = ancestors[:len(ancestors)-1]
 			}
-			localGeo, localUsage := geo[prefix], usage[prefix]
-			if len(applicableGeo)+len(localGeo) > 8192 || len(applicableUsage)+len(localUsage) > 8192 {
+			local := boundaries[prefix]
+			if geoCount+local.geoCount > 8192 || len(applicableUsage)+len(local.usage) > 8192 {
 				return errors.New("mapping boundary working set exceeded")
 			}
-			current := mappingAncestor{prefix: prefix, geoStart: len(applicableGeo), usageStart: len(applicableUsage)}
-			applicableGeo = append(applicableGeo, localGeo...)
-			applicableUsage = append(applicableUsage, localUsage...)
+			current := mappingAncestor{prefix: prefix, geoStart: geoCount, usageStart: len(applicableUsage)}
+			geoCount += local.geoCount
+			applicableGeo = append(applicableGeo, local.geo...)
+			applicableUsage = append(applicableUsage, local.usage...)
 			u := intelligence.FuseUsage(applicableUsage)
 			geoParent := locationValue{coordinates: via3.CoordinateData{Unknown: true}}
 			parentAnycast := false
@@ -235,7 +249,7 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 				parentAnycast = parent.anycast
 			}
 			current.anycast = u.Anycast != nil && *u.Anycast
-			changed := len(localGeo) != 0 || current.anycast != parentAnycast
+			changed := local.geoCount != 0 || current.anycast != parentAnycast
 			resolved, err := locations.resolve(prefix, policy, applicableGeo, current.anycast, changed, geoParent)
 			if err != nil {
 				return err

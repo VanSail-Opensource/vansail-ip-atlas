@@ -364,24 +364,30 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 				}
 				return nil
 			}
+			riskRoots, separateRisk := spool.routedRiskRoots(spatial)
 			var reuse *bulkLeafReuse
 			if spool.reuse != nil {
 				scoreKey, err := exactRiskDependencies(policy, clock)
 				if err != nil {
 					return err
 				}
-				// Physical hits can skip collection together. Joined role rows affect
-				// the full leaf's bounded geometry, although they never enter risk.
+				// Separate risk roots exclude joined roles. A shared public root
+				// still sizes those rows when it chooses its fixed geometry.
+				roles := spool.usage
+				if separateRisk {
+					roles = nil
+				}
 				layoutKey, err := spatialReuseKey("exact-risk-layout", struct {
 					Score [32]byte
 					Usage asnUsageIndex
-				}{scoreKey, spool.usage})
+				}{scoreKey, roles})
 				if err != nil {
 					return err
 				}
 				reuse = &bulkLeafReuse{domain: "risk", dependencies: layoutKey, riskPolicy: scoreKey, spool: spool, risk: accumulate}
 			}
-			spatial, err = spool.leavesReusing(ctx, spatial, false, reuse, func(bucket *bulkBucket, part intelligence.BuildState) error {
+			var riskLeaves []*bulkBucket
+			riskLeaves, err = spool.leavesReusing(ctx, riskRoots, false, reuse, func(bucket *bulkBucket, part intelligence.BuildState) error {
 				if reuse != nil {
 					return reuse.visitRisk(ctx, bucket, part, policy, clock)
 				}
@@ -396,6 +402,13 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 				}
 				return IntelligenceProducer(part, policy, clock, MaterializationInputs{scope: bucket.prefix, prepare: prepare, prepareOnly: true, encodedLengths: bucket.recordBytes})(ctx, func(via3.PublicRecord) error { return nil })
 			})
+			if separateRisk {
+				for _, leaf := range riskLeaves {
+					leaf.active = false
+				}
+			} else {
+				spatial = riskLeaves
+			}
 		}
 		if err != nil {
 			riskPhase(false)

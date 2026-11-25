@@ -299,6 +299,18 @@ reflects the publisher's description of the data as community reports.
 TweetFeed releases these feeds under CC0 and makes attribution optional.
 [API and manifest documentation](https://tweetfeed.live/api/) · [Publisher terms](https://tweetfeed.live/tos/)
 
+A November 25 replay checked three complete immutable weekly CSVs against
+their same-commit publisher manifests. At the sealed 07:28:37 UTC intake
+clock, the 07:00:40 edition had 1,816 rows. At 07:55:47, the 07:30:44
+edition had 1,822 rows. At 08:05:00, the 08:00:43 edition had 1,829 rows.
+Each retained 22 explicit phishing observations with original report times
+from November 19 at 00:38:19 through November 25 at 04:01:50 UTC.
+The verifier follows at most one prior weekly revision from the matched
+child commit when the live publisher manifest postdates intake.
+[07:00 edition](https://github.com/0xDanielLopez/TweetFeed/commit/faa455611b082a8edc724597c3e44e0d90ce7c09) ·
+[07:30 edition](https://github.com/0xDanielLopez/TweetFeed/commit/1c0971d1a5a038e882e76582344b431179841dc9) ·
+[08:00 edition](https://github.com/0xDanielLopez/TweetFeed/commit/5b42528e8b8491c21d6c01162945c1b01c32e8fc)
+
 ## Anycast addresses of DNS root services — November 22
 
 ICANN's Root Server System Advisory Committee identifies thirteen root service
@@ -319,6 +331,10 @@ On November 25 the primary text and its published MD5 agreed on serial
 second published gzip decoded to the same 2,246,005 bytes as the current
 original, with SHA-256 `d26cf5211ad2bab34db2fd5c1dfccf5d0acfb61a332d9e8d865284d5a3205da5`.
 All 26 exact addresses retained their original clock and December 1 deadline.
+The encrypted per-source result for GitHub run 45573889788 identified the
+IANA root zone as its sole rejected source. The TweetFeed cutoff replays
+above independently exercised the weekly source's publisher rollover.
+[Diagnostic run](https://github.com/VanSail-Opensource/vansail-ip-atlas/actions/runs/45573889788) ·
 [InterNIC alternate distribution](https://www.internic.net/zones/)
 
 Other IPs receive no anycast or location assertion from this source. The

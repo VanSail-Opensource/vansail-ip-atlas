@@ -25,6 +25,7 @@ const (
 	RecordPath
 	RecordRelationship
 	RecordASNIdentity
+	RecordNetworkOrganization
 )
 
 type ScopedUsage struct {
@@ -45,30 +46,31 @@ type RelationshipRecord struct {
 // NormalizedRecord is a versioned tagged union; exactly one payload is allowed.
 // It has no URI, port, protocol, credential, source URL, or raw publisher field.
 type NormalizedRecord struct {
-	Version         uint16
-	Kind            RecordKind
-	Evidence        *Evidence            `json:",omitempty"`
-	Coverage        *Coverage            `json:",omitempty"`
-	Origins         *OriginMapping       `json:",omitempty"`
-	Geo             *GeoEvidence         `json:",omitempty"`
-	Usage           *ScopedUsage         `json:",omitempty"`
-	VRP             *VRP                 `json:",omitempty"`
-	Path            *ScopedPath          `json:",omitempty"`
-	Relationship    *RelationshipRecord  `json:",omitempty"`
-	ASNIdentity     *ASNIdentityEvidence `json:",omitempty"`
-	MRTOriginatedAt *time.Time           `json:",omitempty"` // private route-heard clock, never a public fact
-	MRT             *MRTRouteIdentity    `json:",omitempty"`
+	Version             uint16
+	Kind                RecordKind
+	Evidence            *Evidence                  `json:",omitempty"`
+	Coverage            *Coverage                  `json:",omitempty"`
+	Origins             *OriginMapping             `json:",omitempty"`
+	Geo                 *GeoEvidence               `json:",omitempty"`
+	Usage               *ScopedUsage               `json:",omitempty"`
+	VRP                 *VRP                       `json:",omitempty"`
+	Path                *ScopedPath                `json:",omitempty"`
+	Relationship        *RelationshipRecord        `json:",omitempty"`
+	ASNIdentity         *ASNIdentityEvidence       `json:",omitempty"`
+	NetworkOrganization *NetworkOrganizationRecord `json:",omitempty"`
+	MRTOriginatedAt     *time.Time                 `json:",omitempty"` // private route-heard clock, never a public fact
+	MRT                 *MRTRouteIdentity          `json:",omitempty"`
 }
 
 func (r NormalizedRecord) Validate() error {
-	present := [9]bool{r.Evidence != nil, r.Coverage != nil, r.Origins != nil, r.Geo != nil, r.Usage != nil, r.VRP != nil, r.Path != nil, r.Relationship != nil, r.ASNIdentity != nil}
+	present := [...]bool{r.Evidence != nil, r.Coverage != nil, r.Origins != nil, r.Geo != nil, r.Usage != nil, r.VRP != nil, r.Path != nil, r.Relationship != nil, r.ASNIdentity != nil, r.NetworkOrganization != nil}
 	count := 0
 	for _, yes := range present {
 		if yes {
 			count++
 		}
 	}
-	if r.Version != 3 || r.Kind < 1 || r.Kind > 9 || count != 1 || !present[int(r.Kind)-1] {
+	if r.Version != 3 || r.Kind < 1 || int(r.Kind) > len(present) || count != 1 || !present[int(r.Kind)-1] {
 		return errors.New("normalized record union invalid")
 	}
 	if r.MRTOriginatedAt != nil && (r.MRTOriginatedAt.IsZero() || r.Kind != RecordOrigins && r.Kind != RecordPath) {
@@ -76,6 +78,9 @@ func (r NormalizedRecord) Validate() error {
 	}
 	if r.MRT != nil && (r.Kind != RecordOrigins && r.Kind != RecordPath || r.MRT.PeerTable == 0 || r.MRT.CapturedAt.IsZero() || !r.MRT.AddPath && r.MRT.PathID != 0) {
 		return errors.New("private MRT route identity invalid")
+	}
+	if v := r.NetworkOrganization; v != nil && (!v.Prefix.IsValid() || v.Prefix.Addr().Is4In6() || v.Prefix != v.Prefix.Masked() || len(v.Organization) == 0 || len(v.Organization) > 128 || SafeLabel(v.Organization) != v.Organization) {
+		return errors.New("normalized network organization invalid")
 	}
 	if u := r.Usage; u != nil {
 		if u.ASN != 0 {
@@ -118,6 +123,7 @@ type SourceSnapshot struct {
 	CAIDAProof                                            *CAIDASourceProof     `json:",omitempty"`
 	AzureProof                                            *AzureServiceProof    `json:",omitempty"`
 	NROProof                                              *NRORegistrationProof `json:",omitempty"`
+	GoogleNetworkProof                                    *GoogleNetworkProof   `json:",omitempty"`
 }
 type SourceDecision struct{ ID, State, Reason string }
 type StoredSource struct {
@@ -233,6 +239,9 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 				if _, err := snapshot.GeoProof.ContentHash(); err != nil || snapshot.PublishedAt.After(snapshot.GeoProof.UpstreamClock) || snapshot.GeoProof.UpstreamClock.After(now.Add(24*time.Hour)) {
 					deny("invalid", "geolocation_payload_or_clock_invalid")
 				}
+			}
+			if (id == GoogleNetworkSourceID) != (snapshot.GoogleNetworkProof != nil) || snapshot.GoogleNetworkProof != nil && (snapshot.ProofKind != "embedded" || snapshot.GoogleNetworkProof.Validate(now, snapshot.PublishedAt, snapshot.PayloadHash) != nil) {
+				deny("invalid", "google_network_organization_proof_invalid")
 			}
 			if (id == NRORegistrationID) != (snapshot.NROProof != nil) || snapshot.NROProof != nil && (snapshot.ProofKind != "embedded" || snapshot.NROProof.Validate(now, snapshot.PublishedAt, snapshot.PayloadHash) != nil) {
 				deny("invalid", "nro_registration_proof_invalid")
@@ -371,8 +380,16 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 			}
 		}
 
+		var googleDigest GoogleNetworkDigest
 		var nroDigest NRORegistrationDigest
 		process := func(record NormalizedRecord) error {
+			if snapshot.GoogleNetworkProof != nil {
+				if err := googleDigest.Add(record); err != nil {
+					return err
+				}
+			} else if record.Kind == RecordNetworkOrganization {
+				return errors.New("network organization has no qualified publisher proof")
+			}
 			if snapshot.NROProof != nil {
 				if err := nroDigest.Add(record); err != nil {
 					return err
@@ -541,6 +558,9 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 				}
 			}
 		}
+		if p := snapshot.GoogleNetworkProof; p != nil && !googleDigest.Matches(p) {
+			return plan, errors.New("normalized network organizations differ from the complete publisher inventory")
+		}
 		if p := snapshot.NROProof; p != nil {
 			n, digest := nroDigest.Sum()
 			if n != p.Prefixes || digest != p.Projection {
@@ -568,7 +588,7 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 			Snapshot         SourceSnapshot
 			Records          []NormalizedRecord
 			RecordPartitions []RecordPartition `json:",omitempty"`
-		}{policy, SourceSnapshot{ID: id, PayloadHash: snapshot.PayloadHash, ProofPayloadHash: snapshot.ProofPayloadHash, NormalizationPolicyHash: snapshot.NormalizationPolicyHash, ParserVersion: snapshot.ParserVersion, SchemaVersion: snapshot.SchemaVersion, PublishedAt: snapshot.PublishedAt, ContentValidUntil: snapshot.ContentValidUntil, ProofKind: snapshot.ProofKind, PayloadVerified: true, SchemaVerified: true, ImmutableCommitBound: snapshot.ImmutableCommitBound, MRTProof: cloneMRTProof(snapshot.MRTProof), GeoProof: cloneGeoProof(snapshot.GeoProof), VRPProof: cloneVRPProof(snapshot.VRPProof), CAIDAProof: cloneCAIDAProof(snapshot.CAIDAProof), AzureProof: cloneAzureProof(snapshot.AzureProof), NROProof: cloneNROProof(snapshot.NROProof)}, records, parts})
+		}{policy, SourceSnapshot{ID: id, PayloadHash: snapshot.PayloadHash, ProofPayloadHash: snapshot.ProofPayloadHash, NormalizationPolicyHash: snapshot.NormalizationPolicyHash, ParserVersion: snapshot.ParserVersion, SchemaVersion: snapshot.SchemaVersion, PublishedAt: snapshot.PublishedAt, ContentValidUntil: snapshot.ContentValidUntil, ProofKind: snapshot.ProofKind, PayloadVerified: true, SchemaVerified: true, ImmutableCommitBound: snapshot.ImmutableCommitBound, MRTProof: cloneMRTProof(snapshot.MRTProof), GeoProof: cloneGeoProof(snapshot.GeoProof), VRPProof: cloneVRPProof(snapshot.VRPProof), CAIDAProof: cloneCAIDAProof(snapshot.CAIDAProof), AzureProof: cloneAzureProof(snapshot.AzureProof), NROProof: cloneNROProof(snapshot.NROProof), GoogleNetworkProof: cloneGoogleNetworkProof(snapshot.GoogleNetworkProof)}, records, parts})
 		if err != nil {
 			return plan, err
 		}

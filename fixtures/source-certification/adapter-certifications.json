@@ -86,7 +86,7 @@
       "source_id": "ipverse-asn-usage",
       "parser": "ipverse-asn-usage-json",
       "schema": "ipverse-as-category-json-v1",
-      "version": 1,
+      "version": 2,
       "fixture_sha256": "ca510002163250ed211db3caed36496df9376c0796516b625f8c674bfe5bdb8d",
       "tested_at": "2026-11-25T06:24:34Z",
       "implementation_sha256": "0436c97b75a89233ddf48a070640d9f5c90920b8be553e2e1688c5e3670d26aa"

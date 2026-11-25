@@ -138,6 +138,15 @@ func verifyTorExitFile(ctx context.Context, path string, s Source, now time.Time
 	return parseTorExitAddresses(ctx, f, now, s.MaxAge, 100_000_000, nil)
 }
 
+// Reserve enough time to qualify a successor across delayed scheduled intake and
+// browser runs. The retained role still expires at its own original observation
+// plus maxAge, or earlier if the source expires first.
+const asnUsageServingWindow = 48 * time.Hour
+
+func asnUsageObservedAfter(intake time.Time, maxAge time.Duration) time.Time {
+	return intake.Add(asnUsageServingWindow - maxAge)
+}
+
 // Ipverse's category is an ASN's primary function, never direct address usage.
 // The explicit item clock is retained. ISP, null and unknown classifications do
 // not invent residential/mobile facts; networkRole is deliberately discarded.

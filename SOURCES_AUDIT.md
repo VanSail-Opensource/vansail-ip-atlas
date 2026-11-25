@@ -145,6 +145,24 @@ public provenance section.
 | Tor current exits (1) | Official Tor Metrics CC0 data; positive exits only | November 15 complete 438,145-byte body: 2,794 current literal public observations; original ExitAddress clocks retained. Earliest surviving 2026-11-13T03:17:00Z. |
 | Ipverse ASN usage JSON (1) | CC0 primary ASN function, only observed-origin fallback | November 15 complete 70,172,159-byte JSON matched immutable 942f7eb297bb6c9db589a430cddaab7f01c58e0c, published 02:28:16Z. Parser emitted 63,912 unambiguous public-ASN categories; 1,591 within 720h. ISP/null and stale categories stay unknown. |
 
+The Ipverse ASN usage adapter verifies the complete immutable JSON and records
+only roles whose original observation plus 720 hours is more than 48 hours
+after intake. Each retained role keeps its original date. This gives a successor
+time to reach production after a delayed refresh. Between November 20 and 25,
+2026, consecutive successful scheduled intakes began up to 37.15 hours apart.
+
+In the November 25 engineering capture at 06:25:50 UTC, 1,732 unambiguous
+public ASN roles were within 720 hours. The adapter retained 1,645, omitting
+38 that expired on November 26 and 49 that expired on November 27. Both groups
+expired at 00:00 UTC. The earliest retained role expired November 28 at 00:00
+UTC, which set the earliest deadline among the twenty reviewed inputs. The
+next original deadlines were November 30 for the IANA root zone, December 1
+for CAIDA and DB-IP, and December 3 at 21:30:44 UTC for FFraud. Tor's oldest
+eligible item expired December 23 at 08:22:17 UTC. FFraud uses its original
+generation time for the full feed. Both sources retained every qualifying
+observation in this capture. These clocks still bound future releases that use
+the same editions.
+
 Small observed excerpts and notices are in fixtures/source-certification/.
 Full raw captures and clock/hash observations remain build-private. Final
 certifications bind observed fixture tests to the exact internal Go code.

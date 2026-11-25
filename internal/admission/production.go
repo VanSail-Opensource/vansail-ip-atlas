@@ -37,6 +37,7 @@ type SourceStatistics struct {
 	googleIPv4                                  uint64
 	nroProjection                               [32]byte
 	azureHostHash                               [32]byte
+	oldestASNRole                               time.Time
 	ID                                          string
 	Records                                     uint64
 	Kinds                                       [intelligence.RecordNetworkName]uint64
@@ -516,6 +517,10 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 		}
 		if p := v.Receipt.RIPENetworkProof; p != nil && (stat.ripeNameDigest == nil || !stat.ripeNameDigest.Matches(p) || stat.Records != p.Prefixes) {
 			return report, nil, errors.New("production inet6num names differ from both registry exports")
+		}
+		if s.Parser.ID == "ipverse-asn-usage-json" && (stat.Kinds[intelligence.RecordUsage-1] != stat.Records ||
+			!stat.oldestASNRole.After(asnUsageObservedAfter(state.EvaluatedAt, s.MaxAge))) {
+			return report, nil, errors.New("ASN role projection differs from the intake serving window")
 		}
 		if p := v.Receipt.GoogleNetworkProof; p != nil && (p.Prefixes != stat.Records || p.IPv4 != stat.googleIPv4 || p.Projection != stat.googleProjection) {
 			return report, nil, errors.New("network organization population differs from complete Google report")

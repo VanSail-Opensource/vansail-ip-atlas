@@ -1036,7 +1036,8 @@ sources:
     correlation_group: ipverse-as
   scope: asn
   notes: ASN primary-function usage context only. Bounded join to current observed origins; exact or prefix
-    usage takes priority and mixed MOAS stays unknown. Ignore publisher networkRole and all topology classifications.
+    usage takes priority and mixed MOAS stays unknown. Only include roles whose original observation plus max_stale
+    remains valid for more than 48h from intake. Ignore publisher networkRole and all topology classifications.
   publication_proof:
     kind: github_commit
     locator: https://api.github.com/repos/ipverse/as-metadata/commits?path=as.json&sha=master&per_page=1
@@ -1056,7 +1057,7 @@ sources:
   parser:
     id: ipverse-asn-usage-json
     schema: ipverse-as-category-json-v1
-    version: 1
+    version: 2
   public_fields:
   - usage_type
   field_mappings:

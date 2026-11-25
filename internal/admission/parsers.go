@@ -42,7 +42,7 @@ const (
 // enabled by this registry; reviewed per-source fixture evidence is still needed.
 func selectAdapter(source Source) (adapter, bool) {
 	version := uint32(1)
-	if source.Parser.ID == "ffraud-csv" {
+	if source.Parser.ID == "ffraud-csv" || source.Parser.ID == "ipverse-asn-usage-json" {
 		version = 2
 	}
 	if source.Parser.Version != version || source.Coverage != "mapping" && source.Coverage != "positive_only" {

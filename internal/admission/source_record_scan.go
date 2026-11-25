@@ -137,6 +137,15 @@ func (scan *sourceRecordScan) accept(record intelligence.NormalizedRecord) error
 		if observed := record.Usage.ObservedAt; !observed.IsZero() && (!now.Before(observed.Add(s.MaxAge)) || v.ExpiresAt.After(observed.Add(s.MaxAge))) {
 			return errors.New("production usage item expiry extended")
 		}
+		if s.Parser.ID == "ipverse-asn-usage-json" {
+			role := record.Usage
+			if !intelligence.IsPublicASN(role.ASN) || role.ObservedAt.IsZero() {
+				return errors.New("production ASN role lacks original ASN or item clock")
+			}
+			if stat.oldestASNRole.IsZero() || role.ObservedAt.Before(stat.oldestASNRole) {
+				stat.oldestASNRole = role.ObservedAt
+			}
+		}
 		stat.Usage = stat.Usage || x.Type != "" && x.Type != "unknown"
 	case intelligence.RecordNetworkName:
 		if scan.ripeNameDigest == nil || record.NetworkName.ModifiedAt.After(now) {

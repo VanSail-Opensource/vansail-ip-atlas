@@ -129,6 +129,8 @@ class BrowserShardTests(unittest.TestCase):
                        lambda r: r["cold_queries"][0].update(atlas_body_bytes=1),
                        lambda r: r["hot_queries"][0].update(context=4),
                        lambda r: r["hot_queries"][0].update(warmups=999),
+                       lambda r: r.update(graph_component_fixture={}),
+                       lambda r: r.update(measurement_shards=[]),
                        lambda r: r["hot_queries"][0]["samples_ms"].pop(),
                        lambda r: r["hot_queries"][1].update(samples_ms=[15]*1000),
                        lambda r: r["component_populations"].append({"sample": 1})):

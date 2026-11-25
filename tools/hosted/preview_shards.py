@@ -14,7 +14,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.hosted.candidate import check_preview_origin
-from tools.release_contract.acceptance import THEMES, WIDTHS, browser_gates, number, require_all
+from tools.release_contract.acceptance import GRAPH_FIXTURE_SHA256, THEMES, WIDTHS, browser_gates, number, require_all
 from tools.release_contract.contracts import ContractError, HASH, sha256
 from tools.release_contract.promotion import json_object
 
@@ -72,8 +72,13 @@ def identity(root, env):
     require(corpus.get("format_version") == 3 and corpus.get("mode") == "production"
             and corpus.get("release_id") == fields["release_id"] and len(corpus.get("queries", [])) == 10_000,
             "browser corpus differs from frozen candidate")
+    require(isinstance(memory.get("worker_sha256"), str) and HASH.fullmatch(memory["worker_sha256"]),
+            "missing measured worker identity")
     coverage = corpus["ipv4_network_coverage"]
-    fields.update(url=url, head_sha=head, corpus_release_id=corpus["release_id"], corpus_sha256=sha256(raw),
+    fields.update(scope="hosted-production-browser-v3", mode="production", release_scope="release-scope-v6",
+                  url=url, head_sha=head, corpus_release_id=corpus["release_id"], corpus_sha256=sha256(raw),
+                  graph_component_fixture={"scope": "isolated-synthetic-capacity", "fixture_sha256": GRAPH_FIXTURE_SHA256,
+                      "worker_sha256": memory["worker_sha256"], "candidate_bundle_sha256": fields["candidate_bundle_sha256"]},
                   corpus_availability=corpus["availability"], worst_case_worker_memory=memory,
                   corpus_features={"map": corpus["map_query"] is not None, "graph": corpus["graph_query"] is not None},
                   corpus_ipv4_network_coverage=None if coverage is None else
@@ -115,7 +120,8 @@ def validate_part(packet, shard, expected):
             and (packet["shard"], packet["head_sha"], packet["run_id"], packet["run_attempt"]) ==
             (shard, expected.head_sha, expected.run_id, expected.run_attempt), "wrong browser shard, run or attempt")
     report = packet["report"]
-    require(type(report) is dict and all(k in report and report[k] == v for k, v in expected.fields.items())
+    require(type(report) is dict and set(report) == set(expected.fields) | VARIABLE | {"errors", "browser", "protocol"}
+            and all(report[k] == v for k, v in expected.fields.items())
             and report.get("errors") == [] and all(type(report.get(k)) is list for k in ARRAYS),
             "browser shard changed candidate, corpus, memory proof or reported an error")
     host = report.get("execution_host")

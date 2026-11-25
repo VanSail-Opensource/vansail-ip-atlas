@@ -1475,6 +1475,19 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
+        "if": {"properties": {"id": {"const": "apple-private-relay"}}},
+        "then": {
+          "properties": {
+            "category": {"const": "proxy"},
+            "scope": {"const": "prefix"},
+            "coverage": {"const": {"kind": "positive_only", "scope": "prefix"}},
+            "fields": {"const": ["ip"]},
+            "signals": {"const": ["proxy"]},
+            "public_fields": {"const": ["reason_flags"]},
+            "field_mappings": {"const": {"ip": "reason_flags"}},
+            "assessment_layers": {"maxItems": 0}
+          }
+        },
         "properties": {
           "id": {
             "type": "string",

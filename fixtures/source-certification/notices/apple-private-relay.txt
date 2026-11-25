@@ -1,0 +1,14 @@
+Apple Inc. publishes the iCloud Private Relay egress IP ranges so that
+network operators can recognize connections from the service. VanSail IP
+Atlas uses the listed address prefixes as positive evidence of proxy egress.
+
+Apple retains its rights in the original material. Its website terms limit
+republication and automated access. The project records its educational-use
+decision and credits Apple. The review found no separate dataset license.
+
+Apple’s guidance for network operators
+https://developer.apple.com/icloud/prepare-your-network-for-icloud-private-relay/
+Published egress IP ranges
+https://mask-api.icloud.com/egress-ip-ranges.csv
+Apple Website Terms of Use
+https://www.apple.com/legal/internet-services/terms/site.html

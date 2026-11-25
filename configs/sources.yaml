@@ -944,6 +944,66 @@ sources:
     description: organization
     country-code: asn_country
   signals: []
+- id: apple-private-relay
+  evidence_family: apple-private-relay
+  source_group: apple-private-relay
+  category: proxy
+  admission: rights_approved
+  discovery: https://developer.apple.com/icloud/prepare-your-network-for-icloud-private-relay/
+  download:
+    url: https://mask-api.icloud.com/egress-ip-ranges.csv
+    format: csv
+    max_compressed_mib: 32
+  refresh:
+    interval: 6h
+    max_stale: 720h
+  fields: [ip]
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: Apple-Website-Terms-of-Use
+    distribution: user_authorized_educational_use
+    evidence_url: https://www.apple.com/legal/internet-services/terms/site.html
+    review_basis: Apple publishes the egress ranges for network operators to recognize
+      Private Relay traffic. The project records its educational-use decision for
+      these range memberships. Apple retains rights in the original material.
+    attribution_required: true
+    attribution:
+      name: Apple Inc.
+      text: Apple publishes the iCloud Private Relay egress ranges used by VanSail IP Atlas.
+      url: https://developer.apple.com/icloud/prepare-your-network-for-icloud-private-relay/
+      license_url: https://www.apple.com/legal/internet-services/terms/site.html
+  trust:
+    source_weight: 70
+    correlation_group: apple-private-relay
+  scope: prefix
+  notes: A listed prefix is positive evidence for Private Relay egress. Other CSV
+    columns are discarded. An unlisted address has no observation from this family.
+  publication_proof:
+    kind: snapshot_metadata
+    locator: https://mask-api.icloud.com/egress-ip-ranges.csv
+    field: egress.scope_change
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: missing
+    sha256: null
+    schema_observed: false
+    tested_at: null
+    path: fixtures/source-certification/observed-apple-private-relay.csv
+    parser: apple-private-relay
+    schema: apple-relay-egress-csv-v1
+    synthetic: false
+    payload_format: original
+  parser:
+    id: apple-private-relay
+    schema: apple-relay-egress-csv-v1
+    version: 1
+  public_fields: [reason_flags]
+  field_mappings:
+    ip: reason_flags
+  signals: [proxy]
 - id: x4b-vpn-v4
   evidence_family: x4b
   source_group: x4b

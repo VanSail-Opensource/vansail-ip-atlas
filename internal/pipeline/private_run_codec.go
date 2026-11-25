@@ -174,6 +174,7 @@ type privateRunReader struct {
 	decoder          *zstd.Decoder
 	encoded, decoded []byte
 	offset           int
+	shared           bool
 	ended            bool
 	failure          error
 }
@@ -184,6 +185,27 @@ func newPrivateRunReader(input io.Reader) (*privateRunReader, error) {
 		return nil, err
 	}
 	return &privateRunReader{input: input, decoder: decoder}, nil
+}
+
+// takeFrame lends a complete frame from the current verified segment.
+// Once a frame escapes, the decoder must use new storage for its next
+// segment. Cross-segment frames are assembled by the ordinary reader.
+func (r *privateRunReader) takeFrame(limit int64) []byte {
+	if r.failure != nil || r.ended {
+		return nil
+	}
+	remaining := r.decoded[r.offset:]
+	if len(remaining) < 4 {
+		return nil
+	}
+	n := int64(binary.LittleEndian.Uint32(remaining))
+	if n == 0 || n > limit+int64(len(sparseRunMarker)) || n > int64(len(remaining)-4) {
+		return nil
+	}
+	end := 4 + int(n)
+	r.offset += end
+	r.shared = true
+	return remaining[4:end:end]
 }
 
 func (r *privateRunReader) Read(p []byte) (int, error) {
@@ -245,6 +267,10 @@ func (r *privateRunReader) segment() error {
 	}
 	if err := validatePrivateRunFrame(r.encoded, uint64(decoded)); err != nil {
 		return err
+	}
+	if r.shared {
+		r.decoded = nil
+		r.shared = false
 	}
 	r.decoded = resizePrivateRun(r.decoded, int(decoded))
 	result, err := r.decoder.DecodeAll(r.encoded, r.decoded[:0:int(decoded)])

@@ -714,6 +714,17 @@ func (r *runReader) next() error {
 	return nil
 }
 
+// Split and scatter scans synchronously consume every frame before advancing.
+// Their child writers copy all bytes into their own segment buffers. Release
+// the consumed frame so the private decoder can reuse its bounded output.
+func (r *runReader) nextPartitionRow() error {
+	r.row, r.record = encoded{}, via3.PublicRecord{}
+	if r.file != nil && r.file.compressed != nil {
+		r.file.compressed.shared = false
+	}
+	return r.next()
+}
+
 type mergeHeap []*runReader
 
 func (h mergeHeap) Len() int { return len(h) }
@@ -1088,7 +1099,7 @@ func (c *compiler) split(path string, children *[2]scope) ([2]string, error) {
 	var cover netip.Prefix
 	var firstASN, lastASN uint32
 	for {
-		if err := r.next(); err == io.EOF {
+		if err := r.nextPartitionRow(); err == io.EOF {
 			break
 		} else if err != nil {
 			return paths, err

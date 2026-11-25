@@ -12,7 +12,7 @@ import (
 // escaped strings, reordered members, and newly introduced fields.
 // The caller checks UTF-8 before selecting either decoder.
 func decodeWriterGeo(data []byte) (*GeoEvidence, bool) {
-	r := geoFrameReader{remaining: data}
+	r := writerFrameReader{remaining: data}
 	if !r.take(`{"Version":3,"Kind":4,"Geo":{"Family":`) {
 		return nil, false
 	}
@@ -62,11 +62,11 @@ func decodeWriterGeo(data []byte) (*GeoEvidence, bool) {
 	return &v, true
 }
 
-type geoFrameReader struct {
+type writerFrameReader struct {
 	remaining []byte
 }
 
-func (r *geoFrameReader) take(literal string) bool {
+func (r *writerFrameReader) take(literal string) bool {
 	if !bytes.HasPrefix(r.remaining, []byte(literal)) {
 		r.remaining = nil
 		return false
@@ -75,7 +75,7 @@ func (r *geoFrameReader) take(literal string) bool {
 	return true
 }
 
-func (r *geoFrameReader) plainString() string {
+func (r *writerFrameReader) plainString() string {
 	if !r.take(`"`) {
 		return ""
 	}
@@ -96,7 +96,7 @@ func (r *geoFrameReader) plainString() string {
 
 // A token must pass both JSON syntax and the destination Go type. The strict
 // fallback handles unusual numeric spellings beyond the common length bound.
-func (r *geoFrameReader) numericToken(delimiter byte) []byte {
+func (r *writerFrameReader) numericToken(delimiter byte) []byte {
 	end := bytes.IndexByte(r.remaining, delimiter)
 	if end <= 0 || end > 32 || !json.Valid(r.remaining[:end]) {
 		r.remaining = nil
@@ -107,7 +107,7 @@ func (r *geoFrameReader) numericToken(delimiter byte) []byte {
 	return token
 }
 
-func (r *geoFrameReader) number() float64 {
+func (r *writerFrameReader) number() float64 {
 	value, err := strconv.ParseFloat(string(r.numericToken(',')), 64)
 	if err != nil {
 		r.remaining = nil

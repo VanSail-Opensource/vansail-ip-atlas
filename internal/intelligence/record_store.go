@@ -616,6 +616,9 @@ func decodeRecordFrame(data []byte) (NormalizedRecord, error) {
 		record := NormalizedRecord{Version: 3, Kind: RecordGeo, Geo: geo}
 		return record, record.Validate()
 	}
+	if record, ok := decodeWriterMRT(data); ok {
+		return record, record.Validate()
+	}
 	var record NormalizedRecord
 	if err := jsonv2.Unmarshal(data, &record, json.DefaultOptionsV1(), jsonv2.RejectUnknownMembers(true)); err != nil {
 		return record, err

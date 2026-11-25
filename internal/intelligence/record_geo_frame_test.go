@@ -10,7 +10,7 @@ import (
 	"unicode/utf8"
 )
 
-func verifyGeoFrame(t testing.TB, data []byte) {
+func verifyRecordFrame(t testing.TB, data []byte) {
 	t.Helper()
 	got, gotErr := decodeRecordFrame(data)
 	var want NormalizedRecord
@@ -20,7 +20,7 @@ func verifyGeoFrame(t testing.TB, data []byte) {
 	}
 	wantOK := wantErr == nil && utf8.Valid(data)
 	if (gotErr == nil) != wantOK || wantOK && !reflect.DeepEqual(got, want) {
-		t.Fatalf("geo decode mismatch for %q: %#v/%v, %#v/%v", data, got, gotErr, want, wantErr)
+		t.Fatalf("record decode mismatch for %q: %#v/%v, %#v/%v", data, got, gotErr, want, wantErr)
 	}
 }
 
@@ -52,7 +52,7 @@ func TestWriterGeoFrameParity(t *testing.T) {
 		if _, ok := decodeWriterGeo(value); !ok {
 			t.Fatalf("writer shape missed %q", value)
 		}
-		verifyGeoFrame(t, value)
+		verifyRecordFrame(t, value)
 	}
 	// Fallback must retain ordinary decoding of all valid wire variants and
 	// normal rejection of malformed input, including unknown and trailing data.
@@ -67,13 +67,13 @@ func TestWriterGeoFrameParity(t *testing.T) {
 		{`"Weight":`, `"Weight":25,"Weight":`}, {`"Current":true`, `"Current":null`},
 		{`"Current":true`, `"Current":true,"Unexpected":null`}, {"}}", "}} "}, {"}}", "}}x"},
 	} {
-		verifyGeoFrame(t, bytes.Replace(data, []byte(change[0]), []byte(change[1]), 1))
+		verifyRecordFrame(t, bytes.Replace(data, []byte(change[0]), []byte(change[1]), 1))
 	}
 	for n := range len(data) {
-		verifyGeoFrame(t, data[:n])
+		verifyRecordFrame(t, data[:n])
 		mutated := bytes.Clone(data)
 		mutated[n] ^= 1
-		verifyGeoFrame(t, mutated)
+		verifyRecordFrame(t, mutated)
 	}
 }
 
@@ -89,7 +89,7 @@ func FuzzWriterGeoFrameParity(f *testing.F) {
 	f.Add(b)
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if len(data) <= 4096 {
-			verifyGeoFrame(t, data)
+			verifyRecordFrame(t, data)
 		}
 	})
 }

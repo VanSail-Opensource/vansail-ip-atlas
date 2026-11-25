@@ -18,6 +18,8 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/atlas-setup
       - name: Check original representation and evidence
+        env:
+          ATLAS_GITHUB_METADATA_TOKEN: ${{ github.token }}
         run: |
           python - <<'PY'
           from pathlib import Path

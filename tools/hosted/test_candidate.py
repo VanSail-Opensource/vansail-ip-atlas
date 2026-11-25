@@ -1,14 +1,15 @@
 import io
+import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import tempfile
 import threading
-import urllib.request
+import urllib3
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from urllib.parse import urlsplit
 
-from tools.hosted.candidate import INVENTORY_WORKERS, _live_inventory_fetch, check_candidate, check_preview_origin, verify_preview
+from tools.hosted.candidate import INVENTORY_WORKERS, _inventory_pool, _live_inventory_fetch, check_candidate, check_preview_origin, verify_preview
 from tools.release_contract.contracts import ContractError, canonical_bytes, make_manifest, parse_canonical, sha256, tree_inventory
 from tools.release_contract.data_license import NOTICE
 
@@ -110,16 +111,22 @@ class CandidateTests(unittest.TestCase):
             root = Path(directory)
             files, report = self.fixture(root)
             class Response(io.BytesIO):
+                connection = None
                 def __init__(self, status, headers, body):
                     super().__init__(body)
                     self.status, self.headers = status, headers
+                def release_conn(self):
+                    pass
             calls = []
-            def open_request(request, timeout):
-                agent = request.get_header("User-agent", "Python-urllib/default")
+            def open_request(method, url, *, headers, redirect, retries, **kwargs):
+                self.assertEqual(method, "GET")
+                self.assertFalse(redirect)
+                self.assertFalse(retries)
+                agent = headers["User-Agent"]
                 calls.append(agent)
                 if agent.startswith("Python-urllib/"):
                     return Response(403, {}, b"error code: 1010")
-                path = urlsplit(request.full_url).path
+                path = urlsplit(url).path
                 if path == "/":
                     return Response(302, {"location": "/ip"}, b"")
                 name = path.removeprefix("/")
@@ -132,8 +139,8 @@ class CandidateTests(unittest.TestCase):
                 if name.startswith(("_atlas/objects/", "_atlas/releases/", "_atlas/credits/")):
                     headers["cache-control"] = "public, max-age=31536000, immutable"
                 return Response(200, headers, files[name])
-            with patch("tools.hosted.candidate.urllib.request.build_opener") as factory, patch("tools.hosted.candidate.time.time", return_value=150):
-                factory.return_value.open = open_request
+            with patch("tools.hosted.candidate._inventory_pool") as factory, patch("tools.hosted.candidate.time.time", return_value=150):
+                factory.return_value.request = open_request
                 result = verify_preview(root, report, "https://a01b23cd.atlas.pages.dev", 150)
             self.assertEqual(result["status"], "passed")
             self.assertTrue(all(agent.startswith("VanSail-IP-Atlas-Preview-QA/") for agent in calls))
@@ -143,12 +150,19 @@ class CandidateTests(unittest.TestCase):
             tree = Path(directory)
             files, report = self.fixture(tree, extra_objects=2 * INVENTORY_WORKERS)
             requests = []
+            connections = set()
             queue = threading.Barrier(INVENTORY_WORKERS, timeout=5)
             lock = threading.Condition()
             failures = {}
             active = peak = started = 0
 
             class Handler(BaseHTTPRequestHandler):
+                protocol_version = "HTTP/1.1"
+
+                def setup(self):
+                    super().setup()
+                    self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
                 def log_message(self, *args):
                     pass
 
@@ -159,6 +173,7 @@ class CandidateTests(unittest.TestCase):
                     is_object = name.startswith("_atlas/objects/")
                     with lock:
                         requests.append(path)
+                        connections.add(self.client_address)
                         if is_object:
                             started += 1
                             first_batch = started <= INVENTORY_WORKERS
@@ -170,6 +185,7 @@ class CandidateTests(unittest.TestCase):
                         if path == "/" or failures.get(path) == "redirect":
                             self.send_response(302)
                             self.send_header("Location", "/ip" if path == "/" else "/forbidden")
+                            self.send_header("Content-Length", "0")
                             self.end_headers()
                             return
                         name = {"ip/": "ip/index.html", "200": "200.html", "404": "404.html"}.get(name, name)
@@ -199,24 +215,20 @@ class CandidateTests(unittest.TestCase):
             thread = threading.Thread(target=server.serve_forever)
             thread.start()
             origin = "https://a01b23cd.atlas.pages.dev"
-            real_opener = urllib.request.build_opener
-
-            class LocalOpener:
-                # Route the verified deployment hostname to the fixture. Keep
-                # the actual urllib request, redirect handler and response stream.
-                def __init__(self, *handlers):
-                    self.inner = real_opener(*handlers)
-
-                def open(self, request, timeout):
-                    local = f"http://127.0.0.1:{server.server_port}{urlsplit(request.full_url).path}"
-                    return self.inner.open(urllib.request.Request(local, headers=dict(request.header_items())), timeout=timeout)
+            class LocalPool(urllib3.PoolManager):
+                # Exercise the actual pooled HTTP and response stream against
+                # loopback while keeping the immutable-origin validation.
+                def request(self, method, url, **kwargs):
+                    local = f"http://127.0.0.1:{server.server_port}{urlsplit(url).path}"
+                    return super().request(method, local, **kwargs)
 
             try:
-                with patch("tools.hosted.candidate.urllib.request.build_opener", LocalOpener), patch("tools.hosted.candidate.time.time", return_value=150):
+                with patch("tools.hosted.candidate._inventory_pool", side_effect=lambda origin: LocalPool(maxsize=INVENTORY_WORKERS, block=True)), patch("tools.hosted.candidate.time.time", return_value=150):
                     result = verify_preview(tree, report, origin, 150)
                     with lock:
                         self.assertTrue(lock.wait_for(lambda: active == 0, timeout=2))
                     self.assertEqual(peak, INVENTORY_WORKERS)
+                    self.assertEqual(len(connections), INVENTORY_WORKERS)
                     self.assertEqual(requests[0], "/")
                     self.assertEqual(len(set(requests)), result["verified_files"] + 1)
                     self.assertEqual(len(requests), len(set(requests)))
@@ -241,8 +253,12 @@ class CandidateTests(unittest.TestCase):
 
     def test_slow_body_checks_deadline_between_bounded_reads(self):
         class SlowResponse(io.BytesIO):
+            connection = None
             status = 200
             headers = {}
+
+            def release_conn(self):
+                pass
 
             def read1(self, size):
                 self.requested = size
@@ -251,13 +267,53 @@ class CandidateTests(unittest.TestCase):
 
         clock = [0]
         response = SlowResponse(bytes(200000))
-        with patch("tools.hosted.candidate.time.monotonic", side_effect=lambda: clock[0]), patch("tools.hosted.candidate.urllib.request.build_opener") as factory:
-            factory.return_value.open.return_value = response
-            fetch = _live_inventory_fetch("https://a01b23cd.atlas.pages.dev", 1)
-            with self.assertRaisesRegex(ContractError, "deadline exceeded"):
-                fetch("/object", 200000)
+        with patch("tools.hosted.candidate.time.monotonic", side_effect=lambda: clock[0]), patch("tools.hosted.candidate._inventory_pool") as factory:
+            factory.return_value.request.return_value = response
+            with _live_inventory_fetch("https://a01b23cd.atlas.pages.dev", 1) as fetch:
+                with self.assertRaisesRegex(ContractError, "deadline exceeded"):
+                    fetch("/object", 200000)
+            factory.return_value.clear.assert_called_once()
             self.assertEqual(response.requested, 64 * 1024)
             self.assertTrue(response.closed)
+
+    def test_https_proxy_authentication_stays_on_the_proxy(self):
+        origin = "https://a01b23cd.atlas.pages.dev"
+        proxy = "http://user:p%40ss@proxy.test:3128"
+        with (patch("tools.hosted.candidate.urllib.request.getproxies", return_value={"https": proxy}),
+              patch("tools.hosted.candidate.urllib.request.proxy_bypass", return_value=False),
+              patch("tools.hosted.candidate.urllib3.ProxyManager") as factory):
+            _inventory_pool(origin)
+            self.assertEqual(factory.call_args.args, ("http://proxy.test:3128",))
+            headers = factory.call_args.kwargs["proxy_headers"]
+            self.assertEqual(headers, urllib3.make_headers(proxy_basic_auth="user:p@ss"))
+            self.assertNotIn("headers", factory.call_args.kwargs)
+        with (patch("tools.hosted.candidate.urllib.request.getproxies", return_value={"https": proxy}),
+              patch("tools.hosted.candidate.urllib.request.proxy_bypass", return_value=True)):
+            self.assertIs(type(_inventory_pool(origin)), urllib3.PoolManager)
+
+    def test_pooled_get_restarts_interrupted_body_and_rejects_tls_errors(self):
+        partial, complete = MagicMock(), MagicMock()
+        partial.read1.side_effect = [b"partial", urllib3.exceptions.ProtocolError("disconnected")]
+        complete.read1.side_effect = [b"complete", b""]
+        complete.status, complete.headers = 200, {"X-Observed": "yes"}
+        origin = "https://a01b23cd.atlas.pages.dev"
+        with (patch("tools.hosted.candidate._inventory_pool") as factory,
+              patch("tools.hosted.candidate.time.monotonic", return_value=1)):
+            pool = factory.return_value
+            pool.request.side_effect = [partial, complete]
+            with _live_inventory_fetch(origin, 5) as fetch:
+                self.assertEqual(fetch("/file", 8), (200, {"x-observed": "yes"}, 8, sha256(b"complete")))
+            self.assertEqual(pool.request.call_count, 2)
+            for response in (partial, complete):
+                response.close.assert_called_once()
+                response.release_conn.assert_called_once()
+            pool.clear.assert_called_once()
+            pool.reset_mock()
+            pool.request.side_effect = urllib3.exceptions.SSLError("invalid certificate")
+            with _live_inventory_fetch(origin, 5) as fetch, self.assertRaises(ContractError):
+                fetch("/file", 8)
+            pool.request.assert_called_once()
+            pool.clear.assert_called_once()
 
     def test_preview_verifies_every_served_byte_and_effective_headers(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -86,3 +86,80 @@ func TestStableSeedPreservesUnchangedInputPartitionIdentity(t *testing.T) {
 		t.Fatal("one changed input shifted an unrelated seed chunk")
 	}
 }
+
+func TestRoutedRiskRootsRetainMixedGroupsAndKeepAllPublicParts(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	clock := time.Unix(1700000000, 0).UTC()
+	v4 := netip.MustParsePrefix("9.0.0.0/24")
+	v6 := netip.MustParsePrefix("2001:4860::/32")
+	geo := func(prefix netip.Prefix, city string) intelligence.NormalizedRecord {
+		return intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordGeo, Geo: &intelligence.GeoEvidence{
+			Prefix: prefix, PhysicalCountry: "US", City: city, Family: "fixture", Weight: 70, Current: true,
+		}}
+	}
+	origin := intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordOrigins, Origins: &intelligence.OriginMapping{Prefix: v4, Origins: []uint32{13335}}}
+	exact := intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordEvidence, Evidence: &intelligence.Evidence{
+		Address: v6.Addr(), Scope: intelligence.Exact, Family: "fixture", Signal: "abuse", Weight: 80, SourcePublishedAt: clock, Current: true,
+	}}
+	state := intelligence.BuildState{Version: 1, PolicyHash: [32]byte{1}, EvaluatedAt: clock}
+	for i, rows := range [][]intelligence.NormalizedRecord{
+		{geo(v4, "Omitted v4"), geo(v6, "Omitted v6")},
+		{geo(v4, "Retained v4"), origin},
+		{geo(v6, "Retained v6"), exact},
+	} {
+		state.Sources = append(state.Sources, intelligence.StoredSource{ID: []string{"geo", "v4-mixed", "v6-mixed"}[i], ExpiresAt: clock.Add(time.Hour), Records: rows})
+	}
+	state = partitionSpatialFixture(t, root, state)
+	for attempt := range 2 {
+		spool, err := newBulkSpool(root, clock, state.PolicyHash, 1<<30, func() uint64 { return 0 })
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(spool.root)
+		spool.reuse, err = openSpatialCache(ctx, root, [32]byte{4}, 64<<20, func(uint64) bool { return true })
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer spool.reuse.Abort()
+		roots, _, err := spool.seedStable(ctx, root, state)
+		if err != nil {
+			t.Fatal(err)
+		}
+		risk, separate := spool.routedRiskRoots(roots)
+		if !separate || len(risk) != 2 || len(roots) != 2 {
+			t.Fatal("expected two filtered risk roots")
+		}
+		for i, bucket := range risk {
+			if !bucket.riskOnly || roots[i].riskOnly || !roots[i].active || len(roots[i].parts) != 2 || len(bucket.parts) != 1 {
+				t.Fatalf("risk projection lost original or mixed group on attempt %d, family %d", attempt, i)
+			}
+			var seen []intelligence.RecordKind
+			if err := spool.walk(ctx, bucket.parts, func(record intelligence.NormalizedRecord) error {
+				seen = append(seen, record.Kind)
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			want := [][]intelligence.RecordKind{{intelligence.RecordGeo, intelligence.RecordOrigins}, {intelligence.RecordGeo, intelligence.RecordEvidence}}
+			if !reflect.DeepEqual(seen, want[i]) {
+				t.Fatalf("mixed input rows changed on attempt %d: %v", attempt, seen)
+			}
+			bucket.active = false
+		}
+		if err := spool.gc(ctx); err != nil {
+			t.Fatal(err)
+		}
+		for _, public := range roots {
+			if err := spool.verifyParts(ctx, public.parts); err != nil {
+				t.Fatal("risk cleanup removed public inputs", err)
+			}
+		}
+		if err := spool.reuse.Prepare(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := spool.reuse.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

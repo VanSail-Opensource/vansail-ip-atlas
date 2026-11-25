@@ -27,6 +27,7 @@ type bulkBucket struct {
 	asn         bool
 	parts       []intelligence.RecordPartition
 	riskDigest  [32]byte
+	riskOnly    bool
 	active      bool
 	cover       netip.Prefix
 	scattered   [2]*bulkBucket
@@ -37,6 +38,7 @@ type bulkSpool struct {
 	root         string
 	store        *intelligence.RecordStore
 	canonical    map[[32]byte]intelligence.CanonicalPartition
+	riskParts    map[[32]byte]bool
 	clock        time.Time
 	binding      [32]byte
 	maximum      uint64
@@ -197,7 +199,7 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 		return intelligence.BuildState{}, err
 	}
 	overflow = errBulkPartition
-	if !b.asn && len(s.usage) > 0 {
+	if !b.asn && !b.riskOnly && len(s.usage) > 0 {
 		origins := map[netip.Prefix][]uint32{}
 		for _, r := range source.Records {
 			if r.Origins != nil {
@@ -666,11 +668,13 @@ func (s *bulkSpool) seedStable(ctx context.Context, workspace string, state inte
 		return nil, nil, err
 	}
 	s.usage = asnUsageIndex{}
+	s.riskParts = map[[32]byte]bool{}
 	var categories [6][]intelligence.RecordPartition
 	for _, source := range state.Sources {
 		type seedGroup struct {
 			entry spatialCacheEntry
 			hit   bool
+			risk  [2]bool
 		}
 		var groups []seedGroup
 		var current *seedGroup
@@ -688,6 +692,9 @@ func (s *bulkSpool) seedStable(ctx context.Context, workspace string, state inte
 			remaining = source.RecordPartitions[0].Records
 		}
 		appendRecord := func(category int, record intelligence.NormalizedRecord) error {
+			if category < 2 && exactRiskInput(record) {
+				current.risk[category] = true
+			}
 			if current.hit {
 				return nil
 			}
@@ -773,6 +780,11 @@ func (s *bulkSpool) seedStable(ctx context.Context, workspace string, state inte
 		for _, group := range groups {
 			for i, parts := range group.entry.Seed.Parts {
 				categories[i] = append(categories[i], parts...)
+				if i < 2 && group.risk[i] {
+					for _, part := range parts {
+						s.riskParts[part.SHA256] = true
+					}
+				}
 			}
 			if s.reuse != nil && group.entry.Key != ([32]byte{}) {
 				if _, err := s.reuse.Retain(ctx, group.entry, s.cachePartFiles(group.entry.Seed.Parts[:]...)); err != nil {

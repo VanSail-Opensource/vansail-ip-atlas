@@ -14,7 +14,8 @@ The private `spatial-cache-v1` inventory records separate dependencies for each 
 | Seed | Category streams for one original normalized partition | Complete original partition descriptor, including byte hash and counters |
 | Scatter | Four-level spatial redistribution for one input partition | Complete ordered input descriptors and parent prefix |
 | Raw split | Subdivision required by the distinct raw records before adding ASN roles or coverage | Scope, ordered physical partition descriptors and collection limits. Each hit verifies the current bytes of every input object. |
-| Risk | A fitting leaf's ordered exact-address risk events, or its split decision | Scope, ordered descriptors, fit limits, policy, evaluation clock, global usage and coverage |
+| Risk | A fitting leaf's ordered exact-address risk events, or its split decision | Scope, ordered descriptors, fit limits, scoring policy and evaluation clock. Shared public geometry also binds the joined roles. |
+| Risk input | A fitting leaf's exact-address events across unrelated spatial edits | Exact evidence, prefix-to-origin observations, their canonical order, scope, exact-layer scoring policy and evaluation clock |
 | Public | A fitting leaf's public records, or its split decision | Risk dependencies, final global ASN contexts, RPKI completeness, publisher observation time and coverage deadline |
 | Compiled | Final public objects and routes for a public partition subtree | Actual complete public-run bytes, scope and actual ASN prefix-provider bytes and index |
 
@@ -28,6 +29,13 @@ shift later category chunks. Every source still completes its full strict
 normalized walk before any cached category stream is adopted. That walk rebuilds
 usage, relationship, known-ASN, edge, exact-record, path and prefix side indexes
 from the current state. Withdrawn sources cannot leave a cached side index.
+
+During that same walk, the compiler records which IPv4 and IPv6 seed groups
+contain exact evidence or prefix-to-origin observations. The ASN risk pass
+can process those groups separately. It keeps every record in a mixed group
+and accumulates routed risk in canonical address order. The public pass uses
+all original groups and still applies the full record, join and geometry limits.
+
 
 Spatial reuse retains the existing binary traversal, exact-record deduplication,
 encoded fit accounting, path population cap, IPv4 `/24` floor and inherited

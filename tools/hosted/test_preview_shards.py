@@ -43,9 +43,11 @@ def part(expected, shard):
         "worker_memory_samples": [{"supported": True, "at_ms": 400, "rss_bytes": 200, "processes": 3}],
         "browser_process_tree_rss_peak_bytes": 200}
     if shard == "queries":
-        report["cold_queries"] = [{"sample": i, "stratum": expected.cold_strata[i-1], "atlas_body_bytes": 150,
+        report["cold_queries"] = [{"sample": i, "stratum": expected.cold_strata[i-1], "atlas_body_bytes": 180,
             "responses": [{"path": "/_atlas/current.json", "body_bytes": 100},
-                          {"path": "/_atlas/releases/x/manifest.json", "body_bytes": 50}]} for i in range(1, 101)]
+                          {"path": "/_atlas/releases/x/manifest.json", "body_bytes": 50},
+                          {"path": "/dataset-credits.json", "body_bytes": 12},
+                          {"path": "/_atlas/credits/" + "b"*64 + ".json", "body_bytes": 18}]} for i in range(1, 101)]
         report["hot_queries"] = [{"context": i, "warmups": 1000, "samples_ms": [3] * 1000,
                                   "timing": "actual-worker-indexed-lookups"} for i in range(1, 4)]
     else:

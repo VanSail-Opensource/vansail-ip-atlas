@@ -106,3 +106,57 @@ func FuzzWriterGeoFrameParity(f *testing.F) {
 		}
 	})
 }
+
+func TestCanonicalGeographicComparisonChecksWriterSpelling(t *testing.T) {
+	base := GeoEvidence{Family: "source", Weight: 1, Prefix: netip.MustParsePrefix("2001:db8::/32"), PhysicalCountry: "FR", Region: "Île-de-France", City: "Paris", Coordinates: &Coordinates{48.85, 2.35, 3}, Current: true}
+	for _, weight := range []float64{1, 0, math.Copysign(0, -1), .000001, 999999999999999900000} {
+		v := base
+		v.Weight = weight
+		record := NormalizedRecord{Version: 3, Kind: RecordGeo, Geo: &v}
+		canonical, err := json.Marshal(record)
+		if err != nil || !canonicalWriterGeo(canonical, &v) {
+			t.Fatalf("writer spelling missed for %v: %v", weight, err)
+		}
+	}
+	record := NormalizedRecord{Version: 3, Kind: RecordGeo, Geo: &base}
+	canonical, _ := json.Marshal(record)
+	for _, pair := range [][2]string{{`"Weight":1`, `"Weight":1.0`}, {`"Weight":1`, `"Weight":1e0`}, {`"Latitude":48.85`, `"Latitude":48.850`}, {`{"Version":`, `{ "Version":`}, {`"Paris"`, `"Par\u0069s"`}, {`2001:db8::/32`, `2001:0db8::/32`}, {`"Current":true`, `"Current": true`}} {
+		changed := bytes.Replace(canonical, []byte(pair[0]), []byte(pair[1]), 1)
+		if bytes.Equal(canonical, changed) {
+			t.Fatalf("test did not change %q", pair[0])
+		}
+		decoded, err := decodeRecordFrame(changed)
+		if err != nil || canonicalWriterGeo(changed, decoded.Geo) {
+			t.Fatalf("accepted alternate spelling %q: %v", pair[1], err)
+		}
+	}
+	for _, city := range []string{"A&B", "<Paris>", "quote\"", "slash\\", "line\n", "A\u2028B", "A\u2029B"} {
+		v := base
+		v.City = city
+		r := NormalizedRecord{Version: 3, Kind: RecordGeo, Geo: &v}
+		encoded, _ := json.Marshal(r)
+		if canonicalWriterGeo(encoded, &v) {
+			t.Fatal("escaped geographic label left the ordinary encoder", city)
+		}
+	}
+}
+
+func FuzzCanonicalGeographicWriterComparison(f *testing.F) {
+	base := NormalizedRecord{Version: 3, Kind: RecordGeo, Geo: &GeoEvidence{Family: "family", Weight: 1, Prefix: netip.MustParsePrefix("1.2.3.0/24"), PhysicalCountry: "US", Current: true}}
+	encoded, _ := json.Marshal(base)
+	f.Add(encoded)
+	f.Add(bytes.Replace(encoded, []byte(`"Weight":1`), []byte(`"Weight":1.0`), 1))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) > 64<<10 {
+			return
+		}
+		r, err := decodeRecordFrame(data)
+		if err != nil || r.Geo == nil || !canonicalWriterGeo(data, r.Geo) {
+			return
+		}
+		canonical, err := json.Marshal(r)
+		if err != nil || !bytes.Equal(canonical, data) {
+			t.Fatal("accepted bytes differ from standard writer")
+		}
+	})
+}

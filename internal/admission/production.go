@@ -32,13 +32,14 @@ type Capability struct {
 	Required   bool     `json:"required"`
 }
 type SourceStatistics struct {
+	ripeNameDigest                              *intelligence.RIPENetworkNameDigest
 	googleProjection                            [32]byte
 	googleIPv4                                  uint64
 	nroProjection                               [32]byte
 	azureHostHash                               [32]byte
 	ID                                          string
 	Records                                     uint64
-	Kinds                                       [intelligence.RecordNetworkOrganization]uint64
+	Kinds                                       [intelligence.RecordNetworkName]uint64
 	OriginObservations, UnknownOriginBoundaries uint64
 	Family                                      string
 	Country, City, Coordinates, Usage, Exact    bool
@@ -398,6 +399,9 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 		} else if s.Parser.ID == "mrt-table-dump-v2" {
 			return report, nil, errors.New("production MRT snapshot proof missing")
 		}
+		if ripeNamesSource(s) != (r.RIPENetworkProof != nil) || r.RIPENetworkProof != nil && (r.ProofKind != "embedded" || r.RIPENetworkProof.Validate(state.EvaluatedAt, r.PublishedAt, r.PayloadHash) != nil) {
+			return report, nil, errors.New("production RIPE inet6num proof invalid")
+		}
 		if googleNetworkSource(s) != (r.GoogleNetworkProof != nil) || r.GoogleNetworkProof != nil && (r.ProofKind != "embedded" || r.GoogleNetworkProof.Validate(state.EvaluatedAt, r.PublishedAt, r.PayloadHash) != nil) {
 			return report, nil, errors.New("production Google network report proof invalid")
 		}
@@ -497,6 +501,7 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 			if scan.stat.Family != "" && scan.stat.Family != family {
 				return report, nil, errors.New("production evidence independence changed")
 			}
+			scan.stat.ripeNameDigest = scan.ripeNameDigest
 			if scan.googleDigest != nil {
 				_, scan.stat.googleProjection = scan.googleDigest.Sum()
 			}
@@ -508,6 +513,9 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 			}
 			stat = scan.stat
 			stat.Family = family
+		}
+		if p := v.Receipt.RIPENetworkProof; p != nil && (stat.ripeNameDigest == nil || !stat.ripeNameDigest.Matches(p) || stat.Records != p.Prefixes) {
+			return report, nil, errors.New("production inet6num names differ from both registry exports")
 		}
 		if p := v.Receipt.GoogleNetworkProof; p != nil && (p.Prefixes != stat.Records || p.IPv4 != stat.googleIPv4 || p.Projection != stat.googleProjection) {
 			return report, nil, errors.New("network organization population differs from complete Google report")

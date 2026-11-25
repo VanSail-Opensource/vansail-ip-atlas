@@ -34,6 +34,7 @@ const (
 	rootServiceZone
 	azureAppService
 	googleNetwork
+	ripeNetworkNames
 	nroRegistration
 )
 
@@ -49,6 +50,8 @@ func selectAdapter(source Source) (adapter, bool) {
 		return 0, false
 	}
 	switch source.Parser.ID {
+	case intelligence.RIPENetworkNameSourceID:
+		return ripeNetworkNames, ripeNamesSource(source)
 	case "google-network-organization":
 		return googleNetwork, googleNetworkSource(source)
 	case "nro-delegated-registration":
@@ -149,6 +152,10 @@ func parsePayload(ctx context.Context, file *os.File, size int64, source Source,
 func parsePayloadTo(ctx context.Context, file *os.File, size int64, source Source, implementation adapter, published time.Time, maxRecords int, emit func(intelligence.NormalizedRecord) error, asnStats ...*intelligence.ASNIdentityStats) error {
 	if emit == nil || maxRecords <= 0 || implementation == subscriptionSyntax {
 		return errors.New("bounded supported parser and record sink required")
+	}
+	if implementation == ripeNetworkNames {
+		_, _, _, err := readRIPENamesArchive(ctx, file, source, published, maxRecords, ripeNamesDecoded, false, emit)
+		return err
 	}
 	if implementation == ipapiCityZIP {
 		return parseIPAPIArchive(ctx, file, size, source, maxRecords, emit)

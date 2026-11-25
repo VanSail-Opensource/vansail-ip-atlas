@@ -93,6 +93,10 @@ func (e *Engine) certify(ctx context.Context, source Source, adapter adapter, no
 	// Review evidence is necessary, but not sufficient: the current adapter must
 	// still successfully parse the exact reviewed fixture on this run.
 	count := uint64(0)
+	if fixture.PayloadFormat == "ripe-inet6num-excerpt" {
+		_, err := validateRIPENamesExcerpt(ctx, file, source, adapter, tested)
+		return err
+	}
 	if fixture.PayloadFormat == "nro-delegated-excerpt" {
 		_, err := validateNROExcerpt(ctx, file, source, adapter, tested)
 		return err

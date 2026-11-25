@@ -282,6 +282,7 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 	if err != nil {
 		return deny("invalid", "payload_integrity_failed")
 	}
+	var ripeNames *intelligence.RIPEIPv6NetworkProof
 	var googleProof *intelligence.GoogleNetworkProof
 	var nroProof *intelligence.NRORegistrationProof
 	var geoProof *intelligence.GeoSourceProof
@@ -308,6 +309,11 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		caidaProof, err = verifyCAIDAFile(ctx, payload, size, source, assetURL, caidaIndexHash, hash, now)
 		if err == nil {
 			published = caidaProof.FirstObservedAt
+		}
+	} else if adapter == ripeNetworkNames {
+		ripeNames, err = e.verifyRIPENames(ctx, payload, source, hash, now)
+		if err == nil {
+			published = ripeNames.PublishedAt
 		}
 	} else if adapter == googleNetwork {
 		googleProof, err = verifyGoogleNetwork(ctx, payload, source, hash, now)
@@ -376,7 +382,7 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 	var records []intelligence.NormalizedRecord
 	var partitions []intelligence.RecordPartition
 	parserClock := published
-	if adapter == rpkiClientJSON {
+	if adapter == rpkiClientJSON || adapter == ripeNetworkNames {
 		parserClock = now
 	}
 	var azureHosts map[netip.Addr]bool
@@ -436,6 +442,7 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		ProofPayloadHash: hash, NormalizationPolicyHash: normalizationPolicyHash,
 		ParserVersion: source.Parser.Version, SchemaVersion: 3, PublishedAt: published, ContentValidUntil: contentValidUntil,
 		ProofKind: source.Publication.Kind, PayloadVerified: true, SchemaVerified: true, ImmutableCommitBound: source.Publication.Kind == "github_commit", Records: records, RecordPartitions: partitions}
+	result.Snapshot.RIPENetworkProof = ripeNames
 	result.Snapshot.GoogleNetworkProof = googleProof
 	result.Snapshot.NROProof = nroProof
 	result.Snapshot.AzureProof = azureProof

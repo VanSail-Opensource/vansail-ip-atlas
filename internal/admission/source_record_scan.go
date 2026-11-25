@@ -13,21 +13,25 @@ import (
 // typed records. One family can be observed per source. Its final canonical
 // family is checked once all receipt payload aliases are known.
 type sourceRecordScan struct {
-	googleDigest  *intelligence.GoogleNetworkDigest
-	nroDigest     *intelligence.NRORegistrationDigest
-	rootAddresses rootAddressSet
-	azureHosts    map[netip.Addr]bool
-	source        Source
-	clocks        intelligence.SourceRecordClocks
-	now           time.Time
-	stat          SourceStatistics
-	err           error
+	ripeNameDigest *intelligence.RIPENetworkNameDigest
+	googleDigest   *intelligence.GoogleNetworkDigest
+	nroDigest      *intelligence.NRORegistrationDigest
+	rootAddresses  rootAddressSet
+	azureHosts     map[netip.Addr]bool
+	source         Source
+	clocks         intelligence.SourceRecordClocks
+	now            time.Time
+	stat           SourceStatistics
+	err            error
 }
 
 func newSourceRecordScan(s Source, clocks intelligence.SourceRecordClocks, now time.Time) *sourceRecordScan {
 	s.Signals = append([]string(nil), s.Signals...)
 	s.PublicFields = append([]string(nil), s.PublicFields...)
 	scan := &sourceRecordScan{source: s, clocks: clocks, now: now, stat: SourceStatistics{ID: clocks.ID, Signals: map[intelligence.Signal]bool{}}}
+	if ripeNamesSource(s) {
+		scan.ripeNameDigest = new(intelligence.RIPENetworkNameDigest)
+	}
 	if googleNetworkSource(s) {
 		scan.googleDigest = new(intelligence.GoogleNetworkDigest)
 	}
@@ -47,6 +51,11 @@ func (scan *sourceRecordScan) accept(record intelligence.NormalizedRecord) error
 	s, v, now, stat := &scan.source, &scan.clocks, scan.now, &scan.stat
 	if err := record.Validate(); err != nil {
 		return err
+	}
+	if scan.ripeNameDigest != nil {
+		if err := scan.ripeNameDigest.Add(record); err != nil {
+			return err
+		}
 	}
 	if scan.googleDigest != nil {
 		if err := scan.googleDigest.Add(record); err != nil {
@@ -129,6 +138,10 @@ func (scan *sourceRecordScan) accept(record intelligence.NormalizedRecord) error
 			return errors.New("production usage item expiry extended")
 		}
 		stat.Usage = stat.Usage || x.Type != "" && x.Type != "unknown"
+	case intelligence.RecordNetworkName:
+		if scan.ripeNameDigest == nil || record.NetworkName.ModifiedAt.After(now) {
+			return errors.New("production inet6num source or object clock invalid")
+		}
 	case intelligence.RecordNetworkOrganization:
 		if scan.googleDigest == nil {
 			return errors.New("production network organization source binding invalid")

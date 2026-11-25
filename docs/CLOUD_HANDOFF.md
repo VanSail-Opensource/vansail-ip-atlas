@@ -24,6 +24,20 @@ requires the fifteen build samples, the full frozen preview and canonical
 Pages promotion. The dated sections below record earlier checkpoints.
 [Twenty-source hosted measurements](https://github.com/VanSail-Opensource/vansail-ip-atlas/actions/runs/45557395254)
 
+The first protected twenty-source candidate completed compilation, current-time
+revalidation, query corpus generation and website generation. It stopped during
+static packaging. A full decoded-object replay reproduced two ASN labels that
+contained the private identifier of an unrelated input. PR integration now runs
+the same website packaging and public inventory checks on the actual compiled
+data before merge. Its runner retains only aggregate reports after the check.
+[Protected candidate](https://github.com/VanSail-Opensource/vansail-ip-atlas/actions/runs/45567549937)
+
+The initial 21-source integration included all 21 publishers and 38,400,332
+normalized observations. Compilation took 20 minutes 46.615 seconds and
+produced 5,622 objects totaling 127,464,879 bytes. Across 100,000 full native
+lookups, p50 was 4.809 µs, p95 was 13.462 µs and p99 was 25.124 µs.
+[21-source integration](https://github.com/VanSail-Opensource/vansail-ip-atlas/actions/runs/45563664177)
+
 ## Approved decisions
 
 - Retain all views and all twelve detection categories. Use versioned observed

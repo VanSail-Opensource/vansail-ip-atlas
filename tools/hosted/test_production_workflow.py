@@ -47,6 +47,15 @@ class CandidateClockTests(unittest.TestCase):
                 with self.subTest(field=field), self.assertRaises(ContractError):
                     workflow.preview_origin()
 
+    def test_pr_package_verifies_the_same_static_tree_with_its_own_real_receipt(self):
+        with patch.object(workflow, 'ROOT', self.root), patch.object(workflow, 'run') as run:
+            workflow.integration_package()
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(commands[-2], ['python', 'tools/release_contract/prepare_static.py', '--atlas',
+            self.root/'build-private/integration-production-atlas', '--qualification-receipt',
+            self.private/'integration-production-receipt.json'])
+        self.assertEqual(commands[-1], ['python', 'tools/hosted/candidate.py', '--public', 'web/.output/public'])
+
     def test_delayed_candidate_uses_intake_clock_only_for_compilation(self):
         with patch.object(workflow, 'ROOT', self.root), patch.dict(os.environ, self.environment), \
                 patch.object(workflow.time, 'time', return_value=self.evaluated_at + 600), \
@@ -130,6 +139,11 @@ class CandidateClockTests(unittest.TestCase):
         self.assertEqual(workflow.failure_category(log, len(previous)), 'source-capability')
         log.write_bytes(previous + b'x' * 70000 + b'\npipeline scratch ceiling exceeded\n')
         self.assertEqual(workflow.failure_category(log, len(previous)), 'scratch-budget')
+        label = b'FAIL: static candidate: forbidden public data string'
+        log.write_bytes(previous + label + b'\n')
+        self.assertEqual(workflow.failure_category(log, len(previous)), 'public-data-string')
+        log.write_bytes(previous + label + b': private-value\n')
+        self.assertEqual(workflow.failure_category(log, len(previous)), 'command-failed')
 
     def test_intake_waits_for_longer_exact_head_integration_without_relaxing_identity(self):
         head = 'a' * 40

@@ -50,6 +50,11 @@ SAFE_FAILURES={
     'resource_limit':'object-resource-profile',
     'partition_budget':'object-partition-budget',
     'pipeline requires at least one public fact':'empty-public-data',
+    'FAIL: static candidate: forbidden public data string':'public-data-string',
+    'FAIL: static candidate: forbidden public metadata key':'public-metadata-key',
+    'FAIL: static candidate: Go binary validation failed':'public-object-validation',
+    'FAIL: static candidate: production source-store revalidation failed':'source-store-revalidation',
+    'FAIL: static candidate: atlas contains missing, private or unreferenced extra files':'atlas-inventory',
 }
 
 COMPILE_PHASES=frozenset({'stage','config','qualification','tier1','build','boundary',
@@ -356,6 +361,21 @@ def intake_clock():
         raise ContractError('intake clock is outside the current time interval')
     return clock
 
+def package_site(atlas, receipt):
+    pnpm=['npm','exec','--yes','--package','pnpm@11.28.12','--','pnpm','--dir','web']
+    with (ROOT/'build-private/software-license-metadata.json').open('wb') as output:
+        run([*pnpm,'licenses','list','--prod','--json'],output=output)
+    run(['python','tools/release_contract/software_licenses.py'])
+    run([*pnpm,'typecheck']);run([*pnpm,'generate'])
+    run(['python','tools/release_contract/software_licenses.py','--bundle-audit','build-private/software-bundle-audit.json','--require-runtime-review'])
+    run(['python','tools/release_contract/prepare_static.py','--atlas',atlas,'--qualification-receipt',receipt])
+
+
+def integration_package():
+    package_site(ROOT/'build-private/integration-production-atlas',ROOT/'.atlas-private/integration-production-receipt.json')
+    run(['python','tools/hosted/candidate.py','--public','web/.output/public'])
+
+
 def candidate():
     clock=intake_clock();update_context('candidate');private=ROOT/'.atlas-private'
     receipt=private/'production-receipt.json';atlas=ROOT/'build-private/production-atlas'
@@ -364,13 +384,7 @@ def candidate():
     # at the current wall clock before any corpus or public packaging is built.
     run(['build-private/atlas','verify-production','-workspace',ROOT,'-atlas',atlas,'-receipt',receipt])
     run(['build-private/atlas','corpus','-atlas',atlas,'-out',private/'production-browser-corpus.json'])
-    pnpm=['npm','exec','--yes','--package','pnpm@11.28.12','--','pnpm','--dir','web']
-    with (ROOT/'build-private/software-license-metadata.json').open('wb') as output:
-        run([*pnpm,'licenses','list','--prod','--json'],output=output)
-    run(['python','tools/release_contract/software_licenses.py'])
-    run([*pnpm,'typecheck']);run([*pnpm,'generate'])
-    run(['python','tools/release_contract/software_licenses.py','--bundle-audit','build-private/software-bundle-audit.json','--require-runtime-review'])
-    run(['python','tools/release_contract/prepare_static.py','--atlas',atlas,'--qualification-receipt',receipt])
+    package_site(atlas,receipt)
     run(['go','run','./tools/hosted/lookupbench','-atlas',atlas,'-corpus',private/'production-browser-corpus.json','-report','reports/production-lookup.json'])
     run(['python','tools/hosted/production_workflow.py','native-gate'])
     run(['python','tools/hosted/candidate.py','--public','web/.output/public'])
@@ -439,7 +453,7 @@ def promotion():
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('operation',choices=('context','intake','candidate','preview','preview-deploy','preview-shard','preview-join','promotion','dispatch-benchmarks','native-gate','benchmark-case','benchmark-resolve','benchmark-join','cleanup-private'))
+    parser.add_argument('operation',choices=('context','intake','candidate','integration-package','preview','preview-deploy','preview-shard','preview-join','promotion','dispatch-benchmarks','native-gate','benchmark-case','benchmark-resolve','benchmark-join','cleanup-private'))
     parser.add_argument('--kind',choices=STAGES)
     parser.add_argument('--upstream-run-id',type=int)
     parser.add_argument('--scenario',choices=('cold_full','warm_unchanged','warm_changed','clock_advance','withdrawal'))

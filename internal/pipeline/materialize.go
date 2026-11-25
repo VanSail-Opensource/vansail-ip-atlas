@@ -158,7 +158,7 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 					return errors.New("bounded intelligence working input exceeded")
 				}
 				switch record.Kind {
-				case intelligence.RecordGeo, intelligence.RecordUsage, intelligence.RecordOrigins:
+				case intelligence.RecordGeo, intelligence.RecordUsage, intelligence.RecordOrigins, intelligence.RecordNetworkOrganization:
 					mapping.Records = append(mapping.Records, record)
 					mappingLengths = append(mappingLengths, size)
 				}

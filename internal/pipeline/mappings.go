@@ -69,6 +69,7 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 		geo := map[netip.Prefix][]intelligence.GeoEvidence{}
 		usage := map[netip.Prefix][]intelligence.UsageEvidence{}
 		origins := map[netip.Prefix][]uint32{}
+		organizations := map[netip.Prefix]string{}
 		boundaries := map[netip.Prefix]struct{}{}
 		seen := map[string]struct{}{}
 		var bytes, count int
@@ -93,7 +94,7 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 				if err := record.Validate(); err != nil {
 					return err
 				}
-				if record.Kind != intelligence.RecordGeo && record.Kind != intelligence.RecordUsage && record.Kind != intelligence.RecordOrigins {
+				if record.Kind != intelligence.RecordGeo && record.Kind != intelligence.RecordUsage && record.Kind != intelligence.RecordOrigins && record.Kind != intelligence.RecordNetworkOrganization {
 					return errors.New("mapping-only materializer cannot discard risk, coverage, RPKI, path or relationship facts")
 				}
 				// Reject huge nested fields before allocating their JSON encoding.
@@ -123,6 +124,8 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 					prefix = record.Usage.Prefix
 				case intelligence.RecordOrigins:
 					prefix = record.Origins.Prefix
+				case intelligence.RecordNetworkOrganization:
+					prefix = record.NetworkOrganization.Prefix
 				}
 				prefix, err = canonicalMappingPrefix(prefix)
 				if err != nil {
@@ -150,6 +153,12 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 					}
 					usage[prefix] = append(usage[prefix], v)
 					boundaries[prefix] = struct{}{}
+				case intelligence.RecordNetworkOrganization:
+					org := record.NetworkOrganization.Organization
+					if previous, ok := organizations[prefix]; ok && previous != org {
+						org = ""
+					}
+					organizations[prefix] = org
 				case intelligence.RecordOrigins:
 					for _, asn := range record.Origins.Origins {
 						if !facts.PublicASN(asn) {
@@ -261,24 +270,51 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 		for prefix := range origins {
 			keys = append(keys, prefix)
 		}
+		for prefix := range organizations {
+			if _, exists := origins[prefix]; !exists {
+				keys = append(keys, prefix)
+			}
+		}
 		sortPrefixes(keys)
+		// K4 combines the selected ownership and origins at their independent
+		// boundaries. K10 records only actual observed announcement prefixes.
+		type networkScope struct {
+			prefix netip.Prefix
+			data   via3.NetworkData
+		}
+		var networkAncestors []networkScope
 		for _, prefix := range keys {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			asns := origins[prefix]
-			sort.Slice(asns, func(i, j int) bool { return asns[i] < asns[j] })
-			asns = compact(asns)
-			if len(asns) > via3.PublicOrigins {
-				return errors.New("merged mapping origin count exceeded")
+			var network via3.NetworkData
+			if len(organizations) > 0 {
+				for len(networkAncestors) > 0 && !networkAncestors[len(networkAncestors)-1].prefix.Contains(prefix.Addr()) {
+					networkAncestors = networkAncestors[:len(networkAncestors)-1]
+				}
+				if len(networkAncestors) > 0 {
+					network = networkAncestors[len(networkAncestors)-1].data
+				}
+				if org, ok := organizations[prefix]; ok {
+					network.Organization = org
+				}
 			}
-			// These keys remain the actual observed origin prefix. They are not
-			// replaced by geo-fusion boundaries or router partition prefixes.
-			if err := emit(via3.PublicRecord{Version: 3, Kind: 4, Prefix: prefix, Network: &via3.NetworkData{Origins: asns}}); err != nil {
+			if asns, observed := origins[prefix]; observed {
+				sort.Slice(asns, func(i, j int) bool { return asns[i] < asns[j] })
+				asns = compact(asns)
+				if len(asns) > via3.PublicOrigins {
+					return errors.New("merged mapping origin count exceeded")
+				}
+				network.Origins = asns
+				if err := emit(via3.PublicRecord{Version: 3, Kind: 10, Prefix: prefix, Origins: &via3.OriginsData{ASNs: asns}}); err != nil {
+					return err
+				}
+			}
+			if err := emit(via3.PublicRecord{Version: 3, Kind: 4, Prefix: prefix, Network: &network}); err != nil {
 				return err
 			}
-			if err := emit(via3.PublicRecord{Version: 3, Kind: 10, Prefix: prefix, Origins: &via3.OriginsData{ASNs: asns}}); err != nil {
-				return err
+			if len(organizations) > 0 {
+				networkAncestors = append(networkAncestors, networkScope{prefix, network})
 			}
 		}
 		return nil

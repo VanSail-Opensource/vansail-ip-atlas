@@ -250,6 +250,8 @@ func spatialPrefix(record intelligence.NormalizedRecord) (netip.Prefix, error) {
 		if record.Coverage.Layer != intelligence.ASN {
 			p = record.Coverage.Prefix
 		}
+	case intelligence.RecordNetworkOrganization:
+		p = record.NetworkOrganization.Prefix
 	case intelligence.RecordOrigins:
 		p = record.Origins.Prefix
 	case intelligence.RecordGeo:

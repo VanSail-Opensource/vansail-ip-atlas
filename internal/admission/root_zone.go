@@ -22,9 +22,10 @@ import (
 )
 
 const (
-	rootZoneURL     = "https://www.internic.net/domain/root.zone"
-	rootZoneLimit   = 8 << 20
-	rootServerCount = 13
+	rootZoneURL              = "https://www.internic.net/domain/root.zone"
+	rootZoneAlternateGzipURL = "https://www.internic.net/zones/root.zone.gz"
+	rootZoneLimit            = 8 << 20
+	rootServerCount          = 13
 )
 
 func rootZoneSource(s Source) bool {
@@ -241,9 +242,59 @@ func parseRootZone(ctx context.Context, input io.Reader, maximum int, emit func(
 	return z, nil
 }
 
-// The root-zone maintainer supplies independent text and gzip distributions
-// and a checksum for the plain file. SHA-256 across both complete bodies and
-// the gzip CRC/EOF check bind the copy. MD5 is an additional publisher check.
+// Both publisher directories contain complete gzip representations of the
+// current zone. The text always chooses the edition. Never substitute facts or
+// a date from a divergent compressed file.
+var errRootZoneCopyUnavailable = errors.New("DNS root zone gzip unavailable")
+var errRootZoneCopyOlder = errors.New("DNS root zone gzip has an earlier serial")
+
+func (e *Engine) matchRootZoneGzip(ctx context.Context, url, path string, digest [32]byte, size int64, serial string, now time.Time) error {
+	res, err := e.fetch.Fetch(ctx, url, path, rootZoneLimit)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return errRootZoneCopyUnavailable
+	}
+	if res.LastModified.After(now) {
+		return errors.New("DNS root gzip postdates evaluation")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	sha := sha256.New()
+	var decoded int64
+	var edition rootZoneProjection
+	limits := acquire.ArchiveLimits{CompressedBytes: rootZoneLimit, DecodedBytes: rootZoneLimit, EntryBytes: rootZoneLimit, Entries: 1, NameBytes: 4096}
+	err = acquire.WalkArchive(ctx, acquire.ArchiveInput{Reader: f, ReaderAt: f, Size: res.Bytes}, "gzip", limits, func(_ string, r io.Reader) error {
+		limited := &io.LimitedReader{R: io.TeeReader(r, sha), N: rootZoneLimit + 1}
+		var parseErr error
+		edition, parseErr = parseRootZone(ctx, limited, 2*rootServerCount, nil)
+		decoded = rootZoneLimit + 1 - limited.N
+		return parseErr
+	})
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	// Every successfully parsed serial is a ten-digit YYYYMMDDnn. A fully
+	// formed prior edition can be a normal lagging publisher edge. Malformed
+	// archives, newer editions, and different bytes under one serial fail.
+	if edition.serial < serial {
+		return errRootZoneCopyOlder
+	}
+	if edition.serial != serial || decoded != size || !bytes.Equal(sha.Sum(nil), digest[:]) {
+		return errors.New("DNS root gzip differs from original text")
+	}
+	return nil
+}
+
+// Verify the original text, its independent publisher checksum and one
+// identical complete gzip representation. A recovery tries only the second
+// fixed publisher path, retaining the original SOA/TTL/signature bounds.
 func (e *Engine) verifyRootZone(ctx context.Context, payload string, digest [32]byte, size int64, now time.Time) (rootZoneProjection, error) {
 	var z rootZoneProjection
 	deny := errors.New("DNS root zone publication rejected")
@@ -252,39 +303,28 @@ func (e *Engine) verifyRootZone(ctx context.Context, payload string, digest [32]
 	}
 	dir := filepath.Dir(payload)
 	mdPath := filepath.Join(dir, "root-md5")
-	if _, err := e.fetch.Fetch(ctx, rootZoneURL+".md5", mdPath, 128); err != nil {
+	metaInfo, err := e.fetch.Fetch(ctx, rootZoneURL+".md5", mdPath, 128)
+	if err != nil || metaInfo.LastModified.After(now) {
 		return z, deny
 	}
 	meta, err := boundedFile(ctx, mdPath, 128)
 	if err != nil || len(meta) != md5.Size*2+1 || meta[len(meta)-1] != '\n' {
 		return z, deny
 	}
-	gzipPath := filepath.Join(dir, "root-gzip")
-	res, err := e.fetch.Fetch(ctx, rootZoneURL+".gz", gzipPath, rootZoneLimit)
-	if err != nil {
-		return z, deny
-	}
-	f, err := os.Open(gzipPath)
-	if err != nil {
-		return z, deny
-	}
-	sha, md := sha256.New(), md5.New()
-	var decoded int64
-	limits := acquire.ArchiveLimits{CompressedBytes: rootZoneLimit, DecodedBytes: rootZoneLimit, EntryBytes: rootZoneLimit, Entries: 1, NameBytes: 4096}
-	err = acquire.WalkArchive(ctx, acquire.ArchiveInput{Reader: f, ReaderAt: f, Size: res.Bytes}, "gzip", limits, func(_ string, r io.Reader) error {
-		var copyErr error
-		decoded, copyErr = io.Copy(io.MultiWriter(sha, md), r)
-		return copyErr
-	})
-	if closeErr := f.Close(); err != nil || closeErr != nil || decoded != size || !bytes.Equal(sha.Sum(nil), digest[:]) || hex.EncodeToString(md.Sum(nil)) != string(meta[:md5.Size*2]) {
-		return z, deny
-	}
 	input, err := os.Open(payload)
 	if err != nil {
 		return z, deny
 	}
-	z, err = parseRootZone(ctx, input, 2*rootServerCount, nil)
-	if closeErr := input.Close(); err != nil || closeErr != nil || z.day.After(now) || z.nsSignatureStart.After(now) {
+	md := md5.New()
+	z, err = parseRootZone(ctx, io.TeeReader(input, md), 2*rootServerCount, nil)
+	if closeErr := input.Close(); err != nil || closeErr != nil || z.day.After(now) || z.nsSignatureStart.After(now) || hex.EncodeToString(md.Sum(nil)) != string(meta[:md5.Size*2]) {
+		return z, deny
+	}
+	err = e.matchRootZoneGzip(ctx, rootZoneURL+".gz", filepath.Join(dir, "root-gzip"), digest, size, z.serial, now)
+	if errors.Is(err, errRootZoneCopyUnavailable) || errors.Is(err, errRootZoneCopyOlder) {
+		err = e.matchRootZoneGzip(ctx, rootZoneAlternateGzipURL, filepath.Join(dir, "root-gzip-alternate"), digest, size, z.serial, now)
+	}
+	if err != nil {
 		return z, deny
 	}
 	return z, nil

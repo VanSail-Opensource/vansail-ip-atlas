@@ -3,12 +3,16 @@ from __future__ import annotations
 
 import math
 import re
+import hashlib
+from pathlib import Path
 
-from .contracts import ContractError, HASH
+from .contracts import ContractError, HASH, NATIVE_LOOKUP_P95_LIMIT_NS
 
 WIDTHS = (320, 390, 1280, 1440)
 THEMES = ("light", "dark")
 BUILD_SCENARIOS = ("cold_full", "warm_changed", "warm_unchanged", "clock_advance", "withdrawal")
+CORPUS_STRATA = ("ipv4_exact", "ipv4_lpm", "ipv6_exact", "ipv6_lpm", "moas", "sparse_asn", "dense_asn", "inherited", "unknown")
+GRAPH_FIXTURE_SHA256 = hashlib.sha256((Path(__file__).resolve().parents[2] / "fixtures/bin/synthetic-graph24-via3.json").read_bytes()).hexdigest()
 
 
 def number(value: object) -> bool:
@@ -28,6 +32,29 @@ def comparison(values: list, limit: float, *, minimum: int = 1, maximum=False, i
     if value is None:
         return "unmeasured"
     return "passed" if (value <= limit if inclusive else value < limit) else "failed"
+
+
+def cold_payload_bytes(row: object) -> int | None:
+    """Sum the actual cold response population, including release and credit controls."""
+    if not isinstance(row, dict) or not isinstance(row.get("responses"), list):
+        return None
+    paths = set()
+    total = 0
+    for response in row["responses"]:
+        if not isinstance(response, dict):
+            return None
+        path, size = response.get("path"), response.get("body_bytes")
+        if not isinstance(path, str) or not (path.startswith("/_atlas/") or path == "/dataset-credits.json"):
+            return None
+        if type(size) is not int or size <= 0:
+            return None
+        paths.add(path)
+        total += size
+    if not {"/_atlas/current.json", "/dataset-credits.json"}.issubset(paths):
+        return None
+    if not any(path.startswith("/_atlas/credits/") for path in paths):
+        return None
+    return total if type(row.get("atlas_body_bytes")) is int and row["atlas_body_bytes"] == total else None
 
 
 def graph_gate(graph: object) -> str:
@@ -65,11 +92,22 @@ def graph_gate(graph: object) -> str:
     return "passed"
 
 
-def browser_gates(report: dict) -> dict[str, str]:
-    if (report.get("scope") != "hosted-production-browser-v1" or report.get("mode") != "production"
-            or report.get("errors") != []):
-        raise ContractError("production browser evidence has wrong scope or errors")
-    samples = report.get("populations")
+def corpus_availability(value: object) -> bool:
+    if type(value) is not list or len(value) != len(CORPUS_STRATA):
+        return False
+    observed = []
+    for stratum, row in zip(CORPUS_STRATA, value):
+        if (type(row) is not dict or set(row) != {"stratum", "status", "sampled_queries"}
+                or row["stratum"] != stratum or type(row["sampled_queries"]) is not int
+                or not 0 <= row["sampled_queries"] <= 1200
+                or row["status"] != ("observed" if row["sampled_queries"] else "absent")):
+            return False
+        if row["sampled_queries"]:
+            observed.append(stratum)
+    return "unknown" in observed and any(s != "unknown" for s in observed)
+
+
+def population_groups(samples: object) -> dict:
     if not isinstance(samples, list):
         raise ContractError("production browser evidence has no raw populations")
     groups = {(width, theme): [] for width in WIDTHS for theme in THEMES}
@@ -84,6 +122,45 @@ def browser_gates(report: dict) -> dict[str, str]:
             raise ContractError("unknown or duplicate browser population")
         seen.add(identity)
         groups[key].append(sample)
+    return groups
+
+
+def valid_ipv4_coverage(coverage) -> bool:
+    return coverage is None or (type(coverage) is dict
+        and set(coverage) == {"covered_addresses", "network_objects", "router_intervals"}
+        and all(type(count) is int for count in coverage.values())
+        and coverage["covered_addresses"] == 2**32
+        and 1 <= coverage["network_objects"] < 18500
+        and coverage["network_objects"] <= coverage["router_intervals"] <= 2**32)
+
+
+def browser_gates(report: dict) -> dict[str, str]:
+    if (report.get("scope") != "hosted-production-browser-v3" or report.get("mode") != "production"
+            or report.get("release_scope") != "release-scope-v6" or report.get("errors") != []):
+        raise ContractError("production browser evidence has wrong scope or errors")
+    if (not HASH.fullmatch(str(report.get("release_id", "")))
+            or report.get("corpus_release_id") != report["release_id"]
+            or not HASH.fullmatch(str(report.get("corpus_sha256", "")))
+            or not corpus_availability(report.get("corpus_availability"))):
+        raise ContractError("production corpus availability is not bound to the candidate")
+    features = report.get("corpus_features", {})
+    if type(features) is not dict or set(features) != {"map", "graph"} or any(type(v) is not bool for v in features.values()):
+        raise ContractError("candidate map/graph availability is missing")
+    if "corpus_ipv4_network_coverage" not in report:
+        raise ContractError("candidate IPv4 population is missing")
+    coverage = report["corpus_ipv4_network_coverage"]
+    if not valid_ipv4_coverage(coverage):
+        raise ContractError("invalid full IPv4 network coverage")
+    groups = population_groups(report.get("populations"))
+    components = population_groups(report.get("component_populations", []))
+    fixture = report.get("graph_component_fixture", {})
+    memory = report.get("worst_case_worker_memory", {})
+    worker = memory.get("worker_sha256") if type(memory) is dict else None
+    fixture_bound = (type(fixture) is dict and fixture.get("scope") == "isolated-synthetic-capacity"
+        and fixture.get("fixture_sha256") == GRAPH_FIXTURE_SHA256
+        and HASH.fullmatch(str(worker)) is not None and fixture.get("worker_sha256") == worker
+        and HASH.fullmatch(str(report.get("candidate_bundle_sha256", ""))) is not None
+        and fixture.get("candidate_bundle_sha256") == report["candidate_bundle_sha256"])
     result = {}
     for (width, theme), rows in groups.items():
         prefix = f"browser_{width}_{theme}"
@@ -95,20 +172,49 @@ def browser_gates(report: dict) -> dict[str, str]:
         # maximum durations are retained. Missing/unsupported observers cannot pass.
         latencies = []
         complete = len(rows) >= 30
-        accessibility = complete
+        component_rows = components[(width, theme)]
+        accessibility = complete and len(component_rows) >= 30
         for row in rows:
             events = row.get("interaction_durations_ms", [])
             complete &= (row.get("complete_interaction_script") is True and row.get("event_timing_supported") is True
+                         and row.get("completed_routes") == ["overview", "quality", "class-c", "asn", "bgp"]
                          and isinstance(events, list) and len(events) > 0 and all(number(x) for x in events))
             latencies += events if isinstance(events, list) else []
+        for row in [*rows, *component_rows]:
             axe = row.get("accessibility", {})
             accessibility &= (type(axe) is dict and axe.get("engine") == "axe-core"
                               and axe.get("violations") == [] and axe.get("incomplete") == [])
         result[prefix + "_lab_INP"] = comparison(latencies, 200) if complete else "unmeasured"
-        violation = any(isinstance(row.get("accessibility"), dict) and row["accessibility"].get("violations") for row in rows)
+        violation = any(isinstance(row.get("accessibility"), dict) and row["accessibility"].get("violations") for row in [*rows, *component_rows])
         result[prefix + "_accessibility"] = "failed" if violation else "passed" if accessibility else "unmeasured"
-        graphs = [graph_gate(row.get("graph")) for row in rows]
-        result[prefix + "_graph"] = "failed" if "failed" in graphs else "passed" if len(rows) >= 30 and all(x == "passed" for x in graphs) else "unmeasured"
+        actual_states = len(rows) >= 30
+        unknowns = ipv4 = len(rows) >= 30
+        for row in rows:
+            mapping, graph = row.get("map", {}), row.get("graph", {})
+            actual_states &= (type(mapping) is dict and mapping.get("state") == ("observed" if features["map"] else "unavailable")
+                and (features["map"] or mapping.get("unknown_state_verified") is True)
+                and type(graph) is dict and graph.get("state") == ("observed" if features["graph"] else "unavailable")
+                and type(graph.get("visible_nodes")) is int and 0 <= graph["visible_nodes"] <= 24
+                and type(graph.get("observed_routes")) is int and graph["observed_routes"] >= 0
+                and (graph["observed_routes"] > 0 if features["graph"] else graph["visible_nodes"] == 0 and graph["observed_routes"] == 0 and graph.get("empty_state_verified") is True))
+            checks = row.get("unknown_states")
+            flags = type(checks) is dict and set(checks) == {"ipv4", "ipv6", "asn"}
+            unknowns &= flags and checks["ipv6"] is True and checks["asn"] is True
+            ipv4 &= (flags and "ipv4_network_coverage_verified" in row
+                and (checks["ipv4"] is True and row["ipv4_network_coverage_verified"] is None if coverage is None
+                     else checks["ipv4"] is None and row["ipv4_network_coverage_verified"] is True))
+        result[prefix + "_candidate_states"] = "passed" if actual_states else "unmeasured"
+        result[prefix + "_ipv6_asn_unknown_states"] = "passed" if unknowns else "unmeasured"
+        ipv4_gate = "_ipv4_unknown_state" if coverage is None else "_ipv4_network_coverage"
+        result[prefix + ipv4_gate] = "passed" if ipv4 else "unmeasured"
+        synthetic_empty = (fixture_bound and len(component_rows) >= 30 and
+            all(row.get("worker_sha256") == worker and row.get("ipv4_unknown_state_verified") is True for row in component_rows))
+        result[prefix + "_synthetic_ipv4_unknown_state"] = "passed" if synthetic_empty else "unmeasured"
+        # Capacity remains the same 24-node workload on the exact emitted code.
+        # These isolated synthetic observations never claim real routing coverage.
+        graphs = [graph_gate(row.get("graph")) if row.get("worker_sha256") == worker else "unmeasured" for row in component_rows]
+        result[prefix + "_graph"] = ("failed" if "failed" in graphs else "passed"
+            if fixture_bound and len(component_rows) >= 30 and all(x == "passed" for x in graphs) else "unmeasured")
     # Whole-browser measured peaks are explicitly separate from a 384MiB worker
     # envelope. A sampled JS heap or process RSS cannot be relabelled worker proof.
     memory = report.get("worst_case_worker_memory", {})
@@ -121,8 +227,7 @@ def browser_gates(report: dict) -> dict[str, str]:
             and memory.get('memory_events',{}).get('oom_kill') == 0):
         result["worker_memory"] = comparison([memory["peak_bytes"]], 384 * 1024**2, maximum=True)
     cold = report.get("cold_queries", [])
-    result["cold_payload"] = comparison([row.get("atlas_body_bytes") for row in cold if isinstance(row, dict)],
-                                         400 * 1024, minimum=100)
+    result["cold_payload"] = comparison([cold_payload_bytes(row) for row in cold], 400 * 1024, minimum=100)
     hot = report.get("hot_queries", [])
     for context in range(1, 4):
         rows = [row for row in hot if isinstance(row, dict) and row.get("context") == context]
@@ -190,7 +295,7 @@ def allocation_gate(row: dict) -> str:
 
 
 def build_gates(report: dict) -> dict[str, str]:
-    if (report.get("scope") != "hosted-production-build-v1" or report.get("mode") != "production"
+    if (report.get("scope") not in ("hosted-production-build-v1", "hosted-production-build-v2") or report.get("mode") != "production"
             or report.get("errors") != []):
         raise ContractError("production build evidence has wrong scope or errors")
     envelope = report.get('execution_envelope', {})
@@ -198,7 +303,32 @@ def build_gates(report: dict) -> dict[str, str]:
         and envelope.get('cpu_quota_us')==200000 and envelope.get('cpu_period_us')==100000
         and envelope.get('memory_max_bytes')==8*1024**3 and envelope.get('swap_max_bytes')==0
         and envelope.get('workspace_limit_bytes')==14*1024**3 else 'unmeasured'}
+    if report['scope'] == 'hosted-production-build-v2':
+        # Every independently measured case needs its finalized outer cgroup
+        # report; one good runner profile cannot cover the other fourteen jobs.
+        from tools.hosted.production_benchmarks import validate_budget
+        envelopes = report.get('execution_envelopes')
+        expected = {(name, sample) for name in BUILD_SCENARIOS for sample in (1, 2, 3)}
+        observed = set()
+        valid = type(envelopes) is list and len(envelopes) == 15
+        if valid:
+            for row in envelopes:
+                if (type(row) is not dict or set(row) != {'scenario', 'sample', 'budget_report'}
+                        or type(row['sample']) is not int or type(row['scenario']) is not str
+                        or (row['scenario'], row['sample']) not in expected
+                        or (row['scenario'], row['sample']) in observed):
+                    valid = False
+                    break
+                observed.add((row['scenario'], row['sample']))
+                try:
+                    validate_budget(row['budget_report'])
+                except ContractError:
+                    valid = False
+                    break
+        result['standard_runner'] = 'passed' if valid and observed == expected else 'unmeasured'
     scenarios = report.get("scenarios", [])
+    if report['scope'] == 'hosted-production-build-v2' and (type(scenarios) is not list or len(scenarios) != 15):
+        raise ContractError('exactly fifteen production benchmark cases required')
     for name in BUILD_SCENARIOS:
         rows = [row for row in scenarios if isinstance(row, dict) and row.get("scenario") == name]
         identities = [row.get("sample") for row in rows]
@@ -236,7 +366,7 @@ def build_gates(report: dict) -> dict[str, str]:
     result["go_lookup_p95"] = "unmeasured"
     if (lookup.get("corpus_queries") == 10_000 and lookup.get("warmups", 0) >= 1000
             and lookup.get("timing") == "individual-indexed-lookups" and len(lookup.get("samples_ns", [])) >= 100_000):
-        result["go_lookup_p95"] = comparison(lookup["samples_ns"], 2000, minimum=100_000)
+        result["go_lookup_p95"] = comparison(lookup["samples_ns"], NATIVE_LOOKUP_P95_LIMIT_NS, minimum=100_000)
     return result
 
 

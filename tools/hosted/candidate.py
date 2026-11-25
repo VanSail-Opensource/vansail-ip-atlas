@@ -6,10 +6,14 @@ No deployment token, source catalog or private evidence is accepted by this tool
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
+import hashlib
+from itertools import groupby, islice
 import json
 from pathlib import Path
 import re
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -18,6 +22,7 @@ from urllib.parse import urlsplit
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from tools.release_contract.browser_index import verified_browser_files
 from tools.release_contract.contracts import (
     ContractError, canonical_bytes, parse_canonical, rollback_eligible, sha256, tree_inventory, verify_manifest,
 )
@@ -59,6 +64,7 @@ def check_candidate(public: Path, report: dict, now: int) -> dict:
         raise ContractError("candidate release differs from report")
     manifest_bytes = (public / "_atlas/releases" / report["release_id"] / "manifest.json").read_bytes()
     manifest = verify_manifest(manifest_bytes, pointer_bytes, now)
+    verified_browser_files(public / "_atlas", pointer)
     if manifest["mode"] != report["mode"]:
         raise ContractError("candidate report and manifest modes differ")
     manifests = list((public / "_atlas/releases").glob("*/manifest.json"))
@@ -109,6 +115,51 @@ def _global_headers(public: Path) -> dict[str, str]:
     return result
 
 
+INVENTORY_WORKERS = 8
+READ_CHUNK_BYTES = 64 * 1024
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        return None
+
+
+def _live_inventory_fetch(origin, deadline):
+    # Each worker keeps its own urllib state. Bound memory independently of
+    # asset size by hashing the response incrementally, including an overrun byte.
+    local = threading.local()
+
+    def remaining():
+        seconds = deadline - time.monotonic()
+        if seconds <= 0:
+            raise ContractError("preview verification deadline exceeded")
+        return seconds
+
+    def fetch(path, size):
+        if not hasattr(local, "opener"):
+            local.opener = urllib.request.build_opener(_NoRedirect)
+        request = urllib.request.Request(origin + path, headers={
+            "Accept-Encoding": "identity", "User-Agent": QA_USER_AGENT})
+        try:
+            response = local.opener.open(request, timeout=min(30, remaining()))
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            digest = hashlib.sha256()
+            count = 0
+            while count <= size:
+                remaining()
+                # read1 permits a deadline check between network reads.
+                block = response.read1(min(READ_CHUNK_BYTES, size + 1 - count))
+                if not block:
+                    break
+                count += len(block)
+                digest.update(block)
+            remaining()
+            return response.status, {k.lower(): v for k, v in response.headers.items()}, count, digest.hexdigest()
+    return fetch
+
+
 def verify_preview(public: Path, report: dict, origin: str, now: int, fetch=None, *, production_alias=False) -> dict:
     if production_alias:
         parsed = urlsplit(origin)
@@ -122,36 +173,26 @@ def verify_preview(public: Path, report: dict, origin: str, now: int, fetch=None
     expected_headers = _global_headers(public)
     deadline = time.monotonic() + 600
     live = fetch is None
-    if fetch is None:
-        class NoRedirect(urllib.request.HTTPRedirectHandler):
-            def redirect_request(self, request, fp, code, msg, headers, newurl):
-                return None
-        opener = urllib.request.build_opener(NoRedirect)
-        def fetch(path, size):
-            if time.monotonic() >= deadline:
-                raise ContractError("preview verification deadline exceeded")
-            request = urllib.request.Request(origin + path, headers={"Accept-Encoding": "identity", "User-Agent": QA_USER_AGENT})
-            try:
-                response = opener.open(request, timeout=min(30, max(1, deadline - time.monotonic())))
-            except urllib.error.HTTPError as error:
-                response = error
-            with response:
-                # Whole individual responses stay below the existing Pages asset cap.
-                return response.status, {k.lower(): v for k, v in response.headers.items()}, response.read(size + 1)
-    status, headers, _ = fetch("/", 64 * 1024)
+    if live:
+        fetch_digest = _live_inventory_fetch(origin, deadline)
+    else:
+        def fetch_digest(path, size):
+            status, headers, data = fetch(path, size)
+            return status, headers, len(data), sha256(data)
+
+    status, headers, _, _ = fetch_digest("/", 64 * 1024)
     if status != 302 or headers.get("location") != "/ip":
         raise ContractError("deployed root is not the required HTTP 302")
-    verified = 0
-    for path, size, digest in candidate["entries"]:
-        if path in ("_headers", "_redirects"):
-            continue  # Pages executes these files; verify their effects instead.
+
+    def verify_file(entry):
+        path, size, digest = entry
         request_path = "/" + path
         if request_path.endswith("/index.html"):
             request_path = request_path[:-len("index.html")]
         elif request_path.endswith(".html"):
             request_path = request_path[:-len(".html")]
-        status, headers, body = fetch(request_path, size)
-        if (status != 200 and not (path == "404.html" and status == 404)) or len(body) != size or sha256(body) != digest:
+        status, headers, received, received_digest = fetch_digest(request_path, size)
+        if (status != 200 and not (path == "404.html" and status == 404)) or received != size or received_digest != digest:
             raise ContractError(f"preview file differs from frozen candidate: {path}")
         for name, value in expected_headers.items():
             if name == "cache-control":
@@ -159,12 +200,27 @@ def verify_preview(public: Path, report: dict, origin: str, now: int, fetch=None
             if " ".join(headers.get(name, "").split()) != " ".join(value.split()):
                 raise ContractError(f"preview effective header differs: {name}")
         cache = {token.strip() for token in headers.get("cache-control", "").lower().split(",")}
-        if path.startswith(("_atlas/objects/", "_atlas/releases/", "_atlas/credits/", "_atlas/legal/", "_nuxt/")):
+        if path.startswith(("_atlas/objects/", "_atlas/browser/", "_atlas/releases/", "_atlas/credits/", "_atlas/legal/", "_nuxt/")):
             if "immutable" not in cache or "max-age=31536000" not in cache:
                 raise ContractError("immutable preview object cache policy missing")
         elif path in ("_atlas/current.json", "dataset-credits.json") and ("max-age=0" not in cache or "must-revalidate" not in cache):
             raise ContractError("preview mutable pointer/credit alias revalidation policy missing")
-        verified += 1
+        return 1
+
+    # Pages executes the two control files. The redirect and per-file headers
+    # above verify their effects. Only immutable objects and index pages run concurrently.
+    entries = (row for row in candidate["entries"] if row[0] not in ("_headers", "_redirects"))
+    verified = 0
+    with ThreadPoolExecutor(max_workers=INVENTORY_WORKERS) as workers:
+        for objects, rows in groupby(entries, key=lambda row: row[0].startswith(("_atlas/objects/","_atlas/browser/"))):
+            if live and objects:
+                # Keep at most one batch in flight, including after a failed check.
+                while batch := tuple(islice(rows, INVENTORY_WORKERS)):
+                    verified += sum(workers.map(verify_file, batch))
+            else:
+                verified += sum(map(verify_file, rows))
+    if live and time.monotonic() >= deadline:
+        raise ContractError("preview verification deadline exceeded")
     # Fetching all files can cross the release expiry; recheck at completion in live runs.
     if live and time.time() >= candidate["valid_until"]:
         raise ContractError("candidate expired during preview verification")

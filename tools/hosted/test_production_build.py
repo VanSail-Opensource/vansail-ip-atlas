@@ -1,8 +1,10 @@
 import importlib.util
 import copy
+import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from tools.release_contract.contracts import ContractError, canonical_bytes
 
@@ -12,6 +14,45 @@ spec.loader.exec_module(build)
 
 
 class ProductionBuildTransitionTests(unittest.TestCase):
+    def test_single_replay_preserves_warm_preparation_before_measured_timer(self):
+        for scenario in ('cold_full', 'warm_unchanged'):
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                (root/'.atlas-private').mkdir(); (root/'build-private').mkdir()
+                (root/'.atlas-private/production-receipt.json').write_text(json.dumps({'evaluated_at':100,'normalized_state_sha256':'a'*64}))
+                profile = root/'profile.json'; profile.write_bytes(canonical_bytes(build.ENVELOPE))
+                events = []
+                def tick():
+                    events.append('timer')
+                    return 1 if events.count('timer') == 1 else 1000002
+                def command(argv, workspace, metrics=None, **kwargs):
+                    self.assertEqual(workspace, root)
+                    self.assertEqual(argv[1:4], ['benchmark-state','-workspace',str(root)])
+                    self.assertEqual(argv[argv.index('-scenario')+1], scenario)
+                    self.assertEqual(argv[argv.index('-clock')+1], '100')
+                    if argv[-1] == '-prepare':
+                        self.assertIsNone(metrics)
+                        events.append('prepare')
+                    else:
+                        self.assertEqual(kwargs['atlas_commands'], {'benchmark-state':1})
+                        self.assertEqual(kwargs['phase'], 'benchmark-state')
+                        events.append('measure')
+                        kwargs['stdout'].write(canonical_bytes({'schema_version':1,'scope':'authenticated-real-input-engineering-benchmark',
+                            'scenario':scenario,'clock':100,'input_records':100,'normalized_input_bytes':1000,
+                            'before_state_sha256':'a'*64,'after_state_sha256':'a'*64,'release_id':'b'*64,
+                            'compile_exit_code':0,'transition':{}}))
+                    return 0
+                report = {'scenarios':[]}
+                with patch.object(build, 'ROOT', root), patch.dict(build.os.environ, {'ATLAS_RUNNER_PROFILE':str(profile)}), \
+                        patch.object(build, 'command', command), patch.object(build.time, 'monotonic_ns', tick):
+                    build.measure_replay(Path('/fixed/atlas'), report, case=scenario, sample=2)
+                self.assertEqual(events, (['prepare'] if scenario != 'cold_full' else []) + ['timer','measure','timer'])
+                self.assertEqual(len(report['scenarios']), 1)
+                self.assertEqual(report['scenarios'][0]['sample'], 2)
+                self.assertEqual(report['scenarios'][0]['runtime_ms'], 2)  # Round up, never hide boundary overshoot.
+                self.assertEqual(list((root/'build-private').iterdir()), [])
+                self.assertEqual(list((root/'.atlas-private').glob('benchmark-metrics-*')), [])
+
     def write(self, path, values):
         path.write_bytes(b''.join(canonical_bytes({'source_id':'fixture-source','semantic_sha256':value}) + b'\n' for value in values))
 

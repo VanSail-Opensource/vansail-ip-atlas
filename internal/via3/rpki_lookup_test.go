@@ -56,10 +56,12 @@ func TestExportRPKIPrefixLookupFixture(t *testing.T) {
 		t.Skip("opt-in shared fixture export")
 	}
 	row := func(asn uint32, status, maximum byte) []byte {
-		r := make([]byte, 16)
+		r := make([]byte, 32)
 		p32(r, 0, bits(20))
 		p32(r, 4, asn)
 		r[8], r[9] = status, maximum
+		p64(r, 16, 1699990000)
+		p64(r, 24, 1699993600)
 		return r
 	}
 	s := newShard(9, row(3356, 2, 16), row(13335, 1, 24), row(174, 3, 0), row(3356, 1, 48), row(13335, 2, 32), row(174, 3, 0))

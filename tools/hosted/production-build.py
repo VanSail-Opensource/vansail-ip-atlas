@@ -29,6 +29,8 @@ sys.path.insert(0, str(ROOT))
 from tools.release_contract.acceptance import BUILD_SCENARIOS, build_gates, require_all
 from tools.release_contract.contracts import ContractError, canonical_bytes, parse_canonical, sha256
 from tools.release_contract.production import read_private
+from tools.hosted.production_benchmarks import (benchmark_identity, case_report, ENVELOPE,
+    json_report, verify_native_lookup)
 
 
 def private_path(root: Path, value: str) -> Path:
@@ -199,7 +201,8 @@ def command(args: list[str], workspace: Path, metrics: dict | None = None, *, st
             while process.poll() is None:
                 rss, scratch, free = group_rss(process.pid), disk_bytes(workspace), shutil.disk_usage(workspace).free
                 if metrics is not None:
-                    metrics["runtime_ms"] = (time.monotonic() - metrics["_started"]) * 1000
+                    metrics["runtime_ms"] = ((time.monotonic_ns() - metrics["_started_ns"] + 999999) // 1000000
+                        if "_started_ns" in metrics else (time.monotonic() - metrics["_started"]) * 1000)
                     metrics["process_group_peak_rss_bytes"] = max(metrics["process_group_peak_rss_bytes"], rss)
                     metrics["scratch_peak_bytes"] = max(metrics["scratch_peak_bytes"], scratch)
                     metrics["physical_free_low_water_bytes"] = min(metrics["physical_free_low_water_bytes"], free)
@@ -367,7 +370,7 @@ def measure(plan: dict, private: Path, atlas_binary: Path, report: dict | None =
     return report
 
 
-def measure_replay(atlas_binary: Path, report: dict) -> None:
+def measure_replay(atlas_binary: Path, report: dict, *, case: str | None = None, sample: int | None = None) -> None:
     """Replay authenticated real input through the native engineering compiler.
 
     The mutation output is engineering-only. It cannot qualify a source, become
@@ -377,6 +380,10 @@ def measure_replay(atlas_binary: Path, report: dict) -> None:
     if sys.platform != 'linux' or not profile_path:
         raise ContractError('official hosted cgroup execution profile required')
     report['execution_envelope'] = json.loads(read_private(Path(profile_path)))
+    if report['execution_envelope'] != ENVELOPE:
+        raise ContractError('official hosted cgroup execution profile differs')
+    if (case is None) != (sample is None) or case is not None and (case not in BUILD_SCENARIOS or type(sample) is not int or sample not in (1,2,3)):
+        raise ContractError('invalid benchmark case selection')
     report['execution_host'] = {'logical_cpus': os.cpu_count(),
         'memory_bytes': os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES'),
         'disk_bytes': shutil.disk_usage(ROOT).total}
@@ -389,22 +396,22 @@ def measure_replay(atlas_binary: Path, report: dict) -> None:
     report['measurement_scope'] = plan['scope']
     report['resource_accounting'] = {'scope':'entire-child-process-group','poll_ms':100,
         'scratch_scope':'all-baseline-inputs-and-isolated-replay-output','blind_spots':'procfs-between-poll-peaks; cgroup peak recorded separately'}
-    for name in BUILD_SCENARIOS:
-        for sample in (1,2,3):
+    for name in (BUILD_SCENARIOS if case is None else (case,)):
+        for selected_sample in ((1,2,3) if sample is None else (sample,)):
             with tempfile.TemporaryDirectory(prefix='benchmark-', dir=ROOT/'build-private') as directory:
                 target = Path(directory)/'workspace'
                 argv = [str(atlas_binary),'benchmark-state','-workspace',str(ROOT),'-out',str(target),
                         '-scenario',name,'-clock',str(clock)]
                 if name != 'cold_full' and command([*argv,'-prepare'], ROOT):
                     raise ContractError('authenticated engineering baseline preparation failed')
-                metric = {'scenario':name,'sample':sample,'measurement_scope':plan['scope'],
+                metric = {'scenario':name,'sample':selected_sample,'measurement_scope':plan['scope'],
                     'process_group_peak_rss_bytes':0,'scratch_peak_bytes':0,
                     'physical_free_low_water_bytes':shutil.disk_usage(ROOT).free,
                     'allocation_count':0,'allocated_bytes':0,'allocation_process_count':0,
                     'allocation_scope':GO_ALLOCATION_SCOPE,'go_processes':[],'go_invocations':[],
                     'allocation_exclusions':'non-Go orchestration and baseline preparation'}
                 metric['_go_metrics_root'] = tempfile.mkdtemp(prefix='benchmark-metrics-',dir=ROOT/'.atlas-private')
-                metric['_started'] = time.monotonic()
+                metric['_started_ns'] = time.monotonic_ns()
                 report['scenarios'].append(metric)
                 result_path=Path(directory)/'measurement.json'
                 with result_path.open('wb') as output:
@@ -415,24 +422,42 @@ def measure_replay(atlas_binary: Path, report: dict) -> None:
                 if (observed.get('schema_version')!=1 or observed.get('scope')!=plan['scope']
                         or observed.get('scenario')!=name or observed.get('before_state_sha256')!=plan['baseline']):
                     raise ContractError('engineering replay does not bind authentic baseline')
-                allowed=('input_records','normalized_input_bytes','before_state_sha256','after_state_sha256',
+                allowed=('clock','input_records','normalized_input_bytes','before_state_sha256','after_state_sha256',
                          'release_id','compile_exit_code','transition')
                 metric.update({key:observed[key] for key in allowed})
-                metric['runtime_ms']=(time.monotonic()-metric.pop('_started'))*1000
+                metric['runtime_ms']=(time.monotonic_ns()-metric.pop('_started_ns')+999999)//1000000
                 finish_go_metrics(metric)
-                print(f'Authenticated engineering {name} sample {sample}/3 measured')
+                print(f'Authenticated engineering {name} sample {selected_sample}/3 measured')
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", type=Path, help="legacy reviewed scenario plan; default derives authenticated replay cases")
     parser.add_argument("--atlas-binary", type=Path, required=True)
+    parser.add_argument('--case', choices=BUILD_SCENARIOS)
+    parser.add_argument('--sample', type=int, choices=(1,2,3))
     parser.add_argument("--candidate-report", type=Path, default=ROOT / "reports/static-candidate.json")
     parser.add_argument("--lookup-report", type=Path, default=ROOT / "reports/production-lookup.json")
     parser.add_argument("--report", type=Path, default=ROOT / "reports/production-build.json")
     args = parser.parse_args()
     report = {"scope": "hosted-production-build-v1", "mode": "production", "errors": [], "scenarios": []}
     try:
+        if (args.case is None) != (args.sample is None) or args.case is not None and args.plan:
+            raise ContractError('case and sample require native replay')
+        if args.case is not None:
+            candidate = json_report(read_private(args.candidate_report))
+            receipt = json_report(read_private(ROOT/'.atlas-private/production-receipt.json'))
+            context = json_report(read_private(ROOT/'.atlas-private/workflow-context.json'))
+            if context.get('format_version') != 2:
+                raise ContractError('authenticated benchmark context required')
+            identity = benchmark_identity(candidate, receipt, head_sha=context['head_sha'],
+                candidate_run_id=context['candidate_run_id'], candidate_run_attempt=context['candidate_run_attempt'])
+            measure_replay(args.atlas_binary.resolve(strict=True), report, case=args.case, sample=args.sample)
+            if report['benchmark_plan_sha256'] != identity['benchmark_plan_sha256']:
+                raise ContractError('benchmark identity changed')
+            report = case_report(identity, report['scenarios'][0], run_id=int(os.environ['GITHUB_RUN_ID']),
+                run_attempt=int(os.environ['GITHUB_RUN_ATTEMPT']), execution_host=report['execution_host'])
+            return 0
         if args.plan:
             plan_bytes = read_private(args.plan)
             measure(json.loads(plan_bytes), args.plan.parent, args.atlas_binary.resolve(strict=True), report)
@@ -447,10 +472,11 @@ def main() -> int:
         report["go_lookup"] = json.loads(read_private(args.lookup_report, 16 * 1024 * 1024))
         if report["go_lookup"].get("release_id") != report["release_id"]:
             raise ContractError("Go lookup report refers to another release")
+        verify_native_lookup(candidate, report['go_lookup'])
         gates = build_gates(report); report["derived_gates"] = gates; require_all(gates)
         return 0
     except (ContractError, OSError, ValueError, KeyError, TypeError) as error:
-        report["errors"].append(str(error)); print(f"FAIL: production build measurements: {error}")
+        report["errors"].append('production-benchmark-failed'); print('FAIL: production build measurements')
         return 1
     finally:
         for row in report["scenarios"]:
@@ -458,6 +484,9 @@ def main() -> int:
             if "_started" in row:
                 row["runtime_ms"] = (time.monotonic() - row.pop("_started")) * 1000
                 row["status"] = "incomplete"
+            if '_started_ns' in row:
+                row['runtime_ms'] = (time.monotonic_ns()-row.pop('_started_ns')+999999)//1000000
+                row['status'] = 'incomplete'
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(json.dumps(report, separators=(",", ":")) + "\n", encoding="utf-8")
 

@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"hash"
 	"io"
@@ -28,6 +29,107 @@ type RecordPartition struct {
 	Codec        string `json:",omitempty"`
 	DecodedBytes int64  `json:",omitempty"`
 }
+
+// ErrVerifyRecordPrefix requests a validated early stop from a record callback.
+// The walker returns the callback's marked error only after hashing the physical
+// suffix on the same read that supplied the decoded prefix.
+var ErrVerifyRecordPrefix = errors.New("verify consumed record prefix")
+
+// CanonicalPartition is a process-local capability for frames produced by a
+// successful RecordWriter or verified byte-for-byte against its encoder.
+// It conveys no source approval or freshness.
+type CanonicalPartition struct {
+	root string
+	part RecordPartition
+}
+
+// Descriptor returns an independent copy of the immutable object identity.
+func (p CanonicalPartition) Descriptor() RecordPartition { return p.part }
+
+// Walk retains the normal byte, framing, decoding and semantic checks. Only the
+// proven writer encoding permits reusing the encoded length and digest.
+func (p CanonicalPartition) Walk(ctx context.Context, emit func(CanonicalRecordFrame) error) error {
+	if p.root == "" || !validPartition(p.part) || emit == nil {
+		return errors.New("canonical partition capability invalid")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	root, err := recordDirectory(filepath.Dir(filepath.Dir(p.root)), false)
+	if err != nil {
+		return err
+	}
+	if root != p.root {
+		return errors.New("canonical partition root changed")
+	}
+	return walkPartitionFrames(ctx, root, p.part, func(record NormalizedRecord, data []byte) error {
+		return emit(CanonicalRecordFrame{record: record, data: data})
+	})
+}
+
+// CompareCanonicalFrames walks the ordinary strict representation, including
+// its final count, hash and decoder checks. The callback receives a fresh frame
+// encoded exactly as a RecordWriter would encode the owned record. A capability
+// for later reads is returned only if every original frame already matched.
+func CompareCanonicalFrames(ctx context.Context, workspace string, part RecordPartition, emit func(CanonicalRecordFrame) error) (CanonicalPartition, error) {
+	if ctx == nil || emit == nil {
+		return CanonicalPartition{}, errors.New("canonical comparison sink required")
+	}
+	root, err := recordDirectory(workspace, false)
+	if err != nil {
+		return CanonicalPartition{}, err
+	}
+	equal := true
+	err = walkPartitionFrames(ctx, root, part, func(record NormalizedRecord, data []byte) error {
+		encoded, err := json.Marshal(record)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(data, encoded) {
+			equal = false
+		}
+		return emit(CanonicalRecordFrame{record: record, data: encoded})
+	})
+	if err != nil || !equal {
+		return CanonicalPartition{}, err
+	}
+	return CanonicalPartition{root: root, part: part}, nil
+}
+
+// CanonicalRecordFrame owns one strictly decoded canonical frame. Its encoded
+// bytes are private and never alias the mutable decoded record returned below.
+type CanonicalRecordFrame struct {
+	record NormalizedRecord
+	data   []byte
+}
+
+// Record transfers the decoded value to the caller. Mutating its payload does
+// not change the encoded frame used by Digest or AppendTo.
+func (f CanonicalRecordFrame) Record() (NormalizedRecord, error) {
+	if len(f.data) == 0 {
+		return NormalizedRecord{}, errors.New("canonical record frame invalid")
+	}
+	return f.record, nil
+}
+
+func (f CanonicalRecordFrame) EncodedBytes() int { return len(f.data) }
+func (f CanonicalRecordFrame) Digest() [32]byte {
+	if len(f.data) == 0 {
+		return [32]byte{}
+	}
+	return sha256.Sum256(f.data)
+}
+
+// AppendTo copies the original canonical bytes through the destination's usual
+// count, logical-byte, physical-byte and cancellation limits. It deliberately
+// ignores mutations to the independently decoded record.
+func (f CanonicalRecordFrame) AppendTo(w *RecordWriter) error {
+	if len(f.data) == 0 || w == nil || w.store == nil || w.ctx == nil {
+		return errors.New("canonical record frame or writer invalid")
+	}
+	return w.appendEncoded(f.data)
+}
+
 type RecordStoreLimits struct {
 	PartitionBytes   int64
 	PartitionRecords uint64
@@ -54,6 +156,14 @@ type RecordStore struct {
 
 // DiskBytes includes existing immutable objects and reserved in-flight bytes.
 func (s *RecordStore) DiskBytes() uint64 { s.mu.Lock(); defer s.mu.Unlock(); return uint64(s.disk) }
+
+// RemainingPartitionSlots reports headroom from the latest inventory and
+// every object installed since. Writers still enforce the hard limit.
+func (s *RecordStore) RemainingPartitionSlots() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return maxRecordPartitions - s.objects
+}
 
 func recordDirectory(workspace string, create bool) (string, error) {
 	root, err := filepath.Abs(workspace)
@@ -202,16 +312,26 @@ func (w *RecordWriter) Append(record NormalizedRecord) error {
 	if err != nil {
 		return err
 	}
+	return w.appendEncoded(data)
+}
+
+func (w *RecordWriter) appendEncoded(data []byte) error {
+	if err := w.ctx.Err(); err != nil {
+		return err
+	}
+	if w.closed {
+		return errors.New("record writer closed")
+	}
 	if len(data) > w.store.limits.RecordBytes || int64(len(data)+4+len(recordHeader)) > w.store.limits.PartitionBytes {
 		return errors.New("private record byte budget exceeded")
 	}
 	if w.file != nil && (w.count >= w.store.limits.PartitionRecords || int64(len(data)+4) > w.store.limits.PartitionBytes-w.decoded) {
-		if err = w.finishPartition(); err != nil {
+		if err := w.finishPartition(); err != nil {
 			return err
 		}
 	}
 	if w.file == nil {
-		if err = w.start(); err != nil {
+		if err := w.start(); err != nil {
 			return err
 		}
 	}
@@ -219,10 +339,10 @@ func (w *RecordWriter) Append(record NormalizedRecord) error {
 	w.decoded += n
 	var frame [4]byte
 	binary.LittleEndian.PutUint32(frame[:], uint32(len(data)))
-	if _, err = w.buffer.Write(frame[:]); err != nil {
+	if _, err := w.buffer.Write(frame[:]); err != nil {
 		return err
 	}
-	if _, err = w.buffer.Write(data); err != nil {
+	if _, err := w.buffer.Write(data); err != nil {
 		return err
 	}
 	w.count++
@@ -253,6 +373,23 @@ func (w *RecordWriter) finishPartition() error {
 	}
 	part := RecordPartition{Bytes: w.size, Records: w.count, Codec: "zstd-v1", DecodedBytes: w.decoded}
 	copy(part.SHA256[:], w.digest.Sum(nil))
+	if err := w.installPartition(part); err != nil {
+		return err
+	}
+	w.parts = append(w.parts, part)
+	w.file = nil
+	w.buffer = nil
+	w.size = 0
+	w.decoded = 0
+	w.count = 0
+	return nil
+}
+
+// Inspect and install the destination while holding the same lock as imports.
+// Two concurrent writers finishing identical bytes charge one file.
+func (w *RecordWriter) installPartition(part RecordPartition) error {
+	w.store.mu.Lock()
+	defer w.store.mu.Unlock()
 	destination := filepath.Join(w.store.root, partitionName(part))
 	if info, err := os.Lstat(destination); err == nil {
 		if !info.Mode().IsRegular() || info.Size() != part.Bytes {
@@ -264,30 +401,21 @@ func (w *RecordWriter) finishPartition() error {
 		if err = os.Remove(w.file.Name()); err != nil {
 			return err
 		}
-		w.store.release(w.size)
+		w.store.disk -= w.size
 	} else if !os.IsNotExist(err) {
 		return err
 	} else {
-		w.store.mu.Lock()
 		if w.store.objects >= maxRecordPartitions {
-			w.store.mu.Unlock()
 			return errors.New("private partition inventory exceeded")
 		}
 		err = os.Rename(w.file.Name(), destination)
 		if err == nil {
 			w.store.objects++
 		}
-		w.store.mu.Unlock()
 		if err != nil {
 			return err
 		}
 	}
-	w.parts = append(w.parts, part)
-	w.file = nil
-	w.buffer = nil
-	w.size = 0
-	w.decoded = 0
-	w.count = 0
 	return nil
 }
 func (w *RecordWriter) Finish() ([]RecordPartition, error) {
@@ -299,6 +427,23 @@ func (w *RecordWriter) Finish() ([]RecordPartition, error) {
 	}
 	w.closed = true
 	return append([]RecordPartition(nil), w.parts...), nil
+}
+
+// FinishCanonical mints capabilities only for the exact objects successfully
+// finished by this writer. Opening an existing store never adopts its objects.
+func (w *RecordWriter) FinishCanonical() ([]CanonicalPartition, error) {
+	if w == nil || w.store == nil || w.ctx == nil {
+		return nil, errors.New("canonical record writer invalid")
+	}
+	parts, err := w.Finish()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]CanonicalPartition, len(parts))
+	for i, part := range parts {
+		out[i] = CanonicalPartition{root: w.store.root, part: part}
+	}
+	return out, nil
 }
 func (w *RecordWriter) Abort() error {
 	w.closed = true
@@ -320,6 +465,14 @@ func (w *RecordWriter) Abort() error {
 }
 
 func walkPartition(ctx context.Context, root string, part RecordPartition, emit func(NormalizedRecord) error) error {
+	var frames func(NormalizedRecord, []byte) error
+	if emit != nil {
+		frames = func(record NormalizedRecord, _ []byte) error { return emit(record) }
+	}
+	return walkPartitionFrames(ctx, root, part, frames)
+}
+
+func walkPartitionFrames(ctx context.Context, root string, part RecordPartition, emit func(NormalizedRecord, []byte) error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -362,7 +515,29 @@ func walkPartition(ctx context.Context, root string, part RecordPartition, emit 
 		return err
 	}
 	parsedHash := sha256.New()
-	var logical io.Reader = &recordContextReader{ctx, io.TeeReader(io.LimitReader(file, part.Bytes), parsedHash)}
+	physical := &recordContextReader{ctx, io.TeeReader(io.LimitReader(file, part.Bytes), parsedHash)}
+	var logical io.Reader = physical
+	finishRead := func(result error) error {
+		if result != nil {
+			if !errors.Is(result, ErrVerifyRecordPrefix) {
+				return result
+			}
+			// Buffered compressed bytes are already in parsedHash. Drain the
+			// unread physical suffix without decoding unused logical frames.
+			if _, readErr := io.Copy(io.Discard, physical); readErr != nil {
+				return readErr
+			}
+		}
+		var parsedDigest [32]byte
+		copy(parsedDigest[:], parsedHash.Sum(nil))
+		if parsedDigest != part.SHA256 {
+			return errors.New("private partition changed while reading")
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return result
+	}
 	decodedBytes := part.Bytes
 	if part.Codec == "zstd-v1" {
 		var outer [len(compressedRecordHeader)]byte
@@ -384,46 +559,42 @@ func walkPartition(ctx context.Context, root string, part RecordPartition, emit 
 	}
 	remaining := decodedBytes - int64(len(header))
 	var count uint64
-	for remaining > 0 {
-		if err = ctx.Err(); err != nil {
-			return err
+	if part.Records > recordDecodeBatchFrames {
+		count, err = walkRecordDecodeBatches(ctx, buffer, remaining, part.Records, emit)
+		if err != nil {
+			return finishRead(err)
 		}
-		var frame [4]byte
-		if remaining < 4 {
-			return errors.New("private record frame truncated")
+	} else {
+		for remaining > 0 {
+			if err = ctx.Err(); err != nil {
+				return err
+			}
+			var frame [4]byte
+			if remaining < 4 {
+				return errors.New("private record frame truncated")
+			}
+			if _, err = io.ReadFull(buffer, frame[:]); err != nil {
+				return err
+			}
+			remaining -= 4
+			n := binary.LittleEndian.Uint32(frame[:])
+			if n == 0 || n > 1<<20 || int64(n) > remaining || count >= part.Records {
+				return errors.New("private record frame invalid")
+			}
+			data := make([]byte, int(n))
+			if _, err = io.ReadFull(buffer, data); err != nil {
+				return err
+			}
+			remaining -= int64(n)
+			record, err := decodeRecordFrame(data)
+			if err != nil {
+				return err
+			}
+			if err = emit(record, data); err != nil {
+				return finishRead(err)
+			}
+			count++
 		}
-		if _, err = io.ReadFull(buffer, frame[:]); err != nil {
-			return err
-		}
-		remaining -= 4
-		n := binary.LittleEndian.Uint32(frame[:])
-		if n == 0 || n > 1<<20 || int64(n) > remaining || count >= part.Records {
-			return errors.New("private record frame invalid")
-		}
-		data := make([]byte, int(n))
-		if _, err = io.ReadFull(buffer, data); err != nil {
-			return err
-		}
-		remaining -= int64(n)
-		if !utf8.Valid(data) {
-			return errors.New("private record UTF-8 invalid")
-		}
-		var record NormalizedRecord
-		decoder := json.NewDecoder(bytes.NewReader(data))
-		decoder.DisallowUnknownFields()
-		if err = decoder.Decode(&record); err != nil {
-			return err
-		}
-		if err = record.Validate(); err != nil {
-			return err
-		}
-		if err = decoder.Decode(new(json.RawMessage)); err != io.EOF {
-			return errors.New("private record trailing data")
-		}
-		if err = emit(record); err != nil {
-			return err
-		}
-		count++
 	}
 	if count != part.Records {
 		return errors.New("private record count invalid")
@@ -431,12 +602,187 @@ func walkPartition(ctx context.Context, root string, part RecordPartition, emit 
 	if _, err = buffer.ReadByte(); err != io.EOF {
 		return errors.New("private partition decoded length or checksum invalid")
 	}
-	var parsedDigest [32]byte
-	copy(parsedDigest[:], parsedHash.Sum(nil))
-	if parsedDigest != part.SHA256 {
-		return errors.New("private partition changed while reading")
+	return finishRead(nil)
+}
+
+// Decode only independently owned, complete frames. Both scheduling paths keep
+// the existing UTF-8, v1 member/duplicate semantics, trailing-data, unknown-field
+// and typed-union checks; concurrency conveys no source or schema approval.
+func decodeRecordFrame(data []byte) (NormalizedRecord, error) {
+	if !utf8.Valid(data) {
+		return NormalizedRecord{}, errors.New("private record UTF-8 invalid")
 	}
-	return ctx.Err()
+	if geo, ok := decodeWriterGeo(data); ok {
+		record := NormalizedRecord{Version: 3, Kind: RecordGeo, Geo: geo}
+		return record, record.Validate()
+	}
+	if record, ok := decodeWriterMRT(data); ok {
+		return record, record.Validate()
+	}
+	var record NormalizedRecord
+	if err := jsonv2.Unmarshal(data, &record, json.DefaultOptionsV1(), jsonv2.RejectUnknownMembers(true)); err != nil {
+		return record, err
+	}
+	return record, record.Validate()
+}
+
+const recordDecodeBatchFrames = 64
+const recordDecodeBatchBytes = 1 << 20
+
+type recordDecodeBatch struct {
+	frames                [recordDecodeBatchFrames][]byte
+	records               [recordDecodeBatchFrames]NormalizedRecord
+	count, bytes, decoded int
+	readErr, decodeErr    error
+}
+
+// The caller exclusively owns framing and all underlying reader state. A
+// length that would exceed this batch's byte limit is retained without reading
+// its payload; even a single one-MiB frame fits without a third live buffer.
+type recordBatchReader struct {
+	ctx             context.Context
+	reader          io.Reader
+	remaining       int64
+	expected, count uint64
+	pending         uint32
+}
+
+func (r *recordBatchReader) fill(b *recordDecodeBatch) {
+	for b.count < recordDecodeBatchFrames && r.remaining > 0 {
+		if err := r.ctx.Err(); err != nil {
+			b.readErr = err
+			return
+		}
+		if r.pending == 0 {
+			var frame [4]byte
+			if r.remaining < 4 {
+				b.readErr = errors.New("private record frame truncated")
+				return
+			}
+			if _, err := io.ReadFull(r.reader, frame[:]); err != nil {
+				b.readErr = err
+				return
+			}
+			r.remaining -= 4
+			n := binary.LittleEndian.Uint32(frame[:])
+			if n == 0 || n > 1<<20 || int64(n) > r.remaining || r.count >= r.expected {
+				b.readErr = errors.New("private record frame invalid")
+				return
+			}
+			r.pending = n
+		}
+		if int(r.pending) > recordDecodeBatchBytes-b.bytes {
+			return
+		}
+		data := make([]byte, int(r.pending))
+		if _, err := io.ReadFull(r.reader, data); err != nil {
+			b.readErr = err
+			return
+		}
+		r.remaining -= int64(r.pending)
+		r.pending = 0
+		r.count++
+		b.frames[b.count] = data
+		b.count++
+		b.bytes += len(data)
+	}
+}
+
+func runRecordDecodeWorker(ctx context.Context, jobs <-chan *recordDecodeBatch, done chan<- *recordDecodeBatch, workers *sync.WaitGroup) {
+	defer workers.Done()
+	for b := range jobs {
+		for i := 0; i < b.count; i++ {
+			if err := ctx.Err(); err != nil {
+				b.decodeErr = err
+				break
+			}
+			record, err := decodeRecordFrame(b.frames[i])
+			if err != nil {
+				b.decodeErr = err
+				break
+			}
+			b.records[i] = record
+			b.decoded++
+		}
+		done <- b
+	}
+}
+
+// At most two slots are live: each has <=64 owned frames and <=one MiB of
+// encoded bytes. Only workers decode; the caller emits every callback in FIFO
+// order. An earlier callback failure wins over later non-context read/decode
+// failures. Once cancellation is observed, scheduling and callbacks stop; read
+// ahead intentionally does not reproduce a serial reader's wall-clock ordering
+// of cancellation side effects.
+// The worker pair is joined before returning, hence before the caller closes
+// its decoder or file. Frames are never pooled/recycled: canonical callers may
+// retain their immutable bytes beyond a callback or this entire walk.
+func walkRecordDecodeBatches(ctx context.Context, reader io.Reader, remaining int64, expected uint64, emit func(NormalizedRecord, []byte) error) (uint64, error) {
+	var slots [2]recordDecodeBatch
+	var jobs [2]chan *recordDecodeBatch
+	var done [2]chan *recordDecodeBatch
+	var workers sync.WaitGroup
+	for i := range jobs {
+		jobs[i], done[i] = make(chan *recordDecodeBatch), make(chan *recordDecodeBatch, 1)
+		workers.Add(1)
+		go runRecordDecodeWorker(ctx, jobs[i], done[i], &workers)
+	}
+	defer func() {
+		for _, ch := range jobs {
+			close(ch)
+		}
+		workers.Wait()
+	}()
+	input := recordBatchReader{ctx: ctx, reader: reader, remaining: remaining, expected: expected}
+	submitted, consumed := 0, 0
+	ended := false
+	fill := func(slot int) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		b := &slots[slot]
+		*b = recordDecodeBatch{}
+		input.fill(b)
+		ended = b.readErr != nil || input.remaining == 0
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		jobs[slot] <- b
+		submitted++
+		return nil
+	}
+	for submitted < 2 && !ended {
+		if err := fill(submitted); err != nil {
+			return input.count, err
+		}
+	}
+	for consumed < submitted {
+		slot := consumed % 2
+		b := <-done[slot]
+		for i := 0; i < b.decoded; i++ {
+			if err := ctx.Err(); err != nil {
+				return input.count, err
+			}
+			if err := emit(b.records[i], b.frames[i]); err != nil {
+				return input.count, err
+			}
+		}
+		if b.decodeErr != nil {
+			return input.count, b.decodeErr
+		}
+		if b.readErr != nil {
+			return input.count, b.readErr
+		}
+		consumed++
+		if !ended {
+			if err := fill(slot); err != nil {
+				return input.count, err
+			}
+		} else {
+			*b = recordDecodeBatch{}
+		}
+	}
+	return input.count, ctx.Err()
 }
 
 type recordContextReader struct {
@@ -449,6 +795,40 @@ func (r *recordContextReader) Read(p []byte) (int, error) {
 		return 0, err
 	}
 	return r.reader.Read(p)
+}
+
+// VerifyStoredSourceObjects checks exact stored bytes without decoding an
+// already validated immutable record stream again. A caller may use this only
+// to verify an exact cache input identity; it does not certify source semantics,
+// rights, freshness, admission, or an unbound partition descriptor.
+func VerifyStoredSourceObjects(ctx context.Context, workspace string, source StoredSource) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if len(source.Records) > 0 && len(source.RecordPartitions) > 0 || len(source.RecordPartitions) > maxRecordPartitions {
+		return errors.New("ambiguous private record storage")
+	}
+	if len(source.RecordPartitions) == 0 {
+		for _, record := range source.Records {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := record.Validate(); err != nil {
+				return err
+			}
+		}
+		return ctx.Err()
+	}
+	root, err := recordDirectory(workspace, false)
+	if err != nil {
+		return err
+	}
+	for _, part := range source.RecordPartitions {
+		if err = walkPartition(ctx, root, part, nil); err != nil {
+			return err
+		}
+	}
+	return ctx.Err()
 }
 
 // WalkStoredSource emits one owned typed record at a time. V1 inline sources

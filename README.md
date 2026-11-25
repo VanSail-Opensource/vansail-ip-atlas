@@ -4,7 +4,7 @@ A Go compiler and Nuxt 4 static IP/ASN atlas. The local synthetic application an
 
 The browser reads indexed, compressed VIA3 objects bundled with the site. It never uses an IP lookup API, resolves subscription hosts, or executes proxy connections. The only external runtime requests are optional OpenStreetMap tiles. IP lookup facts and VIA3 contain no source metadata. A shared footer displays reviewed dataset credits for included data from the same deployment; production facts wait for verified credits, and required publisher links remain visible when full notices are collapsed. Private lineage and source IDs stay private.
 
-Under the owner-approved `release-scope-v5`, compiled database material uses [CC BY-SA 4.0](DATA_LICENSE.md). The exact data-license notice and included-dataset credits are part of each immutable candidate. Source code and software dependencies retain their separate licenses; the product data license does not approve an unreviewed source.
+Under the owner-approved `release-scope-v6`, compiled database material uses [CC BY-SA 4.0](DATA_LICENSE.md). The exact data-license notice and included-dataset credits are part of each immutable candidate. Source code and software dependencies retain their separate licenses; the product data license does not approve an unreviewed source.
 
 ## Local preview
 
@@ -65,9 +65,9 @@ Selected race tests require a CGO-capable toolchain: `go test -race ./internal/.
 
 ## Production boundary
 
-The November 15 shortlist contains 14 sources: ten statically admitted entries and four routing candidates. Dated Tor exits and Ipverse ASN categories add observed risk and usage. Every build independently rechecks actual bytes, item clocks, rights and parser certifications; a static active label never proves current production coverage. See [the source audit](SOURCES_AUDIT.md) for remaining qualification blockers.
+The November 15 release catalog contains ten statically admitted entries. Four unqualified routing sources were removed under the approved v6 scope; their facts remain explicitly unknown. Dated Tor exits and Ipverse ASN categories add observed risk and usage. Every build independently rechecks actual bytes, item clocks, rights and parser certifications; a static active label never proves current production coverage. See [the source audit](SOURCES_AUDIT.md) for remaining qualification blockers.
 
-Production requires qualified real inputs, complete bulk ingestion, measured hosted regression/performance and a verified Pages preview bound to the exact frozen candidate. Under `release-scope-v5`, promotion is automatic from protected main after every mandatory gate passes. Observed risk can report supported positive evidence with explicit incomplete coverage; absent evidence never means safe. Reviewed required logos are local global-credit assets. Source-specific redistribution and credit obligations remain mandatory. The checked-in production policy cannot replace independently verified evidence.
+Production requires qualified real inputs, complete bulk ingestion, measured hosted regression/performance and a verified Pages preview bound to the exact frozen candidate. Under `release-scope-v6`, promotion is automatic from protected main after every mandatory gate passes. Observed risk can report supported positive evidence with explicit incomplete coverage; absent evidence never means safe. Reviewed required logos are local global-credit assets. Source-specific redistribution and credit obligations remain mandatory. The checked-in production policy cannot replace independently verified evidence.
 
 The external planner can also compile the small post-fusion engineering fixture:
 
@@ -89,7 +89,7 @@ This runs all five closed config checks before acquisition, then records private
 connects surviving reconciled receipts to bounded engineering materialization.
 Admitted real records produce private `engineering` artifacts that public
 packaging rejects; they cannot become synthetic previews. `compile-production`
-uses authenticated source and Tier-1 qualification, with `verify-production`
+uses authenticated source qualification and an authenticated Tier-1 observation, with `verify-production`
 checking the exact resulting artifact. See [production qualification](docs/production-qualification.md)
 and [production evidence](docs/production-evidence.md) for the commands and
 remaining coverage, capacity, preview and approval gates.

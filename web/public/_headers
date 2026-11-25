@@ -12,6 +12,9 @@
 /_atlas/objects/*
   Cache-Control: public, max-age=31536000, immutable
 
+/_atlas/browser/*
+  Cache-Control: public, max-age=31536000, immutable
+
 /_atlas/releases/*
   Cache-Control: public, max-age=31536000, immutable
 

@@ -67,17 +67,18 @@ func (e *Engine) tryMRTReplay(ctx context.Context, sources []Source, now time.Ti
 		}
 		proof := stored.Receipt.MRTProof
 		content, err := proof.ContentHash()
-		if err != nil || content != stored.Receipt.PayloadHash {
+		if err != nil || content != stored.Receipt.PayloadHash || !validMRTArchiveBinding(source, proof, now) {
 			return cold("mrt_base_content_set_mismatch")
 		}
-		base, err := mrtArchiveURL(source.URL)
+		baseURL := mrtReplayBaseURL(source, proof)
+		base, err := mrtArchiveURL(baseURL)
 		if err != nil || !base.rib || base.collector != proof.Collector {
 			return cold("mrt_base_collector_mismatch")
 		}
 		if automatic {
 			cursor := proof.Through
 			for n := 0; n < 512; n++ {
-				raw, location, err := nextMRTUpdateURL(source.URL, cursor)
+				raw, location, err := nextMRTUpdateURL(baseURL, cursor)
 				if err != nil {
 					return cold("automatic_update_collector_plan_unavailable")
 				}
@@ -87,7 +88,7 @@ func (e *Engine) tryMRTReplay(ctx context.Context, sources []Source, now time.Ti
 				plans[source.ID] = append(plans[source.ID], raw)
 				cursor = location.until
 			}
-			if raw, location, err := nextMRTUpdateURL(source.URL, cursor); err != nil || raw == "" || !location.until.After(now) {
+			if raw, location, err := nextMRTUpdateURL(baseURL, cursor); err != nil || raw == "" || !location.until.After(now) {
 				return cold("automatic_update_catchup_budget_exceeded")
 			}
 		}

@@ -17,6 +17,8 @@ fixtures/source-samples/
 fixtures/source-certification/*
 !fixtures/source-certification/README.md
 !fixtures/source-certification/adapter-certifications.json
+!fixtures/source-certification/observed-azure-appservice.json
+!fixtures/source-certification/observed-google-owned-prefixes.json
 !fixtures/source-certification/observed-user-country-ipv4.csv
 !fixtures/source-certification/observed-server-country-ipv4.csv
 !fixtures/source-certification/observed-user-country-ipv6.csv
@@ -27,6 +29,11 @@ fixtures/source-certification/*
 !fixtures/source-certification/observed-x4b-vpn-ipv4.txt
 !fixtures/source-certification/observed-tor-exit-addresses.txt
 !fixtures/source-certification/observed-ipverse-asn-usage.json
+!fixtures/source-certification/observed-ffraud.csv
+!fixtures/source-certification/observed-rpki-client-excerpt.json
+!fixtures/source-certification/routeviews-wide-20261115-1200.mrt.bz2
+!fixtures/source-certification/ris-rrc18-20261115-0800.mrt.gz
+!fixtures/source-certification/observed-caida-asrel2.txt.bz2
 !fixtures/source-certification/logos/
 !fixtures/source-certification/logos/*.png
 !fixtures/source-certification/notices/

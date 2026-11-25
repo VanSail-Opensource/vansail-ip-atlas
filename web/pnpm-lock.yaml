@@ -163,7 +163,7 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  fzstd@0.1.1: 7cb459a45c31a410402b3287666f23f7f4bfd9ddfec06d8c1bb287dd0440852d
+  fzstd@0.1.1: 3f23df4cb8e1ccb2a93c97aa655522fd648966283ed9f862e2d62a92e9aedb81
 
 importers:
 
@@ -177,7 +177,7 @@ importers:
         version: 4.12.0(74498588d2905b1bfb4b744326ea30a1)
       fzstd:
         specifier: 0.1.1
-        version: 0.1.1(patch_hash=7cb459a45c31a410402b3287666f23f7f4bfd9ddfec06d8c1bb287dd0440852d)
+        version: 0.1.1(patch_hash=3f23df4cb8e1ccb2a93c97aa655522fd648966283ed9f862e2d62a92e9aedb81)
       leaflet:
         specifier: 1.9.4
         version: 1.9.4
@@ -6607,7 +6607,7 @@ snapshots:
 
   fuzzysort@4.0.2: {}
 
-  fzstd@0.1.1(patch_hash=7cb459a45c31a410402b3287666f23f7f4bfd9ddfec06d8c1bb287dd0440852d): {}
+  fzstd@0.1.1(patch_hash=3f23df4cb8e1ccb2a93c97aa655522fd648966283ed9f862e2d62a92e9aedb81): {}
 
   generic-names@4.0.0:
     dependencies:

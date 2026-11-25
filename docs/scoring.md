@@ -11,7 +11,7 @@ tools/contract_vectors -p "test_*.py"` checks the synthetic vectors.
 
 Model `via-observed-risk-v1` replaces higher-is-better quality with a 0-100
 **observed risk** index, where higher means more supported adverse evidence.
-VIA3 public schema 4 identifies the changed meaning; schema-3 readers and data
+VIA3 public schema 5 retains the observed-risk meaning introduced in schema 4; schema-3 readers and data
 cannot be mixed with it. This is not a probability, a safety rating or a claim
 that absent evidence establishes safety. The historical scope amendments below
 record earlier decisions; this amendment supersedes their numeric-score rules.

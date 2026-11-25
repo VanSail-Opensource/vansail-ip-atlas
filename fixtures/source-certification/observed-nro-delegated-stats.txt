@@ -1,0 +1,9 @@
+2|nro|20261122|776332|19821213|20261122|+0000
+nro|*|asn|*|117801|summary
+nro|*|ipv4|*|271662|summary
+nro|*|ipv6|*|386869|summary
+arin|US|asn|1|1|20010920|assigned|e5e3b9c13678dfc483fb1f819d70883c|e-stats
+iana|ZZ|ipv4|0.0.0.0|16777216|19810901|reserved|ietf|iana
+apnic|AU|ipv4|1.0.0.0|256|20110811|assigned|A91872ED|e-stats
+apnic|JP|ipv6|2001:200::|35|19990813|assigned|A916B6AA|e-stats
+apnic|ZZ|ipv6|2001:201::|32|20261122|available|apnic|e-stats

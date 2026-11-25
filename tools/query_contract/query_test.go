@@ -64,6 +64,14 @@ func TestSharedQueryContract(t *testing.T) {
 			if err != nil || got != test.Expected {
 				t.Fatalf("got %+v, %v; want %+v", got, err, test.Expected)
 			}
+			value, err := ParseValue(test.Input)
+			if err != nil || value.Input != got {
+				t.Fatal("numeric lookup key differs from the public input")
+			}
+			if got.Kind == "ip" && (value.Address.String() != got.Canonical || value.ASN != 0) ||
+				got.Kind == "asn" && (value.Address.IsValid() || fmt.Sprintf("AS%d", value.ASN) != got.Canonical) {
+				t.Fatal("numeric lookup key differs from its canonical text")
+			}
 			again, err := ParseInput(got.Canonical)
 			if err != nil || again != got {
 				t.Fatal("canonical form is not idempotent")
@@ -137,7 +145,7 @@ type layoutCorpus struct {
 func TestFrozenBinaryLayoutCorpus(t *testing.T) {
 	var data layoutCorpus
 	readFixture(t, "via3-layouts.json", &data)
-	if data.Format != 3 || data.Schema != 4 || data.Revision != 2 || !data.Synthetic || len(data.Shards) != 14 {
+	if data.Format != 3 || data.Schema != 5 || data.Revision != 3 || !data.Synthetic || len(data.Shards) != 14 {
 		t.Fatal("wrong contract version or missing shard layout")
 	}
 	if data.FileLimit != 24<<20 || data.SectionLimit != 64<<20 || data.TotalLimit != 256<<20 || data.WindowLimit != 8<<20 {

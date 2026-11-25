@@ -1,8 +1,10 @@
+import { COMPONENT_LIMIT, FactComponents, projectPrefix, projectASN, safePrefixDepth, scopeKey } from './factComponents.ts'
+import { LookupIndex, REFERENCE_MINIMUM, digest, readRoot, type Snapshot, type ObjectInfo } from './lookupIndex.ts'
 import { decodeZstd } from '../lib/zstd.ts'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { parseInput } from '../lib/query.ts'
 import type { Input } from '../lib/query.ts'
-import type { LookupAnswer, ClassCAnswer, ASNAnswer, BGPAnswer, ASNPrefixPage, CoverageAnswer } from '../lib/via3.ts'
+import type { AddressView, ClassCView, LookupAnswer, OverviewAnswer, QualityAnswer, RiskView, ClassCAnswer, ASNAnswer, BGPAnswer, ASNPrefixPage, CoverageAnswer } from '../lib/via3.ts'
 
 const MAX_FILE = 24 * 1024 * 1024
 const MAX_SECTION = 64 * 1024 * 1024
@@ -36,11 +38,16 @@ const mask = (...bits: number[]) => bits.reduce((value, bit) => (value | (1 << b
 const has = (b: Uint8Array, bit: number) => (u32(b, 0) & (1 << bit)) !== 0
 const range = (first: number, count: number, total: number) => first <= total && count <= total - first
 const checkAbort = (signal?: AbortSignal) => { if (signal?.aborted) throw new DOMException('Aborted', 'AbortError') }
-const hex = (b: Uint8Array) => Array.from(b, value => value.toString(16).padStart(2, '0')).join('')
-const unhex = (text: string) => Uint8Array.from(text.match(/../g) ?? [], part => parseInt(part, 16))
-// Read the owned input in fixed-size blocks. WebCrypto snapshots the complete
-// BufferSource, temporarily duplicating a maximum-sized decoded section.
-export const hash = async (b: Uint8Array): Promise<string> => hex(sha256(b))
+const hex = (b: Uint8Array) => b.toHex()
+const unhex = (text: string) => Uint8Array.fromHex(text)
+// WebCrypto may snapshot its input. Limit native calls to one MiB and keep
+// the streaming implementation for larger sections and shared buffers.
+export const hash = async (b: Uint8Array): Promise<string> => {
+  if (b.byteLength >= 4096 && b.byteLength <= 1 << 20 && b.buffer instanceof ArrayBuffer && globalThis.crypto?.subtle) {
+    return hex(new Uint8Array(await crypto.subtle.digest('SHA-256', b as Uint8Array<ArrayBuffer>)))
+  }
+  return hex(sha256(b))
+}
 const textDecoder = new TextDecoder('utf-8', { fatal: true })
 const reasonNames = ['malware', 'botnet', 'command_control', 'abuse', 'fraud', 'scanning', 'spam', 'tor', 'vpn', 'proxy', 'datacenter', 'hosting', 'asn_context', 'subnet_context']
 const reasons = (bits: number) => reasonNames.filter((_, bit) => (bits & (1 << bit)) !== 0)
@@ -61,25 +68,45 @@ class AnswerBudget {
   cellOrigins(count: number): void { if (count > PUBLIC_ORIGINS - this.origins) fail('resource_limit'); this.origins += count; this.charge(count * 16) }
 }
 
+const segmentTypes = ['', 'sequence', 'set', 'confederation_sequence', 'confederation_set']
+type PathSegments = BGPAnswer['paths'][number]['segments']
+type SegmentKey = number | string
+const segmentKeyBytes = (key: SegmentKey) => typeof key === 'number' ? 8 : key.length * 2
+
 /** Per-answer sharing for identical immutable segment values. Public routes are
  * still materialized individually; JSON and structured-clone values are unchanged. */
 export class PathSegmentPool {
-  private values = new Map<string, BGPAnswer['paths'][number]['segments']>()
+  private values = new Map<SegmentKey, PathSegments>()
   keyBytes = 0
   get size(): number { return this.values.size }
-  intern(segments: BGPAnswer['paths'][number]['segments']): BGPAnswer['paths'][number]['segments'] {
-    let key = ''
-    for (const segment of segments) key += `${segment.type}:${segment.asns.join(',')};`
+
+  private get(key: SegmentKey): PathSegments | undefined {
     const found = this.values.get(key)
-    if (found) { this.values.delete(key); this.values.set(key, found); return found }
-    const bytes = key.length * 2
+    if (found) { this.values.delete(key); this.values.set(key, found) }
+    return found
+  }
+
+  private store(key: SegmentKey, segments: PathSegments): PathSegments {
+    const bytes = segmentKeyBytes(key)
     if (bytes > 128 * 1024) return segments
     while (this.values.size >= 256 || this.keyBytes + bytes > 128 * 1024) {
       const oldest = this.values.keys().next().value!
-      this.values.delete(oldest); this.keyBytes -= oldest.length * 2
+      this.values.delete(oldest); this.keyBytes -= segmentKeyBytes(oldest)
     }
     this.values.set(key, segments); this.keyBytes += bytes
     return segments
+  }
+
+  singleton(type: number, asn: number): PathSegments {
+    // The validated type occupies three bits; even the largest u32 ASN is exact.
+    const key = asn * 8 + type
+    return this.get(key) ?? this.store(key, [{ type: segmentTypes[type]!, asns: [asn] }])
+  }
+
+  intern(segments: PathSegments): PathSegments {
+    let key = ''
+    for (const segment of segments) key += `${segment.type}:${segment.asns.join(',')};`
+    return this.get(key) ?? this.store(key, segments)
   }
 }
 /** Exact JSON UTF-8 size for the reader's plain JSON answers, without an
@@ -125,7 +152,8 @@ const answerFits = (value: unknown) => { answerJSONBytes(value) }
 const country = (value: number) => value === 0 ? null : String.fromCharCode(65 + Math.floor((value - 1) / 26), 65 + (value - 1) % 26)
 const countryCodes = new Set('AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW'.split(' '))
 const publicASN = (value: number) => Number.isInteger(value) && ((value >= 1 && value <= 23455) || (value >= 23457 && value <= 64495) || (value >= 131072 && value <= 4199999999))
-const unsafeLabelToken = (value: string) => /[@:/\\]/u.test(value) || /(?:[\p{L}\p{N}-]+\.)+[\p{L}][\p{L}\p{N}-]{1,62}/u.test(value.replace(/^[.,;!()[\]{}"']+|[.,;!()[\]{}"']+$/g, ''))
+// Match the embedded domain suffix checked by the Go publisher and reader.
+const unsafeLabelToken = (value: string) => /[@:/\\]/u.test(value) || (value.includes('.') && /[\p{L}\p{N}-]\.\p{L}[\p{L}\p{N}-]/u.test(value))
 function validPartition(value: string): boolean {
   if (value === 'all') return true
   if (value.startsWith('asn:')) {
@@ -140,7 +168,7 @@ function validPartition(value: string): boolean {
 }
 
 function schema(kind: number): { width: number; sections: number[] } {
-  const widths = [0, 16, 24, 16, 40, 8, 32, 24, 64, 16, 16, 24, 16, 16, 0]
+  const widths = [0, 16, 24, 16, 40, 8, 32, 24, 64, 32, 16, 24, 16, 16, 0]
   const sections = [[], [1, 2, 3, 4, 7], [1, 3, 7, 8], [1, 3, 8], [1, 3, 4, 7, 8], [1, 3, 8], [1, 3, 8], [1, 3, 7, 10], [2, 3, 7, 11, 12], [1, 3, 8], [1, 3, 4, 8], [2, 3, 4, 9], [2, 3, 4], [2, 3], [5, 6]]
   if (kind < 1 || kind > 14) return fail('schema')
   return { width: widths[kind]!, sections: sections[kind]! }
@@ -152,7 +180,23 @@ export function comparePrefixKeys(a: Uint8Array, aOffset: number, b: Uint8Array,
   if (a[aOffset + 1] !== b[bOffset + 1]) return a[aOffset + 1]! - b[bOffset + 1]!
   return u16(a, aOffset + 2) - u16(b, bOffset + 2)
 }
-function compareKey(a: Uint8Array, b: Uint8Array): number { return comparePrefixKeys(a, 0, b, 0) }
+// All callers have already validated both keys. IPv4 uses the low four of
+// the sixteen address bytes. Local exact markers do not affect containment.
+export function partitionContains(ancestor: Uint8Array, a: number, child: Uint8Array, c: number): boolean {
+  const bits = ancestor[a + 1]!
+  if (ancestor[a] !== child[c] || bits > child[c + 1]!) return false
+  const start = ancestor[a] === 4 ? 16 : 4
+  const whole = bits >>> 3
+  for (let i = start; i < start + whole; i++) if (ancestor[a + i] !== child[c + i]) return false
+  const tail = bits & 7
+  return tail === 0 || ((ancestor[a + start + whole]! ^ child[c + start + whole]!) >>> (8 - tail)) === 0
+}
+
+function bytesBefore(data: Uint8Array, a: number, aEnd: number, b: number, bEnd: number): boolean {
+  const count = Math.min(aEnd - a, bEnd - b)
+  for (let i = 0; i < count; i++) if (data[a + i] !== data[b + i]) return data[a + i]! < data[b + i]!
+  return aEnd - a < bEnd - b
+}
 const zeroRange = (bytes: Uint8Array, first: number, end: number) => {
   for (let p = first; p < end; p++) if (bytes[p] !== 0) return false
   return true
@@ -168,8 +212,10 @@ export function prefixKeyValid(bytes: Uint8Array, offset: number, recordBytes: n
   if (width === 128 && zeroRange(bytes, offset + 4, offset + 14) && bytes[offset + 14] === 255 && bytes[offset + 15] === 255) return false
   if (flags === 1 && bits !== width) return false
   const address = offset + (width === 32 ? 16 : 4)
-  for (let bit = bits; bit < width; bit++) if ((bytes[address + Math.floor(bit / 8)]! & (1 << (7 - bit % 8))) !== 0) return false
-  return true
+  const partial = bits & 7
+  const next = address + (bits >>> 3)
+  if (partial && (bytes[next]! & (255 >>> partial))) return false
+  return zeroRange(bytes, partial ? next + 1 : next, offset + 20)
 }
 function validKey(row: Uint8Array): boolean { return prefixKeyValid(row, 0, row.length) }
 function addressBytes(canonical: string): { family: number; bytes: Uint8Array } {
@@ -206,15 +252,31 @@ export class Shard {
   record(index: number): Uint8Array { const rows = this.rows(3); const width = this.width(3); if (!width || index < 0 || index >= rows.length / width) return fail('record'); return rows.subarray(index * width, (index + 1) * width) }
   prefix(canonical: string): { row: Uint8Array; prefix: string; key: Uint8Array } | null {
     const width = canonical.includes(':') ? 128 : 32
+    const offset = width === 32 ? 16 : 4
+    const target = keyFor(canonical, width, true)
+    const indexes = [this.rows(1), this.rows(8)]
     for (let length = width; length >= 0; length--) {
-      for (const exact of length === width ? [true, false] : [false]) {
-        const target = keyFor(canonical, length, exact)
-        for (const id of [1, 8]) {
-          const rows = this.rows(id)
+      target[1] = length
+      // Try the exact host first. A same-length prefix follows, then each
+      // ancestor with exactly one more address bit cleared.
+      for (let flag = length === width ? 1 : 0; flag >= 0; flag--) {
+        target[2] = flag
+        for (const rows of indexes) {
           let lo = 0; let hi = rows.length / 32
-          while (lo < hi) { const mid = lo + Math.floor((hi - lo) / 2); if (compareKey(rows.subarray(mid * 32, (mid + 1) * 32), target) < 0) lo = mid + 1; else hi = mid }
-          if (lo < rows.length / 32) { const key = rows.subarray(lo * 32, (lo + 1) * 32); if (compareKey(key, target) === 0) return { row: this.record(u32(key, 20)), prefix: prefixText(key), key } }
+          while (lo < hi) {
+            const mid = lo + Math.floor((hi - lo) / 2)
+            if (comparePrefixKeys(rows, mid * 32, target, 0) < 0) lo = mid + 1
+            else hi = mid
+          }
+          if (lo < rows.length / 32 && comparePrefixKeys(rows, lo * 32, target, 0) === 0) {
+            const key = rows.subarray(lo * 32, (lo + 1) * 32)
+            return { row: this.record(u32(key, 20)), prefix: prefixText(key), key }
+          }
         }
+      }
+      if (length > 0) {
+        const bit = length - 1
+        target[offset + (bit >>> 3)]! &= ~(128 >>> (bit & 7))
       }
     }
     return null
@@ -237,9 +299,10 @@ export class Shard {
   }
   relationship(from: number, to: number): Uint8Array | null {
     const bounds = this.asnBounds(from); if (!bounds) return null
+    const rows = this.rows(3); const width = this.width(3)
     const [first, end] = bounds; let lo = first; let hi = end
-    while (lo < hi) { const mid = lo + Math.floor((hi - lo) / 2); if (u32(this.record(mid), 8) < to) lo = mid + 1; else hi = mid }
-    return lo < end && u32(this.record(lo), 8) === to ? this.record(lo) : null
+    while (lo < hi) { const mid = lo + Math.floor((hi - lo) / 2); if (u32(rows, mid * width + 8) < to) lo = mid + 1; else hi = mid }
+    return lo < end && u32(rows, lo * width + 8) === to ? this.record(lo) : null
   }
   rpki(canonical: string, origin: number, announcement: string | null): Uint8Array | null {
     const width = canonical.includes(':') ? 128 : 32
@@ -252,17 +315,41 @@ export class Shard {
     if (prefixText(target) !== announcement) return null
     for (const id of [1, 8]) {
       const index = this.rows(id); const count = index.length / 32; let lo = 0; let hi = count
-      while (lo < hi) { const mid = lo + Math.floor((hi - lo) / 2); if (compareKey(index.subarray(mid * 32, (mid + 1) * 32), target) < 0) lo = mid + 1; else hi = mid }
+      while (lo < hi) { const mid = lo + Math.floor((hi - lo) / 2); if (comparePrefixKeys(index, mid * 32, target, 0) < 0) lo = mid + 1; else hi = mid }
       const first = lo
-      if (first === count || compareKey(index.subarray(first * 32, (first + 1) * 32), target) !== 0) continue
+      if (first === count || comparePrefixKeys(index, first * 32, target, 0) !== 0) continue
       hi = count
-      while (lo < hi) { const mid = lo + Math.floor((hi - lo) / 2); if (compareKey(index.subarray(mid * 32, (mid + 1) * 32), target) <= 0) lo = mid + 1; else hi = mid }
+      while (lo < hi) { const mid = lo + Math.floor((hi - lo) / 2); if (comparePrefixKeys(index, mid * 32, target, 0) <= 0) lo = mid + 1; else hi = mid }
       const end = lo; lo = first; hi = end
       while (lo < hi) { const mid = lo + Math.floor((hi - lo) / 2); if (u32(this.record(u32(index, mid * 32 + 20)), 4) < origin) lo = mid + 1; else hi = mid }
       if (lo === end) return null
       const row = this.record(u32(index, lo * 32 + 20)); return u32(row, 4) === origin ? row : null
     }
     return null
+  }
+}
+
+// This object contains only a selected, verified row and its own vectors. Its
+// checked cell includes neither a different LPM winner nor an unvisited child.
+class PrefixComponent extends Shard {
+  private readonly family: number
+  private readonly cell: string
+  private readonly bits: number
+  private readonly text: string | null
+
+  constructor(kind: number, sections: Map<number, Uint8Array>, family: number, cell: string, bits: number, text: string | null) {
+    super(kind, sections)
+    this.family = family
+    this.cell = cell
+    this.bits = bits
+    this.text = text
+  }
+
+  override prefix(canonical: string) {
+    const { family, bytes } = addressBytes(canonical)
+    const address = hex(family === 4 ? bytes.subarray(12) : bytes)
+    if (family !== this.family || scopeKey('', address, this.bits) !== this.cell) return fail('record')
+    return this.text === null ? null : {key: this.rows(1), row: this.rows(3), prefix: this.text}
   }
 }
 
@@ -284,7 +371,7 @@ function validate(shard: Shard): void {
   for (let p = 0; p < objects.length; p += 40) {
     const kind = u16(objects, p)
     if (kind < 1 || kind > 14 || u16(objects, p + 2) !== 0 || u32(objects, p + 4) < 64 || u32(objects, p + 4) >= MAX_FILE) fail('record')
-    if (p && (u16(objects, p - 40) > kind || (u16(objects, p - 40) === kind && hex(objects.subarray(p - 32, p)) >= hex(objects.subarray(p + 8, p + 40))))) fail('record')
+    if (p && (u16(objects, p - 40) > kind || (u16(objects, p - 40) === kind && !bytesBefore(objects, p - 32, p, p + 8, p + 40)))) fail('record')
   }
   const ref = (row: Uint8Array, p: number, bit: number, kind: number) => {
     const object = u32(row, p); const id = u32(row, p + 4)
@@ -307,7 +394,7 @@ function validate(shard: Shard): void {
     }
   }
   const local = shard.rows(1); const overlay = shard.rows(8)
-  for (let p = 0; p < overlay.length; p += 32) { let lo = 0; let hi = local.length / 32; const key = overlay.subarray(p, p + 32); while (lo < hi) { const mid = lo + Math.floor((hi - lo) / 2); if (compareKey(local.subarray(mid * 32, (mid + 1) * 32), key) < 0) lo = mid + 1; else hi = mid }; if (lo < local.length / 32 && compareKey(local.subarray(lo * 32, (lo + 1) * 32), key) === 0) fail('record') }
+  for (let p = 0; p < overlay.length; p += 32) { let lo = 0; let hi = local.length / 32; while (lo < hi) { const mid = lo + Math.floor((hi - lo) / 2); if (comparePrefixKeys(local, mid * 32, overlay, p) < 0) lo = mid + 1; else hi = mid }; if (lo < local.length / 32 && comparePrefixKeys(local, lo * 32, overlay, p) === 0) fail('record') }
   const index = shard.rows(2)
   for (let p = 0; p < index.length; p += 8) {
     if (u32(index, p) === 0 || u32(index, p + 4) >= count || (p > 0 && (u32(index, p - 8) >= u32(index, p) || u32(index, p - 4) > u32(index, p + 4) || (shard.kind !== 1 && u32(index, p - 4) === u32(index, p + 4))))) fail('record')
@@ -375,9 +462,12 @@ function validate(shard: Shard): void {
         if (has(row, 31) && !countryCodes.has(country(u16(row, 24))!)) fail('record')
         if (has(row, 23) && row[26] !== (u32(row, 28) >= 666667 ? 3 : u32(row, 28) >= 333334 ? 2 : 1)) fail('record')
         break
-      case 9:
-        if (!u32(row, 4) || row[8]! > 3 || row[9]! > 128 || !zero(row.subarray(10)) || (!has(row, 20) && (row[8] !== 0 || row[9] !== 0))) fail('record')
+      case 9: {
+        if (!u32(row, 4) || row[8]! > 3 || row[9]! > 128 || !zero(row.subarray(10, 16)) || (!has(row, 20) && (row[8] !== 0 || row[9] !== 0))) fail('record')
+        const observedAt = u32(row, 16) + u32(row, 20) * 4294967296, validUntil = u32(row, 24) + u32(row, 28) * 4294967296
+        if (!Number.isSafeInteger(observedAt) || !Number.isSafeInteger(validUntil) || (row[8] === 0 ? observedAt !== 0 || validUntil !== 0 : observedAt <= 0 || validUntil <= observedAt)) fail('record')
         break
+      }
       case 10: if (!zero(row.subarray(12)) || !asns(u32(row, 4), u32(row, 8)) || (!has(row, 19) && (u32(row, 4) !== 0 || u32(row, 8) !== 0))) fail('record'); if (u32(row, 8) > PUBLIC_ORIGINS) fail('resource_limit'); break
       case 11: {
         if (!u32(row, 4) || !has(row, 29) || u16(row, 12) === 0 || u16(row, 12) > 255 || row[14]! > 1 || row[15]! > 3 || !zero(row.subarray(16)) || !range(u32(row, 8), u16(row, 12), segments.length / 12)) fail('record')
@@ -401,23 +491,24 @@ function validate(shard: Shard): void {
   if (shard.kind === 14) {
     const offsets = shard.rows(5); const bytes = shard.rows(6)
     if (offsets.length < 4 || u32(offsets, 0) !== 0 || u32(offsets, offsets.length - 4) !== bytes.length) fail('record')
-    let previous = ''
     for (let p = 0; p < offsets.length - 4; p += 4) {
       const a = u32(offsets, p); const b = u32(offsets, p + 4)
       if (a >= b || b > bytes.length || b - a > 256) fail('record')
       let label: string
       try { label = textDecoder.decode(bytes.subarray(a, b)) } catch { return fail('record') }
-      if (label.normalize('NFC') !== label || label.trim() !== label || /[\p{Cc}\p{Cf}]/u.test(label) || label.split(/\s/u).some(unsafeLabelToken) || (p > 0 && hex(bytes.subarray(u32(offsets, p - 4), a)) >= hex(bytes.subarray(a, b)))) fail('record')
-      previous = label
+      if (label.normalize('NFC') !== label || label.trim() !== label || /[\p{Cc}\p{Cf}]/u.test(label) || label.split(/\s/u).some(unsafeLabelToken) || (p > 0 && !bytesBefore(bytes, u32(offsets, p - 4), a, a, b))) fail('record')
     }
-    void previous
   }
 }
 
-export async function parseShard(bytes: Uint8Array, signal?: AbortSignal): Promise<Shard> {
+export function parseShard(bytes: Uint8Array, signal?: AbortSignal): Promise<Shard> {
+  return decodeShard(bytes, false, signal)
+}
+
+async function decodeShard(bytes: Uint8Array, knownSchema: boolean, signal?: AbortSignal): Promise<Shard> {
   checkAbort(signal)
   if (bytes.length < 64 || bytes.length >= MAX_FILE) return fail('length')
-  if (bytes[0] !== 86 || bytes[1] !== 73 || bytes[2] !== 65 || bytes[3] !== 51 || u16(bytes, 4) !== 3 || u16(bytes, 6) !== 4) return fail('version')
+  if (bytes[0] !== 86 || bytes[1] !== 73 || bytes[2] !== 65 || bytes[3] !== 51 || u16(bytes, 4) !== 3 || u16(bytes, 6) !== 5) return fail('version')
   if (u16(bytes, 8) !== 64 || u32(bytes, 12) !== 0 || bytes[44] !== 1 || !zero(bytes.subarray(45, 64))) return fail('header')
   if (view(bytes).getBigUint64(36, true) > BigInt(PUBLIC_OBJECT)) return fail('resource_limit')
   const kind = u16(bytes, 10); const expected = schema(kind)
@@ -447,7 +538,7 @@ export async function parseShard(bytes: Uint8Array, signal?: AbortSignal): Promi
     }
     checkAbort(signal)
     const shard = new Shard(kind, sections)
-    validate(shard)
+    if (!knownSchema) validate(shard)
     return shard
   } catch (error) {
     releaseDecoded(sections)
@@ -455,10 +546,15 @@ export async function parseShard(bytes: Uint8Array, signal?: AbortSignal): Promi
   }
 }
 
-type ObjectInfo = { bytes: number; kind: number; partition: string; sha256: string }
 type Manifest = { codec: string; format_version: number; mode: 'synthetic' | 'production'; objects: ObjectInfo[]; release_id: string; schema_version: number; valid_from: number; valid_until: number }
-type Pointer = { format_version: number; manifest_path: string; manifest_sha256: string; release_id: string }
-const exactKeys = (value: object, keys: string[]) => Object.keys(value).sort().join(',') === keys.sort().join(',')
+type Pointer = { browser_sha256?: string; format_version: number; manifest_path: string; manifest_sha256: string; release_id: string }
+const exactKeys = (value: object, keys: string[]) => !!value && typeof value === 'object' && !Array.isArray(value) && keys.length === Object.keys(value).length && keys.every(key => Object.hasOwn(value, key))
+function validInfo(object: ObjectInfo): boolean {
+  return exactKeys(object,['bytes','kind','partition','sha256']) && digest(object.sha256) &&
+    Number.isInteger(object.bytes) && object.bytes >= 64 && object.bytes < MAX_FILE &&
+    Number.isInteger(object.kind) && object.kind >= 1 && object.kind <= 14 &&
+    typeof object.partition === 'string' && validPartition(object.partition)
+}
 function canonical(value: unknown): string {
   if (value === null || typeof value === 'boolean') return JSON.stringify(value)
   if (typeof value === 'number') { if (!Number.isSafeInteger(value)) return fail('manifest'); return JSON.stringify(value) }
@@ -469,12 +565,32 @@ function canonical(value: unknown): string {
 }
 function parseCanonical<T>(bytes: Uint8Array): T { let text: string; let parsed: unknown; try { text = textDecoder.decode(bytes); parsed = JSON.parse(text) } catch { return fail('manifest') }; if (canonical(parsed) !== text) return fail('manifest'); return parsed as T }
 
+// A collision evicts the previous proof. A hit requires all 256 digest bits.
+// Each of the 128 pages has 64 entries of 33 bytes (one presence byte and a
+// full digest). Only touched pages are allocated, at most 264 KiB per reader.
+class VerifiedShardSchemas {
+  private pages: (Uint8Array | undefined)[] = []
+  has(digest: Uint8Array): boolean {
+    const page = this.pages[digest[0]! & 127]
+    const start = (digest[1]! & 63) * 33
+    if (!page?.[start]) return false
+    for (let i = 0; i < 32; i++) if (page[start + 1 + i] !== digest[i]) return false
+    return true
+  }
+  remember(digest: Uint8Array): void {
+    const page = this.pages[digest[0]! & 127] ??= new Uint8Array(64 * 33)
+    const start = (digest[1]! & 63) * 33
+    page[start] = 1
+    page.set(digest, start + 1)
+  }
+}
+
 class ObjectCache {
   private database: Promise<IDBDatabase | null> | null = null
   private db(): Promise<IDBDatabase | null> {
     if (typeof indexedDB === 'undefined') return Promise.resolve(null)
     this.database ??= new Promise(resolve => {
-      const request = indexedDB.open('via3-schema4', 1)
+      const request = indexedDB.open('via3-schema5', 1)
       request.onupgradeneeded = () => { const db = request.result; db.createObjectStore('objects'); db.createObjectStore('meta', { keyPath: 'hash' }) }
       request.onsuccess = () => resolve(request.result)
       request.onerror = request.onblocked = () => resolve(null)
@@ -520,13 +636,32 @@ class ObjectCache {
   }
 }
 
+function riskAt(shard: Shard | undefined, address: string): QualityAnswer | null {
+  const row = shard?.prefix(address)?.row
+  if (!row) return null
+  const layer = (bit: number, offset: number) => has(row, bit) ? u32(row, offset) / 1e6 : null
+  return {
+    coverage: coverageAnswer(row[11]!, address.includes(':')),
+    score: has(row, 9) ? row[9]! : null,
+    confidence: confidence(row[10]!),
+    reasons: reasons(u32(row, 4)),
+    layers: { exact: layer(10,12), prefix: layer(11,16), asn: layer(12,20), neighbors: layer(13,24) },
+  }
+}
+
+// Internal signal to retry without optional projections when their query pins
+// alone would displace an otherwise admissible decoded shard.
+class ComponentPressure extends Error {}
+
 /** Indexed reader used only in the worker; injected fetch/clock support parity tests. */
 export class AtlasReader {
   private fetcher: typeof fetch
   private clock: () => number
   private invalidate: (reason: string) => void
   private leaseClock: () => number
-  private manifest: Manifest | null = null
+  private manifest: Snapshot | null = null
+  private index: LookupIndex | null = null
+  private indexHash?: string
   private pointerHash = ''
   private inventory = new Map<string, ObjectInfo>()
   private cache = new Map<string, Shard>()
@@ -538,7 +673,27 @@ export class AtlasReader {
   private residents = new Map<string, { size: number; query: boolean; cache: boolean; router: boolean; shard?: Shard }>()
   private residentBytes = 0
   private router: Shard | null = null
+  private querySources = new Set<string>()
+  private querySourceBytes = 0
+  private components = this.newComponents()
+  private newComponents(): FactComponents {
+    return new FactComponents((hash, size) => this.chargeSource(hash, size))
+  }
+  private rememberComponent(key: string, value: unknown, bytes: number, scope?: {group: string; bits: number}): boolean {
+    const source = this.residents.get(key.slice(0,64))
+    if (!source) return fail('record')
+    return this.components.put(key, value, bytes, PUBLIC_LIVE - this.residentBytes, scope, source.size)
+  }
+  // Even a compact hit retains the original per-query decoded-work limit.
+  // Count each authenticated source once across components and raw lookups.
+  private chargeSource(hash: string, size: number): void {
+    if (this.querySources.has(hash)) return
+    if (size > PUBLIC_LIVE - this.querySourceBytes) fail('resource_limit')
+    this.querySources.add(hash)
+    this.querySourceBytes += size
+  }
   private persistent = new ObjectCache()
+  private verifiedSchemas = new VerifiedShardSchemas()
   private expiryTimer: ReturnType<typeof setTimeout> | null = null
   private leaseTimer: ReturnType<typeof setTimeout> | null = null
   private revalidateTimer: ReturnType<typeof setTimeout> | null = null
@@ -546,27 +701,61 @@ export class AtlasReader {
   private leaseEpoch = 0
   private revalidateController: AbortController | null = null
   constructor(fetcher: typeof fetch = fetch, clock = () => Math.floor(Date.now() / 1000), invalidate: (reason: string) => void = () => {}, leaseClock = () => performance.now() / 1000) { this.fetcher = fetcher.bind(globalThis); this.clock = clock; this.invalidate = invalidate; this.leaseClock = leaseClock }
-  clear(): void { for (const entry of this.residents.values()) if (entry.shard) releaseDecoded(entry.shard.sections); this.cache.clear(); this.cacheBytes = 0; this.active.clear(); this.activeReserved.clear(); this.activeBytes = 0; this.routerBytes = 0; this.residents.clear(); this.residentBytes = 0; this.manifest = null; this.router = null; this.inventory.clear(); this.pointerHash = ''; this.pointerCheckedAt = -Infinity; this.leaseEpoch++; this.revalidateController?.abort(); if (this.expiryTimer) clearTimeout(this.expiryTimer); if (this.leaseTimer) clearTimeout(this.leaseTimer); if (this.revalidateTimer) clearTimeout(this.revalidateTimer) }
+  clear(): void { this.components.clear(); this.components = this.newComponents(); this.querySources.clear(); this.querySourceBytes = 0; for (const entry of this.residents.values()) if (entry.shard) releaseDecoded(entry.shard.sections); this.cache.clear(); this.cacheBytes = 0; this.active.clear(); this.activeReserved.clear(); this.activeBytes = 0; this.routerBytes = 0; this.residents.clear(); this.residentBytes = 0; this.manifest = null; this.index = null; this.indexHash = undefined; this.verifiedSchemas = new VerifiedShardSchemas(); this.router = null; this.inventory.clear(); this.pointerHash = ''; this.pointerCheckedAt = -Infinity; this.leaseEpoch++; this.revalidateController?.abort(); if (this.expiryTimer) clearTimeout(this.expiryTimer); if (this.leaseTimer) clearTimeout(this.leaseTimer); if (this.revalidateTimer) clearTimeout(this.revalidateTimer) }
   private releaseResident(key: string): void { const entry = this.residents.get(key); if (entry && !entry.query && !entry.cache && !entry.router) { if (entry.shard) releaseDecoded(entry.shard.sections); this.residentBytes -= entry.size; this.residents.delete(key) } }
-  private endQuery(): void { for (const key of this.activeReserved) { const entry = this.residents.get(key); if (entry) { entry.query = false; this.releaseResident(key) } }; this.active.clear(); this.activeReserved.clear(); this.activeBytes = 0 }
-  private beginQuery(): void { this.endQuery() }
+  private endQuery(): void { this.querySources.clear(); this.querySourceBytes = 0; this.components.endQuery(); for (const key of this.activeReserved) { const entry = this.residents.get(key); if (entry) { entry.query = false; this.releaseResident(key) } }; this.active.clear(); this.activeReserved.clear(); this.activeBytes = 0 }
+  private beginQuery(): void {
+    this.endQuery()
+    if (this.routerBytes >= COMPONENT_LIMIT) this.components.suspended = true
+    if (this.router) for (const [hash, entry] of this.residents) {
+      if (entry.router) { this.chargeSource(hash, entry.size); break }
+    }
+  }
+  private async runQuery<T>(work: () => Promise<T>): Promise<T> {
+    this.beginQuery()
+    try {
+      return await work()
+    } catch (error) {
+      if (!(error instanceof ComponentPressure)) throw error
+      this.beginQuery()
+      this.components.clear()
+      this.components.suspended = true
+      return await work()
+    } finally {
+      this.components.suspended = false
+      this.endQuery()
+    }
+  }
   private shardBytes(shard: Shard): number { return [...shard.sections.values()].reduce((sum, bytes) => sum + bytes.length, 0) }
   private evictCache(key: string): void { const object = this.cache.get(key); if (object) { this.cacheBytes -= this.shardBytes(object); this.cache.delete(key) }; const entry = this.residents.get(key); if (entry) { entry.cache = false; this.releaseResident(key) } }
   private admit(key: string, size: number): void {
     if (this.activeReserved.has(key)) return
     if (size > PUBLIC_OBJECT) fail('resource_limit')
+    // A single decoded source as large as the secondary cache favors the
+    // original raw plan. This keeps temporary projections out of large scans.
+    if (size >= COMPONENT_LIMIT) this.components.suspended = true
+    this.chargeSource(key, size)
     let entry = this.residents.get(key)
     if (entry && entry.size !== size) fail('record')
-    while (!entry && size > PUBLIC_LIVE - this.residentBytes && this.cache.size) this.evictCache(this.cache.keys().next().value!)
-    if (!entry && size > PUBLIC_LIVE - this.residentBytes) fail('resource_limit')
+    if (!entry) this.components.trim(Math.max(0, PUBLIC_LIVE - this.residentBytes - size))
+    while (!entry && size > PUBLIC_LIVE - this.residentBytes - this.components.bytes && this.cache.size) this.evictCache(this.cache.keys().next().value!)
+    if (!entry && size > PUBLIC_LIVE - this.residentBytes - this.components.bytes) {
+      if (this.components.bytes && size <= PUBLIC_LIVE - this.residentBytes) throw new ComponentPressure('resource_limit')
+      fail('resource_limit')
+    }
     if (!entry) { entry = { size, query: true, cache: false, router: false }; this.residents.set(key, entry); this.residentBytes += size }
     entry.query = true
     this.activeReserved.add(key); this.activeBytes += size
   }
-  private current(): Manifest { const manifest = this.manifest; if (!manifest || this.clock() < manifest.valid_from || this.clock() >= manifest.valid_until) { this.invalidate('expired'); return fail('expired') }; if (this.leaseClock() - this.pointerCheckedAt >= 60) { this.invalidate('pointer_lease_expired'); return fail('pointer_lease_expired') }; return manifest }
+  private current(): Snapshot { const manifest = this.manifest; if (!manifest || this.clock() < manifest.valid_from || this.clock() >= manifest.valid_until) { this.invalidate('expired'); return fail('expired') }; if (this.leaseClock() - this.pointerCheckedAt >= 60) { this.invalidate('pointer_lease_expired'); return fail('pointer_lease_expired') }; return manifest }
   private pointer(bytes: Uint8Array): Pointer {
     const pointer = parseCanonical<Pointer>(bytes)
-    if (!pointer || !exactKeys(pointer, ['format_version', 'manifest_path', 'manifest_sha256', 'release_id']) || pointer.format_version !== 3 || !/^[0-9a-f]{64}$/.test(pointer.release_id) || !/^[0-9a-f]{64}$/.test(pointer.manifest_sha256) || pointer.manifest_path !== `/_atlas/releases/${pointer.release_id}/manifest.json`) return fail('manifest')
+    const fields = ['format_version', 'manifest_path', 'manifest_sha256', 'release_id']
+    if (pointer && Object.hasOwn(pointer,'browser_sha256')) {
+      if (!digest(pointer.browser_sha256)) return fail('manifest')
+      fields.push('browser_sha256')
+    }
+    if (!pointer || !exactKeys(pointer, fields) || pointer.format_version !== 3 || !/^[0-9a-f]{64}$/.test(pointer.release_id) || !/^[0-9a-f]{64}$/.test(pointer.manifest_sha256) || pointer.manifest_path !== `/_atlas/releases/${pointer.release_id}/manifest.json`) return fail('manifest')
     return pointer
   }
   private armLease(): void {
@@ -586,7 +775,7 @@ export class AtlasReader {
       const pointer = this.pointer(await this.read('/_atlas/current.json', 4096, controller.signal))
       if (epoch !== this.leaseEpoch || controller.signal.aborted) return
       if (!this.manifest || this.clock() >= this.manifest.valid_until) { this.clear(); this.invalidate('expired'); return }
-      if (pointer.manifest_sha256 !== this.pointerHash || pointer.release_id !== this.manifest.release_id) { this.clear(); this.invalidate('release_changed'); return }
+      if (pointer.manifest_sha256 !== this.pointerHash || pointer.browser_sha256 !== this.indexHash || pointer.release_id !== this.manifest.release_id) { this.clear(); this.invalidate('release_changed'); return }
       if (this.leaseClock() - requestAt >= 60) return
       this.pointerCheckedAt = requestAt; this.armLease()
     } catch { /* The existing hard deadline remains armed; failed fetches never renew it. */ }
@@ -612,55 +801,100 @@ export class AtlasReader {
     if (this.manifest && this.leaseClock() - this.pointerCheckedAt < 60) { checkAbort(signal); this.current(); return }
     const requestAt = this.leaseClock()
     const pointer = this.pointer(await this.read('/_atlas/current.json', 4096, signal))
-    if (this.pointerHash === pointer.manifest_sha256 && this.manifest) { this.pointerCheckedAt = requestAt; this.current(); this.armLease(); return }
+    if (this.pointerHash === pointer.manifest_sha256 && this.indexHash === pointer.browser_sha256 && this.manifest?.release_id === pointer.release_id) { this.pointerCheckedAt = requestAt; this.current(); this.armLease(); return }
     if (this.manifest) { this.clear(); this.invalidate('release_changed') }
+    if (pointer.browser_sha256) {
+      const root = readRoot(await this.control(pointer.browser_sha256,1024,signal), pointer.release_id, pointer.manifest_sha256)
+      checkAbort(signal)
+      this.manifest = root
+      this.index = new LookupIndex(root, this.control.bind(this), validInfo, this.components, () => PUBLIC_LIVE - this.residentBytes)
+      this.indexHash = pointer.browser_sha256
+      this.pointerHash = pointer.manifest_sha256
+      this.pointerCheckedAt = requestAt
+      this.current(); this.armExpiry(); this.armLease()
+      return
+    }
     const bytes = await this.read(pointer.manifest_path, 4 * 1024 * 1024, signal)
     if (await hash(bytes) !== pointer.manifest_sha256) return fail('integrity')
     const manifest = parseCanonical<Manifest>(bytes)
-    if (!manifest || !exactKeys(manifest, ['codec', 'format_version', 'mode', 'objects', 'release_id', 'schema_version', 'valid_from', 'valid_until']) || manifest.codec !== 'zstd-1' || manifest.format_version !== 3 || manifest.schema_version !== 4 || !['synthetic', 'production'].includes(manifest.mode) || manifest.release_id !== pointer.release_id || !Number.isSafeInteger(manifest.valid_from) || !Number.isSafeInteger(manifest.valid_until) || manifest.valid_from < 0 || manifest.valid_until <= manifest.valid_from || manifest.valid_until - manifest.valid_from > 720 * 3600 || !Array.isArray(manifest.objects) || manifest.objects.length === 0 || manifest.objects.length >= 18500) return fail('manifest')
+    if (!manifest || !exactKeys(manifest, ['codec', 'format_version', 'mode', 'objects', 'release_id', 'schema_version', 'valid_from', 'valid_until']) || manifest.codec !== 'zstd-1' || manifest.format_version !== 3 || manifest.schema_version !== 5 || !['synthetic', 'production'].includes(manifest.mode) || manifest.release_id !== pointer.release_id || !Number.isSafeInteger(manifest.valid_from) || !Number.isSafeInteger(manifest.valid_until) || manifest.valid_from < 0 || manifest.valid_until <= manifest.valid_from || manifest.valid_until - manifest.valid_from > 720 * 3600 || !Array.isArray(manifest.objects) || manifest.objects.length === 0 || manifest.objects.length >= 18500) return fail('manifest')
     const { release_id: _id, ...descriptor } = manifest
     if (await hash(new TextEncoder().encode(canonical(descriptor))) !== manifest.release_id) return fail('manifest')
     let previous = ''; let routerHash = ''
     for (const object of manifest.objects) {
-      if (!exactKeys(object, ['bytes', 'kind', 'partition', 'sha256']) || !/^[0-9a-f]{64}$/.test(object.sha256) || object.sha256 <= previous || !Number.isInteger(object.bytes) || object.bytes < 64 || object.bytes >= MAX_FILE || !Number.isInteger(object.kind) || object.kind < 1 || object.kind > 14 || !validPartition(object.partition)) return fail('manifest')
+      if (!validInfo(object) || object.sha256 <= previous) return fail('manifest')
       previous = object.sha256; this.inventory.set(object.sha256, object)
       if (object.kind === 1) { if (routerHash || object.partition !== 'all') return fail('manifest'); routerHash = object.sha256 }
     }
     if (!routerHash) return fail('manifest')
     this.manifest = manifest; this.pointerHash = pointer.manifest_sha256; this.pointerCheckedAt = requestAt; this.current(); this.router = await this.object(routerHash, signal); this.routerBytes = this.shardBytes(this.router); this.residents.get(routerHash)!.router = true; this.armExpiry(); this.armLease()
   }
+  private async control(key: string, limit: number, signal?: AbortSignal): Promise<unknown> {
+    const bytes = await this.read('/_atlas/browser/' + key + '.json', limit, signal)
+    if (await hash(bytes) !== key) return fail('integrity')
+    return parseCanonical(bytes)
+  }
+  private remember(info: ObjectInfo): void {
+    const previous = this.inventory.get(info.sha256)
+    if (previous) {
+      if (previous.kind !== info.kind || previous.bytes !== info.bytes || previous.partition !== info.partition) fail('manifest')
+    } else {
+      if (this.inventory.size >= 18499) fail('resource_limit')
+      this.inventory.set(info.sha256, info)
+    }
+  }
+  private async info(key: string, signal?: AbortSignal): Promise<ObjectInfo> {
+    const known = this.inventory.get(key)
+    if (known) return known
+    const index = this.index
+    const info = await index?.object(key, signal)
+    this.current()
+    if (!info || index !== this.index) return fail('missing_object')
+    this.remember(info)
+    return info
+  }
   private async object(key: string, signal?: AbortSignal): Promise<Shard> {
     this.current(); checkAbort(signal)
     const active = this.active.get(key); if (active) return active
     const cached = this.cache.get(key)
     if (cached) { this.admit(key, this.shardBytes(cached)); this.active.set(key, cached); if (this.cache.has(key)) { this.cache.delete(key); this.cache.set(key, cached) }; return cached }
-    const info = this.inventory.get(key); if (!info) return fail('missing_object')
+    const schemas = this.verifiedSchemas
+    const info = await this.info(key, signal)
     const stored = await this.persistent.get(key, info.bytes)
     const bytes = stored ?? await this.read(`/_atlas/objects/${key}.via3`, MAX_FILE - 1, signal)
     try {
       if (bytes.length !== info.bytes || await hash(bytes) !== key) { if (stored) await this.persistent.evict(key); return fail('integrity') }
       checkAbort(signal); this.current()
+      if (this.verifiedSchemas !== schemas) return fail('expired')
       if (bytes.length < 64 || view(bytes).getBigUint64(36, true) > BigInt(PUBLIC_OBJECT)) return fail('resource_limit')
       this.admit(key, Number(view(bytes).getBigUint64(36, true)))
-      const shard = await parseShard(bytes, signal)
+      // The complete owned container matches its release key. decodeShard still
+      // rechecks every decoded section's length and SHA-256 on a schema hit.
+      const digestBytes = unhex(key)
+      const shard = await decodeShard(bytes, schemas.has(digestBytes), signal)
       const resident = this.residents.get(key)
-      if (!resident) { releaseDecoded(shard.sections); return fail('expired') }
+      if (!resident || this.verifiedSchemas !== schemas) { releaseDecoded(shard.sections); return fail('expired') }
       resident.shard = shard
       checkAbort(signal); this.current()
       if (shard.kind !== info.kind) return fail('schema')
-      const references = shard.rows(7)
-      for (let p = 0; p < references.length; p += 40) { const target = hex(references.subarray(p + 8, p + 40)); const object = this.inventory.get(target); if (!object || object.kind !== u16(references, p) || object.bytes !== u32(references, p + 4) || target === key) return fail('record') }
+      await this.verifyReferences(shard,info,signal)
       if (info.partition.startsWith('4:') || info.partition.startsWith('6:')) {
         const [address, length] = info.partition.slice(2).split('/'); const partition = new Uint8Array(32); partition[0] = info.partition[0] === '4' ? 4 : 6; partition[1] = Number(length); partition.set(unhex(address!), 4)
         if (!validKey(partition)) return fail('manifest')
         const overlay = shard.rows(8)
-        for (let p = 0; p < overlay.length; p += 32) { const row = overlay.subarray(p, p + 32); if (row[0] !== partition[0] || row[1]! > partition[1]!) return fail('record'); const candidate = keyFor(prefixText(partition).split('/')[0]!, row[1]!, false); if (compareKey(candidate, row) !== 0) return fail('record') }
+        for (let p = 0; p < overlay.length; p += 32) {
+          if (u16(overlay, p + 2) !== 0 || !partitionContains(overlay, p, partition, 0)) return fail('record')
+        }
         const local = shard.rows(1)
-        for (let p = 0; p < local.length; p += 32) { const row = local.subarray(p, p + 32); if (row[0] !== partition[0] || row[1]! < partition[1]!) return fail('record'); const candidate = keyFor(prefixText(row).split('/')[0]!, partition[1]!, false); if (compareKey(candidate, partition) !== 0) return fail('record') }
+        for (let p = 0; p < local.length; p += 32) {
+          if (!partitionContains(partition, 0, local, p)) return fail('record')
+        }
       }
       if (info.partition.startsWith('asn:')) { const [, first, last] = info.partition.split(':'); const index = shard.rows(2); for (let p = 0; p < index.length; p += 8) if (u32(index, p) < Number(first) || u32(index, p) > Number(last)) return fail('record') }
       if (!stored) await this.persistent.put(key, bytes)
       checkAbort(signal); this.current()
+      if (this.verifiedSchemas !== schemas) return fail('expired')
+      schemas.remember(digestBytes)
       const size = [...shard.sections.values()].reduce((sum, bytes) => sum + bytes.length, 0)
       if (size <= 32 * 1024 * 1024) {
         while (this.cacheBytes + size > 32 * 1024 * 1024 && this.cache.size) this.evictCache(this.cache.keys().next().value!)
@@ -675,47 +909,233 @@ export class AtlasReader {
       ;(bytes.buffer as ArrayBuffer).transfer(0)
     }
   }
-  private async reference(shard: Shard, index: number, signal?: AbortSignal): Promise<Shard> { const objects = shard.rows(7); if (index >= objects.length / 40) return fail('record'); return this.object(hex(objects.subarray(index * 40 + 8, index * 40 + 40)), signal) }
+  private async verifyReferences(shard: Shard, owner: ObjectInfo, signal?: AbortSignal): Promise<void> {
+    const rows = shard.rows(7), count = rows.length / 40, index = this.index
+    if (index?.hasReferenceProofs && count >= REFERENCE_MINIMUM) {
+      const expected = await index.referenceDigest(owner,count,signal)
+      checkAbort(signal); this.current()
+      if (this.index !== index) return fail('expired')
+      const proof = sha256.create()
+      proof.update(new TextEncoder().encode('VIA3-REFERENCES-1\0'))
+      proof.update(unhex(this.pointerHash)); proof.update(unhex(owner.sha256))
+      proof.update(shard.sections.get(7)!)
+      if (hex(proof.digest()) !== expected) return fail('integrity')
+      // Already-known targets must agree immediately. Reading an external row
+      // also checks its actual descriptor before exposing facts from that target.
+      for (let p = 0; p < rows.length; p += 40) {
+        const key = hex(rows.subarray(p+8,p+40)), info = this.inventory.get(key)
+        if (key === owner.sha256 || info && (info.kind !== u16(rows,p) || info.bytes !== u32(rows,p+4))) return fail('record')
+      }
+      return
+    }
+    for (let p = 0; p < rows.length; p += 40) {
+      const key = hex(rows.subarray(p+8,p+40))
+      const info = this.inventory.get(key) ?? (index ? await this.info(key,signal) : undefined)
+      if (!info || info.kind !== u16(rows,p) || info.bytes !== u32(rows,p+4) || key === owner.sha256) return fail('record')
+    }
+  }
+  private async referenceTarget(shard: Shard, ordinal: number, signal?: AbortSignal): Promise<string> {
+    const key = this.referenceHash(shard,ordinal)
+    const info = this.inventory.get(key) ?? await this.info(key,signal)
+    const rows = shard.rows(7), p = ordinal * 40
+    if (info.kind !== u16(rows,p) || info.bytes !== u32(rows,p+4)) return fail('record')
+    return key
+  }
+  private async reference(shard: Shard, ordinal: number, signal?: AbortSignal): Promise<Shard> {
+    return this.object(await this.referenceTarget(shard,ordinal,signal),signal)
+  }
+  private referenceHash(shard: Shard, index: number): string {
+    const objects = shard.rows(7)
+    if (index >= objects.length / 40) return fail('record')
+    return hex(objects.subarray(index * 40 + 8, index * 40 + 40))
+  }
   private async label(shard: Shard, row: Uint8Array, p: number, signal?: AbortSignal): Promise<string | null> {
-    const object = u32(row, p); const id = u32(row, p + 4); if (object === NONE && id === NONE) return null
-    const dictionary = await this.reference(shard, object, signal); const offsets = dictionary.rows(5); const text = dictionary.rows(6)
+    const object = u32(row,p), id = u32(row,p+4)
+    if (object === NONE && id === NONE) return null
+    const hash = await this.referenceTarget(shard,object,signal), key = hash + '/label/' + id
+    const known = this.components.get<string>(key)
+    if (known !== undefined) return known
+    const dictionary = await this.object(hash,signal), offsets = dictionary.rows(5), text = dictionary.rows(6)
     if (dictionary.kind !== 14 || id + 1 >= offsets.length / 4) return fail('record')
-    return textDecoder.decode(text.subarray(u32(offsets, id * 4), u32(offsets, (id + 1) * 4)))
+    const value = textDecoder.decode(text.subarray(u32(offsets,id*4),u32(offsets,(id+1)*4)))
+    this.rememberComponent(key,value,64+2*value.length)
+    return value
   }
   private originList(shard: Shard, row: Uint8Array): number[] { const ints = shard.rows(4); return Array.from({ length: u32(row, 8) }, (_, index) => u32(ints, (u32(row, 4) + index) * 4)) }
-  private async destinations(input: Input, signal?: AbortSignal): Promise<Map<number, Shard>> {
-    const router = this.router!; const row = input.kind === 'ip' ? router.prefix(input.canonical)?.row : router.asn(Number(input.canonical.slice(2)))[0]
-    const output = new Map<number, Shard>(); if (!row) return output
-    const ints = router.rows(4)
-    for (let index = 0; index < u16(row, 4); index++) { const shard = await this.reference(router, u32(ints, (u32(row, 0) + index) * 4), signal); output.set(shard.kind, shard) }
+  private async routeInfos(input: Input, signal?: AbortSignal): Promise<ObjectInfo[]> {
+    const index = this.index
+    if (index) {
+      const address = input.kind === 'ip' ? addressBytes(input.canonical) : undefined
+      const plane = address ? (address.family === 4 ? 'ipv4' : 'ipv6') : 'asn'
+      const key = address ? hex(address.family === 4 ? address.bytes.subarray(12) : address.bytes) : Number(input.canonical.slice(2)).toString(16).padStart(8,'0')
+      const destinations = await index.routes(plane,key,signal)
+      this.current()
+      if (this.index !== index) return fail('expired')
+      for (const info of destinations) this.remember(info)
+      return destinations
+    }
+    const router = this.router!
+    const row = input.kind === 'ip' ? router.prefix(input.canonical)?.row : router.asn(Number(input.canonical.slice(2)))[0]
+    const output: ObjectInfo[] = []
+    if (row) {
+      const ints = router.rows(4)
+      for (let index = 0; index < u16(row,4); index++) {
+        const ordinal = u32(ints,(u32(row,0)+index)*4)
+        const info = this.inventory.get(this.referenceHash(router,ordinal))
+        if (!info) return fail('record')
+        output.push(info)
+      }
+    }
     return output
   }
+  private async selectedFact(info: ObjectInfo, input: Input, signal?: AbortSignal): Promise<Shard> {
+    const hash = info.sha256
+    if (this.components.suspended) return this.object(hash,signal)
+    if (input.kind === 'ip' && [2,3,4,5,6,10].includes(info.kind)) {
+      const addr = addressBytes(input.canonical), address = hex(addr.family === 4 ? addr.bytes.subarray(12) : addr.bytes)
+      const group = hash + '/' + addr.family
+      const known = this.components.prefix<Shard>(group,address)
+      if (known) return known
+      const shard = await this.object(hash,signal)
+      const match = shard.prefix(input.canonical), projection = projectPrefix(shard,match)
+      if (projection) {
+        const bits = safePrefixDepth(shard,addr.family,addr.bytes,match)
+        const cell = scopeKey(group,address,bits)
+        const compact = new PrefixComponent(shard.kind, projection.sections, addr.family, scopeKey('', address, bits), bits, match?.prefix ?? null)
+        if (this.rememberComponent(cell, compact, projection.bytes + 256 + 2*(cell.length + (match?.prefix.length ?? 0)), {group,bits})) return compact
+      }
+      return shard
+    }
+    if (input.kind === 'asn' && [8,11,13].includes(info.kind)) {
+      const asn = Number(input.canonical.slice(2)), key = hash + '/asn/' + asn
+      const known = this.components.get<Shard>(key)
+      if (known) return known
+      const shard = await this.object(hash,signal), projection = projectASN(shard,asn)
+      if (projection) this.rememberComponent(key, new Shard(shard.kind,projection.sections), projection.bytes)
+      return shard
+    }
+    return this.object(hash,signal)
+  }
+  private async destinations(input: Input, signal: AbortSignal | undefined, kinds: number | readonly number[], infos?: ObjectInfo[]): Promise<Map<number,Shard>> {
+    const selected = new Map<number,Shard>()
+    for (const info of infos ?? await this.routeInfos(input,signal)) {
+      if (typeof kinds === 'number' ? kinds === info.kind : kinds.includes(info.kind)) selected.set(info.kind,await this.selectedFact(info,input,signal))
+    }
+    return selected
+  }
+  // Full lookup has always authenticated every routed destination, including
+  // the grid and RPKI shards when the answer has no rows from them. Retain
+  // only the successful verification for those unconsumed immutable objects.
+  private async verifyUnused(infos: ObjectInfo[], used: readonly number[], signal?: AbortSignal): Promise<void> {
+    for (const info of infos) {
+      if (used.includes(info.kind)) continue
+      const key = info.sha256 + '/verified'
+      if (!this.components.get<boolean>(key)) {
+        await this.object(info.sha256,signal)
+        this.rememberComponent(key,true,32)
+      }
+    }
+  }
+  private async relationship(from: number, to: number, signal?: AbortSignal): Promise<Uint8Array | null> {
+    const info = (await this.routeInfos({kind:'asn',canonical:'AS'+from},signal)).find(o=>o.kind===12)
+    if (!info) return null
+    const key = info.sha256 + '/relation/' + from + '/' + to
+    const known = this.components.get<Uint8Array|null>(key)
+    if (known !== undefined) return known
+    const row = (await this.object(info.sha256,signal)).relationship(from,to)?.slice() ?? null
+    this.rememberComponent(key,row,64+(row?.length??0))
+    return row
+  }
+  private async rpkiRow(info: ObjectInfo | undefined, ip: string, asn: number, announcement: string | null, signal?: AbortSignal): Promise<Uint8Array|null> {
+    if (!info || !announcement) return null
+    // The announcement comes from a verified prefix matching this IP; each
+    // origin has its own row for that precise announcement in this object.
+    const key = info.sha256 + '/rpki/' + announcement + '/' + asn
+    const known = this.components.get<Uint8Array|null>(key)
+    if (known !== undefined) return known
+    const row = (await this.object(info.sha256,signal)).rpki(ip,asn,announcement)?.slice() ?? null
+    this.rememberComponent(key,row,64+(row?.length??0))
+    return row
+  }
+  // Overview needs only place, coordinates, network identity and usage. Both
+  // entry points decode these fields identically, including anycast suppression.
+  private async readOverview(ip: string, dest: Map<number, Shard>, answer: Pick<OverviewAnswer, 'geo' | 'network' | 'usage'>, budget: AnswerBudget, signal?: AbortSignal): Promise<boolean> {
+    let networkOriginsKnown = false
+    const geo = dest.get(2); const geoRow = geo?.prefix(ip)?.row
+    if (geo && geoRow) answer.geo = { country: country(u16(geoRow, 4)), registrationCountry: country(u16(geoRow, 6)), region: await this.label(geo, geoRow, 8, signal), city: await this.label(geo, geoRow, 16, signal), latitude: null, longitude: null, precision: null }
+    const coords = dest.get(3)?.prefix(ip)?.row
+    if (coords && has(coords, 4)) { answer.geo ??= { country: null, registrationCountry: null, region: null, city: null, latitude: null, longitude: null, precision: null }; answer.geo.latitude = i32(coords, 4) / 1000; answer.geo.longitude = i32(coords, 8) / 1000; answer.geo.precision = ['unknown', 'country', 'region', 'city_centroid', 'area'][coords[12]!]! }
+    const network = dest.get(4); const found = network?.prefix(ip)
+    if (network && found) { budget.charge(4096 + 16 * u32(found.row, 8)); answer.network = { prefix: found.prefix, name: await this.label(network, found.row, 16, signal), organization: await this.label(network, found.row, 24, signal), isp: await this.label(network, found.row, 32, signal), origins: this.originList(network, found.row) }; networkOriginsKnown = has(found.row, 19) }
+    const use = dest.get(5)?.prefix(ip)?.row
+    if (use) { answer.usage = { type: usage(use[4]!), assignment: ['unknown', 'native', 'broadcast_or_routed'][use[5]!]!, anycast: has(use, 7) ? !!(use[6]! & 1) : null, directedBroadcast: has(use, 8) ? !!(use[6]! & 2) : null }; if (answer.usage.anycast && answer.geo) { answer.geo.city = null; answer.geo.latitude = null; answer.geo.longitude = null; answer.geo.precision = null } }
+    return networkOriginsKnown
+  }
+  private addressView(input: Input): AddressView {
+    const manifest = this.current()
+    return { q: input.canonical, kind: 'ip', releaseId: manifest.release_id, synthetic: manifest.mode === 'synthetic', validUntil: manifest.valid_until }
+  }
+  async risk(q: string, signal?: AbortSignal): Promise<RiskView> {
+    const input = parseInput(q)
+    if (input.kind !== 'ip') return fail('invalid_input')
+    return this.runQuery(async () => {
+      await this.ready(signal)
+      const dest = await this.destinations(input, signal, 6)
+      checkAbort(signal)
+      return { ...this.addressView(input), observedRisk: riskAt(dest.get(6), input.canonical) }
+    })
+  }
+  async classCView(q: string, signal?: AbortSignal): Promise<ClassCView> {
+    const input = parseInput(q)
+    if (input.kind !== 'ip') return fail('invalid_input')
+    return this.runQuery(async () => {
+      const profile = await this.classCInput(input, signal)
+      checkAbort(signal)
+      return { ...this.addressView(input), profile }
+    })
+  }
+  async overview(q: string, signal?: AbortSignal): Promise<OverviewAnswer> {
+    const input = parseInput(q)
+    if (input.kind !== 'ip') return fail('invalid_input')
+    return this.runQuery(async () => {
+      await this.ready(signal)
+      const answer: OverviewAnswer = { ...this.addressView(input), geo: null, network: null, usage: null }
+      const dest = await this.destinations(input, signal, [2, 3, 4, 5])
+      await this.readOverview(input.canonical, dest, answer, new AnswerBudget(), signal)
+      checkAbort(signal); this.current(); answerFits(answer)
+      return answer
+    })
+  }
   async lookup(q: string, signal?: AbortSignal): Promise<LookupAnswer> {
-    const input = parseInput(q); this.beginQuery()
-    try { return await this.lookupInput(input, signal) } finally { this.endQuery() }
+    const input = parseInput(q)
+    return this.runQuery(() => this.lookupInput(input, signal))
   }
   private async lookupInput(input: Input, signal?: AbortSignal): Promise<LookupAnswer> {
-    const budget = new AnswerBudget(); await this.ready(signal); const manifest = this.current(); const dest = await this.destinations(input, signal)
+    const budget = new AnswerBudget(); await this.ready(signal); const manifest = this.current(); const ipRoutes = input.kind === 'ip' ? await this.routeInfos(input,signal) : []
+    const ipKinds = [2,3,4,5,6,10]
+    await this.verifyUnused(ipRoutes,ipKinds,signal)
+    const dest = await this.destinations(input,signal,ipKinds,ipRoutes)
     const pathSegments = new PathSegmentPool()
     const answer: LookupAnswer = { q: input.canonical, kind: input.kind, releaseId: manifest.release_id, synthetic: manifest.mode === 'synthetic', validUntil: manifest.valid_until, geo: null, network: null, usage: null, observedRisk: null, asns: [], bgp: { origins: [], paths: [], relationships: [], tier1: [], rpki: [] } }
     let announcement: string | null = null
     if (input.kind === 'ip') {
-      let networkOriginsKnown = false
-      const geo = dest.get(2); const geoRow = geo?.prefix(input.canonical)?.row
-      if (geo && geoRow) answer.geo = { country: country(u16(geoRow, 4)), registrationCountry: country(u16(geoRow, 6)), region: await this.label(geo, geoRow, 8, signal), city: await this.label(geo, geoRow, 16, signal), latitude: null, longitude: null, precision: null }
-      const coords = dest.get(3)?.prefix(input.canonical)?.row
-      if (coords && has(coords, 4)) { answer.geo ??= { country: null, registrationCountry: null, region: null, city: null, latitude: null, longitude: null, precision: null }; answer.geo.latitude = i32(coords, 4) / 1000; answer.geo.longitude = i32(coords, 8) / 1000; answer.geo.precision = ['unknown', 'country', 'region', 'city_centroid', 'area'][coords[12]!]! }
-      const network = dest.get(4); const found = network?.prefix(input.canonical)
-      if (network && found) { budget.charge(4096 + 16 * u32(found.row, 8)); answer.network = { prefix: found.prefix, name: await this.label(network, found.row, 16, signal), organization: await this.label(network, found.row, 24, signal), isp: await this.label(network, found.row, 32, signal), origins: this.originList(network, found.row) }; networkOriginsKnown = has(found.row, 19); if (networkOriginsKnown) announcement = found.prefix; answer.bgp.origins = answer.network.origins }
-      const use = dest.get(5)?.prefix(input.canonical)?.row
-      if (use) { answer.usage = { type: usage(use[4]!), assignment: ['unknown', 'native', 'broadcast_or_routed'][use[5]!]!, anycast: has(use, 7) ? !!(use[6]! & 1) : null, directedBroadcast: has(use, 8) ? !!(use[6]! & 2) : null }; if (answer.usage.anycast && answer.geo) { answer.geo.city = null; answer.geo.latitude = null; answer.geo.longitude = null; answer.geo.precision = null } }
-      const quality = dest.get(6)?.prefix(input.canonical)?.row
-      if (quality) answer.observedRisk = { coverage: coverageAnswer(quality[11]!, input.canonical.includes(':')), score: has(quality, 9) ? quality[9]! : null, confidence: confidence(quality[10]!), reasons: reasons(u32(quality, 4)), layers: { exact: has(quality, 10) ? u32(quality, 12) / 1e6 : null, prefix: has(quality, 11) ? u32(quality, 16) / 1e6 : null, asn: has(quality, 12) ? u32(quality, 20) / 1e6 : null, neighbors: has(quality, 13) ? u32(quality, 24) / 1e6 : null } }
+      const networkOriginsKnown = await this.readOverview(input.canonical, dest, answer, budget, signal)
+      if (answer.network) {
+        answer.bgp.origins = answer.network.origins
+        if (networkOriginsKnown) announcement = answer.network.prefix
+      }
+      answer.observedRisk = riskAt(dest.get(6), input.canonical)
       const originShard = dest.get(10); const originFound = originShard?.prefix(input.canonical); const originRow = originFound?.row
       if (originShard && originRow && has(originRow, 19)) { budget.charge(16 * u32(originRow, 8)); const values = this.originList(originShard, originRow); if (networkOriginsKnown && (answer.network!.origins.length !== values.length || values.some((value, index) => value !== answer.network!.origins[index]))) return fail('record'); answer.bgp.origins = values; announcement = originFound!.prefix }
     } else answer.bgp.origins = [Number(input.canonical.slice(2))]
+    // Large multi-origin results already pin their raw owners. Avoid filling
+    // the interactive row cache with thousands of one-pass graph components.
+    if (answer.bgp.origins.length > 64) this.components.suspended = true
     for (const asn of answer.bgp.origins) {
-      const related = await this.destinations({ kind: 'asn', canonical: `AS${asn}` }, signal)
+      const asnInput: Input = {kind:'asn',canonical:'AS'+asn}
+      const routes = await this.routeInfos(asnInput,signal), asnKinds = [8,11,13]
+      await this.verifyUnused(routes,asnKinds,signal)
+      const related = await this.destinations(asnInput,signal,asnKinds,routes)
       const aggregate = related.get(8); const row = aggregate?.asn(asn)[0]
       if (aggregate && row) {
         budget.charge(4096)
@@ -731,26 +1151,33 @@ export class AtlasReader {
         const segments = paths.rows(9); const ints = paths.rows(4)
         for (const row of rows) {
           const first = u32(row, 8), count = u16(row, 12)
-          const path: BGPAnswer['paths'][number] = { origin: asn, asns: [], visibility: ['unknown', 'low', 'medium', 'high'][row[15]!]!, graphEligible: !!(row[14]! & 1), segments: new Array(count) }
+          const offset = first * 12
+          let shared: PathSegments
           let total = 0
-          for (let index = 0; index < count; index++) {
-            const segment = segments.subarray((first + index) * 12, (first + index + 1) * 12)
-            const length = u32(segment, 8), start = u32(segment, 4)
-            budget.path(length)
-            const asns = new Array<number>(length)
-            for (let i = 0; i < length; i++) asns[i] = u32(ints, (start + i) * 4)
-            path.segments[index] = { type: ['', 'sequence', 'set', 'confederation_sequence', 'confederation_set'][segment[0]!]!, asns }
-            total += length
+          if (count === 1 && u32(segments, offset + 8) === 1) {
+            budget.path(1)
+            shared = pathSegments.singleton(segments[offset]!, u32(ints, u32(segments, offset + 4) * 4))
+          } else {
+            const decoded: PathSegments = new Array(count)
+            for (let index = 0; index < count; index++) {
+              const position = offset + index * 12
+              const length = u32(segments, position + 8), start = u32(segments, position + 4)
+              budget.path(length)
+              const asns = new Array<number>(length)
+              for (let i = 0; i < length; i++) asns[i] = u32(ints, (start + i) * 4)
+              decoded[index] = { type: segmentTypes[segments[position]!]!, asns }
+              total += length
+            }
+            shared = pathSegments.intern(decoded)
           }
-          path.segments = pathSegments.intern(path.segments)
           // A single segment already is the complete path. Sharing this array
           // also survives structured clone, avoiding a second array per route.
-          if (count === 1) path.asns = path.segments[0]!.asns
-          else {
-            path.asns = new Array<number>(total)
+          const asns = count === 1 ? shared[0]!.asns : new Array<number>(total)
+          if (count > 1) {
             let next = 0
-            for (const segment of path.segments) for (const asn of segment.asns) path.asns[next++] = asn
+            for (const segment of shared) for (const asn of segment.asns) asns[next++] = asn
           }
+          const path: BGPAnswer['paths'][number] = { origin: asn, asns, visibility: ['unknown', 'low', 'medium', 'high'][row[15]!]!, graphEligible: !!(row[14]! & 1), segments: shared }
           answer.bgp.paths.push(path)
         }
       }
@@ -758,14 +1185,14 @@ export class AtlasReader {
       if (tier) answer.bgp.tier1.push({ asn, networkClass: networkClass(tier[8]!), stability: stability(tier[9]!) })
       if (input.kind === 'ip') {
         let status = 'unavailable'
-        const row = dest.get(9)?.rpki(input.canonical, asn, announcement)
+        const row = await this.rpkiRow(ipRoutes.find(o=>o.kind===9),input.canonical,asn,announcement,signal)
         if (row) status = ['unavailable', 'valid', 'invalid', 'not_found'][row[8]!]!
-        answer.bgp.rpki.push({ origin: asn, status })
+        answer.bgp.rpki.push({ origin: asn, status, observedAt: row && row[8] !== 0 ? u64(row, 16, Number.MAX_SAFE_INTEGER) : null, validUntil: row && row[8] !== 0 ? u64(row, 24, Number.MAX_SAFE_INTEGER) : null })
       }
     }
     const pairs = new Map<string, [number, number]>()
     for (const path of answer.bgp.paths) if (path.graphEligible) for (let index = 1; index < path.asns.length; index++) { const from = path.asns[index - 1]!; const to = path.asns[index]!; if (from !== to) pairs.set(`${from}:${to}`, [from, to]) }
-    for (const [from, to] of [...pairs.values()].sort(([a, b], [c, d]) => a - c || b - d)) { checkAbort(signal); budget.charge(256); const related = await this.destinations({ kind: 'asn', canonical: `AS${from}` }, signal); const row = related.get(12)?.relationship(from, to); answer.bgp.relationships.push({ from, to, relation: row ? ['unknown', 'transit_upstream', 'peer', 'customer', 'sibling'][row[12]!]! : 'unknown', observed: true, inferred: !!row && !!(row[13]! & 2) }) }
+    for (const [from, to] of [...pairs.values()].sort(([a, b], [c, d]) => a - c || b - d)) { checkAbort(signal); budget.charge(256); const row = await this.relationship(from,to,signal); answer.bgp.relationships.push({ from, to, relation: row ? ['unknown', 'transit_upstream', 'peer', 'customer', 'sibling'][row[12]!]! : 'unknown', observed: true, inferred: !!row && !!(row[13]! & 2) }) }
     checkAbort(signal); this.current(); answerFits(answer); return answer
   }
   private async prefixPage(shard: Shard, row: Uint8Array, asn: number, cursor: number, signal?: AbortSignal): Promise<ASNPrefixPage> {
@@ -774,32 +1201,39 @@ export class AtlasReader {
     if (count === 0 && cursor === 0) return output
     if (!Number.isSafeInteger(cursor) || cursor < 0 || cursor >= count) return fail('invalid_cursor')
     const page = shard.rows(12).subarray((u32(row, 36) + cursor) * 16, (u32(row, 36) + cursor + 1) * 16)
-    const target = await this.reference(shard, u32(page, 0), signal)
-    if (target.kind !== 8 || target.rows(2).length || target.rows(3).length || target.rows(7).length || target.rows(12).length) return fail('record')
-    const rows = target.rows(11); const first = u32(page, 4); const total = u32(page, 8)
-    if (!range(first, total, rows.length / 24)) return fail('record')
-    output.prefixes = Array.from({ length: total }, (_, index) => prefixText(rows.subarray((first + index) * 24, (first + index + 1) * 24)))
+    const hash = await this.referenceTarget(shard,u32(page,0),signal), first = u32(page,4), total = u32(page,8)
+    const key = hash + '/prefix-span/' + first + '/' + total
+    const known = this.components.get<readonly string[]>(key)
+    if (known) output.prefixes = known.slice()
+    else {
+      const target = await this.object(hash,signal)
+      if (target.kind !== 8 || target.rows(2).length || target.rows(3).length || target.rows(7).length || target.rows(12).length) return fail('record')
+      const rows = target.rows(11)
+      if (!range(first,total,rows.length/24)) return fail('record')
+      const labels = Array.from({ length: total }, (_, index) => prefixText(rows.subarray((first + index) * 24,(first + index + 1) * 24)))
+      this.rememberComponent(key,labels,96+labels.reduce((sum,s)=>sum+32+2*s.length,0))
+      output.prefixes = labels.slice()
+    }
     output.nextCursor = cursor + 1 < count ? cursor + 1 : null
     return output
   }
   async prefixes(q: string, cursor = 0, signal?: AbortSignal): Promise<ASNPrefixPage> {
     const input = parseInput(q); if (input.kind !== 'asn') return fail('invalid_input')
     if (!Number.isSafeInteger(cursor) || cursor < 0) return fail('invalid_cursor')
-    this.beginQuery()
-    try { return await this.prefixesInput(input, cursor, signal) } finally { this.endQuery() }
+    return this.runQuery(() => this.prefixesInput(input, cursor, signal))
   }
   private async prefixesInput(input: Input, cursor: number, signal?: AbortSignal): Promise<ASNPrefixPage> {
-    await this.ready(signal); const dest = await this.destinations(input, signal); const asn = Number(input.canonical.slice(2)); const shard = dest.get(8); const row = shard?.asn(asn)[0]
+    await this.ready(signal); const dest = await this.destinations(input, signal, 8); const asn = Number(input.canonical.slice(2)); const shard = dest.get(8); const row = shard?.asn(asn)[0]
     if (!shard || !row) { if (cursor !== 0) return fail('invalid_cursor'); return { asn, prefixes: [], nextCursor: null } }
     const answer = await this.prefixPage(shard, row, asn, cursor, signal); checkAbort(signal); this.current(); return answer
   }
   async classC(q: string, signal?: AbortSignal): Promise<ClassCAnswer | null> {
-    const input = parseInput(q); this.beginQuery()
-    try { return await this.classCInput(input, signal) } finally { this.endQuery() }
+    const input = parseInput(q)
+    return this.runQuery(() => this.classCInput(input, signal))
   }
   private async classCInput(input: Input, signal?: AbortSignal): Promise<ClassCAnswer | null> {
     const budget = new AnswerBudget(); budget.charge(256 * 512); await this.ready(signal); this.current(); if (input.kind !== 'ip' || input.canonical.includes(':')) return null
-    const dest = await this.destinations(input, signal); const shard = dest.get(7); const found = shard?.prefix(input.canonical)
+    const dest = await this.destinations(input, signal, 7); const shard = dest.get(7); const found = shard?.prefix(input.canonical)
     if (!shard || !found) return null
     const row = found.row; const base = input.canonical.split('.').slice(0, 3).join('.')
     const answer: ClassCAnswer = { prefix: found.prefix, cells: Array.from({ length: 256 }, (_, suffix) => ({ ip: `${base}.${suffix}`, observed: false, observedRiskScore: null, confidence: 'unrated', coverage: 'incomplete' as const, reasons: [], usage: 'unknown', origins: [] })), observedCount: u16(row, 8), assessedCount: u16(row, 10), positiveCount: u16(row, 12), scoredCount: u16(row, 14), meanObservedRisk: has(row, 22) ? row[20]! : null }
@@ -818,12 +1252,24 @@ if (typeof self !== 'undefined' && typeof window === 'undefined') {
     const { action, id, q, cursor } = event.data
     if (action === 'cancel') { controllers.get(id)?.abort(); return }
     if (action === 'clear') { for (const controller of controllers.values()) controller.abort(); reader.clear(); return }
-    if (!Number.isSafeInteger(id) || typeof q !== 'string' || !['lookup', 'classC', 'prefixes'].includes(action)) return
+    if (!Number.isSafeInteger(id) || typeof q !== 'string' || !['lookup', 'overview', 'risk', 'classCView', 'classC', 'prefixes'].includes(action)) return
     if (new TextEncoder().encode(q).byteLength > 128) { self.postMessage({ id, error: 'invalid_input' }); return }
     if (controllers.size >= 8) { self.postMessage({ id, error: 'resource_limit' }); return }
     const controller = new AbortController(); controllers.set(id, controller)
     queue = queue.then(async () => {
-      try { checkAbort(controller.signal); const answer = action === 'lookup' ? await reader.lookup(q, controller.signal) : action === 'prefixes' ? await reader.prefixes(q, cursor, controller.signal) : await reader.classC(q, controller.signal); checkAbort(controller.signal); answerFits(answer); self.postMessage({ id, answer }) }
+      try {
+        checkAbort(controller.signal)
+        let answer: LookupAnswer | OverviewAnswer | RiskView | ClassCView | ClassCAnswer | ASNPrefixPage | null
+        switch (action) {
+          case 'lookup': answer = await reader.lookup(q, controller.signal); break
+          case 'overview': answer = await reader.overview(q, controller.signal); break
+          case 'risk': answer = await reader.risk(q, controller.signal); break
+          case 'classCView': answer = await reader.classCView(q, controller.signal); break
+          case 'prefixes': answer = await reader.prefixes(q, cursor, controller.signal); break
+          default: answer = await reader.classC(q, controller.signal)
+        }
+        checkAbort(controller.signal); answerFits(answer); self.postMessage({ id, answer })
+      }
       catch (error) { self.postMessage({ id, error: error instanceof Error ? error.message : 'internal' }) }
       finally { controllers.delete(id) }
     })

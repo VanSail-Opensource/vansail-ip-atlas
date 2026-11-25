@@ -18,7 +18,7 @@ watch(() => route.fullPath, () => { if (ready) applyQuery() })
       <h1>Every address.<br><span>A little more context.</span></h1>
       <p class="hero-copy">Explore an IP address or ASN. Geography, observed risk, and the routes between.</p>
       <SearchInput />
-      <p class="hero-footnote">Synthetic preview · IPv4 &amp; IPv6 · private by design</p>
+      <p class="hero-footnote">IPv4 &amp; IPv6 · private by design</p>
     </motion.div>
     <div class="hero-orbit" aria-hidden="true"><div /><div /><div /></div>
   </section>

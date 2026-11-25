@@ -32,32 +32,71 @@ type Capability struct {
 	Required   bool     `json:"required"`
 }
 type SourceStatistics struct {
-	ID                                       string
-	Records                                  uint64
-	Kinds                                    [9]uint64
-	Family                                   string
-	Country, City, Coordinates, Usage, Exact bool
-	VRPComplete                              bool
-	Signals                                  map[intelligence.Signal]bool
+	googleProjection                            [32]byte
+	googleIPv4                                  uint64
+	nroProjection                               [32]byte
+	azureHostHash                               [32]byte
+	ID                                          string
+	Records                                     uint64
+	Kinds                                       [intelligence.RecordNetworkOrganization]uint64
+	OriginObservations, UnknownOriginBoundaries uint64
+	Family                                      string
+	Country, City, Coordinates, Usage, Exact    bool
+	VRPComplete                                 bool
+	VRPObservedAt, VRPCoverageValidUntil        time.Time
+	Signals                                     map[intelligence.Signal]bool
+}
+
+const ProductionReleaseScope = "release-scope-v6"
+
+// Routing observations remain independently derived and recorded even when
+// absent. V6 permits that absence; it does not assert routing completeness.
+func requiredProductionCapability(name string) (required, known bool) {
+	switch name {
+	case "country", "region_city", "coordinates", "usage", "risk_reasons", "class_c":
+		return true, true
+	case "asn_prefix", "rpki", "bgp_origins_paths", "relationships", "tier1":
+		return false, true
+	default:
+		return false, false
+	}
 }
 
 // ProductionQualification can only be constructed by revalidating a sealed
 // intake. Its fields are private so materializers cannot turn a boolean into
 // complete VRP or source coverage. Validate binds the exact normalized roots.
 type ProductionQualification struct {
-	state       intelligence.BuildState
-	stateHash   [32]byte
-	report      CapabilityReport
-	validUntil  time.Time
-	vrpComplete bool
+	state                                  intelligence.BuildState
+	stateHash                              [32]byte
+	report                                 CapabilityReport
+	validUntil                             time.Time
+	vrpComplete                            bool
+	rpkiObservedAt, rpkiCoverageValidUntil time.Time
+	validation                             *sourceValidation
 }
 
 func QualifyProductionState(ctx context.Context, root string, catalog []Source, now time.Time, binding [32]byte) (*ProductionQualification, error) {
-	state, err := intelligence.VerifyPrivateStateSeal(ctx, root, binding)
+	return qualifyValidatedSourceSet(validateSourceSet(ctx, root, catalog, now, binding))
+}
+
+// QualifyProductionStateVerified accepts only an opaque handle minted by a
+// full semantic seal verification in this process. It rechecks the same root,
+// seal/key/state and every chunk before the unchanged source-semantic admission
+// pass. This lets Tier-1 observation precede unrelated capability failures.
+func QualifyProductionStateVerified(ctx context.Context, root string, catalog []Source, now time.Time, binding [32]byte, verified *intelligence.VerifiedPrivateState) (*ProductionQualification, error) {
+	return qualifyValidatedSourceSet(validateVerifiedSourceSet(ctx, root, catalog, now, binding, verified, nil))
+}
+
+func qualifyValidatedSourceSet(state intelligence.BuildState, report CapabilityReport, validation *sourceValidation, err error) (*ProductionQualification, error) {
 	if err != nil {
 		return nil, err
 	}
-	return productionFromAuthenticatedState(ctx, root, catalog, state, now, binding)
+	q, err := qualificationFromReport(state, report)
+	if err != nil {
+		return nil, err
+	}
+	q.validation = validation
+	return q, nil
 }
 
 // QualifyProductionStateAtHash selects the exact current or retained generation.
@@ -103,7 +142,10 @@ func productionFromAuthenticatedState(ctx context.Context, root string, catalog 
 	if err != nil {
 		return nil, err
 	}
-	if err = report.RequireProduction(); err != nil {
+	return qualificationFromReport(state, report)
+}
+func qualificationFromReport(state intelligence.BuildState, report CapabilityReport) (*ProductionQualification, error) {
+	if err := report.RequireProduction(); err != nil {
 		return nil, err
 	}
 	data, err := json.Marshal(state)
@@ -115,10 +157,20 @@ func productionFromAuthenticatedState(ctx context.Context, root string, catalog 
 		if s.ExpiresAt.Before(q.validUntil) {
 			q.validUntil = s.ExpiresAt
 		}
+		if s.Receipt != nil && s.Receipt.VRPProof != nil && s.Receipt.VRPProof.Version == 2 {
+			proof := s.Receipt.VRPProof
+			if !q.rpkiObservedAt.IsZero() && !q.rpkiObservedAt.Equal(proof.ObservedAt) {
+				return nil, errors.New("RPKI observation epochs differ")
+			}
+			q.rpkiObservedAt = proof.ObservedAt
+			if q.rpkiCoverageValidUntil.IsZero() || proof.CoverageValidUntil.Before(q.rpkiCoverageValidUntil) {
+				q.rpkiCoverageValidUntil = proof.CoverageValidUntil
+			}
+		}
 	}
 	for _, c := range report.Capabilities {
 		if c.Capability == "rpki" {
-			q.vrpComplete = c.Qualified
+			q.vrpComplete = c.Qualified && q.rpkiObservedAt.IsZero()
 		}
 	}
 	return q, nil
@@ -135,6 +187,16 @@ func (q *ProductionQualification) Validate(state intelligence.BuildState, clock 
 }
 func (q *ProductionQualification) VRPComplete() bool {
 	return q != nil && q.stateHash != ([32]byte{}) && q.vrpComplete
+}
+
+// RPKIObservation supplies only an authenticated complete publisher epoch.
+// It does not assert that its historical authorizations remain current now.
+// Legacy v1 proofs omitted rows at intake and cannot establish this epoch.
+func (q *ProductionQualification) RPKIObservation() (observedAt, coverageValidUntil time.Time, ok bool) {
+	if q == nil || q.stateHash == ([32]byte{}) || q.rpkiObservedAt.IsZero() || !q.rpkiObservedAt.Before(q.rpkiCoverageValidUntil) {
+		return time.Time{}, time.Time{}, false
+	}
+	return q.rpkiObservedAt, q.rpkiCoverageValidUntil, true
 }
 func (q *ProductionQualification) State() intelligence.BuildState {
 	if q == nil {
@@ -265,9 +327,22 @@ func RightsDigests(s Source) (string, *string, error) {
 // actual records. It accepts neither caller success flags nor a release manifest
 // as proof of source coverage. The caller must first verify the private seal.
 func RevalidateStoredSources(ctx context.Context, root string, catalog []Source, state intelligence.BuildState, now time.Time, binding [32]byte) (CapabilityReport, []SourceStatistics, error) {
+	return revalidateStoredSources(ctx, root, catalog, state, now, binding, nil, nil)
+}
+
+// Only sourceValidation supplies prior statistics, after authenticating its
+// exact original state and checking every current normalized object byte.
+// Source controls, certification, deadlines and dependencies still run below.
+func revalidateStoredSources(ctx context.Context, root string, catalog []Source, state intelligence.BuildState, now time.Time, binding [32]byte, prior map[string]SourceStatistics, collected map[string]*sourceRecordScan) (CapabilityReport, []SourceStatistics, error) {
 	var report CapabilityReport
 	if state.Version != 2 || state.PolicyHash != binding || binding == ([32]byte{}) || now.IsZero() || state.EvaluatedAt.After(now) || len(state.Sources) > 1000 {
 		return report, nil, errors.New("production requires current sealed intake")
+	}
+	if err := ctx.Err(); err != nil {
+		return report, nil, err
+	}
+	if prior != nil && len(prior) != len(state.Sources) {
+		return report, nil, errors.New("verified source statistics differ from current state")
 	}
 	byID := make(map[string]Source, len(catalog))
 	for _, s := range catalog {
@@ -300,7 +375,7 @@ func RevalidateStoredSources(ctx context.Context, root string, catalog []Source,
 		if _, ok := stored[v.ID]; ok {
 			return report, nil, errors.New("duplicate production source receipt")
 		}
-		if s.Rights.Status != "reviewed" || s.Rights.Distribution != "allow" || s.Rights.AttributionRequired == nil || !safeHTTPS(s.Rights.EvidenceURL) || strings.TrimSpace(s.Rights.ReviewBasis) == "" || *s.Rights.AttributionRequired && s.Rights.Attribution == nil || s.Rights.Attribution != nil && s.Rights.Attribution.Validate() != nil {
+		if s.Rights.Status != "reviewed" || !permittedDistributionDecision(s.Rights.Distribution) || s.Rights.AttributionRequired == nil || !safeHTTPS(s.Rights.EvidenceURL) || strings.TrimSpace(s.Rights.ReviewBasis) == "" || *s.Rights.AttributionRequired && s.Rights.Attribution == nil || s.Rights.Attribution != nil && s.Rights.Attribution.Validate() != nil {
 			return report, nil, errors.New("production source rights or credits incomplete")
 		}
 		if s.Rights.Attribution != nil && intelligence.ValidateDatasetLogoFile(root, s.Rights.Attribution.Logo) != nil {
@@ -309,16 +384,40 @@ func RevalidateStoredSources(ctx context.Context, root string, catalog []Source,
 		if s.MaxAge <= 0 || s.MaxAge > 720*time.Hour || r.PublishedAt.IsZero() || r.PublishedAt.After(state.EvaluatedAt.Add(24*time.Hour)) || !now.Before(v.ExpiresAt) || v.ExpiresAt.After(r.PublishedAt.Add(s.MaxAge)) || v.ExpiresAt.After(r.PublishedAt.Add(720*time.Hour)) || r.Subscription && v.ExpiresAt.After(r.PublishedAt.Add(168*time.Hour)) {
 			return report, nil, errors.New("production source receipt expired or extended")
 		}
+		if rootZoneSource(s) && r.ContentValidUntil.IsZero() {
+			return report, nil, errors.New("DNS root zone expiry missing")
+		}
 		if !r.ContentValidUntil.IsZero() && (v.ExpiresAt.After(r.ContentValidUntil) || !now.Before(r.ContentValidUntil)) {
 			return report, nil, errors.New("production content expired or expiry extended")
 		}
 		if r.MRTProof != nil {
 			content, err := r.MRTProof.ContentHash()
-			if err != nil || content != r.PayloadHash || r.ProofKind != "embedded" || r.PublishedAt.After(r.MRTProof.CapturedAt) || r.MRTProof.Through.After(state.EvaluatedAt.Add(24*time.Hour)) || r.MRTProof.CaptureEnd().After(state.EvaluatedAt.Add(24*time.Hour)) {
+			if err != nil || content != r.PayloadHash || !validMRTArchiveBinding(s, r.MRTProof, state.EvaluatedAt) || r.ProofKind != "embedded" || r.PublishedAt.After(r.MRTProof.CapturedAt) || r.MRTProof.Through.After(state.EvaluatedAt.Add(24*time.Hour)) || r.MRTProof.CaptureEnd().After(state.EvaluatedAt.Add(24*time.Hour)) {
 				return report, nil, errors.New("production MRT content-set proof invalid")
 			}
 		} else if s.Parser.ID == "mrt-table-dump-v2" {
 			return report, nil, errors.New("production MRT snapshot proof missing")
+		}
+		if googleNetworkSource(s) != (r.GoogleNetworkProof != nil) || r.GoogleNetworkProof != nil && (r.ProofKind != "embedded" || r.GoogleNetworkProof.Validate(state.EvaluatedAt, r.PublishedAt, r.PayloadHash) != nil) {
+			return report, nil, errors.New("production Google network report proof invalid")
+		}
+		if nroSource(s) != (r.NROProof != nil) || r.NROProof != nil && (r.ProofKind != "embedded" || r.NROProof.Validate(state.EvaluatedAt, r.PublishedAt, r.PayloadHash) != nil) {
+			return report, nil, errors.New("production NRO report proof invalid")
+		}
+		if azureServiceSource(s) != (r.AzureProof != nil) {
+			return report, nil, errors.New("Azure source receipt binding invalid")
+		}
+		if r.AzureProof != nil {
+			if _, err := r.AzureProof.Eligible(state.EvaluatedAt, r.PublishedAt, r.PayloadHash); err != nil || r.ProofKind != "snapshot_metadata" {
+				return report, nil, errors.New("Azure service publication invalid")
+			}
+		}
+		if caidaSource(s) {
+			if r.ProofKind != "embedded" || r.CAIDAProof.Validate(state.EvaluatedAt, r.PublishedAt, r.PayloadHash) != nil {
+				return report, nil, errors.New("production CAIDA content proof invalid")
+			}
+		} else if r.CAIDAProof != nil {
+			return report, nil, errors.New("production CAIDA proof source mismatch")
 		}
 		if err := validateStoredGeoSource(s, v, now); err != nil {
 			return report, nil, err
@@ -368,120 +467,118 @@ func RevalidateStoredSources(ctx context.Context, root string, catalog []Source,
 				return report, nil, errors.New("production source dependency missing")
 			}
 		}
-		stat := SourceStatistics{ID: s.ID, Family: find(s.Family), Signals: map[intelligence.Signal]bool{}}
-		if err := intelligence.WalkStoredSource(ctx, root, v, func(record intelligence.NormalizedRecord) error {
-			if err := record.Validate(); err != nil {
-				return err
+		family := find(s.Family)
+		var stat SourceStatistics
+		if prior != nil {
+			previous, ok := prior[s.ID]
+			if !ok || previous.ID != s.ID || previous.Family != family {
+				return report, nil, errors.New("verified source statistics differ from current controls")
 			}
-			stat.Records++
-			stat.Kinds[record.Kind-1]++
-			if stat.Records > 100_000_000 {
-				return errors.New("production normalized record budget exceeded")
-			}
-			family := ""
-			switch record.Kind {
-			case intelligence.RecordEvidence:
-				x := record.Evidence
-				family = x.Family
-				canonical, ok := intelligence.CanonicalSignal(x.Signal)
-				allowed := false
-				for _, signal := range s.Signals {
-					p, ok := intelligence.CanonicalSignal(intelligence.Signal(signal))
-					allowed = allowed || ok && p == canonical
+			stat = previous
+		} else {
+			var scan *sourceRecordScan
+			if collected != nil {
+				scan = collected[v.ID]
+				if scan == nil || scan.stat.ID != v.ID {
+					return report, nil, errors.New("verified source records missing")
 				}
-				if !ok || !allowed || !x.Current || !x.SourcePublishedAt.Equal(v.Receipt.PublishedAt) || !contains(s.PublicFields, "reason_flags") {
-					return errors.New("production evidence binding invalid")
+				if scan.err != nil {
+					return report, nil, scan.err
 				}
-				itemClock := x.SourcePublishedAt
-				if !x.ItemPublishedAt.IsZero() && x.ItemPublishedAt.Before(itemClock) {
-					itemClock = x.ItemPublishedAt
-				}
-				maximum := s.MaxAge
-				if x.SubscriptionLiteral && maximum > 168*time.Hour {
-					maximum = 168 * time.Hour
-				}
-				if !now.Before(itemClock.Add(maximum)) || v.ExpiresAt.After(itemClock.Add(maximum)) {
-					return errors.New("production dated evidence expiry extended")
-				}
-				stat.Signals[canonical] = true
-				stat.Exact = stat.Exact || x.Scope == intelligence.Exact
-			case intelligence.RecordCoverage:
-				x := record.Coverage
-				family = x.Family
-				if !x.Current || x.Complete && s.Coverage != "complete" {
-					return errors.New("production coverage binding invalid")
-				}
-			case intelligence.RecordGeo:
-				x := record.Geo
-				family = x.Family
-				if !x.Current || x.PhysicalCountry != "" && !contains(s.PublicFields, "physical_country") || x.Region != "" && !contains(s.PublicFields, "region") || x.City != "" && !contains(s.PublicFields, "city") || x.Coordinates != nil && (!contains(s.PublicFields, "latitude") || !contains(s.PublicFields, "longitude")) {
-					return errors.New("production geographic field binding invalid")
-				}
-				stat.Country = stat.Country || x.PhysicalCountry != ""
-				stat.City = stat.City || x.PhysicalCountry != "" && x.Region != "" && x.City != ""
-				stat.Coordinates = stat.Coordinates || x.PhysicalCountry != "" && x.Region != "" && x.City != "" && x.Coordinates != nil
-			case intelligence.RecordUsage:
-				x := record.Usage.Evidence
-				family = x.Family
-				if !x.Current || !contains(s.PublicFields, "usage_type") {
-					return errors.New("production usage binding invalid")
-				}
-				if observed := record.Usage.ObservedAt; !observed.IsZero() && (!now.Before(observed.Add(s.MaxAge)) || v.ExpiresAt.After(observed.Add(s.MaxAge))) {
-					return errors.New("production usage item expiry extended")
-				}
-				stat.Usage = stat.Usage || x.Type != "" && x.Type != "unknown"
-			case intelligence.RecordOrigins:
-				if !contains(s.PublicFields, "origins") && !contains(s.PublicFields, "bgp_origins") {
-					return errors.New("production origin binding invalid")
-				}
-			case intelligence.RecordVRP:
-				if !contains(s.PublicFields, "rpki_status") {
-					return errors.New("production VRP binding invalid")
-				}
-				if until := record.VRP.ValidUntil; !until.IsZero() {
-					if v.Receipt.ContentValidUntil.IsZero() || until.Before(v.Receipt.ContentValidUntil) || !now.Before(until) {
-						return errors.New("production VRP expiry binding invalid")
-					}
-				} else if s.Parser.ID == "rpki-client-json" {
-					return errors.New("production VRP expiry missing")
-				}
-			case intelligence.RecordPath:
-				family = record.Path.Observation.Family
-				if !record.Path.Observation.Current || !contains(s.PublicFields, "bgp_paths") {
-					return errors.New("production path binding invalid")
-				}
-			case intelligence.RecordRelationship:
-				if !contains(s.PublicFields, "as_relationships") {
-					return errors.New("production relationship binding invalid")
-				}
-			case intelligence.RecordASNIdentity:
-				family = record.ASNIdentity.Family
-				if !record.ASNIdentity.Current || !contains(s.PublicFields, "asn") {
-					return errors.New("production ASN identity binding invalid")
+			} else {
+				scan = newSourceRecordScan(s, v.RecordClocks(), now)
+				if err := intelligence.WalkStoredSource(ctx, root, v, scan.accept); err != nil {
+					return report, nil, err
 				}
 			}
-			if family != "" && family != stat.Family {
-				return errors.New("production evidence independence changed")
+			if scan.rootAddresses != nil && !scan.rootAddresses.complete() {
+				return report, nil, errors.New("DNS root address population differs")
 			}
-			return nil
-		}); err != nil {
-			return report, nil, err
+			if scan.stat.Family != "" && scan.stat.Family != family {
+				return report, nil, errors.New("production evidence independence changed")
+			}
+			if scan.googleDigest != nil {
+				_, scan.stat.googleProjection = scan.googleDigest.Sum()
+			}
+			if scan.nroDigest != nil {
+				_, scan.stat.nroProjection = scan.nroDigest.Sum()
+			}
+			if scan.azureHosts != nil {
+				scan.stat.azureHostHash = intelligence.AzureHostSetHash(scan.azureHosts)
+			}
+			stat = scan.stat
+			stat.Family = family
+		}
+		if p := v.Receipt.GoogleNetworkProof; p != nil && (p.Prefixes != stat.Records || p.IPv4 != stat.googleIPv4 || p.Projection != stat.googleProjection) {
+			return report, nil, errors.New("network organization population differs from complete Google report")
+		}
+		if p := v.Receipt.NROProof; p != nil && (p.Prefixes != stat.Records || p.Projection != stat.nroProjection) {
+			return report, nil, errors.New("NRO registration population differs from complete report")
+		}
+		if p := v.Receipt.AzureProof; p != nil {
+			hosts, err := p.Eligible(state.EvaluatedAt, v.Receipt.PublishedAt, v.Receipt.PayloadHash)
+			if err != nil || stat.Records != uint64(len(hosts)) || stat.azureHostHash != intelligence.AzureHostSetHash(hosts) {
+				return report, nil, errors.New("Azure hosting population differs from edition intersection")
+			}
+		}
+		if rootZoneSource(s) && (stat.Records != 2*rootServerCount || stat.Kinds[intelligence.RecordUsage-1] != stat.Records) {
+			return report, nil, errors.New("DNS root address population differs")
 		}
 		if stat.Records == 0 {
 			return report, nil, errors.New("empty production source")
 		}
+		if proof := v.Receipt.CAIDAProof; proof != nil {
+			if stat.Kinds[intelligence.RecordRelationship-1] != proof.Rows || stat.Records != proof.Rows {
+				return report, nil, errors.New("CAIDA proof differs from retained records")
+			}
+		}
 		if proof := v.Receipt.VRPProof; proof != nil {
-			if stat.Kinds[intelligence.RecordVRP-1] != proof.AcceptedRows || stat.Records != proof.AcceptedRows {
+			retained := proof.AcceptedRows
+			if proof.Version == 2 {
+				retained = proof.RetainedRows
+				if !stat.VRPCoverageValidUntil.Equal(proof.CoverageValidUntil) {
+					return report, nil, errors.New("complete VRP observation expiry differs from retained records")
+				}
+				stat.VRPObservedAt, stat.VRPCoverageValidUntil = proof.ObservedAt, proof.CoverageValidUntil
+			}
+			if stat.Kinds[intelligence.RecordVRP-1] != retained || stat.Records != retained {
 				return report, nil, errors.New("complete VRP proof differs from retained records")
 			}
 			stat.VRPComplete = true
 		}
 		stats = append(stats, stat)
 	}
+	if err := validateRPKIObservationCohort(stats); err != nil {
+		return report, nil, err
+	}
 	sort.Slice(stats, func(i, j int) bool { return stats[i].ID < stats[j].ID })
 	report = deriveCapabilities(stats, state.EvaluatedAt)
 	return report, stats, nil
 }
+
+// A single public observation clock cannot describe a union of different
+// historical epochs, or rows whose full publisher epoch was never retained.
+func validateRPKIObservationCohort(stats []SourceStatistics) error {
+	var observed time.Time
+	for _, stat := range stats {
+		if !stat.VRPObservedAt.IsZero() {
+			if !observed.IsZero() && !observed.Equal(stat.VRPObservedAt) {
+				return errors.New("RPKI observation epochs differ")
+			}
+			observed = stat.VRPObservedAt
+		}
+	}
+	if observed.IsZero() {
+		return nil
+	}
+	for _, stat := range stats {
+		if stat.Kinds[intelligence.RecordVRP-1] != 0 && (!stat.VRPComplete || !stat.VRPObservedAt.Equal(observed) || !observed.Before(stat.VRPCoverageValidUntil)) {
+			return errors.New("RPKI observation cohort contains unbound rows")
+		}
+	}
+	return nil
+}
+
 func contains(values []string, value string) bool {
 	for _, v := range values {
 		if v == value {
@@ -505,7 +602,7 @@ func deriveCapabilities(stats []SourceStatistics, clock time.Time) CapabilityRep
 		sort.Strings(values)
 		return values
 	}
-	report := CapabilityReport{EvaluatedAt: clock.Unix(), IncludedSources: len(stats), ReleaseScope: "release-scope-v5", SchemaVersion: 1}
+	report := CapabilityReport{EvaluatedAt: clock.Unix(), IncludedSources: len(stats), ReleaseScope: ProductionReleaseScope, SchemaVersion: 1}
 	add := func(name string, minimum int, match func(SourceStatistics) bool) {
 		fs := families(match)
 		report.Capabilities = append(report.Capabilities, Capability{Capability: name, Families: fs, Qualified: len(fs) >= minimum, Required: true})
@@ -513,11 +610,11 @@ func deriveCapabilities(stats []SourceStatistics, clock time.Time) CapabilityRep
 	add("country", 1, func(s SourceStatistics) bool { return s.Country })
 	add("region_city", 2, func(s SourceStatistics) bool { return s.City })
 	add("coordinates", 2, func(s SourceStatistics) bool { return s.Coordinates })
-	add("asn_prefix", 1, func(s SourceStatistics) bool { return s.Kinds[intelligence.RecordOrigins-1] > 0 })
+	add("asn_prefix", 1, func(s SourceStatistics) bool { return s.OriginObservations > 0 })
 	add("usage", 1, func(s SourceStatistics) bool { return s.Usage })
 	add("class_c", 1, func(s SourceStatistics) bool { return s.Exact })
 	add("rpki", 1, func(s SourceStatistics) bool { return s.VRPComplete })
-	originFamilies := families(func(s SourceStatistics) bool { return s.Kinds[intelligence.RecordOrigins-1] > 0 })
+	originFamilies := families(func(s SourceStatistics) bool { return s.OriginObservations > 0 })
 	pathFamilies := families(func(s SourceStatistics) bool { return s.Kinds[intelligence.RecordPath-1] > 0 })
 	report.Capabilities = append(report.Capabilities, Capability{Capability: "bgp_origins_paths", Families: pathFamilies, Qualified: len(originFamilies) > 0 && len(pathFamilies) >= 2, Required: true})
 	add("relationships", 1, func(s SourceStatistics) bool { return s.Kinds[intelligence.RecordRelationship-1] > 0 })
@@ -538,6 +635,9 @@ func deriveCapabilities(stats []SourceStatistics, clock time.Time) CapabilityRep
 	// capability; absent categories and unlisted addresses remain unknown.
 	risk := len(allSignals) > 0
 	report.Capabilities = append(report.Capabilities, Capability{Capability: "risk_reasons", Families: families(func(s SourceStatistics) bool { return len(s.Signals) > 0 }), Qualified: risk, Required: true})
+	for i := range report.Capabilities {
+		report.Capabilities[i].Required, _ = requiredProductionCapability(report.Capabilities[i].Capability)
+	}
 	sort.Slice(report.Capabilities, func(i, j int) bool { return report.Capabilities[i].Capability < report.Capabilities[j].Capability })
 	return report
 }
@@ -551,13 +651,22 @@ func uniqueStrings(values []string) []string {
 	return out
 }
 func (r CapabilityReport) RequireProduction() error {
+	if r.SchemaVersion != 1 || r.ReleaseScope != ProductionReleaseScope || r.IncludedSources <= 0 || len(r.Capabilities) != 11 {
+		return errors.New("production_blocked: current nonempty source capability report required")
+	}
 	var missing []string
+	seen := make(map[string]bool, len(r.Capabilities))
 	for _, c := range r.Capabilities {
-		if c.Required && !c.Qualified {
+		required, known := requiredProductionCapability(c.Capability)
+		if !known || seen[c.Capability] || c.Required != required {
+			return errors.New("production_blocked: source capability policy differs")
+		}
+		seen[c.Capability] = true
+		if required && !c.Qualified {
 			missing = append(missing, c.Capability)
 		}
 	}
-	if len(r.Capabilities) != 11 || len(missing) > 0 {
+	if len(missing) > 0 {
 		return fmt.Errorf("production_blocked: unqualified source capabilities: %s", strings.Join(missing, ", "))
 	}
 	return nil

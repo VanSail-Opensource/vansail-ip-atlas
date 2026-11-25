@@ -17,8 +17,8 @@ import (
 // RPKIClientMetadata is private proof derived from the complete original body.
 // Operational host/TAL paths and per-source records never enter public facts.
 type RPKIClientMetadata struct {
-	BuiltAt, ContentValidUntil      time.Time
-	Rows, AcceptedRows, ExpiredRows int
+	BuiltAt, CoverageValidUntil             time.Time
+	Rows, RetainedRows, ExpiredAtIntakeRows int
 }
 
 // parseRPKIClientPayload supports the publisher's full JSON, including operational
@@ -118,16 +118,16 @@ func parseRPKIClientPayload(ctx context.Context, input io.Reader, limits intelli
 						minimumAll = vrp.ValidUntil
 					}
 					if !now.Before(vrp.ValidUntil) {
-						result.ExpiredRows++
-					} else {
-						result.AcceptedRows++
-						if result.ContentValidUntil.IsZero() || vrp.ValidUntil.Before(result.ContentValidUntil) {
-							result.ContentValidUntil = vrp.ValidUntil
-						}
-						if emit != nil {
-							if err = emit(intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordVRP, VRP: &vrp}); err != nil {
-								return result, err
-							}
+						result.ExpiredAtIntakeRows++
+					}
+					// This is the complete publisher snapshot at BuiltAt, not a
+					// claim that every authorization remains current at intake.
+					// The final proof below binds the original observation clock
+					// before the earliest original authorization expiry.
+					result.RetainedRows++
+					if emit != nil {
+						if err = emit(intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordVRP, VRP: &vrp}); err != nil {
+							return result, err
 						}
 					}
 				}
@@ -169,10 +169,10 @@ func parseRPKIClientPayload(ctx context.Context, input io.Reader, limits intelli
 		}
 		return result, errors.New("RPKI-client trailing JSON content")
 	}
-	if !seen["metadata"] || !seen["roas"] || result.Rows != header.UniqueVRPs || result.AcceptedRows == 0 || !header.BuiltAt.Before(minimumAll) {
+	if !seen["metadata"] || !seen["roas"] || result.Rows != header.UniqueVRPs || result.RetainedRows != result.Rows || !header.BuiltAt.Before(minimumAll) {
 		return result, errors.New("RPKI-client completeness or validity proof failed")
 	}
-	result.BuiltAt = header.BuiltAt
+	result.BuiltAt, result.CoverageValidUntil = header.BuiltAt, minimumAll
 	return result, nil
 }
 

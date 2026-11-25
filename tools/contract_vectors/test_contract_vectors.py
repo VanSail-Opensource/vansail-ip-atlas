@@ -102,15 +102,21 @@ class BGPContractTests(unittest.TestCase):
         cls.config = yaml.safe_load((ROOT / "configs/tier1.yaml").read_text(encoding="utf-8"))
         cls.vectors = json.loads((ROOT / "fixtures/bgp/contract-v1.json").read_text(encoding="utf-8"))
 
-    def test_existing_thresholds_preserved_and_mrt_disabled(self):
+    def test_existing_thresholds_preserved_and_reviewed_mrt_enabled(self):
         config = self.config["classification"]
         self.assertEqual(config["peer_clique_support_threshold"], 0.80)
         self.assertEqual(config["customer_cone_percentile_threshold"], 0.98)
         self.assertEqual(config["transit_degree_percentile_threshold"], 0.98)
         self.assertEqual(config["minimum_independent_observation_families"], 2)
         sources = yaml.safe_load((ROOT / "configs/sources.yaml").read_text(encoding="utf-8"))
-        self.assertFalse(sources["build"]["bgp"]["mrt_enabled"])
-        self.assertGreaterEqual(sources["build"]["bgp"]["max_mrt_sources_per_run"], 2)
+        self.assertTrue(sources["build"]["bgp"]["mrt_enabled"])
+        self.assertEqual(sources["build"]["bgp"]["max_mrt_sources_per_run"], 2)
+        self.assertEqual(sources["build"]["bgp"]["max_mrt_compressed_mib_per_run"], 1024)
+        mrt = [source for source in sources["sources"] if source["download"]["format"] in ("mrt-gz", "mrt-bz2")]
+        self.assertEqual({source["id"] for source in mrt}, {"routeviews-wide-rib", "ripe-mrt-rrc18"})
+        self.assertEqual(len({source["evidence_family"] for source in mrt}), 2)
+        self.assertEqual(sources["build"]["bgp"]["collectors"], ["rrc18", "route-views.wide"])
+        self.assertTrue(all(source["admission"] == "active" for source in mrt))
         self.assertNotIn("provider_transit", sources["build"]["bgp"]["relationship_classes"])
 
     def test_reverse_relationship_perspective(self):

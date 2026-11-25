@@ -97,27 +97,30 @@ jobs:
     # Intake repeats config/certification validation before any fetch. All four
     # independent jobs must still succeed before production trusts this run.
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 90
+    env:
+      RUNNER_TOOL_CACHE: ${{ github.workspace }}/build-private/toolcache
     steps:
       - uses: actions/checkout@v7.0.0
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v7.0.0
-        with:
-          go-version: '1.27.4'
-          cache: true
-      - uses: actions/setup-python@v7.0.0
-        with:
-          python-version: '3.13.7'
-      - name: Install pinned validation dependencies
-        run: python -m pip install -r tools/requirements.txt
+      - uses: ./.github/actions/atlas-setup
       - name: Verify full actual reviewed source intake
-        run: python tools/hosted/source_intake.py
+        env:
+          ATLAS_GITHUB_METADATA_TOKEN: ${{ github.token }}
+        run: python tools/hosted/runner_budget.py --report reports/intake-runner-budget.json -- python tools/hosted/source_intake.py
+      - name: Compile and measure actual admitted data without publishing
+        run: python tools/hosted/runner_budget.py --report reports/data-check-runner-budget.json -- python tools/hosted/production_data_check.py
       - uses: actions/upload-artifact@v7.0.0
         if: always()
         with:
           name: source-free-intake-status
-          path: reports/source-intake.json
+          path: |
+            reports/source-intake.json
+            reports/intake-runner-budget.json
+            reports/production-data-check.json
+            reports/production-lookup-integration.json
+            reports/data-check-runner-budget.json
           if-no-files-found: ignore
           retention-days: 7
       # Source payloads, fixture receipts, lineage and normalized partitions stay
@@ -133,6 +136,9 @@ jobs:
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '26.13.1'
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.13.7'
       - name: Install locked harness
         working-directory: tools/hosted
         run: npm exec --yes --package pnpm@11.28.12 -- pnpm install --frozen-lockfile --ignore-scripts
@@ -143,7 +149,7 @@ jobs:
         working-directory: web
         run: npm exec --yes --package pnpm@11.28.12 -- pnpm install --frozen-lockfile --ignore-scripts
       - name: Bundled Zstandard TypeScript regression
-        run: node --test tools/query_contract/query.test.mjs tools/query_contract/via3.test.mjs web/tests/zstd.test.ts web/tests/bgpGraph.test.ts web/tests/datasetCredits.test.ts tools/hosted/performance-gates.test.mjs tools/hosted/memory-json-bytes.test.mjs tools/release_contract/bundle_licenses.test.mjs
+        run: node --test tools/query_contract/query.test.mjs tools/query_contract/via3.test.mjs web/tests/zstd.test.ts web/tests/bgpGraph.test.ts web/tests/datasetCredits.test.ts tools/hosted/performance-gates.test.mjs tools/hosted/memory-json-bytes.test.mjs tools/hosted/browser-accessibility.test.mjs tools/release_contract/bundle_licenses.test.mjs
       - name: Native support diagnostic (mechanism replaced by explicit amendment)
         continue-on-error: true
         run: node tools/hosted/codec-probe.mjs
@@ -189,6 +195,7 @@ jobs:
           npm exec --yes --package pnpm@11.28.12 -- pnpm --dir web typecheck
           npm exec --yes --package pnpm@11.28.12 -- pnpm --dir web generate
           python tools/release_contract/software_licenses.py --bundle-audit build-private/software-bundle-audit.json --require-runtime-review
+          node --test tools/query_contract/browser_index.test.mjs
           go run ./cmd/atlas synthetic -graph24 -out build-private/ci-atlas
           python tools/release_contract/prepare_static.py --atlas build-private/ci-atlas --public web/.output/public
       - name: Measure actual emitted worker at accepted maximum profile
@@ -197,6 +204,7 @@ jobs:
           python tools/hosted/runner_budget.py --report reports/worker-runner-budget.json -- python tools/hosted/worker_memory.py --public web/.output/public --preview-url http://127.0.0.1:4173
       - name: Synthetic static HTTP browser regression (not Pages acceptance)
         run: |
+          node --test tools/hosted/production-interactions.browser-test.mjs
           python tools/hosted/static-server.py --directory web/.output/public --port 4173 &
           atlas_pid=$!
           trap 'kill "$atlas_pid"' EXIT

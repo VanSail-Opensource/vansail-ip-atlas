@@ -21,16 +21,18 @@ class CheckpointTests(unittest.TestCase):
             source=root/'source';(source/'.atlas-private').mkdir(parents=True)
             (source/'.atlas-private/state-v1.json').write_bytes(b'{"Sources":[]}')
             (source/'.atlas-private/state-seal.key').write_bytes(b'x'*32)
+            (source/'.atlas-private/production-build.json').write_bytes(b'{"scope":"hosted-production-build-v2"}')
             environment={'GITHUB_REPOSITORY':REPOSITORY,'GITHUB_REF':'refs/heads/main','GITHUB_SHA':'a'*40,
                 'GITHUB_RUN_ID':'1','GITHUB_RUN_ATTEMPT':'1','ATLAS_STATE_AGE_RECIPIENT':recipient,
                 'ATLAS_STATE_AGE_IDENTITY':identity.read_text()}
-            run={'status':'completed','conclusion':'success','path':WORKFLOWS['intake'],'head_branch':'main',
+            run={'status':'completed','conclusion':'success','path':WORKFLOWS['benchmark'],'head_branch':'main',
                 'head_repository':{'full_name':REPOSITORY},'event':'schedule','id':1,'run_attempt':1,'head_sha':'a'*40}
             with patch.dict(os.environ,environment):
-                pack(source,root/'encrypted','intake',100)
+                pack(source,root/'encrypted','benchmark',100)
                 restored=root/'restored';restored.mkdir()
                 unpack(root/'encrypted',restored,run,101)
                 self.assertEqual((restored/'.atlas-private/state-seal.key').read_bytes(),b'x'*32)
+                self.assertEqual((restored/'.atlas-private/production-build.json').read_bytes(),b'{"scope":"hosted-production-build-v2"}')
                 wrong=root/'wrong';wrong.mkdir()
                 with patch.dict(os.environ,{'ATLAS_STATE_AGE_IDENTITY':'invalid'}),self.assertRaises(ContractError):
                     unpack(root/'encrypted',wrong,run,101)
@@ -54,6 +56,8 @@ class CheckpointTests(unittest.TestCase):
             with self.subTest(name=name),self.assertRaises(ContractError):member_name(name)
         self.assertEqual(member_name('.atlas-private/state-seal-v2.json'),'.atlas-private/state-seal-v2.json')
         self.assertEqual(member_name('.atlas-private/records-v2/abc'),'.atlas-private/records-v2/abc')
+        self.assertEqual(member_name('.atlas-private/production-build.json'),'.atlas-private/production-build.json')
+        self.assertEqual(WORKFLOWS['benchmark'],'.github/workflows/production-benchmark-join.yml')
 
     def archive(self,members):
         stream=io.BytesIO()

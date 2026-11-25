@@ -31,21 +31,37 @@ const (
 	riskAdapter
 	torExits
 	ipverseUsageJSON
+	rootServiceZone
+	azureAppService
+	googleNetwork
+	nroRegistration
 )
 
 // Adapter IDs describe implemented schemas, not source certification. None is
 // enabled by this registry; reviewed per-source fixture evidence is still needed.
 func selectAdapter(source Source) (adapter, bool) {
-	if source.Parser.Version != 1 || source.Coverage != "mapping" && source.Coverage != "positive_only" {
+	version := uint32(1)
+	if source.Parser.ID == "ffraud-csv" {
+		version = 2
+	}
+	if source.Parser.Version != version || source.Coverage != "mapping" && source.Coverage != "positive_only" {
 		// These parsers cannot establish absence-as-clean assessment coverage.
 		return 0, false
 	}
 	switch source.Parser.ID {
+	case "google-network-organization":
+		return googleNetwork, googleNetworkSource(source)
+	case "nro-delegated-registration":
+		return nroRegistration, nroSource(source)
+	case "azure-appservice-service-tag":
+		return azureAppService, azureServiceSource(source)
+	case "root-zone-anycast":
+		return rootServiceZone, rootZoneSource(source)
 	case "tor-exit-addresses":
 		return torExits, torExitSource(source)
 	case "ipverse-asn-usage-json":
 		return ipverseUsageJSON, source.Parser.Schema == "ipverse-as-category-json-v1" && source.Category == "asn" && source.Coverage == "mapping" && source.Scope == "asn" && source.Format == "json" && fieldsEqual(source.PublicFields, "usage_type") && mappedFields(source, map[string]string{"metadata.category": "usage_type"})
-	case "ip-count-tsv", "feodo-csv":
+	case "ip-count-tsv", "feodo-csv", "ffraud-csv", "tweetfeed-week-csv":
 		return riskAdapter, selectRiskAdapter(source)
 	case "ipapi-free-city-csv":
 		return ipapiCityZIP, selectGeoProvider(source)
@@ -163,6 +179,20 @@ func parsePayloadTo(ctx context.Context, file *os.File, size int64, source Sourc
 	parse := func(_ string, reader io.Reader) error {
 		limits := intelligence.ParseLimits{Bytes: 3 << 30, Records: maxRecords, LineBytes: 1 << 20}
 		switch implementation {
+		case googleNetwork:
+			_, err := parseGoogleNetwork(ctx, reader, source, published, maxRecords, emit)
+			return err
+		case nroRegistration:
+			proof, err := parseNRO(ctx, reader, source, maxRecords, false, emit)
+			if err == nil && !proof.Day.Equal(published) {
+				return errNRO
+			}
+			return err
+		case azureAppService:
+			return parseAzureService(ctx, reader, source, published, maxRecords, emit)
+		case rootServiceZone:
+			_, err := parseRootZone(ctx, reader, maxRecords, emit)
+			return err
 		case torExits:
 			_, err := parseTorExitAddresses(ctx, reader, published, source.MaxAge, maxRecords, emit)
 			return err
@@ -204,6 +234,10 @@ func parsePayloadTo(ctx context.Context, file *os.File, size int64, source Sourc
 				return emit(intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordPath, Path: &intelligence.ScopedPath{Prefix: value.Prefix, Observation: intelligence.PathObservation{Origin: value.Origin, Segments: value.Segments, Family: source.Family, Current: true, OriginOutward: false}}})
 			})
 		default:
+			if caidaSource(source) {
+				_, err := parseCAIDASerial2(ctx, reader, maxRecords, emit)
+				return err
+			}
 			return parseBulkPayload(ctx, reader, source, published, maxRecords, emit)
 		}
 	}

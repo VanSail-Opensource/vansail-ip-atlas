@@ -1,8 +1,9 @@
-# VIA3 Binary Format - public schema 4, contract revision 2
+# VIA3 Binary Format - public schema 5, contract revision 3
 
-This version introduces observed-risk scoring and independent coverage.
-Magic/format/public-schema are `VIA3`/`3`/`4`. Schema 3 is rejected; its quality
-score must never be interpreted with the new increasing-risk semantics. Machine-readable tables and
+This version adds explicit observation and evidence-expiry clocks to RPKI snapshot
+results while retaining observed-risk scoring and independent coverage.
+Magic/format/public-schema are `VIA3`/`3`/`5`. Schemas 3 and 4 are rejected; old
+quality semantics and undated RPKI results cannot be interpreted as this schema. Machine-readable tables and
 uncompressed synthetic vectors are in `fixtures/contracts/via3-layouts.json`.
 They are contract fixtures, not a compiled real-source database or source
 certification. The compressed engineering corpus is now
@@ -56,7 +57,7 @@ The header is exactly 64 bytes:
 |---:|---:|---|
 | 0 | 4 | ASCII `VIA3` |
 | 4 | 2 | format version = 3 |
-| 6 | 2 | public schema = 4 |
+| 6 | 2 | public schema = 5 |
 | 8 | 2 | header length = 64 |
 | 10 | 2 | shard kind, below |
 | 12 | 4 | flags = 0 |
@@ -73,7 +74,7 @@ Each descriptor is exactly 64 bytes:
 |---:|---:|---|
 | 0 | 2 | section ID |
 | 2 | 1 | codec = 1 |
-| 3 | 1 | flags = 0; all schema-4 sections are required when present |
+| 3 | 1 | flags = 0; all schema-5 sections are required when present |
 | 4 | 4 | reserved |
 | 8 | 8 | compressed offset |
 | 16 | 8 | compressed length, nonzero |
@@ -153,7 +154,7 @@ except nullable references use `NONE,NONE`. Enums use explicit unknown value 0.
 | 6 | Quality | 1,3,8 | 32 |
 | 7 | IPv4 `/24` | 1,3,7,10 | 24 |
 | 8 | ASN | 2,3,7,11,12 | 64 |
-| 9 | RPKI | 1,3,8 | 16 |
+| 9 | RPKI | 1,3,8 | 32 |
 | 10 | BGP origins | 1,3,4,8 | 16 |
 | 11 | BGP paths | 2,3,4,9 | 24 |
 | 12 | BGP relationships | 2,3,4 | 16 |
@@ -219,15 +220,23 @@ RPKI and BGP-origin keys are prefix facts and never set the exact-address flag.
   page via section 12. A page references kind 8 and a section-11 first/count.
   Page-only objects have empty indexes/records and no further references. This
   permits bounded paging for huge ASN lists without scanning unrelated ASNs.
-* **RPKI (16):** `0 presence:u32;4 origin_asn:u32;8 status:u8;
-  9 maximum_length:u8;10 reserved:6`. Status 0 unavailable,1 valid,2 invalid,
-  3 not_found. Missing/stale VRPs are unavailable; not_found requires a complete
-  current VRP snapshot. Prefix keys may repeat only for contiguous ascending
+* **RPKI (32):** `0 presence:u32;4 origin_asn:u32;8 status:u8;
+  9 maximum_length:u8;10 reserved:6;16 observed_at:u64;24 valid_until:u64`.
+  Status 0 unavailable,1 valid,2 invalid,3 not_found. Statuses 1–3 describe the
+  exact announcement at the complete publisher snapshot observation time.
+  Both clocks are whole UTC Unix seconds: `0 < observed_at < valid_until <=
+  9007199254740991`. Unavailable has both clocks zero and exposes public nulls.
+  Known lookup answers expose `observedAt` and `validUntil` as numbers.
+  Valid uses the latest expiry among matching authorizations; invalid/not_found
+  use the earliest authorization expiry of the complete snapshot. No missing or
+  partial snapshot may establish not_found. Expiry does not erase or change a
+  retained snapshot result; the UI displays its observation/expiry and it is not
+  a claim of present authorization. The independent release/source publication
+  age limit remains enforced. Prefix keys may repeat only for contiguous ascending
   origin-ASN runs. The selected actual announcement chooses its exact prefix
   run, then binary-searches origin ASN. An unrelated more-specific RPKI row
   cannot hide that announcement's result; parent results never apply to a
-  different more-specific announcement. This clarifies lookup semantics without
-  changing any stored bytes or keys. Uniqueness is `(prefix key,origin_asn)`,
+  different more-specific announcement. Uniqueness is `(prefix key,origin_asn)`,
   with ascending record ordinals per run.
 * **BGP origins (16):** `0 presence:u32;4 origins_first:u32;
   8 origins_count:u32;12 reserved:u32`. Section-4 origins are ascending unique
@@ -312,3 +321,38 @@ P0 vectors cover every record width, address encoding, exact/prefix keys,
 dictionary ID 0, explicit false booleans, score 0 versus unrated, reason bits,
 all shard IDs and corruption classes. Executed compressed parity and overlay
 lookup remain P1 requirements; uncompressed vectors do not claim those gates.
+
+
+## Browser routing directory
+
+A packaged current pointer can carry an additional lowercase SHA-256 field
+`browser_sha256`. Its immutable root lives at
+`/_atlas/browser/<browser_sha256>.json`. The root binds the full manifest
+digest, release identity, mode and validity interval to four content-addressed
+directories for IPv4, IPv6, ASN and object descriptors. Original native
+manifests and VIA3 objects remain addressable at their existing paths. Legacy
+pointers use the complete manifest and VIA3 router.
+
+Directories branch on hexadecimal digits of the canonical network-order key.
+A routing leaf stores disjoint inclusive intervals mapped to an ordered set of
+object descriptors. An inventory leaf binds object hashes to kind, partition
+and stored size. Packaging reconstructs each index page from the canonical
+manifest and its verified objects, checks every page byte and rejects
+unreferenced files.
+The browser verifies each fetched hash, checks object references, enforces the
+release lease and expires all views at the release deadline. An IP Overview loads
+the four fact kinds it displays. A full lookup continues to return all fields.
+
+Browser root format version 2 adds optional `references` to an object
+inventory leaf. Each entry is `[source_ordinal, target_count, sha256]`, ordered
+by the source ordinal within that leaf. Every non-router source with at least
+eight directory entries requires a proof. The generator authenticates the
+source container, reconstructs the complete section 7 vector from the
+manifest's target kinds, stored sizes and SHA-256 identities in ordinal order,
+and checks the source bytes against it. The digest covers the ASCII domain
+`VIA3-REFERENCES-1`, a NUL byte, the 32-byte manifest and source digests,
+and the reconstructed vector including its eight-byte little-endian header.
+The browser verifies this digest before using the source. For each accessed
+external target it also checks the stored size and kind against the target's
+authenticated descriptor. Smaller directories and all version 1 lookups
+verify every target descriptor individually.

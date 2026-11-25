@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestSchema4ObservedRiskCoverageAndTinyIPv6(t *testing.T) {
+func TestSchema5ObservedRiskCoverageAndTinyIPv6(t *testing.T) {
 	zeroScore, contribution := uint8(0), 0.0000001
 	input := CompileInput{Mode: "synthetic", Clock: 1700000000, ValidUntil: 1700003600, Partitions: []PartitionInput{{Partition: "all", PrefixRoutes: []netip.Prefix{netip.MustParsePrefix("2001:db8::/32")}, Records: []PublicRecord{{Version: 3, Kind: 6, Prefix: netip.MustParsePrefix("2001:db8::1/128"), Exact: true, Quality: &QualityData{Score: &zeroScore, Confidence: 1, Reasons: bits(9), Exact: &contribution}}}}}}
 	built, err := Build(context.Background(), input)
@@ -29,7 +29,7 @@ func TestSchema4ObservedRiskCoverageAndTinyIPv6(t *testing.T) {
 		old := append([]byte(nil), o.Bytes...)
 		p16(old, 6, 3)
 		if _, err := Read(context.Background(), old); ErrorCode(err) != "version" {
-			t.Fatal("schema3 accepted by schema4 reader", err)
+			t.Fatal("schema3 accepted by schema5 reader", err)
 		}
 	}
 	input.Partitions[0].Records[0].Quality.CoverageComplete = true

@@ -15,6 +15,7 @@ import re
 import unicodedata
 from urllib.parse import unquote
 
+NATIVE_LOOKUP_P95_LIMIT_NS = 25_000
 MAX_FILES = 18_500
 MAX_ASSET_BYTES = 24 * 1024 * 1024
 MAX_TREE_BYTES = 3072 * 1024 * 1024
@@ -146,7 +147,7 @@ def rollback_eligible(valid_from: int, valid_until: int, now: int, *, withdrawn:
 def validate_descriptor(descriptor: object) -> dict:
     value = _exact_keys(descriptor, {"format_version", "schema_version", "codec", "mode",
                                    "valid_from", "valid_until", "objects"}, "descriptor")
-    if value["format_version"] != 3 or value["schema_version"] != 4 or value["codec"] != "zstd-1":
+    if value["format_version"] != 3 or value["schema_version"] != 5 or value["codec"] != "zstd-1":
         _fail("unsupported release version or codec")
     if value["mode"] not in ("synthetic", "production"):
         _fail("unknown release mode")
@@ -201,8 +202,13 @@ def make_manifest(descriptor: dict) -> tuple[bytes, bytes]:
 
 
 def verify_manifest(manifest_bytes: bytes, pointer_bytes: bytes, now: int) -> dict:
-    pointer = _exact_keys(parse_canonical(pointer_bytes),
-                          {"format_version", "release_id", "manifest_path", "manifest_sha256"}, "pointer")
+    pointer = parse_canonical(pointer_bytes)
+    fields = {"format_version", "release_id", "manifest_path", "manifest_sha256"}
+    if isinstance(pointer, dict) and "browser_sha256" in pointer:
+        if not isinstance(pointer["browser_sha256"], str) or not HASH.fullmatch(pointer["browser_sha256"]):
+            _fail("invalid browser index digest")
+        fields.add("browser_sha256")
+    pointer = _exact_keys(pointer, fields, "pointer")
     manifest = _exact_keys(parse_canonical(manifest_bytes),
                            {"format_version", "schema_version", "codec", "mode", "valid_from",
                             "valid_until", "objects", "release_id"}, "manifest")

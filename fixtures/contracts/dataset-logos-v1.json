@@ -84,6 +84,66 @@
       "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=",
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "valid": false
+    },
+    {
+      "name": "physical-density",
+      "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAsSAAALEgHS3X78AAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=",
+      "sha256": "a6b2777b82d6baaaef105cacff097fe8bb76f8025f271f124c3ebbf49ebf9898",
+      "valid": true
+    },
+    {
+      "name": "duplicate-physical-density",
+      "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAsSAAALEgHS3X78AAAACXBIWXMAAAsSAAALEgHS3X78AAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=",
+      "sha256": "98f4e6819959ade3de6990072ec749abd7b1369095d5d8befdf05bd8cfda52f3",
+      "valid": false
+    },
+    {
+      "name": "physical-density-before-header",
+      "base64": "iVBORw0KGgoAAAAJcEhZcwAACxIAAAsSAdLdfvwAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=",
+      "sha256": "f2c68fedda868765fe466da629c7ec8e414bddad12f8ba8d219bae19a7471e80",
+      "valid": false
+    },
+    {
+      "name": "physical-density-after-pixels",
+      "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAJcEhZcwAACxIAAAsSAdLdfvwAAAAASUVORK5CYII=",
+      "sha256": "8e1ba5a2d307e8f9dd4549b3a032a60a70a75b6df0c6b492bfb6aa0d621903bc",
+      "valid": false
+    },
+    {
+      "name": "physical-density-zero",
+      "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAAAAAAAAAHqZRakAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=",
+      "sha256": "36c9cf72ff02db507ac96919de214012f5fa55e42b7cbb6fc73a8e5f6b1aff75",
+      "valid": false
+    },
+    {
+      "name": "physical-density-excess",
+      "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAJxBAACcQQEbYuz1AAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=",
+      "sha256": "913272a8798f678c41ba2874f899ce130f1a793cbdfc03dce94f22f75923c3b8",
+      "valid": false
+    },
+    {
+      "name": "physical-density-asymmetric",
+      "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAsSAAALEwHLxk+9AAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=",
+      "sha256": "96002ada1d606b4502465f8664628f95fb9531d9d0b5a927e83c27bb46c8edd3",
+      "valid": false
+    },
+    {
+      "name": "physical-density-unit",
+      "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAsSAAALEgCl2k5qAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=",
+      "sha256": "ab1e4a9496c392b42a6354aa5b623c1d82a82f6ef2f53da6234bb9c14a5a1e17",
+      "valid": false
+    },
+    {
+      "name": "physical-density-short",
+      "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACHBIWXMAAAAAAAAAAL877aMAAAALSURBVHicY/gPBAAJ+wP9+15rKwAAAABJRU5ErkJggg==",
+      "sha256": "6d0c653763f508a5d10c2c39cb294c876010c98d602b6f51c6088105404f5735",
+      "valid": false
+    },
+    {
+      "name": "physical-density-long",
+      "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACnBIWXMAAAAAAAAAAAAAGkjcKwAAAAtJREFUeJxj+A8EAAn7A/37XmsrAAAAAElFTkSuQmCC",
+      "sha256": "6ef68f8f97311c1eac5d63780de9825d990df0f3bd3f96e30975e42e7e41ed2b",
+      "valid": false
     }
   ]
 }

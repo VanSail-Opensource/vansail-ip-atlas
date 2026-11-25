@@ -173,19 +173,33 @@ try {
     for (const [view, corruption] of [['quality', 'none'], ['quality', 'document'], ['class-c', 'logo'], ['class-c', 'none']]) {
       const selector = view === 'quality' ? '.quality-layout' : '.class-layout'
       const isolated = await browser.newContext({ serviceWorkers: 'block' })
-      let releaseCredit, requested
+      // Advance only the page's periodic refresh while the authenticated
+      // credit response is still held. Worker clocks and lease checks run
+      // normally, and the original foreground request must remain alive.
+      await isolated.addInitScript(() => {
+        const timer = window.setInterval
+        window.setInterval = function (callback, delay, ...args) {
+          if (delay === 60_000 && typeof callback === 'function') window.__atlasRefresh = () => callback(...args)
+          return timer.call(window, callback, delay, ...args)
+        }
+      })
+      let releaseCredit, requested, creditRequests = 0
       const delay = new Promise(resolve => { releaseCredit = resolve }), started = new Promise(resolve => { requested = resolve })
       try {
         await isolated.route('**/_atlas/current.json', route => route.fulfill({ contentType: 'application/json', body: mockPointer }))
         await isolated.route(`**/_atlas/releases/${releaseId}/manifest.json`, route => route.fulfill({ contentType: 'application/json', body: manifest }))
         await isolated.route('**/dataset-credits.json', route => route.fulfill({ contentType: 'application/json', body: index }))
-        await isolated.route(`**${creditPath}`, async route => { requested(); await delay; await route.fulfill({ contentType: 'application/json', body: corruption === 'document' ? '{}' : document }) })
+        await isolated.route(`**${creditPath}`, async route => { creditRequests++; requested(); await delay; await route.fulfill({ contentType: 'application/json', body: corruption === 'document' ? '{}' : document }) })
         await isolated.route(`**${logo.path}`, route => route.fulfill({ contentType: 'image/png', body: corruption === 'logo' ? Buffer.from('invalid') : Buffer.from(logoFixture.base64, 'base64') }))
         const creditPage = await isolated.newPage()
         await creditPage.goto(`${base}/ip/${view}/?q=203.0.113.1`)
         await Promise.race([started, new Promise((_, reject) => setTimeout(() => reject(new Error('Credit verification did not start')), 20000))])
         assert(await creditPage.getByRole('status').isVisible())
         assert.equal(await creditPage.locator(selector).count(), 0, 'Production facts must wait for credit integrity')
+        await creditPage.evaluate(() => {
+          if (typeof window.__atlasRefresh !== 'function') throw new Error('Periodic refresh was not registered')
+          window.__atlasRefresh()
+        })
         releaseCredit()
         if (corruption !== 'none') {
           await creditPage.getByRole('alert').waitFor()
@@ -193,6 +207,8 @@ try {
         } else {
           await creditPage.locator(selector).waitFor()
           const visible = creditPage.getByTestId('visible-dataset-credits')
+          assert.equal(creditRequests, 1, 'A periodic refresh must not restart an in-flight foreground verification')
+          assert.equal(await visible.getAttribute('role'), 'group')
           assert(await visible.isVisible())
           assert.equal(await visible.locator('a').getAttribute('href'), entry.url)
           assert.equal(await visible.locator('img').getAttribute('src'), 'data:image/png;base64,' + logoFixture.base64)
@@ -259,6 +275,16 @@ try {
       const owners = { '.map-panel': 'overview', '.score-value': 'quality', '.ip-grid': 'class-c', '.bgp-graph': 'bgp', '.asn-card': 'asn' }
       await page.locator(Object.keys(owners).find(selector => owners[selector] === view)).first().waitFor({ timeout: 20000 })
       for (const [selector, owner] of Object.entries(owners)) assert.equal((await page.locator(selector).count()) > 0, owner === view)
+      if (view === 'overview') {
+        const values = await page.locator('.fact-list > div').evaluateAll(rows => Object.fromEntries(
+          rows.map(row => [row.querySelector('dt').textContent.trim(), row.querySelector('dd').textContent.trim()]),
+        ))
+        assert.equal(values['Matched prefix'], '203.0.113.0/24')
+        assert.equal(values['Network name'], 'Atlas Transit')
+        assert.equal(values['Network organization'], 'Example Organization')
+        assert.equal(values['Registration country'], 'GB')
+        assert.equal(values.Country, 'US')
+      }
       for (const width of [320, 390, 1280, 1440]) {
         await page.setViewportSize({ width, height: 900 })
         assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `Horizontal overflow on ${view} at ${width}`)
@@ -272,11 +298,13 @@ try {
         const assertGraphSurface = async () => {
           const surface = await page.locator('.bgp-graph').evaluate(element => ({
             backdrop: getComputedStyle(element).backdropFilter,
-            background: getComputedStyle(element).backgroundImage,
-            edgeMask: getComputedStyle(element, '::before').maskImage,
+            background: getComputedStyle(element).backgroundColor,
+            edgeMask: getComputedStyle(element.querySelector('.edge-accent')).maskImage,
+            edgeLight: getComputedStyle(element.querySelector('.edge-accent')).backgroundImage,
           }))
           assert.equal(surface.backdrop, 'none', 'The interactive SVG must not invalidate a backdrop blur on every frame')
-          assert.notEqual(surface.background, 'none', 'The graph retains its themed surface lighting')
+          assert.notEqual(surface.background, 'rgba(0, 0, 0, 0)', 'The graph retains its themed surface backing')
+          assert.notEqual(surface.edgeLight, 'none', 'The graph retains its edge lighting')
           assert.notEqual(surface.edgeMask, 'none', 'The graph retains masked edge lighting')
         }
         await assertGraphSurface()
@@ -294,6 +322,70 @@ try {
       }
     })
   }
+  await test('RPKI snapshot expiry remains visible and preserves graph state across timer and resume', async () => {
+    const pointer = await (await context.request.get(`${base}/_atlas/current.json`)).json()
+    const manifest = await (await context.request.get(`${base}${pointer.manifest_path}`)).json()
+    const isolated = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: 'reduce' })
+    try {
+      const snapshot = await isolated.newPage()
+      snapshot.on('pageerror', error => report.errors.push(error.message))
+      await snapshot.clock.install({ time: new Date(manifest.valid_from * 1000) })
+      await snapshot.goto(`${base}/ip/bgp/?q=203.0.113.1`)
+      const valid = snapshot.locator('[data-rpki-origin="13335"]')
+      const invalid = snapshot.locator('[data-rpki-origin="15169"]')
+      await valid.waitFor()
+      // Let Nuxt's hydration/idle scheduling finish before controlling timers.
+      await snapshot.clock.pauseAt(await snapshot.evaluate(() => Date.now() + 1000))
+      assert.match(await valid.innerText(), /Snapshot result: valid/)
+      assert.match(await invalid.innerText(), /Snapshot result: invalid.*Coverage expired/)
+      assert.deepEqual(await invalid.locator('dt').allTextContents(), ['Observed', 'Coverage expiry'])
+      assert.deepEqual(await valid.locator('dt').allTextContents(), ['Observed', 'Authorization expiry'])
+      assert.equal(await valid.locator('.rpki-expired').count(), 0)
+      const clocks = await valid.locator('dd').allTextContents()
+      assert.equal(clocks.length, 2)
+      const observedAt = Date.parse(clocks[0]), expiry = Date.parse(clocks[1])
+      assert(Number.isFinite(observedAt) && observedAt < manifest.valid_from * 1000)
+      assert(Number.isFinite(expiry) && expiry > manifest.valid_from * 1000 && expiry < manifest.valid_until * 1000)
+      const svg = snapshot.locator('.bgp-graph svg')
+      await snapshot.getByRole('combobox', { name: 'Focus observed route' }).selectOption('0')
+      await svg.focus(); await snapshot.keyboard.press('ArrowRight'); await snapshot.keyboard.press('+')
+      const original = await svg.elementHandle()
+      const transform = await svg.locator(':scope > g').getAttribute('transform')
+      const checkPreserved = async () => {
+        assert(await original.evaluate(node => node === document.querySelector('.bgp-graph svg')), 'Snapshot timing must not remount the graph')
+        assert.equal(await svg.locator(':scope > g').getAttribute('transform'), transform)
+        assert.equal(await snapshot.getByRole('combobox', { name: 'Focus observed route' }).inputValue(), '0')
+        assert.match(await valid.innerText(), /Snapshot result: valid/)
+        assert.deepEqual(await valid.locator('dd').allTextContents(), clocks)
+      }
+      await snapshot.clock.setSystemTime(expiry - 1000)
+      await snapshot.clock.runFor(1000)
+      await valid.locator('.rpki-expired').waitFor()
+      assert.match(await valid.innerText(), /Snapshot result: valid.*Authorization expired/)
+      await checkPreserved()
+      // A tab suspended across the deadline must refresh immediately on resume.
+      await snapshot.clock.setSystemTime(expiry - 1000)
+      const resumed = snapshot.waitForResponse('**/_atlas/current.json')
+      await snapshot.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+      await resumed
+      await valid.locator('.rpki-expired').waitFor({ state: 'detached' })
+      await checkPreserved()
+      await snapshot.clock.setSystemTime(expiry)
+      await snapshot.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+      await valid.locator('.rpki-expired').waitFor()
+      await checkPreserved()
+      for (const width of [320, 390, 1280, 1440]) {
+        await snapshot.setViewportSize({ width, height: 900 })
+        assert(await snapshot.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `RPKI dates overflow at ${width}`)
+      }
+      await snapshot.clock.setSystemTime(manifest.valid_until * 1000)
+      await snapshot.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+      await snapshot.getByRole('alert').waitFor()
+      assert.equal(await snapshot.locator('.rpki-snapshots, .bgp-graph').count(), 0, 'Whole-release expiry still removes ineligible facts')
+      report.rpki_snapshot_checks = { observed_status_retained: true, timer_expiry: true, resume_expiry: true,
+        graph_state_preserved: true, whole_release_expiry_enforced: true }
+    } finally { await isolated.close() }
+  })
   await test('downloaded BGP SVG is standalone and keeps geometry under route focus', async () => {
     await page.goto(`${base}/ip/bgp/?q=203.0.113.1`)
     await page.locator('.graph-node').first().waitFor()
@@ -353,7 +445,7 @@ try {
       const geometry = await svg.evaluate(svg => {
         const box = element => { const r = element.getBoundingClientRect(); return { left:r.left, top:r.top, right:r.right, bottom:r.bottom, width:r.width, height:r.height } }
         return { svg:box(svg), bounds:{ width:svg.viewBox.baseVal.width, height:svg.viewBox.baseVal.height },
-          items:[...svg.querySelectorAll('.graph-node')].flatMap((node,index) => ['circle','text'].map(kind =>
+          items:[...svg.querySelectorAll('.graph-node')].flatMap((node,index) => ['circle','.graph-node-label'].map(kind =>
             ({ id:`${index}:${kind}`, ...box(node.querySelector(kind)) }))),
           layout:[...svg.querySelectorAll('.graph-node')].map(node => node.getAttribute('transform')) }
       })

@@ -53,6 +53,64 @@ func TestRecordStorePartitionsIntegrityAndCancellation(t *testing.T) {
 	}
 }
 
+func TestVerifyStoredSourceObjectsRejectsChangedCacheInputs(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewRecordStore(root, DefaultRecordStoreLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := NormalizedRecord{Version: 3, Kind: RecordASNIdentity, ASNIdentity: &ASNIdentityEvidence{ASN: 13335, Name: "Network"}}
+	writer := store.Writer(context.Background())
+	if err = writer.Append(record); err != nil {
+		t.Fatal(err)
+	}
+	parts, err := writer.Finish()
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := StoredSource{RecordPartitions: parts}
+	if err = VerifyStoredSourceObjects(context.Background(), root, source); err != nil {
+		t.Fatal(err)
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err = VerifyStoredSourceObjects(canceled, root, source); err != context.Canceled {
+		t.Fatal("cancellation ignored", err)
+	}
+	ambiguous := source
+	ambiguous.Records = []NormalizedRecord{record}
+	if VerifyStoredSourceObjects(context.Background(), root, ambiguous) == nil {
+		t.Fatal("ambiguous record identity accepted")
+	}
+	if err = VerifyStoredSourceObjects(context.Background(), root, StoredSource{Records: []NormalizedRecord{record}}); err != nil {
+		t.Fatal(err)
+	}
+	if VerifyStoredSourceObjects(context.Background(), root, StoredSource{Records: []NormalizedRecord{{Version: 0}}}) == nil {
+		t.Fatal("invalid inline record accepted")
+	}
+	name := filepath.Join(root, ".atlas-private", "records-v2", partitionName(parts[0]))
+	data, err := os.ReadFile(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data[len(data)-1] ^= 1
+	if err = os.WriteFile(name, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if VerifyStoredSourceObjects(context.Background(), root, source) == nil {
+		t.Fatal("changed stored bytes reused cached result")
+	}
+	if err = os.Remove(name); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Symlink(filepath.Join(root, "outside"), name); err != nil {
+		t.Fatal(err)
+	}
+	if VerifyStoredSourceObjects(context.Background(), root, source) == nil {
+		t.Fatal("linked cache input accepted")
+	}
+}
+
 func TestRecordStoreExactBoundaryAndBudgetFailure(t *testing.T) {
 	record := NormalizedRecord{Version: 3, Kind: RecordASNIdentity, ASNIdentity: &ASNIdentityEvidence{ASN: 13335}}
 	encoded, err := json.Marshal(record)

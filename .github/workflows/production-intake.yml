@@ -26,6 +26,7 @@ jobs:
       GOMEMLIMIT: 5GiB
       RUNNER_TOOL_CACHE: ${{ github.workspace }}/build-private/toolcache
       GH_TOKEN: ${{ github.token }}
+      ATLAS_GITHUB_METADATA_TOKEN: ${{ github.token }}
       ATLAS_STATE_AGE_IDENTITY: ${{ secrets.ATLAS_STATE_AGE_IDENTITY }}
       ATLAS_STATE_AGE_RECIPIENT: ${{ vars.ATLAS_STATE_AGE_RECIPIENT }}
     steps:
@@ -69,14 +70,4 @@ jobs:
         run: python tools/hosted/checkpoint.py prune
       - name: Remove plaintext state
         if: always()
-        run: |
-          python - <<'PY'
-          import os, shutil
-          from pathlib import Path
-          root=Path(os.environ['GITHUB_WORKSPACE']).resolve()
-          target=root/'.atlas-private'
-          if target.exists():
-              if target.is_symlink() or not target.resolve().is_relative_to(root):
-                  raise SystemExit('unsafe state cleanup path')
-              shutil.rmtree(target)
-          PY
+        run: python tools/hosted/production_workflow.py cleanup-private

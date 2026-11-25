@@ -1,0 +1,19 @@
+Google-owned IP address ranges
+
+Google publishes this list of IPv4 and IPv6 address ranges. VanSail IP Atlas
+reports Google as the network organization for matching address blocks.
+The observed fixture contains four original records and their edition header.
+
+The VPC guide defines the ranges and their scope. Its documentation license
+applies to the guide. The address file has no separate data license. VanSail
+records educational use under Google's published terms and credits Google in
+the global dataset notices.
+
+Google's address range definitions
+https://docs.cloud.google.com/vpc/docs/access-apis-external-ip#ip-addr-defaults
+
+Google-owned address ranges
+https://www.gstatic.com/ipranges/goog.json
+
+Google terms
+https://policies.google.com/terms

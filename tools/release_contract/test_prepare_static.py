@@ -21,7 +21,7 @@ class StaticCandidateTests(unittest.TestCase):
         struct.pack_into("<Q", data, 64 + 24, decoded)
         data = bytes(data)
         digest = sha256(data)
-        descriptor = {"format_version": 3, "schema_version": 4, "codec": "zstd-1", "mode": mode,
+        descriptor = {"format_version": 3, "schema_version": 5, "codec": "zstd-1", "mode": mode,
                       "valid_from": 100, "valid_until": 200,
                       "objects": [{"sha256": digest, "bytes": len(data), "kind": 1, "partition": "all"}]}
         manifest, pointer = make_manifest(descriptor)
@@ -106,7 +106,7 @@ class StaticCandidateTests(unittest.TestCase):
             old_index = (public / "dataset-credits.json").read_bytes()
             (public / "_headers").write_text("/*\n  Content-Security-Policy: default-src 'self'; script-src 'self'; object-src 'none'\n", encoding="utf-8")
             (public / "entry.js").write_text('const label="private-publisher";', encoding="utf-8")
-            with patch("tools.release_contract.prepare_static.inspect_binary", return_value=1), patch("tools.release_contract.prepare_static.known_private_values", return_value=("private-publisher",)):
+            with patch("tools.release_contract.prepare_static.inspect_binary", return_value=1), patch("tools.release_contract.prepare_static.stage_browser_index"), patch("tools.release_contract.prepare_static.known_private_values", return_value=("private-publisher",)):
                 with self.assertRaises(ContractError):
                     prepare(atlas, public, 150)
             self.assertEqual((previous / "current.json").read_bytes(), old_pointer)

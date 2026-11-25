@@ -8,7 +8,7 @@
       "const": 3
     },
     "contract_revision": {
-      "const": 4
+      "const": 5
     },
     "description": {
       "type": "string",
@@ -218,6 +218,7 @@
                 "as_name",
                 "asn_country",
                 "organization",
+                "network_organization",
                 "isp",
                 "origins",
                 "usage_type",
@@ -296,7 +297,7 @@
             },
             "schema_version": {
               "type": "integer",
-              "const": 4
+              "const": 5
             },
             "checksum": {
               "type": "string",
@@ -342,7 +343,7 @@
               "type": "string",
               "const": "cloudflare-pages-direct-upload"
             },
-            "publish_only_license_allow": {
+            "publish_only_reviewed_distribution_decisions": {
               "type": "boolean",
               "const": true
             },
@@ -475,7 +476,7 @@
             "use_inherited_prefix_overlay",
             "content_addressed",
             "publish_backend",
-            "publish_only_license_allow",
+            "publish_only_reviewed_distribution_decisions",
             "keep_previous_releases",
             "public_asset_prefix",
             "max_single_asset_mib",
@@ -595,15 +596,13 @@
             },
             "mrt_enabled": {
               "type": "boolean",
-              "const": false
+              "const": true
             },
             "collectors": {
               "type": "array",
               "const": [
-                "rrc01",
-                "rrc03",
-                "rrc06",
-                "route-views2"
+                "rrc18",
+                "route-views.wide"
               ]
             },
             "max_mrt_sources_per_run": {
@@ -854,7 +853,7 @@
             },
             "public_source_rights_policy": {
               "type": "string",
-              "const": "reviewed-redistribution-with-required-global-dataset-credits"
+              "const": "reviewed-distribution-decision-with-required-global-dataset-credits"
             },
             "maximum_snapshot_age_hours": {
               "type": "integer",
@@ -1328,7 +1327,7 @@
               "type": "boolean",
               "const": true
             },
-            "active_requires_public_redistribution": {
+            "active_requires_reviewed_distribution_decision": {
               "type": "boolean",
               "const": true
             },
@@ -1362,7 +1361,7 @@
             "subscription_evidence_family",
             "active_requires_fixture",
             "active_requires_publication_proof",
-            "active_requires_public_redistribution",
+            "active_requires_reviewed_distribution_decision",
             "active_forbidden_if_attribution_required",
             "active_requires_reviewed_attribution_when_required",
             "unknown_independence_defaults_to_one_family",
@@ -1396,7 +1395,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "requires_redistribution_approval": {
+        "requires_reviewed_distribution_decision": {
           "type": "boolean",
           "const": true
         },
@@ -1454,7 +1453,7 @@
         }
       },
       "required": [
-        "requires_redistribution_approval",
+        "requires_reviewed_distribution_decision",
         "on_failure",
         "validate_schema_before_ingestion",
         "dedupe_by_correlation_group",
@@ -1498,6 +1497,7 @@
               "bgp",
               "geolocation",
               "infrastructure",
+              "network_identity",
               "proxy",
               "proxy_ip",
               "proxy_subscription_ip",
@@ -1580,6 +1580,12 @@
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 1024
+              },
+              "mrt_archive_policy": {
+                "type": "string",
+                "enum": [
+                  "latest-complete-v1"
+                ]
               }
             },
             "required": [
@@ -1730,7 +1736,28 @@
                 "vpn_provider",
                 "latitude",
                 "longitude",
-                "metadata.category"
+                "metadata.category",
+                "ffraud_score",
+                "confirmations",
+                "category",
+                "type",
+                "date",
+                "user",
+                "value",
+                "tags",
+                "tweet_url",
+                "name",
+                "id",
+                "properties.systemService",
+                "properties.addressPrefixes",
+                "registry",
+                "cc",
+                "syncToken",
+                "creationTime",
+                "ipv4Prefix",
+                "ipv6Prefix",
+                "start",
+                "status"
               ]
             },
             "uniqueItems": true,
@@ -1752,6 +1779,7 @@
                 "as_name",
                 "asn_country",
                 "organization",
+                "network_organization",
                 "isp",
                 "origins",
                 "usage_type",
@@ -1797,7 +1825,9 @@
                 "vpn",
                 "proxy",
                 "datacenter",
-                "hosting"
+                "hosting",
+                "c2",
+                "scanner"
               ]
             },
             "uniqueItems": true,
@@ -7111,6 +7141,69 @@
                     }
                   }
                 ]
+              },
+              "category": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "reason_flags"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "ffraud_score": {
+                "type": "null"
+              },
+              "date": {
+                "type": "null"
+              },
+              "user": {
+                "type": "null"
+              },
+              "value": {
+                "enum": ["reason_flags", null]
+              },
+              "tags": {
+                "enum": ["reason_flags", null]
+              },
+              "tweet_url": {
+                "type": "null"
+              },
+              "name": {
+                "type": "null"
+              },
+              "id": {
+                "type": "null"
+              },
+              "properties.systemService": {
+                "type": "null"
+              },
+              "registry": {"type": "null"},
+              "cc": {"const": "registration_country"},
+              "syncToken": {"type": "null"},
+              "creationTime": {"type": "null"},
+              "ipv4Prefix": {"const": "network_organization"},
+              "ipv6Prefix": {"const": "network_organization"},
+              "start": {"type": "null"},
+              "status": {"type": "null"},
+              "properties.addressPrefixes": {
+                "enum": ["reason_flags", null]
+              },
+              "confirmations": {
+                "type": "null"
+              },
+              "type": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "reason_flags"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             }
           },
@@ -7173,8 +7266,10 @@
                 "enum": [
                   "allow",
                   "deny",
-                  "review"
-                ]
+                  "review",
+                  "user_authorized_educational_use"
+                ],
+                "description": "Recorded distribution decision. Educational use is an explicit user authorization, not a publisher grant or a declaration of license compatibility."
               },
               "evidence_url": {
                 "anyOf": [
@@ -7261,6 +7356,46 @@
               "status",
               "distribution",
               "attribution_required"
+            ],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "distribution": {
+                      "const": "user_authorized_educational_use"
+                    }
+                  },
+                  "required": [
+                    "distribution"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "status": {
+                      "const": "reviewed"
+                    },
+                    "evidence_url": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "pattern": "^https://"
+                    },
+                    "review_basis": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "pattern": "\\S"
+                    },
+                    "attribution_required": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "evidence_url",
+                    "review_basis"
+                  ]
+                }
+              }
             ]
           },
           "trust": {
@@ -7425,7 +7560,9 @@
               "payload_format": {
                 "enum": [
                   "original",
-                  "decoded-csv"
+                  "decoded-csv",
+                  "rpki-client-excerpt",
+                  "nro-delegated-excerpt"
                 ]
               }
             },

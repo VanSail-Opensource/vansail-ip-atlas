@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/netip"
 	"sort"
@@ -44,7 +43,16 @@ func BuildMappings(ctx context.Context, options Options, state intelligence.Buil
 // Empty rows and explicit coordinate tombstones prevent unknown/conflicting
 // child facts from falling through to stale affirmative parent values.
 func MappingProducer(state intelligence.BuildState, policy intelligence.Policy, clock time.Time) Producer {
+	return mappingProducer(state, policy, clock, nil, false, netip.Prefix{}, nil)
+}
+
+// mappingProducer accepts lengths only from IntelligenceProducer's owned,
+// already bounded mapping subset. Exported entry points always encode inputs.
+func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, clock time.Time, encodedLengths []int, omitInherited bool, scope netip.Prefix, locations *locationProjection) Producer {
 	return func(ctx context.Context, emit func(via3.PublicRecord) error) error {
+		if err := checkOwnedRecordLengths(state, encodedLengths); err != nil {
+			return err
+		}
 		state, joinErr := joinASNUsage(ctx, state)
 		if joinErr != nil {
 			return joinErr
@@ -61,6 +69,7 @@ func MappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 		geo := map[netip.Prefix][]intelligence.GeoEvidence{}
 		usage := map[netip.Prefix][]intelligence.UsageEvidence{}
 		origins := map[netip.Prefix][]uint32{}
+		organizations := map[netip.Prefix]string{}
 		boundaries := map[netip.Prefix]struct{}{}
 		seen := map[string]struct{}{}
 		var bytes, count int
@@ -85,7 +94,7 @@ func MappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 				if err := record.Validate(); err != nil {
 					return err
 				}
-				if record.Kind != intelligence.RecordGeo && record.Kind != intelligence.RecordUsage && record.Kind != intelligence.RecordOrigins {
+				if record.Kind != intelligence.RecordGeo && record.Kind != intelligence.RecordUsage && record.Kind != intelligence.RecordOrigins && record.Kind != intelligence.RecordNetworkOrganization {
 					return errors.New("mapping-only materializer cannot discard risk, coverage, RPKI, path or relationship facts")
 				}
 				// Reject huge nested fields before allocating their JSON encoding.
@@ -98,11 +107,11 @@ func MappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 				if record.Origins != nil && len(record.Origins.Origins) > via3.PublicOrigins {
 					return errors.New("mapping origin count exceeded")
 				}
-				encoded, err := json.Marshal(record)
+				size, err := normalizedRecordBytes(record, encodedLengths, count)
 				if err != nil {
 					return err
 				}
-				bytes += len(encoded) + 512
+				bytes += size + 512
 				count++
 				if bytes > 96<<20 || count > 200000 {
 					return errors.New("bounded mapping materialization partition exceeded")
@@ -115,6 +124,8 @@ func MappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 					prefix = record.Usage.Prefix
 				case intelligence.RecordOrigins:
 					prefix = record.Origins.Prefix
+				case intelligence.RecordNetworkOrganization:
+					prefix = record.NetworkOrganization.Prefix
 				}
 				prefix, err = canonicalMappingPrefix(prefix)
 				if err != nil {
@@ -142,6 +153,12 @@ func MappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 					}
 					usage[prefix] = append(usage[prefix], v)
 					boundaries[prefix] = struct{}{}
+				case intelligence.RecordNetworkOrganization:
+					org := record.NetworkOrganization.Organization
+					if previous, ok := organizations[prefix]; ok && previous != org {
+						org = ""
+					}
+					organizations[prefix] = org
 				case intelligence.RecordOrigins:
 					for _, asn := range record.Origins.Origins {
 						if !facts.PublicASN(asn) {
@@ -160,51 +177,92 @@ func MappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 			keys = append(keys, prefix)
 		}
 		sortPrefixes(keys)
+		// Address order, with the shortest prefix first on a tie, visits each
+		// ancestor before its descendants and keeps its entire subtree together.
+		// Remember the applicable evidence at each level of the active chain.
+		type mappingAncestor struct {
+			prefix               netip.Prefix
+			geoStart, usageStart int
+			geo                  via3.GeoData
+			coords               via3.CoordinateData
+			usage                [4]uint8
+			anycast              bool
+		}
+		var packed locationRows
+		emitLocation := emit
+		if omitInherited {
+			emitLocation = packed.collect
+		}
+		var ancestors []mappingAncestor
+		var applicableGeo []intelligence.GeoEvidence
+		var applicableUsage []intelligence.UsageEvidence
 		for _, prefix := range keys {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			var applicableGeo []intelligence.GeoEvidence
-			var applicableUsage []intelligence.UsageEvidence
-			for bits := 0; bits <= prefix.Bits(); bits++ {
-				ancestor := netip.PrefixFrom(prefix.Addr(), bits).Masked()
-				if len(applicableGeo)+len(geo[ancestor]) > 8192 || len(applicableUsage)+len(usage[ancestor]) > 8192 {
-					return errors.New("mapping boundary working set exceeded")
+			for len(ancestors) > 0 {
+				last := ancestors[len(ancestors)-1]
+				if last.prefix.Contains(prefix.Addr()) {
+					break
 				}
-				applicableGeo = append(applicableGeo, geo[ancestor]...)
-				applicableUsage = append(applicableUsage, usage[ancestor]...)
+				applicableGeo = applicableGeo[:last.geoStart]
+				applicableUsage = applicableUsage[:last.usageStart]
+				ancestors = ancestors[:len(ancestors)-1]
 			}
+			localGeo, localUsage := geo[prefix], usage[prefix]
+			if len(applicableGeo)+len(localGeo) > 8192 || len(applicableUsage)+len(localUsage) > 8192 {
+				return errors.New("mapping boundary working set exceeded")
+			}
+			current := mappingAncestor{prefix: prefix, geoStart: len(applicableGeo), usageStart: len(applicableUsage)}
+			applicableGeo = append(applicableGeo, localGeo...)
+			applicableUsage = append(applicableUsage, localUsage...)
 			u := intelligence.FuseUsage(applicableUsage)
-			g, err := intelligence.FuseGeo(policy, applicableGeo, u.Anycast != nil && *u.Anycast)
+			geoParent := locationValue{coordinates: via3.CoordinateData{Unknown: true}}
+			parentAnycast := false
+			if len(ancestors) > 0 {
+				parent := ancestors[len(ancestors)-1]
+				geoParent = locationValue{parent.geo, parent.coords}
+				parentAnycast = parent.anycast
+			}
+			current.anycast = u.Anycast != nil && *u.Anycast
+			changed := len(localGeo) != 0 || current.anycast != parentAnycast
+			resolved, err := locations.resolve(prefix, policy, applicableGeo, current.anycast, changed, geoParent)
 			if err != nil {
 				return err
 			}
-			geoRecord := via3.GeoData{}
-			if g.PhysicalCountry != nil {
-				geoRecord.Country = *g.PhysicalCountry
-			}
-			if g.RegistrationCountry != nil {
-				geoRecord.RegistrationCountry = *g.RegistrationCountry
-			}
-			if g.Region != nil {
-				geoRecord.Region = *g.Region
-			}
-			if g.City != nil {
-				geoRecord.City = *g.City
-			}
-			coordinates := via3.CoordinateData{Unknown: true}
-			if g.Coordinates != nil {
-				coordinates = via3.CoordinateData{Latitude: g.Coordinates.Latitude, Longitude: g.Coordinates.Longitude, Precision: g.Coordinates.Precision}
-			}
-			if err := emit(via3.PublicRecord{Version: 3, Kind: 2, Prefix: prefix, Geo: &geoRecord}); err != nil {
-				return err
-			}
-			if err := emit(via3.PublicRecord{Version: 3, Kind: 3, Prefix: prefix, Coordinates: &coordinates}); err != nil {
-				return err
-			}
+			geoRecord, coordinates := resolved.geo, resolved.coordinates
 			typeID, _ := usageType(u.Type)
 			assignmentID, _ := assignmentType(u.Assignment)
-			if err := emit(via3.PublicRecord{Version: 3, Kind: 5, Prefix: prefix, Usage: &via3.UsageData{Type: typeID, Assignment: assignmentID, Anycast: u.Anycast, DirectedBroadcast: u.DirectedBroadcast}}); err != nil {
+			current.geo, current.coords = geoRecord, coordinates
+			current.usage = [4]uint8{typeID, assignmentID, optionalBoolCode(u.Anycast), optionalBoolCode(u.DirectedBroadcast)}
+			// Public location lookups return the selected values. Only network and
+			// BGP origin answers expose their matching prefix. Retain the first
+			// row of each location kind, including an explicit unknown, and every
+			// change from the nearest ancestor's value.
+			var parent *mappingAncestor
+			if omitInherited && len(ancestors) > 0 {
+				parent = &ancestors[len(ancestors)-1]
+			}
+			if parent == nil || parent.geo != current.geo {
+				if err := emitLocation(via3.PublicRecord{Version: 3, Kind: 2, Prefix: prefix, Geo: &geoRecord}); err != nil {
+					return err
+				}
+			}
+			if parent == nil || parent.coords != current.coords {
+				if err := emitLocation(via3.PublicRecord{Version: 3, Kind: 3, Prefix: prefix, Coordinates: &coordinates}); err != nil {
+					return err
+				}
+			}
+			if parent == nil || parent.usage != current.usage {
+				usageRecord := via3.UsageData{Type: typeID, Assignment: assignmentID, Anycast: u.Anycast, DirectedBroadcast: u.DirectedBroadcast}
+				if err := emitLocation(via3.PublicRecord{Version: 3, Kind: 5, Prefix: prefix, Usage: &usageRecord}); err != nil {
+					return err
+				}
+			}
+			ancestors = append(ancestors, current)
+		}
+		if omitInherited {
+			if err := packed.emit(ctx, scope, emit); err != nil {
 				return err
 			}
 		}
@@ -212,28 +270,66 @@ func MappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 		for prefix := range origins {
 			keys = append(keys, prefix)
 		}
+		for prefix := range organizations {
+			if _, exists := origins[prefix]; !exists {
+				keys = append(keys, prefix)
+			}
+		}
 		sortPrefixes(keys)
+		// K4 combines the selected ownership and origins at their independent
+		// boundaries. K10 records only actual observed announcement prefixes.
+		type networkScope struct {
+			prefix netip.Prefix
+			data   via3.NetworkData
+		}
+		var networkAncestors []networkScope
 		for _, prefix := range keys {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			asns := origins[prefix]
-			sort.Slice(asns, func(i, j int) bool { return asns[i] < asns[j] })
-			asns = compact(asns)
-			if len(asns) > via3.PublicOrigins {
-				return errors.New("merged mapping origin count exceeded")
+			var network via3.NetworkData
+			if len(organizations) > 0 {
+				for len(networkAncestors) > 0 && !networkAncestors[len(networkAncestors)-1].prefix.Contains(prefix.Addr()) {
+					networkAncestors = networkAncestors[:len(networkAncestors)-1]
+				}
+				if len(networkAncestors) > 0 {
+					network = networkAncestors[len(networkAncestors)-1].data
+				}
+				if org, ok := organizations[prefix]; ok {
+					network.Organization = org
+				}
 			}
-			// These keys remain the actual observed origin prefix. They are not
-			// replaced by geo-fusion boundaries or router partition prefixes.
-			if err := emit(via3.PublicRecord{Version: 3, Kind: 4, Prefix: prefix, Network: &via3.NetworkData{Origins: asns}}); err != nil {
+			if asns, observed := origins[prefix]; observed {
+				sort.Slice(asns, func(i, j int) bool { return asns[i] < asns[j] })
+				asns = compact(asns)
+				if len(asns) > via3.PublicOrigins {
+					return errors.New("merged mapping origin count exceeded")
+				}
+				network.Origins = asns
+				if err := emit(via3.PublicRecord{Version: 3, Kind: 10, Prefix: prefix, Origins: &via3.OriginsData{ASNs: asns}}); err != nil {
+					return err
+				}
+			}
+			if err := emit(via3.PublicRecord{Version: 3, Kind: 4, Prefix: prefix, Network: &network}); err != nil {
 				return err
 			}
-			if err := emit(via3.PublicRecord{Version: 3, Kind: 10, Prefix: prefix, Origins: &via3.OriginsData{ASNs: asns}}); err != nil {
-				return err
+			if len(organizations) > 0 {
+				networkAncestors = append(networkAncestors, networkScope{prefix, network})
 			}
 		}
 		return nil
 	}
+}
+
+// The three possible values must stay distinct in lookup results.
+func optionalBoolCode(value *bool) uint8 {
+	if value == nil {
+		return 0
+	}
+	if *value {
+		return 2
+	}
+	return 1
 }
 
 func usageType(value string) (uint8, bool) {

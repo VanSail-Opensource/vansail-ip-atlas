@@ -12,14 +12,15 @@ type pendingLookupLabel struct {
 // answer-owned string; no substring can retain an entire decoded dictionary.
 // Mutable string headers still belong to independent answer value blocks.
 type lookupLabels struct {
-	inline [16]pendingLookupLabel
-	spill  []pendingLookupLabel
-	count  int
-	bytes  int
+	inline            [16]pendingLookupLabel
+	spill             []pendingLookupLabel
+	count             int
+	known, knownBytes int
+	bytes             int
 }
 
 func (b *lookupLabels) add(value []byte, target *string) (*string, error) {
-	if len(value) > 256 || b.count >= 5+2*PublicOrigins || len(value) > PublicAnswerBytes-b.bytes {
+	if len(value) > 256 || b.count+b.known >= 5+2*PublicOrigins || len(value) > PublicAnswerBytes-b.bytes-b.knownBytes {
 		return nil, fail("resource_limit")
 	}
 	entry := pendingLookupLabel{bytes: value, target: target}
@@ -34,6 +35,7 @@ func (b *lookupLabels) add(value []byte, target *string) (*string, error) {
 }
 
 func (b *lookupLabels) finish() {
+	b.known, b.knownBytes = 0, 0
 	if b.count == 0 {
 		return
 	}
@@ -54,4 +56,14 @@ func (b *lookupLabels) finish() {
 		*entry = pendingLookupLabel{}
 	}
 	b.spill, b.count, b.bytes = nil, 0, 0
+}
+
+func (b *lookupLabels) addKnown(value string, target *string) (*string, error) {
+	if len(value) > 256 || b.count+b.known >= 5+2*PublicOrigins || len(value) > PublicAnswerBytes-b.bytes-b.knownBytes {
+		return nil, fail("resource_limit")
+	}
+	b.known++
+	b.knownBytes += len(value)
+	*target = value
+	return target, nil
 }

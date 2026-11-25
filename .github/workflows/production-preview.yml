@@ -2,7 +2,7 @@ name: Atlas qualified production Pages preview
 
 on:
   workflow_run:
-    workflows: ["Atlas qualified production candidate"]
+    workflows: ["Atlas completed production benchmark join"]
     types: [completed]
     branches: [main]
   workflow_dispatch:
@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-24.04
     environment: atlas-preview
     timeout-minutes: 360
-    env:
+    env: &preview-env
       GOMAXPROCS: '2'
       GOMEMLIMIT: 5GiB
       RUNNER_TOOL_CACHE: ${{ github.workspace }}/build-private/toolcache
@@ -34,16 +34,21 @@ jobs:
       ATLAS_STATE_AGE_IDENTITY: ${{ secrets.ATLAS_STATE_AGE_IDENTITY }}
       ATLAS_STATE_AGE_RECIPIENT: ${{ vars.ATLAS_STATE_AGE_RECIPIENT }}
     steps:
-      - uses: actions/checkout@v7.0.0
+      - &checkout
+        uses: actions/checkout@v7.0.0
         with:
           persist-credentials: false
-      - uses: ./.github/actions/atlas-setup
-      - name: Verify trusted exact-head upstream
+      - &setup
+        uses: ./.github/actions/atlas-setup
+      - &verify-upstream
+        name: Verify trusted exact-head upstream
         id: context
         run: python tools/hosted/production_workflow.py context --kind preview
-      - name: Restore authenticated encrypted state
-        run: python tools/hosted/runner_budget.py --report reports/checkpoint-restore-budget.json -- python tools/hosted/checkpoint.py restore --kind candidate --run-id "$ATLAS_UPSTREAM_RUN"
-      - name: Resolve original frozen candidate
+      - &restore-benchmark
+        name: Restore authenticated encrypted state
+        run: python tools/hosted/runner_budget.py --report reports/checkpoint-restore-budget.json -- python tools/hosted/checkpoint.py restore --kind benchmark --run-id "$ATLAS_UPSTREAM_RUN"
+      - &resolve-candidate
+        name: Resolve original frozen candidate
         id: candidate
         run: |
           python - <<'PY'
@@ -52,29 +57,102 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'],'a') as output:
               output.write('run_id='+str(state['candidate_run_id'])+'\n')
           PY
-      - uses: actions/download-artifact@v8.0.2
+      - &download-public
+        uses: actions/download-artifact@v8.0.2
         with:
           name: atlas-production-public
           path: build-private/frozen-production
           run-id: ${{ steps.candidate.outputs.run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v8.0.2
+      - &download-candidate
+        uses: actions/download-artifact@v8.0.2
         with:
           name: production-candidate-evidence
           path: reports
           run-id: ${{ steps.candidate.outputs.run_id }}
           github-token: ${{ github.token }}
-      - name: Install locked frontend and browser dependencies
+      - &install-browser
+        name: Install locked frontend and browser dependencies
         run: |
           npm exec --yes --package pnpm@11.28.12 -- pnpm --dir web install --frozen-lockfile --ignore-scripts
           npm exec --yes --package pnpm@11.28.12 -- pnpm --dir tools/hosted install --frozen-lockfile --ignore-scripts
           npm exec --yes --package pnpm@11.28.12 -- pnpm --dir tools/hosted exec playwright install --with-deps chrome
-      - name: Run bounded production stage
+      - name: Deploy the frozen preview and measure worker memory
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           ATLAS_ACCOUNT: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           ATLAS_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
-        run: python tools/hosted/runner_budget.py -- python tools/hosted/production_workflow.py preview
+        run: python tools/hosted/runner_budget.py -- python tools/hosted/production_workflow.py preview-deploy
+      - uses: actions/upload-artifact@v7.0.0
+        with:
+          name: atlas-preview-inputs-${{ github.run_attempt }}
+          path: |
+            reports/pages-deployment.json
+            reports/worker-memory.json
+          if-no-files-found: error
+          retention-days: 7
+      - &cleanup
+        name: Remove plaintext state
+        if: always()
+        run: python tools/hosted/production_workflow.py cleanup-private
+
+  browser:
+    needs: preview
+    runs-on: ubuntu-24.04
+    environment: atlas-preview
+    timeout-minutes: 360
+    env: *preview-env
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [320-light, 320-dark, 390-light, 390-dark, 1280-light, 1280-dark, 1440-light, 1440-dark, queries]
+    steps:
+      - *checkout
+      - *setup
+      - *verify-upstream
+      - *restore-benchmark
+      - *resolve-candidate
+      - *download-candidate
+      - &download-preview
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: atlas-preview-inputs-${{ github.run_attempt }}
+          path: reports
+      - *install-browser
+      - name: Measure the assigned Chrome population on the immutable preview
+        env:
+          ATLAS_PREVIEW_SHARD: ${{ matrix.shard }}
+        run: python tools/hosted/runner_budget.py -- python tools/hosted/production_workflow.py preview-shard
+      - uses: actions/upload-artifact@v7.0.0
+        with:
+          name: atlas-browser-part-${{ github.run_attempt }}-${{ matrix.shard }}
+          path: reports/production-browser-part.json
+          if-no-files-found: error
+          retention-days: 7
+      - *cleanup
+
+  join:
+    needs: [preview, browser]
+    runs-on: ubuntu-24.04
+    environment: atlas-preview
+    timeout-minutes: 360
+    env: *preview-env
+    steps:
+      - *checkout
+      - *setup
+      - *verify-upstream
+      - *restore-benchmark
+      - *resolve-candidate
+      - *download-public
+      - *download-candidate
+      - *download-preview
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: atlas-browser-part-${{ github.run_attempt }}-*
+          path: build-private/preview-shards
+          merge-multiple: false
+      - name: Verify the complete browser population and recheck the live inventory
+        run: python tools/hosted/runner_budget.py -- python tools/hosted/production_workflow.py preview-join
       - name: Encrypt immutable state for the next trusted job
         run: python tools/hosted/runner_budget.py --report reports/checkpoint-pack-budget.json -- python tools/hosted/checkpoint.py pack --kind preview
       - uses: actions/upload-artifact@v7.0.0
@@ -102,16 +180,4 @@ jobs:
           path: build-private/checkpoint/envelope.json
           retention-days: 7
           if-no-files-found: error
-      - name: Remove plaintext state
-        if: always()
-        run: |
-          python - <<'PY'
-          import os, shutil
-          from pathlib import Path
-          root=Path(os.environ['GITHUB_WORKSPACE']).resolve()
-          target=root/'.atlas-private'
-          if target.exists():
-              if target.is_symlink() or not target.resolve().is_relative_to(root):
-                  raise SystemExit('unsafe state cleanup path')
-              shutil.rmtree(target)
-          PY
+      - *cleanup

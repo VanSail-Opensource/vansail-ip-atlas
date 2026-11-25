@@ -11,7 +11,7 @@ const library = await readFile(new URL('../../web/node_modules/fzstd/esm/index.m
 // The test bundle contains exactly the pinned local dependency and the product
 // wrapper. Nuxt independently packages the same imports for the static app.
 const bundle = library + '\n' + stripTypeScriptTypes(wrapper, { mode: 'strip' })
-  .replace(/^import \{ Decompress \} from ['"]fzstd['"];?\r?\n/m, '')
+  .replace(/^import \{ decompressInto \} from ['"]fzstd['"];?\r?\n/m, '')
 const path = process.env.ATLAS_CODEC_REPORT
   ? pathToFileURL(resolve(process.env.ATLAS_CODEC_REPORT))
   : new URL('../../reports/codec-bundled.json', import.meta.url)

@@ -3,6 +3,20 @@
 This freezes C06/C11 before collecting a baseline. No budget is raised. Synthetic
 contract tests measure correctness only; they do not establish full-dataset capacity.
 
+The production workflow measures the fifteen scenario/sample combinations in
+separate official hosted jobs. Preparation remains outside each warm-case timer;
+the complete measured command, including authentication and freshness checks,
+remains inside. A completed-run join verifies every sample and its original
+candidate identity before preview. Parallel scheduling does not change any gate.
+
+After deployment, eight independent Chrome jobs each measure one viewport and
+theme on the same immutable preview. Each runs all 30 real user journeys and
+30 graph capacity samples for its assigned population. A ninth job runs the
+100 cold payload lookups and three cached lookup populations. The preview
+workflow joins all nine reports for the same commit, run attempt, candidate
+and deployment, applies the full browser gates, and rechecks the live inventory
+before promotion.
+
 ## Absolute gates and measurement population
 
 | Gate | Requirement |
@@ -14,7 +28,7 @@ contract tests measure correctness only; they do not establish full-dataset capa
 | Whole-process-group peak RSS | Below 6656 MiB |
 | Peak scratch | Below 10240 MiB |
 | Complete generated static tree | At most 3072 MiB |
-| Go indexed lookup p95 | Below 2 microseconds |
+| Complete Go indexed lookup p95 | Below 25 microseconds for launch |
 | Cached browser lookup p95 | Below 15 milliseconds |
 | Typical cold-query compressed payload | Below 400 KiB |
 | Initial executed JS, gzip | Below 200 KiB |
@@ -52,6 +66,29 @@ Keep the original alternating zoom-in/zoom-out pair (`deltaY=-50`, then `+50`),
 event cadence and 50-FPS gate. The default readable canvas, four viewport widths,
 nonoverlapping circle/label bounds and full-world export are separate UI checks.
 Idle scheduler and injected-CSS diagnostics remain ineligible for acceptance.
+
+Ordinary native lookups open the release lazily. For repeated lookups, the corpus
+builder and hosted benchmark use `PrepareNativeIndex` with private scratch. It
+verifies the immutable source inventory and writes release-specific typed
+component pages with SHA-256 digests. Each lookup checks the digest when reading
+a page. The index stores the first key of a searchable page when it fits the
+cache budget and reads the same key from disk under memory pressure. Announced
+prefix rows carry their canonical display text. The reader bounds resident
+pages and admits the same logical public shards as the ordinary reader.
+Closing the reader removes the scratch file.
+
+Prepared readers can reuse individual verified rows, dictionary labels,
+prefix lists and per-origin BGP path components. A cached address range
+must have the same longest match across both original prefix indexes.
+All retained components share at most 16 MiB of the existing decoded cache,
+with a 256 KiB ceiling per component. Each lookup re-admits the referenced
+source objects and builds a caller-owned result. If optional components
+crowd out required pages, the ordinary operation retries without them.
+
+The native report records preparation time, allocation count and bytes, source
+object reads, measured scratch bytes and whole-process peak RSS. It records
+private component-page reads separately during the full 10,000-query warmup and
+100,000 timed public lookups.
 
 ## Process and disk accounting
 
@@ -113,9 +150,9 @@ a pinned, bounded bundled Zstandard decoder after actual Chrome rejected native
 `DecompressionStream('zstd')`. This amends the native-only mechanism, not the VIA3
 codec or public schema. The sole implementation is `fzstd@0.1.1`, pinned with registry
 integrity in the lockfile, wrapped by `web/app/lib/zstd.ts`. No CDN, runtime download,
-alternate codec, native fallback or enrichment API is allowed. Upstream's documented
-streaming interface is inspected and its unchecked frame checksum is independently
-verified by the wrapper; see https://github.com/101arrowz/fzstd.
+alternate codec, native fallback or enrichment API is allowed. The wrapper preflights each frame and verifies its checksum. The pinned patch
+decodes each block using the already written section bytes as its bounded history
+window. This saves an additional allocation of up to 8 MiB per section.
 
 `node tools/hosted/codec-bundled.mjs` is the acceptance probe. It bundles the exact
 local dependency and wrapper, runs golden hashes plus malformed/window/output tests

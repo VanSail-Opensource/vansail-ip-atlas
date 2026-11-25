@@ -1,0 +1,294 @@
+package pipeline
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/netip"
+	"os"
+	"path/filepath"
+	"reflect"
+	"sort"
+	"testing"
+
+	"vansail-ip-atlas/internal/via3"
+)
+
+func scatterFixture(t *testing.T, rows []via3.PublicRecord) (*compiler, string) {
+	t.Helper()
+	limits := DefaultLimits()
+	limits.PartitionRecords = 8
+	limits.PartitionBytes = 8192
+	c := &compiler{ctx: context.Background(), options: Options{Limits: limits}, scratch: t.TempDir()}
+	path := c.next()
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var size partitionSize
+	for _, row := range rows {
+		data, err := json.Marshal(row)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := c.writeRecord(file, data); err != nil {
+			t.Fatal(err)
+		}
+		size.records++
+		size.bytes += int64(len(data)) + 512
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	c.rememberPartitionSize(path, size)
+	return c, path
+}
+
+func partitionFrameMap(t *testing.T, c *compiler, path string, s scope, useScatter bool) map[string][]string {
+	t.Helper()
+	result := map[string][]string{}
+	var walk func(string, scope)
+	walk = func(path string, s scope) {
+		if !c.partitionFits(c.partitionSizes[path]) {
+			if useScatter {
+				runs, applied, err := c.scatterPartition(path, s)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if applied {
+					for _, run := range runs {
+						walk(run.path, run.scope)
+					}
+					return
+				}
+			}
+			left, right, err := s.children()
+			if err != nil {
+				t.Fatal(err)
+			}
+			scopes := [2]scope{left, right}
+			paths, err := c.split(path, &scopes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, path := range paths {
+				if path != "" {
+					walk(path, scopes[i])
+				}
+			}
+			return
+		}
+		r, err := openRun(path, c.options.Limits.RecordBytes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.file.Close()
+		for {
+			if err := r.next(); err == io.EOF {
+				break
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			result[s.name()] = append(result[s.name()], string(r.row.data))
+		}
+	}
+	walk(path, s)
+	for _, rows := range result {
+		sort.Strings(rows)
+	}
+	return result
+}
+
+func TestPublicScatterPreservesBinaryFirstFitAndInheritedBytes(t *testing.T) {
+	for _, family := range []string{"IPv4", "IPv6", "ASN"} {
+		t.Run(family, func(t *testing.T) {
+			var rows []via3.PublicRecord
+			root := scope{prefix: netip.MustParsePrefix("0.0.0.0/0")}
+			for i := 0; i < 80; i++ {
+				switch family {
+				case "IPv4":
+					prefix := netip.MustParsePrefix(fmt.Sprintf("11.0.%d.0/24", i))
+					rows = append(rows, via3.PublicRecord{Version: 3, Kind: 2, Prefix: prefix, Geo: &via3.GeoData{Country: "US"}}, via3.PublicRecord{Version: 3, Kind: 2, Prefix: netip.PrefixFrom(prefix.Addr().Next(), 32), Exact: true, Geo: &via3.GeoData{Country: "DE"}})
+				case "IPv6":
+					root.prefix = netip.MustParsePrefix("::/0")
+					rows = append(rows, via3.PublicRecord{Version: 3, Kind: 2, Prefix: netip.MustParsePrefix(fmt.Sprintf("2001:db8:%x::/48", i)), Geo: &via3.GeoData{Country: "US"}})
+				case "ASN":
+					root = scope{asn: true, last: ^uint32(0)}
+					rows = append(rows, via3.PublicRecord{Version: 3, Kind: 8, ASN: 13300 + uint32(i), ASNAggregate: &via3.ASNData{Name: "Synthetic Network"}})
+				}
+			}
+			if family == "IPv4" {
+				rows = append(rows, via3.PublicRecord{Version: 3, Kind: 3, Prefix: netip.MustParsePrefix("11.0.0.0/8"), Coordinates: &via3.CoordinateData{Unknown: true}}, via3.PublicRecord{Version: 3, Kind: 7, Prefix: netip.MustParsePrefix("11.0.0.0/24"), Profile: &via3.ProfileData{}})
+			} else if family == "IPv6" {
+				rows = append(rows, via3.PublicRecord{Version: 3, Kind: 3, Prefix: netip.MustParsePrefix("2001:db8::/32"), Coordinates: &via3.CoordinateData{Unknown: true}})
+			}
+			old, oldPath := scatterFixture(t, rows)
+			current, path := scatterFixture(t, rows)
+			want := partitionFrameMap(t, old, oldPath, root, false)
+			got := partitionFrameMap(t, current, path, root, true)
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("scatter changed scopes or canonical inherited bytes: got %d scopes, want %d", len(got), len(want))
+			}
+		})
+	}
+}
+
+func TestPublicScatterFallbackAndCancellationDoNotMutateInput(t *testing.T) {
+	var rows []via3.PublicRecord
+	for i := 0; i < 80; i++ {
+		rows = append(rows, via3.PublicRecord{Version: 3, Kind: 2, Prefix: netip.MustParsePrefix(fmt.Sprintf("%d.0.%d.0/24", 11+134*(i%2), i)), Geo: &via3.GeoData{Country: "US"}})
+	}
+	root := scope{prefix: netip.MustParsePrefix("0.0.0.0/0")}
+	for _, mode := range []string{"budget", "cancel", "metadata"} {
+		t.Run(mode, func(t *testing.T) {
+			c, path := scatterFixture(t, rows)
+			before := c.used
+			original, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch mode {
+			case "budget":
+				c.options.Limits.ScratchBytes = c.used
+			case "cancel":
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				c.ctx = ctx
+			case "metadata":
+				size := c.partitionSizes[path]
+				size.records++
+				c.partitionSizes[path] = size
+			}
+			_, applied, err := c.scatterPartition(path, root)
+			if applied || mode == "budget" && err != nil || mode != "budget" && err == nil || mode == "cancel" && !errors.Is(err, context.Canceled) {
+				t.Fatal("scatter fallback/failure changed", applied, err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || string(after) != string(original) || c.used != before {
+				t.Fatal("failed planning changed the owned input or accounting", err)
+			}
+			files, err := os.ReadDir(c.scratch)
+			if err != nil || len(files) != 1 {
+				t.Fatal("planning failure created files", err)
+			}
+		})
+	}
+}
+
+func TestPublicScatterSecondPassFailureCleansOnlyOwnedChildren(t *testing.T) {
+	var rows []via3.PublicRecord
+	for i := 0; i < 80; i++ {
+		rows = append(rows, via3.PublicRecord{Version: 3, Kind: 2, Prefix: netip.MustParsePrefix(fmt.Sprintf("%d.0.%d.0/24", 11+134*(i%2), i)), Geo: &via3.GeoData{Country: "US"}})
+	}
+	for _, mode := range []string{"mutation", "cancel_write", "collision"} {
+		t.Run(mode, func(t *testing.T) {
+			c, path := scatterFixture(t, rows)
+			before := c.used
+			original, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var collision string
+			called := false
+			if mode == "cancel_write" {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				c.ctx = ctx
+				c.options.scratchUsage = func(used uint64) {
+					if used > before {
+						called = true
+						cancel()
+					}
+				}
+			} else {
+				c.options.externalScratch = func() uint64 {
+					if !called {
+						called = true
+						if mode == "mutation" {
+							original = bytes.Replace(original, []byte(`"US"`), []byte(`"DE"`), 1)
+							if err := os.WriteFile(path, original, 0600); err != nil {
+								t.Fatal(err)
+							}
+						} else {
+							collision = filepath.Join(c.scratch, fmt.Sprintf("run-%08d.bin", c.serial+1))
+							if err := os.WriteFile(collision, []byte("not owned by scatter"), 0600); err != nil {
+								t.Fatal(err)
+							}
+						}
+					}
+					return 0
+				}
+			}
+			_, applied, err := c.scatterPartition(path, scope{prefix: netip.MustParsePrefix("0.0.0.0/0")})
+			if !called || applied || err == nil || mode == "cancel_write" && !errors.Is(err, context.Canceled) {
+				t.Fatal("second-pass failure not observed", called, applied, err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(after, original) || c.used != before || len(c.partitionSizes) != 1 {
+				t.Fatal("failed scatter lost parent or retained child accounting", err)
+			}
+			files, err := os.ReadDir(c.scratch)
+			wantFiles := 1
+			if collision != "" {
+				wantFiles++
+				if data, err := os.ReadFile(collision); err != nil || string(data) != "not owned by scatter" {
+					t.Fatal("failed exclusive create removed an unowned file", err)
+				}
+			}
+			if err != nil || len(files) != wantFiles {
+				t.Fatal("failed scatter retained owned child files", err, len(files))
+			}
+		})
+	}
+}
+
+func TestPublicScatterLeavesFittingUnaryRunsToBinaryRepack(t *testing.T) {
+	var rows []via3.PublicRecord
+	for i := 0; i < 8; i++ {
+		rows = append(rows, via3.PublicRecord{Version: 3, Kind: 2, Prefix: netip.MustParsePrefix(fmt.Sprintf("11.0.%d.0/24", i)), Geo: &via3.GeoData{Country: "US"}})
+	}
+	c, path := scatterFixture(t, rows)
+	c.options.Limits.ObjectBytes = 1024
+	root := scope{prefix: netip.MustParsePrefix("0.0.0.0/0")}
+	if _, applied, err := c.scatterPartition(path, root); err != nil || applied {
+		t.Fatal("logical fit must retain the ordinary binary-size repack path", applied, err)
+	}
+	left, right, err := root.children()
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopes := [2]scope{left, right}
+	paths, err := c.split(path, &scopes)
+	if err != nil || paths[0] == "" || paths[1] != "" || scopes[0].prefix != netip.MustParsePrefix("11.0.0.0/21") {
+		t.Fatal("ordinary fitting unary-child scope changed", scopes, err)
+	}
+}
+
+func TestPublicScatterUnaryHandoffReusesExactRunAndBinaryScope(t *testing.T) {
+	var rows []via3.PublicRecord
+	for i := 0; i < 80; i++ {
+		// Both /4 lookahead children are populated, while the first binary
+		// child is unary. Its original jump is the common 0.0.0.0/3 scope.
+		rows = append(rows, via3.PublicRecord{Version: 3, Kind: 2, Prefix: netip.MustParsePrefix(fmt.Sprintf("%d.0.%d.0/24", 11+12*(i%2), i)), Geo: &via3.GeoData{Country: "US"}})
+	}
+	c, path := scatterFixture(t, rows)
+	before, total, serial := c.used, c.partitionSizes[path], c.serial
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The handoff requires no extra scratch reservation or writer at all.
+	c.options.Limits.ScratchBytes = c.used
+	c.options.externalScratch = func() uint64 { t.Fatal("unary handoff must not prepare a rewrite"); return 0 }
+	runs, applied, err := c.scatterPartition(path, scope{prefix: netip.MustParsePrefix("0.0.0.0/0")})
+	if err != nil || !applied || len(runs) != 1 || runs[0].path != path || runs[0].prefix != netip.MustParsePrefix("0.0.0.0/3") {
+		t.Fatal("unary handoff changed the ordinary binary scope", runs, applied, err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(original, after) || c.used != before || c.serial != serial || c.partitionSizes[path] != total {
+		t.Fatal("unary handoff rewrote or changed ownership of the immutable run", err)
+	}
+}

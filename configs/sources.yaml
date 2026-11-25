@@ -1,7 +1,7 @@
 schema_version: 3
 description: 'VanSail IP Atlas: reviewed download-only production shortlist. Positive observations support
   observed risk; absent categories and stale facts remain unknown. No per-IP provenance; reviewed credits
-  are global only. Routing candidates remain blocked pending qualification.'
+  are global only. Authenticated current payloads and every production gate remain required.'
 build:
   profile: github-actions-standard
   incremental: true
@@ -52,6 +52,7 @@ build:
     - as_name
     - asn_country
     - organization
+    - network_organization
     - isp
     - origins
     - usage_type
@@ -97,7 +98,7 @@ build:
     source_provenance_internal_only: true
   storage:
     format: VIA3
-    schema_version: 4
+    schema_version: 5
     checksum: sha256
     byte_order: little
     compression: zstd
@@ -109,7 +110,7 @@ build:
     use_inherited_prefix_overlay: true
     content_addressed: true
     publish_backend: cloudflare-pages-direct-upload
-    publish_only_license_allow: true
+    publish_only_reviewed_distribution_decisions: true
     keep_previous_releases: 2
     public_asset_prefix: /_atlas/objects/
     max_single_asset_mib: 24
@@ -172,12 +173,10 @@ build:
     numeric_quality_requires_all_layers: false
   bgp:
     download_mode: selected-snapshots
-    mrt_enabled: false
+    mrt_enabled: true
     collectors:
-    - rrc01
-    - rrc03
-    - rrc06
-    - route-views2
+    - rrc18
+    - route-views.wide
     max_mrt_sources_per_run: 2
     max_mrt_compressed_mib_per_run: 1024
     preserve_raw_as_path: true
@@ -236,7 +235,7 @@ build:
     pages_build_work: none-ci-prebuild-only
     publish_no_source_provenance: true
     public_provenance: false
-    public_source_rights_policy: reviewed-redistribution-with-required-global-dataset-credits
+    public_source_rights_policy: reviewed-distribution-decision-with-required-global-dataset-credits
     maximum_snapshot_age_hours: 720
     hosted_regression_required: true
     hosted_performance_required: true
@@ -380,7 +379,7 @@ build:
     subscription_evidence_family: public-subscription-aggregators
     active_requires_fixture: true
     active_requires_publication_proof: true
-    active_requires_public_redistribution: true
+    active_requires_reviewed_distribution_decision: true
     active_forbidden_if_attribution_required: false
     active_requires_reviewed_attribution_when_required: true
     unknown_independence_defaults_to_one_family: true
@@ -388,7 +387,7 @@ build:
     authoritative_publication_headers: []
     certification_root: fixtures/source-certification/
 source_defaults:
-  requires_redistribution_approval: true
+  requires_reviewed_distribution_decision: true
   on_failure: recompute-with-only-verified-current-sources
   validate_schema_before_ingestion: true
   dedupe_by_correlation_group: false
@@ -448,7 +447,7 @@ sources:
     parser: country-range-csv
     schema: start-end-country-csv-v1
     schema_observed: true
-    tested_at: '2026-11-15T04:47:08Z'
+    tested_at: '2026-11-25T05:55:36Z'
     synthetic: false
   parser:
     id: country-range-csv
@@ -504,7 +503,7 @@ sources:
     parser: country-range-csv
     schema: start-end-country-csv-v1
     schema_observed: true
-    tested_at: '2026-11-15T04:47:08Z'
+    tested_at: '2026-11-25T05:55:36Z'
     synthetic: false
   parser:
     id: country-range-csv
@@ -560,7 +559,7 @@ sources:
     parser: country-range-csv
     schema: start-end-country-csv-v1
     schema_observed: true
-    tested_at: '2026-11-15T04:47:08Z'
+    tested_at: '2026-11-25T05:55:36Z'
     synthetic: false
   parser:
     id: country-range-csv
@@ -630,7 +629,7 @@ sources:
     status: passed
     sha256: 9f1d79394ceedd24445922f84d17325c0f1809cadac60da410a5c7610bbf57ef
     schema_observed: true
-    tested_at: '2026-11-15T04:47:08Z'
+    tested_at: '2026-11-25T05:55:36Z'
     path: fixtures/source-certification/observed-dbip-city.csv
     parser: city-range-csv
     schema: dbip-city-eight-columns-v1
@@ -709,7 +708,7 @@ sources:
     status: passed
     sha256: 4df74d3dbe3a08c3bc7e6a63d4c3912f7bf4932fc203a69f566656f1f71e2836
     schema_observed: true
-    tested_at: '2026-11-15T04:47:08Z'
+    tested_at: '2026-11-25T05:55:36Z'
     path: fixtures/source-certification/observed-ipapi-city-ipv4.csv
     parser: ipapi-free-city-csv
     schema: ipapi-free-fourteen-columns-v1
@@ -788,7 +787,7 @@ sources:
     status: passed
     sha256: 99f6c0ba9fbeacda88749d62782ba1a9eadb55aea2a5e4940a6f4a20b03704b7
     schema_observed: true
-    tested_at: '2026-11-15T04:47:08Z'
+    tested_at: '2026-11-25T05:55:36Z'
     path: fixtures/source-certification/observed-ipapi-city-ipv6.csv
     parser: ipapi-free-city-csv
     schema: ipapi-free-fourteen-columns-v1
@@ -857,7 +856,7 @@ sources:
     parser: asn-identity-csv
     schema: asn-handle-description-country-csv-v1
     schema_observed: true
-    tested_at: '2026-11-15T04:47:08Z'
+    tested_at: '2026-11-25T05:55:36Z'
     synthetic: false
   parser:
     id: asn-identity-csv
@@ -873,209 +872,6 @@ sources:
     handle: as_name
     description: organization
     country-code: asn_country
-  signals: []
-- id: ripe-mrt-rrc01
-  evidence_family: ripe-ris-mrt
-  source_group: ripe-ris-mrt
-  category: bgp
-  admission: candidate
-  discovery: https://data.ris.ripe.net/rrc01/
-  download:
-    url: null
-    format: mrt-gz
-    max_compressed_mib: 1000
-  refresh:
-    interval: 24h
-    max_stale: 720h
-  fields:
-  - prefix
-  - asn
-  - as_path
-  - peer
-  - observed_at
-  depends_on: []
-  license:
-    status: needs-review
-    identifier: RIPE-terms-review
-    distribution: review
-    evidence_url: null
-    attribution_required: null
-  trust:
-    source_weight: 70
-    correlation_group: ripe-ris-mrt
-  scope: path
-  notes: Use date-resolved complete RIB; do not specify nonexistent fixed filename or download all collectors.
-  publication_proof:
-    kind: unavailable
-    locator: null
-    field: null
-  coverage:
-    kind: mapping
-    scope: path
-  fixture:
-    status: missing
-    sha256: null
-    schema_observed: false
-    tested_at: null
-  parser:
-    id: null
-    schema: null
-    version: null
-  public_fields: []
-  field_mappings: {}
-  signals: []
-- id: routeviews-rib
-  evidence_family: routeviews-mrt
-  source_group: routeviews-mrt
-  category: bgp
-  admission: candidate
-  discovery: https://archive.routeviews.org/route-views2/bgpdata/
-  download:
-    url: null
-    format: mrt-bz2
-    max_compressed_mib: 1000
-  refresh:
-    interval: 24h
-    max_stale: 720h
-  fields:
-  - prefix
-  - asn
-  - as_path
-  - peer
-  - observed_at
-  depends_on: []
-  license:
-    status: needs-review
-    identifier: RouteViews-terms-review
-    distribution: review
-    evidence_url: null
-    attribution_required: null
-  trust:
-    source_weight: 70
-    correlation_group: routeviews-mrt
-  scope: path
-  notes: Resolve latest completed RIB with manifest and time budget, use separate worker.
-  publication_proof:
-    kind: unavailable
-    locator: null
-    field: null
-  coverage:
-    kind: mapping
-    scope: path
-  fixture:
-    status: missing
-    sha256: null
-    schema_observed: false
-    tested_at: null
-  parser:
-    id: null
-    schema: null
-    version: null
-  public_fields: []
-  field_mappings: {}
-  signals: []
-- id: caida-asrel2
-  evidence_family: caida-rel
-  source_group: caida-rel
-  category: bgp
-  admission: candidate
-  download:
-    url: null
-    format: text-bz2
-    max_compressed_mib: 800
-  refresh:
-    interval: 720h
-    max_stale: 720h
-  fields:
-  - asn
-  - as_relationship
-  depends_on: []
-  license:
-    status: needs-review
-    identifier: CAIDA-AUA
-    distribution: review
-    evidence_url: null
-    attribution_required: null
-  trust:
-    source_weight: 70
-    correlation_group: caida-rel
-  scope: asn_edge
-  notes: Discover the latest dated serial-2 asset deterministically; filename selects a candidate only, never
-    proves content publication. Exact payload timestamp binding, parser certification and redistribution review
-    remain required.
-  publication_proof:
-    kind: unavailable
-    locator: null
-    field: null
-  coverage:
-    kind: mapping
-    scope: asn_edge
-  fixture:
-    status: missing
-    sha256: null
-    schema_observed: false
-    tested_at: null
-  parser:
-    id: null
-    schema: null
-    version: null
-  discovery:
-    mode: latest-timestamped-asset
-    index_url: https://data.caida.org/datasets/as-relationships/serial-2/
-    filename_pattern: ^[0-9]{8}\.as-rel2\.txt\.bz2$
-    ordering: filename-date-desc-then-url-bytes
-    requires_exact_file: true
-    no_guessing: true
-  public_fields: []
-  field_mappings: {}
-  signals: []
-- id: rpki-client-vrps
-  evidence_family: rpki-client
-  source_group: rpki-client
-  category: rpki
-  admission: candidate
-  discovery: https://console.rpki-client.org/
-  download:
-    url: null
-    format: json
-    max_compressed_mib: 800
-  refresh:
-    interval: 12h
-    max_stale: 720h
-  fields:
-  - roa
-  - roa_max_length
-  - roa_asn
-  depends_on: []
-  license:
-    status: needs-review
-    identifier: rpki-client-terms-review
-    distribution: review
-    evidence_url: null
-    attribution_required: null
-  trust:
-    source_weight: 70
-    correlation_group: rpki-client
-  scope: prefix
-  notes: Resolve a validated full VRP/ROA snapshot; never use a lookup API.
-  publication_proof:
-    kind: unavailable
-    locator: null
-    field: null
-  coverage:
-    kind: mapping
-    scope: prefix
-  fixture:
-    status: missing
-    sha256: null
-    schema_observed: false
-    tested_at: null
-  parser:
-    id: null
-    schema: null
-    version: null
-  public_fields: []
-  field_mappings: {}
   signals: []
 - id: x4b-vpn-v4
   evidence_family: x4b
@@ -1136,7 +932,7 @@ sources:
     status: passed
     sha256: a7038a372eebed2e872c8e8ee92c52ce5340c62c585f891b13f139de75d8f640
     schema_observed: true
-    tested_at: '2026-11-15T04:47:08Z'
+    tested_at: '2026-11-25T05:55:36Z'
     path: fixtures/source-certification/observed-x4b-vpn-ipv4.txt
     parser: literal-prefix-text
     schema: one-literal-ip-or-prefix-per-line-v1
@@ -1196,7 +992,7 @@ sources:
     parser: tor-exit-addresses
     schema: tordnsel-exit-addresses-v1
     schema_observed: true
-    tested_at: '2026-11-15T04:47:08Z'
+    tested_at: '2026-11-25T05:55:36Z'
     synthetic: false
   parser:
     id: tor-exit-addresses
@@ -1254,7 +1050,7 @@ sources:
     parser: ipverse-asn-usage-json
     schema: ipverse-as-category-json-v1
     schema_observed: true
-    tested_at: '2026-11-15T04:47:08Z'
+    tested_at: '2026-11-25T05:55:36Z'
     synthetic: false
   parser:
     id: ipverse-asn-usage-json
@@ -1265,4 +1061,763 @@ sources:
   field_mappings:
     metadata.category: usage_type
   signals: []
-contract_revision: 4
+- id: ffraud-ip
+  evidence_family: ffraud-original
+  source_group: ffraud-original
+  category: abuse
+  admission: active
+  discovery: https://github.com/FFraud-com/ip-fraud-database
+  download:
+    url: https://raw.githubusercontent.com/FFraud-com/ip-fraud-database/main/threat-ips/confirmed-abusive.csv
+    format: csv
+    max_compressed_mib: 64
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - ip
+  - ffraud_score
+  - confirmations
+  - category
+  - type
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: MIT
+    distribution: allow
+    evidence_url: https://github.com/FFraud-com/ip-fraud-database/blob/main/LICENSE
+    attribution_required: true
+    review_basis: '2026-11-15: reviewed the original publisher MIT license, which explicitly grants use,
+      modification and redistribution of its Data. The complete original copyright, permission and warranty
+      notice is retained in the single global dataset credit. One correlated original publisher family;
+      no publisher contact or permission beyond the stated MIT grant is claimed.'
+    attribution:
+      name: FFraud IP threat observations
+      text: 'MIT License Copyright (c) 2026 ffraud Permission is hereby granted, free of charge, to any
+        person obtaining a copy of this data and associated documentation files (the "Data"), to deal
+        in the Data without restriction, including without limitation the rights to use, copy, modify,
+        merge, publish, distribute, sublicense, and/or sell copies of the Data, and to permit persons
+        to whom the Data is furnished to do so, subject to the following conditions: The above copyright
+        notice and this permission notice shall be included in all copies or substantial portions of the
+        Data. THE DATA IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
+        BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+        IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+        WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH
+        THE DATA OR THE USE OR OTHER DEALINGS IN THE DATA.'
+      url: https://github.com/FFraud-com/ip-fraud-database
+      license_url: https://github.com/FFraud-com/ip-fraud-database/blob/main/LICENSE
+  trust:
+    source_weight: 70
+    correlation_group: ffraud-original
+  scope: exact_ip
+  notes: Enabled for attempted intake; complete current hosted payload verification remains required. Original honeypot/community
+    maintained set, one family. Category is the worst observed threat, not every configured signal per
+    row. Explicit proxy, VPN, Tor or datacenter types add one exact-IP reason under that same family and
+    original clock; blank and mobile types remain unknown. Scores and confirmation counts never establish
+    weights, probabilities or independent votes, and no usage type or safe negative is inferred. The complete
+    November 3 snapshot has 1651503 rows including two excluded nonpublic literals; it yields 1651501
+    threat reasons plus 189501 infrastructure reasons. No phishing/fraud rows were present. Preserve immutable
+    metadata generated_utc, which precedes the file commit; live_utc cannot renew the content clock. The
+    nine-row observed fixture and local parser tests are not admission certification.
+  publication_proof:
+    kind: github_commit
+    locator: https://api.github.com/repos/FFraud-com/ip-fraud-database/commits?path=threat-ips%2Fconfirmed-abusive.csv&sha=main&per_page=1
+    field: commit.committer.date
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: passed
+    path: fixtures/source-certification/observed-ffraud.csv
+    sha256: b6db40d8ae70f233db411e5bd31f45c20f533284cd35373bfb24aadae2f94723
+    parser: ffraud-csv
+    schema: ffraud-five-column-risk-csv-v2
+    schema_observed: true
+    tested_at: '2026-11-25T05:55:36Z'
+    synthetic: false
+    payload_format: original
+  parser:
+    id: ffraud-csv
+    schema: ffraud-five-column-risk-csv-v2
+    version: 2
+  public_fields:
+  - reason_flags
+  field_mappings:
+    ip: reason_flags
+    category: reason_flags
+    ffraud_score: null
+    confirmations: null
+    type: reason_flags
+  signals:
+  - abuse
+  - botnet
+  - c2
+  - datacenter
+  - fraud
+  - malware
+  - proxy
+  - scanner
+  - spam
+  - tor
+  - vpn
+- id: google-network-organization
+  evidence_family: google-network-owner
+  source_group: google-network-owner
+  category: network_identity
+  admission: active
+  discovery: https://docs.cloud.google.com/vpc/docs/access-apis-external-ip
+  download:
+    url: https://www.gstatic.com/ipranges/goog.json
+    format: json
+    max_compressed_mib: 1
+  refresh:
+    interval: 6h
+    max_stale: 720h
+  fields: [syncToken, creationTime, ipv4Prefix, ipv6Prefix]
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: Google-published-IP-ranges-source-terms
+    distribution: user_authorized_educational_use
+    evidence_url: https://policies.google.com/terms
+    review_basis: Google documents these prefixes as Google-owned IP addresses and publishes
+      them for administrators. The range file contains no separate data license. The project
+      records educational use of the address ownership facts under Google's published terms.
+    attribution_required: true
+    attribution:
+      name: Google
+      text: Google publishes the Google-owned IP address ranges used by VanSail IP Atlas
+        to identify the network organization for matching prefixes.
+      url: https://docs.cloud.google.com/vpc/docs/access-apis-external-ip
+      license_url: https://policies.google.com/terms
+  trust:
+    source_weight: 100
+    correlation_group: google-network-owner
+  scope: prefix
+  notes: Google's own published range list identifies the owner of the listed address
+    space. It supplies the organization Google only for covered prefixes. It supplies no
+    evidence of subscriber ISP, service type, threat activity or BGP origin.
+  publication_proof:
+    kind: embedded
+    locator: https://www.gstatic.com/ipranges/goog.json
+    field: syncToken
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: passed
+    path: fixtures/source-certification/observed-google-owned-prefixes.json
+    sha256: f6e65c75c8c85183574926d026ea42b5af553008550ad4a6613f74cb5d690eb5
+    parser: google-network-organization
+    schema: google-owned-ip-ranges-v1
+    schema_observed: true
+    tested_at: '2026-11-25T05:55:36Z'
+    synthetic: false
+    payload_format: original
+  parser:
+    id: google-network-organization
+    schema: google-owned-ip-ranges-v1
+    version: 1
+  public_fields: [network_organization]
+  field_mappings:
+    syncToken: null
+    creationTime: null
+    ipv4Prefix: network_organization
+    ipv6Prefix: network_organization
+  signals: []
+- id: nro-delegated-registration
+  evidence_family: nro-rir-delegation
+  source_group: nro-rir-delegation
+  category: geolocation
+  admission: active
+  discovery: https://www.nro.net/about/rirs/statistics/
+  download:
+    url: https://ftp.ripe.net/pub/stats/ripencc/nro-stats/latest/nro-delegated-stats
+    format: text
+    max_compressed_mib: 64
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields: [registry, cc, type, start, value, status]
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: NRO-RIR-extended-statistics-source-terms
+    distribution: user_authorized_educational_use
+    evidence_url: https://www.nro.net/about/rirs/statistics/
+    review_basis: The NRO publishes these statistics for Internet number resource research and
+      analysis. The project records educational use of the five registries' original facts.
+      The global report carries no uniform open-data license. APNIC publishes its own accuracy
+      and liability conditions for its contribution.
+    attribution_required: true
+    attribution:
+      name: Number Resource Organization and the five Regional Internet Registries
+      text: Registration-country observations come from the NRO Extended Statistics Report
+        and the AFRINIC, APNIC, ARIN, LACNIC and RIPE NCC registries. VanSail extracts the
+        registration country of the organization that received each eligible address
+        range. APNIC gives no guarantee of accuracy and accepts no liability for loss or damage
+        arising from use of its statistics.
+      url: https://www.nro.net/about/rirs/statistics/
+      license_url: https://ftp.apnic.net/stats/apnic/delegated-apnic-extended-latest
+  trust:
+    source_weight: 100
+    correlation_group: nro-rir-delegation
+  scope: prefix
+  notes: Parse assigned and allocated IPv4 and IPv6 resources from the five RIRs.
+    Country codes identify the recipient's administrative registration. The header serial
+    supplies the UTC edition day. Require the matching sibling SHA-256 and all three
+    original record totals. Allocation dates and retrieval times cannot renew the edition.
+  publication_proof:
+    kind: embedded
+    locator: https://ftp.ripe.net/pub/stats/ripencc/nro-stats/latest/nro-delegated-stats
+    field: header.serial
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: passed
+    path: fixtures/source-certification/observed-nro-delegated-stats.txt
+    sha256: aced6ceef6c72d453734903456daaed855db45aff3bb8f341e91947c26f91c0c
+    parser: nro-delegated-registration
+    schema: nro-global-extended-v2
+    schema_observed: true
+    tested_at: '2026-11-25T05:55:36Z'
+    synthetic: false
+    payload_format: nro-delegated-excerpt
+  parser:
+    id: nro-delegated-registration
+    schema: nro-global-extended-v2
+    version: 1
+  public_fields: [registration_country]
+  field_mappings:
+    registry: null
+    cc: registration_country
+    type: null
+    start: null
+    value: null
+    status: null
+  signals: []
+- id: azure-appservice-public
+  evidence_family: microsoft-azure-appservice
+  source_group: microsoft-azure-service-tags
+  category: infrastructure
+  admission: active
+  discovery: https://learn.microsoft.com/en-us/azure/app-service/app-service-ip-addresses
+  download:
+    url: https://download.microsoft.com/download/7/1/d/71d86715-5596-4529-9b13-da13a5de5b63/ServiceTags_Public_20261116.json
+    format: json
+    max_compressed_mib: 16
+  refresh:
+    interval: 6h
+    max_stale: 720h
+  fields: [name, id, properties.systemService, properties.addressPrefixes]
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: Microsoft-Download-Center-Terms-of-Use
+    distribution: user_authorized_educational_use
+    evidence_url: https://www.microsoft.com/en-us/legal/terms-of-use
+    review_basis: Microsoft distributes the weekly public cloud service tags through its Download
+      Center under terms that generally limit use to personal and noncommercial purposes. The project
+      records its own educational-use decision for extraction of
+      the listed eligible service addresses. Microsoft retains its rights in the source material.
+    attribution_required: true
+    attribution:
+      name: Microsoft Azure IP Ranges and Service Tags
+      text: Azure public cloud service-tag data from Microsoft. VanSail extracted individual addresses
+        listed for inbound traffic to multitenant Azure App Service applications. Microsoft retains
+        its rights in the original service-tag data.
+      url: https://learn.microsoft.com/en-us/azure/virtual-network/service-tags-overview
+      license_url: https://www.microsoft.com/en-us/legal/terms-of-use
+  trust:
+    source_weight: 80
+    correlation_group: microsoft-azure-appservice
+  scope: exact_ip
+  notes: Use only individual public IPv4 and IPv6 addresses from the global multitenant
+    AppService tag. The publisher includes upcoming allocations. Require the address in the
+    current edition and an earlier official edition published at least seven days ago.
+    Wider CIDRs, regional duplicates and other services supply no observations. This signal
+    describes listed hosting infrastructure and provides no abuse or safety assessment.
+  publication_proof:
+    kind: snapshot_metadata
+    locator: https://www.microsoft.com/en-us/download/details.aspx?id=56519
+    field: download.filename.date
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: passed
+    path: fixtures/source-certification/observed-azure-appservice.json
+    sha256: ce76a3e14cb4f0214bdf875ef402741ec5a099469a328787aa91536ce2e6f314
+    parser: azure-appservice-service-tag
+    schema: azure-service-tags-json-v1
+    schema_observed: true
+    tested_at: '2026-11-25T05:55:36Z'
+    synthetic: false
+  parser:
+    id: azure-appservice-service-tag
+    schema: azure-service-tags-json-v1
+    version: 1
+  public_fields: [reason_flags]
+  field_mappings:
+    name: null
+    id: null
+    properties.systemService: null
+    properties.addressPrefixes: reason_flags
+  signals: [hosting]
+- id: iana-root-anycast
+  evidence_family: dns-root-operators
+  source_group: iana-root-zone
+  category: infrastructure
+  admission: active
+  discovery: https://www.iana.org/domains/root/files
+  download:
+    url: https://www.internic.net/domain/root.zone
+    format: text
+    max_compressed_mib: 8
+  refresh:
+    interval: 6h
+    max_stale: 720h
+  fields: [ip, type, observed_at]
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: IANA-InterNIC-root-zone-and-ICANN-terms
+    distribution: user_authorized_educational_use
+    evidence_url: https://www.iana.org/domains/root/files
+    attribution_required: true
+    review_basis: The IANA root files are published by the root zone maintainer through InterNIC.
+      The public-domain statement for IANA protocol registries excludes other data. The project
+      records its educational-use decision and credits the root files and ICANN RSSAC interpretation.
+    attribution:
+      name: IANA DNS Root Zone and ICANN RSSAC
+      text: Root zone address data from the IANA root files, distributed by the root zone maintainer
+        through InterNIC. VanSail extracted the exact addresses of delegated root services. Anycast
+        routing for those identities is documented in the ICANN Root Server System Advisory Committee FAQ.
+        Domain data remains subject to its original terms.
+      url: https://www.iana.org/domains/root/files
+      license_url: https://www.icann.org/en/data-protection/terms-of-service
+  trust:
+    source_weight: 80
+    correlation_group: dns-root-operators
+  scope: exact_ip
+  notes: Match the thirteen root service identities and their one literal IPv4 and IPv6 address each.
+    The SOA serial supplies the conservative publication day. Delegation and glue TTLs and the
+    apex NS signature expiry bound validity. Unrelated address records and adjacent IPs remain unknown.
+  publication_proof:
+    kind: embedded
+    locator: https://www.internic.net/domain/root.zone
+    field: soa.serial
+  coverage:
+    kind: mapping
+    scope: exact_ip
+  fixture:
+    status: passed
+    path: fixtures/source-certification/observed-dns-root-zone.txt
+    sha256: a802d24abf2b75e907b956fa4a3b73da97f4cc32dd888f0f42e556464c6e2ff5
+    parser: root-zone-anycast
+    schema: root-zone-in-soa-glue-v1
+    schema_observed: true
+    tested_at: '2026-11-25T05:55:36Z'
+    synthetic: false
+  parser:
+    id: root-zone-anycast
+    schema: root-zone-in-soa-glue-v1
+    version: 1
+  public_fields: [anycast]
+  field_mappings:
+    ip: anycast
+    type: null
+    observed_at: null
+  signals: []
+- id: tweetfeed-week
+  evidence_family: ffraud-original
+  source_group: tweetfeed
+  category: abuse
+  admission: active
+  discovery: https://tweetfeed.live/feeds/
+  download:
+    url: https://tweetfeed.live/feeds/week.csv
+    format: csv
+    max_compressed_mib: 8
+  refresh:
+    interval: 6h
+    max_stale: 720h
+  fields: [date, user, type, value, tags, tweet_url]
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: CC0-1.0
+    distribution: allow
+    evidence_url: https://tweetfeed.live/tos/
+    review_basis: The publisher dedicates the CSV feeds to the public domain under CC0 1.0 and makes attribution optional.
+    attribution_required: false
+  trust:
+    source_weight: 35
+    correlation_group: ffraud-original
+  scope: exact_ip
+  notes: A community report must explicitly tag a literal public IP with phishing. The report supplies one
+    positive fraud observation. Reporter counts cannot increase confidence. The evidence shares a family
+    with FFraud because independence between their community reports is unverified. Each keeps its own
+    source identity and can be withdrawn separately. The original UTC report time governs item age.
+  publication_proof:
+    kind: snapshot_metadata
+    locator: https://api.tweetfeed.live/v1/manifest
+    field: artifacts.week.csv.updated_at
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: passed
+    path: fixtures/source-certification/observed-tweetfeed-week.csv
+    sha256: e42c373d45b2a5da40ecd33a7b42051d632ce3a8f124fca479e0e2e4e550b269
+    parser: tweetfeed-week-csv
+    schema: tweetfeed-six-column-ioc-v1
+    schema_observed: true
+    tested_at: '2026-11-25T05:55:36Z'
+    synthetic: false
+  parser:
+    id: tweetfeed-week-csv
+    schema: tweetfeed-six-column-ioc-v1
+    version: 1
+  public_fields: [reason_flags]
+  field_mappings:
+    date: null
+    user: null
+    type: null
+    value: reason_flags
+    tags: reason_flags
+    tweet_url: null
+  signals: [fraud]
+- id: routeviews-wide-rib
+  evidence_family: routeviews-mrt
+  source_group: routeviews-mrt
+  category: bgp
+  admission: active
+  discovery: https://archive.routeviews.org/route-views.wide/bgpdata/2026.11/RIBS/
+  download:
+    url: https://archive.routeviews.org/route-views.wide/bgpdata/2026.11/RIBS/rib.20261115.1200.bz2
+    format: mrt-bz2
+    max_compressed_mib: 256
+    mrt_archive_policy: latest-complete-v1
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - prefix
+  - asn
+  - as_path
+  - peer
+  - observed_at
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: CC-BY-4.0-with-RouteViews-terms
+    distribution: user_authorized_educational_use
+    evidence_url: https://www.routeviews.org/routeviews/licenses/
+    attribution_required: true
+    review_basis: '2026-11-15: publisher terms reviewed and recorded accurately. The user explicitly authorized
+      educational use despite unresolved or incompatible redistribution conditions; this is not a new
+      publisher grant. Global dataset notices retained. No publisher was contacted. Explicit owned-data
+      CC BY4.0 grant, mandatory attribution and logo, revocation for attribution failure or abuse. Separate
+      logo terms say non-commercial use. The exact publisher site-header PNG and its bounded 2834-by-2834
+      pixels-per-metre density chunk passed the reviewed local-logo validator; publisher pixels and bytes
+      are unchanged.'
+    attribution:
+      name: RouteViews
+      text: This product utilizes data provided by RouteViews (www.routeviews.org). Use of this data is
+        subject to the CC BY 4.0 license. With contributions from network operators and volunteers all
+        over the world, RouteViews collects BGP data by direct peering at Internet Exchange Points (IXPs)
+        or multi-hop peering. Data are archived and made publicly available for download at archive.routeviews.org,
+        lg.routeviews.org, and api.routeviews.org. VanSail IP Atlas selects complete collector snapshots
+        and compiles observed prefix origins and paths; unsupported-origin boundaries remain unknown.
+      url: https://www.routeviews.org/
+      license_url: https://creativecommons.org/licenses/by/4.0/
+      logo:
+        path: /_atlas/legal/3ce31a403fb0c5a739b74be41dff81e68848b83e9e0265be9250bdbeb41db4bb.png
+        sha256: 3ce31a403fb0c5a739b74be41dff81e68848b83e9e0265be9250bdbeb41db4bb
+        alt: RouteViews logo
+  trust:
+    source_weight: 70
+    correlation_group: routeviews-mrt
+  scope: path
+  notes: Complete dual-stack collector snapshots are consumed through EOF without sampling. Explicit latest-complete-v1
+    rotation uses the reviewed collector schedule, 30-minute publication lag and one prior slot only after
+    HTTP 404. The private seal binds the selected archive and embedded capture clocks. Unsupported origins
+    preserve empty longest-prefix-match boundaries; they do not fabricate origins or paths. Same-family
+    collectors cannot supply independent votes, and no historical Tier-1 stability is fabricated. Enabled for attempted intake;
+    complete current hosted payload verification remains required.
+  publication_proof:
+    kind: embedded
+    locator: https://archive.routeviews.org/route-views.wide/bgpdata/2026.11/RIBS/rib.20261115.1200.bz2
+    field: mrt_frame_capture_timestamp
+  coverage:
+    kind: mapping
+    scope: path
+  fixture:
+    status: passed
+    path: fixtures/source-certification/routeviews-wide-20261115-1200.mrt.bz2
+    sha256: 5361ec3605f86ecab79f210df266602bb8833ec9b64bb47705efce4c2c345818
+    schema_observed: true
+    tested_at: '2026-11-25T05:55:36Z'
+    parser: mrt-table-dump-v2
+    schema: mrt-table-dump-v2-unicast-v1
+    synthetic: false
+    payload_format: original
+  parser:
+    id: mrt-table-dump-v2
+    schema: mrt-table-dump-v2-unicast-v1
+    version: 1
+  public_fields:
+  - bgp_origins
+  - bgp_paths
+  field_mappings:
+    asn: bgp_origins
+    as_path: bgp_paths
+  signals: []
+- id: ripe-mrt-rrc18
+  evidence_family: ripe-ris-mrt
+  source_group: ripe-ris-mrt
+  category: bgp
+  admission: active
+  discovery: https://data.ris.ripe.net/rrc18/2026.11/
+  download:
+    url: https://data.ris.ripe.net/rrc18/2026.11/bview.20261115.0800.gz
+    format: mrt-gz
+    max_compressed_mib: 256
+    mrt_archive_policy: latest-complete-v1
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - prefix
+  - asn
+  - as_path
+  - peer
+  - observed_at
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: RIPE-RIS-commercial-use-terms
+    distribution: user_authorized_educational_use
+    evidence_url: https://www.ripe.net/analyse/internet-measurements/routing-information-service-ris/commercial-use/
+    attribution_required: true
+    review_basis: '2026-11-15: publisher terms reviewed and recorded accurately. The user explicitly authorized
+      educational use despite unresolved or incompatible redistribution conditions; this is not a new
+      publisher grant. Global dataset notices retained. No publisher was contacted. Specific RIS terms
+      require main NCC logo/link/boilerplate and permit general revocation; general main-logo page separately
+      asks prior email permission. This unresolved condition is recorded under the user override; no membership
+      logo or contact claim.'
+    attribution:
+      name: RIPE NCC Routing Information Service
+      text: 'The RIPE Routing Information Service (RIS) is a RIPE NCC service. With the help of network
+        operators all over the world, RIS employs a globally distributed set of Remote Route Collectors
+        (RRCs), typically located at Internet Exchange Points, to collect and store Internet routing data.
+        Volunteers peer with the RRCs using the BGP protocol and RIS stores the update and withdraw messages.
+        RIS data can be accessed via: - RIPEstat, the “one-stop shop” for all available information about
+        Internet number resources. RIPEstat uses individual widgets to display routing and other information;
+        - RIS Live, a real time BGP streaming API allowing server-side filtering of BGP messages by prefix
+        or autonomous system; - RIS Raw Data, available for each route collector, with state dumps and
+        batches of updates made available periodically; - RISwhois, that searches the latest RIS data
+        for details of an IP address using a plaintext “whois”-style interface. It is useful when querying
+        RIS data using scripts. VanSail IP Atlas compiles complete collector snapshots into observed prefix
+        origins and paths; missing observations remain unknown.'
+      url: https://www.ripe.net/ris
+      license_url: https://www.ripe.net/analyse/internet-measurements/routing-information-service-ris/commercial-use/
+      logo:
+        path: /_atlas/legal/aa4a798175a2a531279d60e5176a36cbed508d2e71d0ea26268b13d9fd00eca0.png
+        sha256: aa4a798175a2a531279d60e5176a36cbed508d2e71d0ea26268b13d9fd00eca0
+        alt: RIPE NCC Routing Information Service logo
+  trust:
+    source_weight: 70
+    correlation_group: ripe-ris-mrt
+  scope: path
+  notes: Complete dual-stack collector snapshots are consumed through EOF without sampling. Explicit latest-complete-v1
+    rotation uses the reviewed collector schedule, 30-minute publication lag and one prior slot only after
+    HTTP 404. The private seal binds the selected archive and embedded capture clocks. Unsupported origins
+    preserve empty longest-prefix-match boundaries; they do not fabricate origins or paths. Same-family
+    collectors cannot supply independent votes, and no historical Tier-1 stability is fabricated. Enabled for attempted intake;
+    complete current hosted payload verification remains required.
+  publication_proof:
+    kind: embedded
+    locator: https://data.ris.ripe.net/rrc18/2026.11/bview.20261115.0800.gz
+    field: mrt_frame_capture_timestamp
+  coverage:
+    kind: mapping
+    scope: path
+  fixture:
+    status: passed
+    path: fixtures/source-certification/ris-rrc18-20261115-0800.mrt.gz
+    sha256: 37931b008476cfd2fb385bff603c9a68badffa51411649c912a35b14adc4bbb3
+    schema_observed: true
+    tested_at: '2026-11-25T05:55:36Z'
+    parser: mrt-table-dump-v2
+    schema: mrt-table-dump-v2-unicast-v1
+    synthetic: false
+    payload_format: original
+  parser:
+    id: mrt-table-dump-v2
+    schema: mrt-table-dump-v2-unicast-v1
+    version: 1
+  public_fields:
+  - bgp_origins
+  - bgp_paths
+  field_mappings:
+    asn: bgp_origins
+    as_path: bgp_paths
+  signals: []
+- id: caida-asrel2
+  evidence_family: caida-rel
+  source_group: caida-rel
+  category: bgp
+  admission: active
+  download:
+    format: text-bz2
+    max_compressed_mib: 64
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields:
+  - asn
+  - as_relationship
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: CAIDA-AUA
+    distribution: user_authorized_educational_use
+    evidence_url: https://www.caida.org/about/legal/aua/public_aua/
+    attribution_required: true
+    review_basis: '2026-11-15: publisher terms reviewed and recorded accurately. The user explicitly authorized
+      educational use despite unresolved or incompatible redistribution conditions; this is not a new
+      publisher grant. Global dataset notices retained. No publisher was contacted. CAIDA public AUA is
+      limited, nontransferable and terminable and includes citation/reporting obligations; onward-grant
+      compatibility is unresolved. No publication notice has been sent.'
+    attribution:
+      name: CAIDA AS Relationships Dataset
+      text: The CAIDA AS Relationships Dataset. VanSail IP Atlas compiles inferred directed AS relationships;
+        missing or conflicting relationships remain unknown. Data use is subject to CAIDA terms. Complete
+        selected monthly releases retain their original observation dates privately; the input clique
+        is not adopted as Tier-1 membership.
+      url: https://www.caida.org/catalog/datasets/as-relationships/
+      license_url: https://www.caida.org/about/legal/aua/public_aua/
+  trust:
+    source_weight: 70
+    correlation_group: caida-rel
+  scope: asn_edge
+  notes: Complete serial-2 payload qualification consumed 680178 directed relationships through archive
+    EOF. The reviewed monthly index selects the exact newest canonical filename; content freshness is
+    the earliest original topology observation date across all BGP and looking-glass headers. The observed
+    capture dates span 2026-11-01 through 2026-11-05. Filename, index display date and HTTP time cannot
+    renew the body. CAIDA derives from RouteViews/RIS and looking-glass observations, not an additional
+    independent path family. Input-clique membership does not establish Tier-1. Enabled for attempted intake;
+    complete current hosted payload verification remains required.
+  publication_proof:
+    kind: embedded
+    locator: https://publicdata.caida.org/datasets/as-relationships/serial-2/
+    field: topology_observation_date
+  coverage:
+    kind: mapping
+    scope: asn_edge
+  fixture:
+    status: passed
+    path: fixtures/source-certification/observed-caida-asrel2.txt.bz2
+    sha256: e36b548f613b4ae09f9a848cf9893fb02fc326185d7439db6b0a0995aeccc6a8
+    schema_observed: true
+    tested_at: '2026-11-25T05:55:36Z'
+    parser: caida-relationships
+    schema: asn-asn-relation-pipe-v1
+    synthetic: false
+    payload_format: original
+  parser:
+    id: caida-relationships
+    schema: asn-asn-relation-pipe-v1
+    version: 1
+  discovery:
+    mode: latest-timestamped-asset
+    index_url: https://publicdata.caida.org/datasets/as-relationships/serial-2/
+    filename_pattern: ^[0-9]{8}\.as-rel2\.txt\.bz2$
+    ordering: filename-date-desc-then-url-bytes
+    requires_exact_file: true
+    no_guessing: true
+  public_fields:
+  - as_relationships
+  field_mappings:
+    as_relationship: as_relationships
+  signals: []
+- id: rpki-client-vrps
+  evidence_family: rpki-client
+  source_group: rpki-client
+  category: rpki
+  admission: active
+  discovery: https://console.rpki-client.org/
+  download:
+    url: https://console.rpki-client.org/rpki.json
+    format: json
+    max_compressed_mib: 256
+  refresh:
+    interval: 1h
+    max_stale: 720h
+  fields:
+  - roa
+  - roa_max_length
+  - roa_asn
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: rpki-client-terms-review
+    distribution: user_authorized_educational_use
+    evidence_url: https://www.arin.net/resources/manage/rpki/rpa.pdf
+    attribution_required: true
+    review_basis: '2026-11-15: publisher terms reviewed and recorded accurately. The user explicitly authorized
+      educational use despite unresolved or incompatible redistribution conditions; this is not a new
+      publisher grant. Global dataset notices retained. No publisher was contacted. Underlying trust-anchor
+      terms are separate from rpki-client ISC software license. ARIN pass-through agreement, RIPE repository
+      terms, APNIC CPS and unresolved AFRINIC/LACNIC grants remain documented; software license does not
+      grant data rights.'
+    attribution:
+      name: RPKI validated authorization data
+      text: Contains RPKI authorization data published through the AFRINIC, APNIC, ARIN, LACNIC and RIPE
+        NCC trust anchors and assembled by rpki-client. VanSail IP Atlas preserves complete publisher
+        snapshots and compiles dated origin-validation observations, retaining authorization expiry. Expired
+        results remain historical snapshot observations, not current authorization claims. Original trust-anchor
+        terms apply; the rpki-client software license does not license the source data.
+      url: https://console.rpki-client.org/
+      license_url: https://www.arin.net/resources/manage/rpki/rpa.pdf
+  trust:
+    source_weight: 70
+    correlation_group: rpki-client
+  scope: prefix
+  notes: The complete observed publisher snapshot contains 1034924 original authorization rows. Every
+    original row and expiry is retained; evaluation occurs only at the payload-bound publisher build time.
+    Authorization expiry does not extend or shorten the original publisher snapshot freshness limit of
+    720 hours. Schema-5 lookup results retain observedAt and validUntil and display expired results as
+    snapshot observations. The 21-row observed fixture preserves original metadata totals and certifies
+    syntax only; it cannot produce runtime completeness or publication proof. Enabled for attempted intake;
+    complete current hosted payload verification remains required.
+  publication_proof:
+    kind: embedded
+    locator: https://console.rpki-client.org/rpki.json
+    field: metadata.buildtime
+  coverage:
+    kind: mapping
+    scope: prefix
+  fixture:
+    status: passed
+    path: fixtures/source-certification/observed-rpki-client-excerpt.json
+    sha256: fedd54c17bd596ecb93792aa5b31566549698edbfee914cc06c27002dc5db91b
+    schema_observed: true
+    tested_at: '2026-11-25T05:55:36Z'
+    parser: rpki-client-json
+    schema: rpki-client-payloads-json-v1
+    synthetic: false
+    payload_format: rpki-client-excerpt
+  parser:
+    id: rpki-client-json
+    schema: rpki-client-payloads-json-v1
+    version: 1
+  public_fields:
+  - rpki_status
+  field_mappings:
+    roa: rpki_status
+  signals: []
+contract_revision: 5

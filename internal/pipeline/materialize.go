@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/netip"
 	"sort"
@@ -17,16 +16,21 @@ import (
 // positive VRP row. It is an engineering input, never source certification.
 // Missing or partial VRP snapshots must leave VRPComplete false.
 type MaterializationInputs struct {
-	VRPComplete      bool
-	scope            netip.Prefix
-	contexts         map[uint32]intelligence.ASNContext
-	prepare          func(*intelligence.Engine) error
-	prepareOnly      bool
-	resolver         intelligence.RelationResolver
-	verifiedEmptyVRP bool
+	locations                              *locationProjection
+	VRPComplete                            bool
+	RPKIObservedAt, RPKICoverageValidUntil time.Time
+	scope                                  netip.Prefix
+	contexts                               map[uint32]intelligence.ASNContext
+	prepare                                func(*intelligence.Engine) error
+	prepareOnly                            bool
+	resolver                               intelligence.RelationResolver
+	verifiedEmptyVRP                       bool
+	// Exact canonical lengths from the closed bulk collector. No caller-facing
+	// completeness or validation assertion is accepted through this bookkeeping.
+	encodedLengths []int
 }
 
-// BuildIntelligence connects all nine normalized record kinds to the bounded
+// BuildIntelligence connects the typed normalized records to the bounded
 // public-fact planner. This engineering entry point refuses production: its
 // BuildState lacks certified Tier-1 history and complete streamed bulk state,
 // and does not replace the real-source admission/capability gate.
@@ -67,12 +71,19 @@ func containsAdmittedData(state intelligence.BuildState) bool {
 // network/announcement prefixes are kept independently of these derived regions.
 func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Policy, clock time.Time, inputs ...MaterializationInputs) Producer {
 	return func(ctx context.Context, emit func(via3.PublicRecord) error) error {
+		if emit == nil || len(inputs) > 1 {
+			return errors.New("one materialization policy and an output sink are required")
+		}
+		var encodedLengths []int
+		if len(inputs) == 1 {
+			encodedLengths = inputs[0].encodedLengths
+		}
+		if err := checkOwnedRecordLengths(state, encodedLengths); err != nil {
+			return err
+		}
 		state, joinErr := joinASNUsage(ctx, state)
 		if joinErr != nil {
 			return joinErr
-		}
-		if emit == nil || len(inputs) > 1 {
-			return errors.New("one materialization policy and an output sink are required")
 		}
 		sink := emit
 		emit = func(record via3.PublicRecord) error {
@@ -89,6 +100,7 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 		}
 		mappings := state
 		mappings.Sources = make([]intelligence.StoredSource, 0, len(state.Sources))
+		var mappingLengths []int
 		var evidence []intelligence.Evidence
 		var coverage []intelligence.Coverage
 		var origins []intelligence.OriginMapping
@@ -136,18 +148,19 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 				if err := boundedNormalizedRecord(record); err != nil {
 					return err
 				}
-				encoded, err := json.Marshal(record)
+				size, err := normalizedRecordBytes(record, encodedLengths, count)
 				if err != nil {
 					return err
 				}
 				count++
-				bytes += len(encoded) + 512
+				bytes += size + 512
 				if count > 200000 || bytes > 96<<20 {
 					return errors.New("bounded intelligence working input exceeded")
 				}
 				switch record.Kind {
-				case intelligence.RecordGeo, intelligence.RecordUsage, intelligence.RecordOrigins:
+				case intelligence.RecordGeo, intelligence.RecordUsage, intelligence.RecordOrigins, intelligence.RecordNetworkOrganization:
 					mapping.Records = append(mapping.Records, record)
+					mappingLengths = append(mappingLengths, size)
 				}
 				switch record.Kind {
 				case intelligence.RecordEvidence:
@@ -290,14 +303,16 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 			}
 		}
 		completeVRP := len(inputs) == 1 && inputs[0].VRPComplete && (len(vrps) > 0 || inputs[0].verifiedEmptyVRP)
-		vrpIndex, err := intelligence.NewVRPIndex(vrps, completeVRP)
+		var vrpIndex *intelligence.VRPIndex
+		if completeVRP && !inputs[0].RPKIObservedAt.IsZero() && !inputs[0].RPKICoverageValidUntil.IsZero() {
+			vrpIndex, err = intelligence.NewVRPObservationIndex(vrps, inputs[0].RPKIObservedAt, inputs[0].RPKICoverageValidUntil)
+		} else {
+			// Incomplete/legacy snapshots remain unavailable, but their retained
+			// records still undergo the same structural VRP validation.
+			vrpIndex, err = intelligence.NewVRPIndex(vrps, false)
+		}
 		if err != nil {
 			return err
-		}
-		vrpsByPrefix := map[netip.Prefix][]intelligence.VRP{}
-		for _, vrp := range vrps {
-			key := vrp.Prefix.Masked()
-			vrpsByPrefix[key] = append(vrpsByPrefix[key], vrp)
 		}
 		var resolver intelligence.RelationResolver = relations
 		if len(inputs) == 1 && inputs[0].resolver != nil {
@@ -334,8 +349,17 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 				return errors.New("invalid intelligence ASN")
 			}
 		}
-		if err := MappingProducer(mappings, policy, clock)(ctx, emit); err != nil {
+		var mappingScope netip.Prefix
+		var locations *locationProjection
+		if len(inputs) == 1 {
+			mappingScope, locations = inputs[0].scope, inputs[0].locations
+		}
+		if err := mappingProducer(mappings, policy, clock, mappingLengths, true, mappingScope, locations)(ctx, emit); err != nil {
 			return err
+		}
+		qualityWriter := qualityBlockWriter{emit: emit}
+		if len(inputs) == 1 {
+			qualityWriter.scope = inputs[0].scope
 		}
 		if err := regions.visit(ctx, func(p netip.Prefix) error {
 			q, err := engine.Lookup(p.Addr())
@@ -343,8 +367,11 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 				return err
 			}
 			_, exact := exacts[p.Addr()]
-			return emit(via3.PublicRecord{Version: 3, Kind: 6, Prefix: p, Exact: exact && p.Bits() == p.Addr().BitLen(), Quality: qualityData(q)})
+			return qualityWriter.write(p, exact && p.Bits() == p.Addr().BitLen(), qualityData(q))
 		}); err != nil {
+			return err
+		}
+		if err := qualityWriter.flush(); err != nil {
 			return err
 		}
 		profileKeys := make([]netip.Prefix, 0, len(profiles))
@@ -436,23 +463,20 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 			sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
 			for _, asn := range keys {
 				status := uint8(0)
-				maximumLength := uint8(0)
-				switch vrpIndex.Validate(p, asn) {
+				observation := vrpIndex.Observe(p, asn)
+				switch observation.Status {
 				case intelligence.RPKIValid:
 					status = 1
-					for bits := p.Bits(); bits >= 0; bits-- {
-						for _, vrp := range vrpsByPrefix[netip.PrefixFrom(p.Addr(), bits).Masked()] {
-							if vrp.ASN == asn && int(vrp.MaxLength) >= p.Bits() && vrp.MaxLength > maximumLength {
-								maximumLength = vrp.MaxLength
-							}
-						}
-					}
 				case intelligence.RPKIInvalid:
 					status = 2
 				case intelligence.RPKINotFound:
 					status = 3
 				}
-				if err := emit(via3.PublicRecord{Version: 3, Kind: 9, Prefix: p, ASN: asn, RPKI: &via3.RPKIData{Status: status, MaximumLength: maximumLength}}); err != nil {
+				data := via3.RPKIData{Status: status, MaximumLength: observation.MaximumLength}
+				if status != 0 {
+					data.ObservedAt, data.ValidUntil = observation.ObservedAt.Unix(), observation.ValidUntil.Unix()
+				}
+				if err := emit(via3.PublicRecord{Version: 3, Kind: 9, Prefix: p, ASN: asn, RPKI: &data}); err != nil {
 					return err
 				}
 			}

@@ -79,11 +79,25 @@ func (r *Release) beginQuery() {
 func (r *Release) releaseReference(reference *objectReference) {
 	if !reference.query && !reference.cache && !reference.router {
 		r.residentBytes -= reference.size
+		if reference.onsite != nil && reference.shard != nil {
+			extra := reference.prefixLabelBytes
+			if graph := reference.shard.lookup.graphIndex; graph != nil {
+				extra += graph.bytes
+			}
+			r.countNativeMetadata(-extra)
+		}
 		reference.size = 0
+		if reference.onsite != nil && reference.shard != nil {
+			r.native.release(reference.onsite)
+		}
+		reference.prefixLabelBytes = 0
 		reference.shard = nil
 	}
 }
 func (r *Release) endQuery() {
+	if r.native != nil {
+		r.native.pages.next()
+	}
 	for _, reference := range r.usedReferences {
 		reference.query = false
 		r.releaseReference(reference)
@@ -128,6 +142,21 @@ func (r *Release) admitReference(reference *objectReference, size int) error {
 		r.evictReference(r.cacheHead)
 	}
 	if !resident && size > PublicLiveDecoded-r.residentBytes {
+		r.releaseRouterASNs()
+	}
+	if !resident && size > PublicLiveDecoded-r.residentBytes {
+		// Optional formatting metadata must never crowd a required decoded
+		// object out of an otherwise valid query. Returned strings are immutable
+		// copies, so dropping the shard's headers cannot invalidate an answer.
+		for _, pinned := range r.usedReferences {
+			r.releasePrefixMetadata(pinned)
+			r.releaseGraphMetadata(pinned)
+			if size <= PublicLiveDecoded-r.residentBytes {
+				break
+			}
+		}
+	}
+	if !resident && size > PublicLiveDecoded-r.residentBytes {
 		return fail("resource_limit")
 	}
 	if !resident {
@@ -138,6 +167,44 @@ func (r *Release) admitReference(reference *objectReference, size int) error {
 	r.usedReferences = append(r.usedReferences, reference)
 	r.activeBytes += size
 	return nil
+}
+
+func (r *Release) releasePrefixMetadata(reference *objectReference) {
+	size := reference.prefixLabelBytes
+	if size == 0 {
+		return
+	}
+	r.countNativeMetadata(-size)
+	reference.prefixLabelBytes = 0
+	reference.size -= size
+	r.residentBytes -= size
+	if reference.query {
+		r.activeBytes -= size
+	}
+	if reference.cache {
+		r.cacheBytes -= size
+	}
+	reference.shard.lookup.prefixLabels = nil
+	reference.shard.lookup.prefixSpans = nil
+}
+
+// This optional derived metadata is installed only while a newly decoded
+// object is query-pinned and before it enters the cache. Failure is a formatting
+// fallback, never a relaxation of the original decoded-object or query limits.
+func (r *Release) reservePrefixMetadata(reference *objectReference, size int) bool {
+	if !reference.query || reference.cache || size <= 0 || size > PublicObjectDecoded-reference.size || size > PublicCacheDecoded-reference.size {
+		return false
+	}
+	for size > PublicLiveDecoded-r.residentBytes && r.cacheHead != nil {
+		r.evictReference(r.cacheHead)
+	}
+	if size > PublicLiveDecoded-r.residentBytes {
+		return false
+	}
+	reference.size += size
+	r.residentBytes += size
+	r.activeBytes += size
+	return true
 }
 func (r *Release) cacheReference(reference *objectReference) {
 	if reference.cache {

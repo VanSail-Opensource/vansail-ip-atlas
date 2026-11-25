@@ -55,7 +55,13 @@ func TestReviewedObservedCatalogFixtures(t *testing.T) {
 			defer input.Close()
 			var count uint64
 			emit := func(record intelligence.NormalizedRecord) error { count++; return record.Validate() }
-			if source.Fixture.PayloadFormat == "decoded-csv" {
+			if source.Fixture.PayloadFormat == "nro-delegated-excerpt" {
+				count, err = validateNROExcerpt(ctx, input, source, implementation, clock)
+			} else if source.Fixture.PayloadFormat == "rpki-client-excerpt" {
+				var rows int
+				rows, err = validateRPKIClientExcerpt(ctx, input, source, implementation, clock)
+				count = uint64(rows)
+			} else if source.Fixture.PayloadFormat == "decoded-csv" {
 				err = parseGeoProviderFixture(ctx, input, source, 1_000_000, emit)
 			} else {
 				err = parsePayloadTo(ctx, input, size, source, implementation, clock, 1_000_000, emit)

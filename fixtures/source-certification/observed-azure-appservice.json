@@ -1,0 +1,51 @@
+{
+  "changeNumber": 427,
+  "cloud": "Public",
+  "values": [
+    {
+      "name": "AppService",
+      "id": "AppService",
+      "properties": {
+        "changeNumber": 60,
+        "region": "",
+        "regionId": 0,
+        "platform": "Azure",
+        "systemService": "AzureAppService",
+        "addressPrefixes": [
+          "4.232.99.0/24",
+          "13.64.73.110/32",
+          "2603:1000:4:2::400/120",
+          "2603:1020:406::2/128"
+        ],
+        "networkFeatures": [
+          "API",
+          "NSG",
+          "UDR",
+          "FW",
+          "VSE"
+        ]
+      }
+    },
+    {
+      "name": "AppService.AustriaEast",
+      "id": "AppService.AustriaEast",
+      "properties": {
+        "changeNumber": 1,
+        "region": "austriaeast",
+        "regionId": 95,
+        "platform": "Azure",
+        "systemService": "AzureAppService",
+        "addressPrefixes": [
+          "68.210.171.0/24",
+          "2603:1020:104:5::500/120"
+        ],
+        "networkFeatures": [
+          "API",
+          "NSG",
+          "UDR",
+          "FW"
+        ]
+      }
+    }
+  ]
+}

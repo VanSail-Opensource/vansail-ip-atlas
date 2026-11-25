@@ -135,10 +135,16 @@ func StreamMRTReplay(ctx context.Context, base MRTStreamBase, archives []MRTStre
 		if budget.exhausted() {
 			return context.DeadlineExceeded
 		}
+		// This replay model reconstructs origin rows from supported paths. An
+		// empty observed-origin boundary has no such path and must survive in a
+		// full capture; ignoring it here would restore a false broader origin.
+		if record.Kind == RecordOrigins && (record.Origins == nil || len(record.Origins.Origins) == 0) {
+			return errMRTReplayCold
+		}
 		if record.Kind != RecordPath {
 			return nil
 		}
-		if record.Validate() != nil || record.MRT == nil || record.MRT.PeerAmbiguous || record.MRT.PeerKey == ([32]byte{}) || record.MRT.PeerTable != 1 || record.MRTOriginatedAt == nil || !record.Path.Observation.Current {
+		if record.Validate() != nil || record.MRT == nil || record.MRT.PeerAmbiguous || record.MRT.PeerKey == ([32]byte{}) || record.MRT.PeerTable != 1 || record.MRTOriginatedAt == nil || !record.Path.Observation.Current || !IsPublicASN(record.Path.Observation.Origin) {
 			return errMRTReplayCold
 		}
 		p := record.Path.Prefix
@@ -196,6 +202,9 @@ func StreamMRTReplay(ctx context.Context, base MRTStreamBase, archives []MRTStre
 			preflight++
 			if event.Local || event.ObservedAt.Before(through) || event.Kind == MRTSessionReset {
 				return nil
+			}
+			if event.Kind == MRTAnnounce && !IsPublicASN(event.Origin) {
+				return errMRTReplayCold
 			}
 			info, exists := peers[event.PeerKey]
 			if !exists || event.AFI != 1 && event.AFI != 2 || info.afis&(1<<event.AFI) == 0 {
@@ -281,6 +290,9 @@ func StreamMRTReplay(ctx context.Context, base MRTStreamBase, archives []MRTStre
 			if event.PeerKey != peer || event.Kind != MRTAnnounce && event.Kind != MRTWithdraw || reset[peer] && event.Kind == MRTAnnounce {
 				return errMRTReplayCold
 			}
+			if event.Kind == MRTAnnounce && !IsPublicASN(event.Origin) {
+				return errMRTReplayCold
+			}
 			key := streamMRTKey{peer, event.Prefix, event.PathID, event.AddPath}
 			cost := replayRouteBytes(event)
 			if prior, exists := changes[key]; exists {
@@ -348,6 +360,9 @@ func StreamMRTReplay(ctx context.Context, base MRTStreamBase, archives []MRTStre
 	err = base.Walk(budget.ctx, func(record NormalizedRecord) error {
 		if budget.exhausted() {
 			return context.DeadlineExceeded
+		}
+		if record.Kind == RecordOrigins && (record.Origins == nil || len(record.Origins.Origins) == 0) {
+			return errMRTReplayCold
 		}
 		if record.Kind != RecordPath {
 			return nil

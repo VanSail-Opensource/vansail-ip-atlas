@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +26,7 @@ import (
 type Source struct {
 	ID, Family, Category, Admission string
 	URL, Format                     string
+	MRTArchivePolicy                string `json:",omitempty"`
 	MaxCompressedBytes              int64
 	MaxAge                          time.Duration
 	Weight                          float64
@@ -34,6 +36,7 @@ type Source struct {
 	Fixture                         Fixture
 	MRTUpdatesFixture               *Fixture
 	Publication                     Publication
+	Discovery                       *Discovery
 	Coverage                        string
 	Scope                           string
 	PublicFields                    []string
@@ -104,7 +107,11 @@ func New(workspace string) (*Engine, error) {
 	if err != nil {
 		return nil, errors.New("admission workspace invalid")
 	}
-	engine := &Engine{workspace: root, fetch: acquire.New(), cleanup: os.RemoveAll}
+	transport, err := acquire.NewWithGitHubMetadataToken(os.Getenv("ATLAS_GITHUB_METADATA_TOKEN"))
+	if err != nil {
+		return nil, errors.New("admission metadata transport invalid")
+	}
+	engine := &Engine{workspace: root, fetch: transport, cleanup: os.RemoveAll}
 	if err := engine.acquireWorkspace(); err != nil {
 		return nil, err
 	}
@@ -166,7 +173,7 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 	if !identity(source.ID) || !identity(source.Family) || source.MaxAge <= 0 || source.MaxAge > 720*time.Hour || math.IsNaN(source.Weight) || math.IsInf(source.Weight, 0) || source.Weight < 0 || source.Weight > 100 || source.MaxCompressedBytes <= 0 || source.MaxCompressedBytes > 1<<30 {
 		return deny("quarantined", "invalid_source_controls")
 	}
-	if source.Rights.Status != "reviewed" || source.Rights.Distribution != "allow" || source.Rights.AttributionRequired == nil || !safeHTTPS(source.Rights.EvidenceURL) || strings.TrimSpace(source.Rights.ReviewBasis) == "" {
+	if source.Rights.Status != "reviewed" || !permittedDistributionDecision(source.Rights.Distribution) || source.Rights.AttributionRequired == nil || !safeHTTPS(source.Rights.EvidenceURL) || strings.TrimSpace(source.Rights.ReviewBasis) == "" {
 		return deny("quarantined", "reviewed_redistribution_rights_required")
 	}
 	if *source.Rights.AttributionRequired && source.Rights.Attribution == nil || source.Rights.Attribution != nil && source.Rights.Attribution.Validate() != nil {
@@ -175,7 +182,7 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 	if source.Rights.Attribution != nil && intelligence.ValidateDatasetLogoFile(e.workspace, source.Rights.Attribution.Logo) != nil {
 		return deny("quarantined", "reviewed_dataset_logo_required")
 	}
-	if !safeHTTPS(source.URL) && !dbipProvider(source) || !publicationSupported(source) {
+	if !safeHTTPS(source.URL) && !dbipProvider(source) && !caidaSource(source) || !publicationSupported(source) {
 		return deny("quarantined", "unsupported_or_unbound_publication_verifier")
 	}
 	adapter, ok := selectAdapter(source)
@@ -220,6 +227,21 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 	payload := filepath.Join(quarantine, "payload")
 	assetURL := source.URL
 	var dbipPlan dbipMonthlyPlan
+	var caidaIndexHash [32]byte
+	if caidaSource(source) {
+		indexPath := filepath.Join(quarantine, "index")
+		if _, err := e.fetch.Fetch(ctx, source.Discovery.IndexURL, indexPath, 1<<20); err != nil {
+			return deny("quarantined", "discovery_index_unavailable")
+		}
+		page, indexErr := boundedFile(ctx, indexPath, 1<<20)
+		if indexErr == nil {
+			assetURL, indexErr = resolveCAIDASerial2Index(page, now)
+		}
+		if indexErr != nil {
+			return deny("quarantined", "discovery_index_invalid")
+		}
+		caidaIndexHash = sha256.Sum256(page)
+	}
 	if dbipProvider(source) {
 		metadata := filepath.Join(quarantine, "publication")
 		if _, err := e.fetch.Fetch(ctx, source.Publication.Locator, metadata, 4<<20); err != nil {
@@ -234,7 +256,23 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		}
 		assetURL = dbipPlan.AssetURL
 	}
-	if _, err := e.fetch.Fetch(ctx, assetURL, payload, source.MaxCompressedBytes); err != nil {
+	var published, contentValidUntil time.Time
+	var azureProof *intelligence.AzureServiceProof
+	if adapter == azureAppService {
+		azureProof, err = e.fetchAzureService(ctx, payload, source, now)
+		if err != nil {
+			if ctx.Err() != nil {
+				return result, ctx.Err()
+			}
+			return deny("quarantined", "publication_not_payload_bound")
+		}
+		published = azureProof.Editions[0].Day
+	} else if source.Parser.ID == "tweetfeed-week-csv" {
+		published, err = e.fetchTweetFeed(ctx, payload, source, now)
+		if err != nil {
+			return deny("quarantined", "publication_not_payload_bound")
+		}
+	} else if _, err := e.fetch.Fetch(ctx, assetURL, payload, source.MaxCompressedBytes); err != nil {
 		if ctx.Err() != nil {
 			return result, ctx.Err()
 		}
@@ -244,9 +282,11 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 	if err != nil {
 		return deny("invalid", "payload_integrity_failed")
 	}
-	var published, contentValidUntil time.Time
+	var googleProof *intelligence.GoogleNetworkProof
+	var nroProof *intelligence.NRORegistrationProof
 	var geoProof *intelligence.GeoSourceProof
 	var vrpProof *intelligence.VRPSourceProof
+	var caidaProof *intelligence.CAIDASourceProof
 	if dbipProvider(source) || adapter == ipapiCityZIP {
 		proofFile, openErr := os.Open(payload)
 		if openErr != nil {
@@ -264,17 +304,37 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 			published = geoProof.UpstreamClock
 			published, err = e.retainClock(ctx, decodedGeoClockKey(geoProof.DecodedSHA256), published)
 		}
+	} else if caidaSource(source) {
+		caidaProof, err = verifyCAIDAFile(ctx, payload, size, source, assetURL, caidaIndexHash, hash, now)
+		if err == nil {
+			published = caidaProof.FirstObservedAt
+		}
+	} else if adapter == googleNetwork {
+		googleProof, err = verifyGoogleNetwork(ctx, payload, source, hash, now)
+		if err == nil {
+			published = googleProof.PublishedAt
+		}
+	} else if adapter == nroRegistration {
+		nroProof, err = e.verifyNRO(ctx, payload, hash, source, now)
+		if err == nil {
+			published = nroProof.Day
+		}
+	} else if adapter == rootServiceZone {
+		var projection rootZoneProjection
+		projection, err = e.verifyRootZone(ctx, payload, hash, size, now)
+		if err == nil {
+			published, contentValidUntil = projection.day, projection.until
+		}
 	} else if adapter == torExits {
 		published, err = verifyTorExitFile(ctx, payload, source, now)
 	} else if adapter == rpkiClientJSON {
 		proof, proofErr := verifyRPKIClientFile(ctx, payload, size, source, now)
 		err = proofErr
 		published = proof.BuiltAt
-		contentValidUntil = proof.ContentValidUntil
 		if err == nil {
-			vrpProof = &intelligence.VRPSourceProof{Version: 1, Rows: uint64(proof.Rows), AcceptedRows: uint64(proof.AcceptedRows), ExpiredRows: uint64(proof.ExpiredRows), BuiltAt: proof.BuiltAt, EvaluatedAt: now, ValidUntil: proof.ContentValidUntil}
+			vrpProof = &intelligence.VRPSourceProof{Version: 2, Rows: uint64(proof.Rows), RetainedRows: uint64(proof.RetainedRows), ObservedAt: proof.BuiltAt, EvaluatedAt: now, CoverageValidUntil: proof.CoverageValidUntil}
 		}
-	} else {
+	} else if published.IsZero() {
 		metadata := filepath.Join(quarantine, "publication")
 		if _, err := e.fetch.Fetch(ctx, source.Publication.Locator, metadata, 4<<20); err != nil {
 			if ctx.Err() != nil {
@@ -319,6 +379,13 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 	if adapter == rpkiClientJSON {
 		parserClock = now
 	}
+	var azureHosts map[netip.Addr]bool
+	if azureProof != nil {
+		azureHosts, err = azureProof.Eligible(now, published, hash)
+		if err != nil {
+			return deny("invalid", "azure_service_selection_invalid")
+		}
+	}
 	if partitioned {
 		e.storeMu.Lock()
 		if e.recordStore == nil {
@@ -331,7 +398,16 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		}
 		writer := store.Writer(ctx)
 		defer writer.Abort()
-		err = parsePayloadTo(ctx, file, size, source, adapter, parserClock, 100_000_000, writer.Append, &asnStats)
+		appendRecord := writer.Append
+		if azureHosts != nil {
+			appendRecord = func(record intelligence.NormalizedRecord) error {
+				if record.Evidence != nil && azureHosts[record.Evidence.Address] {
+					return writer.Append(record)
+				}
+				return nil
+			}
+		}
+		err = parsePayloadTo(ctx, file, size, source, adapter, parserClock, 100_000_000, appendRecord, &asnStats)
 		if err == nil {
 			partitions, err = writer.Finish()
 		}
@@ -340,6 +416,15 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		}
 	} else {
 		records, err = parsePayload(ctx, file, size, source, adapter, parserClock, &asnStats)
+		if azureHosts != nil && err == nil {
+			out := records[:0]
+			for _, r := range records {
+				if r.Evidence != nil && azureHosts[r.Evidence.Address] {
+					out = append(out, r)
+				}
+			}
+			records = out
+		}
 	}
 	if err != nil {
 		if ctx.Err() != nil {
@@ -351,8 +436,12 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		ProofPayloadHash: hash, NormalizationPolicyHash: normalizationPolicyHash,
 		ParserVersion: source.Parser.Version, SchemaVersion: 3, PublishedAt: published, ContentValidUntil: contentValidUntil,
 		ProofKind: source.Publication.Kind, PayloadVerified: true, SchemaVerified: true, ImmutableCommitBound: source.Publication.Kind == "github_commit", Records: records, RecordPartitions: partitions}
+	result.Snapshot.GoogleNetworkProof = googleProof
+	result.Snapshot.NROProof = nroProof
+	result.Snapshot.AzureProof = azureProof
 	result.Snapshot.GeoProof = geoProof
 	result.Snapshot.VRPProof = vrpProof
+	result.Snapshot.CAIDAProof = caidaProof
 	if adapter == asnIdentityCSV {
 		result.Snapshot.ASNIdentityStats = &asnStats
 	}

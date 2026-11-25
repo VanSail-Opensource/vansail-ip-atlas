@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"sort"
 	"sync/atomic"
 	"time"
@@ -14,16 +15,17 @@ import (
 	"vansail-ip-atlas/internal/via3"
 )
 
-// ProductionInputs cannot be manufactured from completeness booleans. Both
-// qualified objects independently bind the sealed real-source state and clock.
+// ProductionInputs cannot be manufactured from completeness booleans. Source qualification
+// and the authenticated Tier-1 observation bind the complete state and clock.
+// Missing routing observations remain unknown, never caller-supplied completeness.
 type ProductionInputs struct {
 	Qualification *admission.ProductionQualification
 	Tier1         *intelligence.QualifiedTier1
 }
 
 // BuildEngineeringBenchmark exercises the production materializer with isolated
-// benchmark records. The original authenticated baseline qualifies routing
-// completeness; transformed inputs can never create a production artifact or
+// benchmark records. The original authenticated baseline determines routing
+// availability; transformed inputs can never create a production artifact or
 // receipt. With empty inputs, expiry/withdrawal scenarios retain unknown routing
 // completeness. Callers must separately prove their measured record transition.
 func BuildEngineeringBenchmark(ctx context.Context, options Options, baseline, state intelligence.BuildState, policy intelligence.Policy, inputs ProductionInputs) (Candidate, error) {
@@ -44,7 +46,7 @@ func BuildEngineeringBenchmark(ctx context.Context, options Options, baseline, s
 		if err := inputs.Qualification.Validate(baseline, clock); err != nil {
 			return Candidate{}, err
 		}
-		if err := inputs.Tier1.Validate(baseline, clock); err != nil {
+		if err := inputs.Tier1.ValidateObservation(baseline, clock); err != nil {
 			return Candidate{}, err
 		}
 		if time.Unix(options.ValidUntil, 0).After(inputs.Tier1.ValidUntil()) {
@@ -98,7 +100,7 @@ func BuildProductionIntelligence(ctx context.Context, options Options, state int
 	if err := inputs.Qualification.Validate(state, clock); err != nil {
 		return Candidate{}, err
 	}
-	if err := inputs.Tier1.Validate(state, clock); err != nil {
+	if err := inputs.Tier1.ValidateObservation(state, clock); err != nil {
 		return Candidate{}, err
 	}
 	if time.Unix(options.ValidUntil, 0).After(inputs.Tier1.ValidUntil()) {
@@ -114,7 +116,7 @@ func BuildProductionIntelligence(ctx context.Context, options Options, state int
 		if err := inputs.Qualification.Validate(state, clock); err != nil {
 			return err
 		}
-		if err := inputs.Tier1.Validate(state, clock); err != nil {
+		if err := inputs.Tier1.ValidateObservation(state, clock); err != nil {
 			return err
 		}
 		return originalGate(gateCtx)
@@ -129,28 +131,108 @@ func buildStreamedCandidate(ctx context.Context, options Options, state intellig
 	if err := options.Limits.validate(); err != nil {
 		return Candidate{}, err
 	}
+	cache, err := openMaterializationCache(ctx, options, state, policy, inputs)
+	if err != nil {
+		return Candidate{}, err
+	}
+	options.materializationCache = cache
 	disk, err := stateDiskBytes(options.Workspace)
 	if err != nil {
 		return Candidate{}, err
 	}
+	disk += cache.bytes
 	if disk >= options.Limits.ScratchBytes {
 		return Candidate{}, errors.New("normalized state exhausted scratch budget")
 	}
 	var used atomic.Uint64
-	spool, err := newBulkSpool(options.Workspace, clock, state.PolicyHash, options.Limits.ScratchBytes, func() uint64 { return disk + used.Load() })
+	var reuse *spatialCache
+	cacheBytes := func() uint64 {
+		if reuse != nil {
+			return reuse.DiskBytes()
+		}
+		return 0
+	}
+	spool, err := newBulkSpool(options.Workspace, clock, state.PolicyHash, options.Limits.ScratchBytes, func() uint64 { return disk + used.Load() + cacheBytes() })
 	if err != nil {
 		return Candidate{}, err
 	}
+	spool.observe = options.ObserveStage
 	defer func() {
 		if spool.prefixFile != nil {
 			returnErr = errors.Join(returnErr, spool.prefixFile.Close())
 		}
 		returnErr = errors.Join(returnErr, os.RemoveAll(spool.root))
 	}()
+	executable, err := os.Executable()
+	if err != nil {
+		return Candidate{}, err
+	}
+	executable, err = filepath.EvalSymlinks(executable)
+	if err != nil {
+		return Candidate{}, err
+	}
+	implementation, err := cacheFileHash(ctx, executable, 256<<20)
+	if err != nil {
+		return Candidate{}, err
+	}
+	contract, err := spatialReuseKey("contract", struct {
+		Implementation [32]byte
+		Limits         Limits
+		Mode           string
+		Schema         int
+	}{implementation, options.Limits, options.Mode, 5})
+	if err != nil {
+		return Candidate{}, err
+	}
+	reuse, err = openSpatialCache(ctx, options.Workspace, contract, options.Limits.ScratchBytes/4, func(prospective uint64) bool {
+		other := disk + used.Load() + spool.pathBytes
+		if spool.store != nil {
+			other += spool.store.DiskBytes()
+		}
+		return other < options.Limits.ScratchBytes && prospective < options.Limits.ScratchBytes-other
+	})
+	if err != nil {
+		return Candidate{}, err
+	}
+	defer func() { returnErr = errors.Join(returnErr, reuse.Abort()) }()
+	if canReuseSpatialState(state) {
+		spool.reuse = reuse
+		options.spatialSpool = spool
+		options.compiledReuse = reuse
+		var dependencies [32]byte
+		dependenciesBound := false
+		options.partitionDependencies = func(ctx context.Context) ([32]byte, error) {
+			if dependenciesBound {
+				return dependencies, ctx.Err()
+			}
+			var err error
+			dependencies, err = spool.compiledDependencies(ctx)
+			dependenciesBound = err == nil
+			return dependencies, err
+		}
+		options.prepareSpatialCache = func(ctx context.Context) error {
+			if !spool.started {
+				return nil
+			}
+			if dependenciesBound {
+				actual, err := spool.compiledDependencies(ctx)
+				if err != nil || actual != dependencies {
+					return errors.Join(err, errors.New("ASN prefix provider changed during compilation"))
+				}
+			}
+			return reuse.Prepare(ctx)
+		}
+		options.commitSpatialCache = func(ctx context.Context) error {
+			if !spool.started {
+				return nil
+			}
+			return reuse.Commit(ctx)
+		}
+	}
 	options.scratchUsage = used.Store
 	options.prefixProvider = spool.providePrefixes
 	options.externalScratch = func() uint64 {
-		extra := disk
+		extra := disk + cacheBytes()
 		if spool.store != nil {
 			extra += spool.store.DiskBytes()
 		}
@@ -206,11 +288,14 @@ func (g *globalASNAggregates) family(v *globalASNSummary, family string) error {
 	return nil
 }
 func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, policy intelligence.Policy, clock time.Time, inputs ProductionInputs, spool *bulkSpool) Producer {
-	return func(ctx context.Context, emit func(via3.PublicRecord) error) error {
+	return func(ctx context.Context, emit func(via3.PublicRecord) error) (returnErr error) {
+		spool.started = true
 		if inputs.Tier1 != nil {
 			spool.relations = nil
 		}
+		seedPhase := spool.stage(ctx, StageSeed)
 		spatial, asnRoot, err := spool.seed(ctx, workspace, state)
+		seedPhase(err == nil)
 		if err != nil {
 			return err
 		}
@@ -218,10 +303,12 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 		if inputs.Tier1 == nil {
 			relations = spool.relations
 		}
+		pathsPhase := spool.stage(ctx, StagePaths)
 		if err = spool.preparePrefixes(ctx); err != nil {
+			pathsPhase(false)
 			return err
 		}
-		if err = spool.reducePaths(ctx, relations, func(path intelligence.Path, rank uint16) error {
+		err = spool.reducePaths(ctx, relations, func(path intelligence.Path, rank uint16) error {
 			data := via3.PathData{GraphEligible: path.GraphEligible, Visibility: path.VisibilityBand}
 			var previous uint32
 			for _, segment := range path.Segments {
@@ -244,42 +331,79 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 				}
 			}
 			return emit(via3.PublicRecord{Version: 3, Kind: 11, ASN: path.Origin, Rank: rank, Path: &data})
-		}); err != nil {
+		})
+		pathsPhase(err == nil)
+		if err != nil {
 			return err
 		}
+		riskPhase := spool.stage(ctx, StageASNRisk)
 		aggregates := globalASNAggregates{values: map[uint32]*globalASNSummary{}, families: map[string]string{}}
 		// The first spatial pass computes exact-IP mass in canonical global address
 		// order. No partial per-bucket ASN context is allowed to reach public output.
-		if spool.hasExact {
-			spatial, err = spool.leaves(ctx, spatial, false, func(bucket *bulkBucket, part intelligence.BuildState) error {
-				prepare := func(engine *intelligence.Engine) error {
-					return engine.WalkExactRisks(ctx, func(_ netip.Addr, risk float64, families []string, origins []uint32) error {
-						for _, asn := range origins {
-							v, err := aggregates.value(asn)
-							if err != nil {
-								return err
-							}
-							v.mass += risk
-							v.count++
-							v.present = true
-							for _, family := range families {
-								if err = aggregates.family(v, family); err != nil {
-									return err
-								}
-							}
+		// Without any observed origin mapping no exact IP can contribute ASN
+		// mass. The final IP risk and /24 pass still processes every observation.
+		observedAt, coverageValidUntil, completeVRP := inputs.Qualification.RPKIObservation()
+		dependencies := spatialDependencies{Policy: policy, PolicyHash: state.PolicyHash, Clock: clock,
+			Usage: spool.usage, Coverage: spool.coverage, VRPComplete: completeVRP,
+			RPKIObservedAt: observedAt, RPKICoverageValidUntil: coverageValidUntil}
+		if spool.hasExact && len(spool.prefixIndex) > 0 {
+			accumulate := func(event spatialRiskEvent) error {
+				for _, asn := range event.Origins {
+					value, err := aggregates.value(asn)
+					if err != nil {
+						return err
+					}
+					value.mass += event.Risk
+					value.count++
+					value.present = true
+					for _, family := range event.Families {
+						if err = aggregates.family(value, family); err != nil {
+							return err
 						}
-						return nil
+					}
+				}
+				return nil
+			}
+			var reuse *bulkLeafReuse
+			if spool.reuse != nil {
+				scoreKey, err := exactRiskDependencies(policy, clock)
+				if err != nil {
+					return err
+				}
+				// Physical hits can skip collection together. Joined role rows affect
+				// the full leaf's bounded geometry, although they never enter risk.
+				layoutKey, err := spatialReuseKey("exact-risk-layout", struct {
+					Score [32]byte
+					Usage asnUsageIndex
+				}{scoreKey, spool.usage})
+				if err != nil {
+					return err
+				}
+				reuse = &bulkLeafReuse{domain: "risk", dependencies: layoutKey, riskPolicy: scoreKey, spool: spool, risk: accumulate}
+			}
+			spatial, err = spool.leavesReusing(ctx, spatial, false, reuse, func(bucket *bulkBucket, part intelligence.BuildState) error {
+				if reuse != nil {
+					return reuse.visitRisk(ctx, bucket, part, policy, clock)
+				}
+				prepare := func(engine *intelligence.Engine) error {
+					return engine.WalkExactRisks(ctx, func(address netip.Addr, risk float64, families []string, origins []uint32) error {
+						event := spatialRiskEvent{Address: address, Risk: risk, Families: families, Origins: origins}
+						if err := reuse.recordRisk(event); err != nil {
+							return err
+						}
+						return accumulate(event)
 					})
 				}
-				return IntelligenceProducer(part, policy, clock, MaterializationInputs{scope: bucket.prefix, prepare: prepare, prepareOnly: true})(ctx, func(via3.PublicRecord) error { return nil })
+				return IntelligenceProducer(part, policy, clock, MaterializationInputs{scope: bucket.prefix, prepare: prepare, prepareOnly: true, encodedLengths: bucket.recordBytes})(ctx, func(via3.PublicRecord) error { return nil })
 			})
 		}
 		if err != nil {
+			riskPhase(false)
 			return err
 		}
 		asnLeaves := []*bulkBucket{asnRoot}
 		if spool.hasASNDirect {
-			asnLeaves, err = spool.leaves(ctx, asnLeaves, false, func(_ *bulkBucket, part intelligence.BuildState) error {
+			asnLeaves, err = spool.leaves(ctx, asnLeaves, false, func(bucket *bulkBucket, part intelligence.BuildState) error {
 				prepare := func(engine *intelligence.Engine) error {
 					for _, source := range part.Sources {
 						for _, record := range source.Records {
@@ -303,10 +427,11 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 					}
 					return nil
 				}
-				return IntelligenceProducer(part, policy, clock, MaterializationInputs{prepare: prepare, prepareOnly: true})(ctx, func(via3.PublicRecord) error { return nil })
+				return IntelligenceProducer(part, policy, clock, MaterializationInputs{prepare: prepare, prepareOnly: true, encodedLengths: bucket.recordBytes})(ctx, func(via3.PublicRecord) error { return nil })
 			})
 		}
 		if err != nil {
+			riskPhase(false)
 			return err
 		}
 		contexts := make(map[uint32]intelligence.ASNContext, len(aggregates.values))
@@ -317,8 +442,32 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 		}
 		aggregates.values = nil
 		aggregates.families = nil
-		spatial, err = spool.leaves(ctx, spatial, true, func(bucket *bulkBucket, part intelligence.BuildState) error {
-			return IntelligenceProducer(part, policy, clock, MaterializationInputs{VRPComplete: inputs.Qualification.VRPComplete(), verifiedEmptyVRP: inputs.Qualification.VRPComplete(), scope: bucket.prefix, contexts: contexts, resolver: relations})(ctx, func(record via3.PublicRecord) error {
+		riskPhase(true)
+		spatialPhase := spool.stage(ctx, StageSpatial)
+		var publicReuse *bulkLeafReuse
+		var locationPolicy [32]byte
+		if spool.reuse != nil {
+			locationPolicy, err = spatialReuseKey("location-policy", struct {
+				Policy     intelligence.Policy
+				PolicyHash [32]byte
+			}{policy, state.PolicyHash})
+			if err != nil {
+				return err
+			}
+			dependencies.Contexts = contexts
+			key, keyErr := spatialReuseKey("public-dependencies", dependencies)
+			if keyErr != nil {
+				return keyErr
+			}
+			publicReuse = &bulkLeafReuse{domain: "public", dependencies: key, locationPolicy: locationPolicy, spool: spool, public: emit}
+		}
+		spatial, err = spool.leavesReusing(ctx, spatial, true, publicReuse, func(bucket *bulkBucket, part intelligence.BuildState) (visitErr error) {
+			locations, err := spool.openLocations(ctx, bucket, locationPolicy)
+			if err != nil {
+				return err
+			}
+			defer func() { visitErr = errors.Join(visitErr, locations.close()) }()
+			err = IntelligenceProducer(part, policy, clock, MaterializationInputs{locations: locations, VRPComplete: completeVRP, RPKIObservedAt: observedAt, RPKICoverageValidUntil: coverageValidUntil, verifiedEmptyVRP: completeVRP, scope: bucket.prefix, contexts: contexts, resolver: relations, encodedLengths: bucket.recordBytes})(ctx, func(record via3.PublicRecord) error {
 				if record.Kind >= 8 && record.Kind != 9 {
 					return nil
 				}
@@ -327,16 +476,24 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 						return nil
 					}
 				}
+				spool.publicRows++
 				return emit(record)
 			})
+			if err != nil {
+				return err
+			}
+			return locations.finish(ctx)
 		})
+		spatialPhase(err == nil)
 		if err != nil {
 			return err
 		}
 		_ = spatial
+		asnPhase := spool.stage(ctx, StageASN)
+		defer func() { asnPhase(returnErr == nil) }()
 		emitted := map[uint32]bool{}
 		_, err = spool.leaves(ctx, asnLeaves, false, func(bucket *bulkBucket, part intelligence.BuildState) error {
-			return IntelligenceProducer(part, policy, clock, MaterializationInputs{contexts: contexts, resolver: relations})(ctx, func(record via3.PublicRecord) error {
+			return IntelligenceProducer(part, policy, clock, MaterializationInputs{contexts: contexts, resolver: relations, encodedLengths: bucket.recordBytes})(ctx, func(record via3.PublicRecord) error {
 				switch record.Kind {
 				case 8:
 					if record.ASN < bucket.first || record.ASN > bucket.last {

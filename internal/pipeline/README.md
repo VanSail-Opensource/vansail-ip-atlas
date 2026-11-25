@@ -49,6 +49,23 @@ and immediately before atomic publication in either mode. Failure retracts the
 candidate without replacing any prior release. It never supplies the production
 capability approval.
 
+The streamed materializer retains one private exact-input cache generation.
+Production and engineering builds use the same cache path. Its authenticated
+index binds the running executable, complete normalized state, scoring policy,
+evaluation/deadline clocks, mode, packing limits, verified VRP availability and
+derived Tier-1/history result. Any changed input causes a real rebuild, including
+clock changes that alter risk decay. This does not yet reuse unaffected partitions
+for changed-input builds.
+
+A hit runs both input and production gates, checks local normalized object
+hashes before and after reuse, validates every cached VIA3 object and its public
+profile, and hashes the actual new output files. Publication remains atomic.
+Cache keys/indexes stay private; neither cache presence nor an index can qualify
+a source. Cache objects, staging, output and current resource measurements remain
+charged to the compiler budget. Retention is bounded to one generation of at
+most one quarter of the existing scratch ceiling; inability to retain that
+generation leaves the normal full-build path available.
+
 `BuildMappings(ctx, options, state, policy)` is the mapping-only entry point. It
 refuses production and requires the release validity deadline to be no later
 than the earliest surviving source receipt. Its lower-level
@@ -70,7 +87,7 @@ needs streamed table-specific risk/BGP/ASN materialization and real-source
 certification. A mapping-only release must not satisfy the full production gate.
 
 `BuildIntelligence(ctx, options, state, policy, MaterializationInputs)` now
-materializes all nine currently defined normalized record kinds for engineering
+materializes the typed normalized record kinds for engineering
 releases. It reuses geographic/usage/MOAS fusion and adds four-layer quality,
 sparse exact-observation `/24` profiles, ASN contextual risk and prefix pages,
 per-announcement/per-origin RPKI, ranked typed observed paths and directed
@@ -85,8 +102,11 @@ This path requires the same reconciliation clock and nonexpired receipts, keeps
 the 96-MiB/200,000-record input ceiling, and caps its change-boundary radix at one
 million nodes. It still buffers a bounded complete state and is not full-source
 streamed production ingestion. Missing/partial VRPs are unavailable; the explicit
-`VRPComplete` engineering assertion plus retained nonempty VRP data is necessary
-to compute valid/invalid/not-found. No ASN identity is inferred from a path,
+`VRPComplete` engineering assertion, explicit publisher observation/coverage
+clocks and retained dated VRP data are necessary to compute historical
+valid/invalid/not-found. Production obtains these clocks only from the opaque
+source qualification. Authorization expiry remains visible in the result and
+does not extend or shorten the independent source/release publication deadline. No ASN identity is inferred from a path,
 address or relationship. This state schema has no certified Tier-1 history,
 so positive Tier-1 classification remains unavailable and the entry
 point rejects production unconditionally. ASN identities now use an explicit

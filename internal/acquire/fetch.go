@@ -26,19 +26,30 @@ import (
 	"vansail-ip-atlas/internal/subscription"
 )
 
+// AzureServiceTagsDetailsURL is the fixed publisher metadata page for Azure Public.
+// Its one stable query is part of the resource identity.
+const AzureServiceTagsDetailsURL = "https://www.microsoft.com/en-us/download/details.aspx?id=56519"
+
 var ErrFetch = errors.New("bulk asset acquisition failed")
 
+// ErrNotFound identifies a header-only HTTP 404, without exposing a URL or
+// response body. It remains an acquisition failure for errors.Is callers.
+// Only explicit archive policies may interpret it as publication lag.
+var ErrNotFound = errors.Join(ErrFetch, errors.New("bulk asset not found"))
+
 type Result struct {
-	SHA256 string
-	Bytes  int64
+	LastModified time.Time
+	SHA256       string
+	Bytes        int64
 }
 type Fetcher struct {
-	client          *http.Client
-	attempts        int
-	delay           func(context.Context, time.Duration) error
-	slots           chan struct{}
-	budget          *atomic.Int64
-	secondaryBudget *atomic.Int64
+	client              *http.Client
+	attempts            int
+	delay               func(context.Context, time.Duration) error
+	slots               chan struct{}
+	budget              *atomic.Int64
+	secondaryBudget     *atomic.Int64
+	githubMetadataToken string
 }
 
 // WithByteBudget adds one shared acquisition-group ceiling while retaining the
@@ -101,7 +112,7 @@ func validURL(raw string) bool {
 	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" || u.ForceQuery || strings.Contains(u.Hostname(), "%") || (u.Port() != "" && u.Port() != "443") {
 		return false
 	}
-	if u.RawQuery != "" {
+	if u.RawQuery != "" && raw != AzureServiceTagsDetailsURL {
 		if _, ok := ParseGitHubCommitURL(raw); !ok {
 			return false
 		}
@@ -259,10 +270,16 @@ func checkRedirect(request *http.Request, via []*http.Request) error {
 	}
 	// Do not forward the source path or an ephemeral asset signature as referrer.
 	request.Header.Del("Referer")
+	// net/http may copy sensitive headers to same-origin and subdomain redirects.
+	// Authentication belongs only to the original, narrowly checked metadata URL.
+	request.Header.Del("Authorization")
 	for _, previous := range via {
-		if previous == nil || previous.URL == nil || !validURL(previous.URL.String()) {
+		if previous == nil || previous.URL == nil || previous.URL.String() == AzureServiceTagsDetailsURL || !validURL(previous.URL.String()) {
 			return ErrFetch
 		}
+	}
+	if request.URL.String() == AzureServiceTagsDetailsURL {
+		return ErrFetch
 	}
 	if validURL(request.URL.String()) {
 		return nil
@@ -335,6 +352,10 @@ func (f *Fetcher) Fetch(ctx context.Context, raw, destination string, maxBytes i
 			return Result{}, ErrFetch
 		}
 		request.Header.Set("User-Agent", "VanSail-IP-Atlas/3 (+https://github.com/VanSail-Opensource/vansail-ip-atlas)")
+		metadata := githubMetadataURL(raw)
+		if metadata && f.githubMetadataToken != "" {
+			request.Header.Set("Authorization", "Bearer "+f.githubMetadataToken)
+		}
 		response, err := f.client.Do(request)
 		if err != nil {
 			if attempt+1 < f.attempts && f.delay(ctx, time.Second) == nil {
@@ -348,8 +369,15 @@ func (f *Fetcher) Fetch(ctx context.Context, raw, destination string, maxBytes i
 			if seconds, e := strconv.Atoi(response.Header.Get("Retry-After")); e == nil && seconds > 0 && seconds <= 5 {
 				retry = time.Duration(seconds) * time.Second
 			}
+			retryable := status == 429 || status >= 500
+			if metadata {
+				retry, retryable = githubMetadataRetry(status, response.Header, time.Now())
+			}
 			response.Body.Close()
-			if (status == 429 || status >= 500) && attempt+1 < f.attempts && f.delay(ctx, retry) == nil {
+			if status == http.StatusNotFound {
+				return Result{}, ErrNotFound
+			}
+			if retryable && attempt+1 < f.attempts && f.delay(ctx, retry) == nil {
 				continue
 			}
 			return Result{}, ErrFetch
@@ -388,7 +416,8 @@ func (f *Fetcher) Fetch(ctx context.Context, raw, destination string, maxBytes i
 			os.Remove(temp.Name())
 			return Result{}, ErrFetch
 		}
-		return Result{hex.EncodeToString(hash.Sum(nil)), n}, nil
+		modified, _ := http.ParseTime(response.Header.Get("Last-Modified"))
+		return Result{SHA256: hex.EncodeToString(hash.Sum(nil)), Bytes: n, LastModified: modified.UTC()}, nil
 	}
 	return Result{}, ErrFetch
 }

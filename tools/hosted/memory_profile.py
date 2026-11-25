@@ -62,7 +62,7 @@ def _frame_window(frame: memoryview, decoded: int) -> int:
 def inspect_object(data: bytes) -> dict:
     """Return actual container/window metrics; do not trust profile declarations."""
     require(64 <= len(data) < 24 << 20, "object length")
-    require(data[:4] == b"VIA3" and struct.unpack_from("<HHH", data, 4) == (3, 4, 64), "object version")
+    require(data[:4] == b"VIA3" and struct.unpack_from("<HHH", data, 4) == (3, 5, 64), "object version")
     kind = struct.unpack_from("<H", data, 10)[0]
     require(kind in SECTIONS and data[12:16] == bytes(4) and data[44] == 1 and data[45:64] == bytes(19), "object header")
     count = struct.unpack_from("<I", data, 16)[0]
@@ -128,7 +128,7 @@ def verify_memory_profile(profile: dict, observed: dict, fixture_root: Path) -> 
     require(type(pointer) is dict and pointer == {"format_version": 3, "release_id": release_id,
             "manifest_path": f"/_atlas/releases/{release_id}/manifest.json", "manifest_sha256": sha256(manifest_bytes)}, "pointer binding")
     require(type(manifest) is dict and manifest.get("release_id") == release_id and manifest.get("mode") == "synthetic"
-            and manifest.get("format_version") == 3 and manifest.get("schema_version") == 4 and manifest.get("codec") == "zstd-1", "synthetic manifest")
+            and manifest.get("format_version") == 3 and manifest.get("schema_version") == 5 and manifest.get("codec") == "zstd-1", "synthetic manifest")
     descriptor = {key: value for key, value in manifest.items() if key != "release_id"}
     require(sha256(canonical_bytes(descriptor)) == release_id, "descriptor binding")
     entries = manifest.get("objects")

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"vansail-ip-atlas/internal/intelligence"
 
@@ -120,13 +121,35 @@ func auditCases() []auditCase {
 	s = newShard(8, aggregate)
 	s.set(2, asnKeys(13335))
 	out = append(out, auditCase{"asn_risk_band_disagrees", s, "AS13335"})
-	rpki := make([]byte, 16)
+	rpki := make([]byte, 32)
 	p32(rpki, 0, bits(20))
 	p32(rpki, 4, 13335)
+	p64(rpki, 16, 1699990000)
+	p64(rpki, 24, 1699993600)
 	rpki[8], rpki[9] = 1, 128
 	s = newShard(9, rpki)
 	s.set(1, prefixRows(key("203.0.113.0/24", false, 0)))
 	out = append(out, auditCase{"ipv4_vrp_length_128", s, "203.0.113.1"})
+	for _, variant := range []struct {
+		name   string
+		change func([]byte)
+	}{
+		{"rpki_known_missing_observation", func(r []byte) { p64(r, 16, 0) }},
+		{"rpki_known_missing_expiry", func(r []byte) { p64(r, 24, 0) }},
+		{"rpki_unavailable_with_clocks", func(r []byte) { r[8] = 0 }},
+		{"rpki_empty_interval", func(r []byte) { p64(r, 24, u64(r, 16)) }},
+		{"rpki_reversed_interval", func(r []byte) { p64(r, 24, u64(r, 16)-1) }},
+		{"rpki_unsafe_expiry", func(r []byte) { p64(r, 24, 9007199254740992) }},
+		{"rpki_unsafe_observation", func(r []byte) { p64(r, 16, 9007199254740992); p64(r, 24, 9007199254740993) }},
+		{"rpki_reserved_clock_padding", func(r []byte) { r[15] = 1 }},
+	} {
+		row := append([]byte(nil), rpki...)
+		row[9] = 24
+		variant.change(row)
+		shard := newShard(9, row)
+		shard.set(1, prefixRows(key("203.0.113.0/24", false, 0)))
+		out = append(out, auditCase{variant.name, shard, "203.0.113.1"})
+	}
 	quality := make([]byte, 32)
 	p32(quality, 0, bits(9, 10, 11, 12, 13, 14))
 	quality[8], quality[9], quality[10] = 1, 0, 1
@@ -188,7 +211,7 @@ func auditUncheckedContainer(t *testing.T, s Shard) []byte {
 	data := make([]byte, 64+len(s.Sections)*64)
 	copy(data, "VIA3")
 	p16(data, 4, 3)
-	p16(data, 6, 4)
+	p16(data, 6, 5)
 	p16(data, 8, 64)
 	p16(data, 10, s.Kind)
 	p32(data, 16, uint32(len(s.Sections)))
@@ -236,6 +259,59 @@ func TestAuditPublicLabelTokensAndBidi(t *testing.T) {
 		}
 	}
 }
+func TestDictionaryLabelPrivacyAcrossCompilationAndReading(t *testing.T) {
+	data, err := os.ReadFile("../../fixtures/bin/dictionary-labels-via3.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vectors []struct {
+		Label, Base64 string
+		Safe          bool
+	}
+	if err = json.Unmarshal(data, &vectors); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range vectors {
+		raw, err := base64.StdEncoding.DecodeString(v.Base64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = Read(context.Background(), raw)
+		if v.Safe && err != nil || !v.Safe && ErrorCode(err) != "record" {
+			t.Fatal("encoded dictionary acceptance differs from the label contract")
+		}
+		want := v.Label
+		if !v.Safe {
+			want, _, _ = strings.Cut(v.Label, " ")
+		}
+		if got := intelligence.SafeLabel(v.Label); got != want {
+			t.Fatal("normalization retained an unsafe token or discarded a safe name")
+		}
+		partition, err := CompilePartition(context.Background(), PartitionInput{
+			Partition: "all",
+			Records:   []PublicRecord{{Version: 3, Kind: 8, ASN: 13335, ASNAggregate: &ASNData{Name: v.Label}}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got string
+		for _, obj := range partition.Objects {
+			if obj.Info.Kind != 14 {
+				continue
+			}
+			shard, err := Read(context.Background(), obj.Bytes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			text, _ := shard.Rows(6)
+			got = string(text)
+		}
+		if got != want {
+			t.Fatal("compiled dictionary differs from the sanitized name")
+		}
+	}
+}
+
 func TestAuditExpiredEmptyAuxiliaryLookups(t *testing.T) {
 	g := golden(t)
 	now := g.Clock
@@ -284,10 +360,10 @@ func auditReleaseFromFacts(t *testing.T, facts ...Shard) (*Release, map[string][
 	infos = append(infos, info)
 	files[info.SHA256] = data
 	sort.Slice(infos, func(i, j int) bool { return infos[i].SHA256 < infos[j].SHA256 })
-	desc := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: infos, SchemaVersion: 4, ValidFrom: 1700000000, ValidUntil: 1700003600}
+	desc := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: infos, SchemaVersion: 5, ValidFrom: 1700000000, ValidUntil: 1700003600}
 	id := Hash(canonical(desc))
-	manifest := Manifest{Codec: desc.Codec, FormatVersion: 3, Mode: desc.Mode, Objects: infos, ReleaseID: id, SchemaVersion: 4, ValidFrom: desc.ValidFrom, ValidUntil: desc.ValidUntil}
-	pointer := Pointer{3, "/_atlas/releases/" + id + "/manifest.json", Hash(canonical(manifest)), id}
+	manifest := Manifest{Codec: desc.Codec, FormatVersion: 3, Mode: desc.Mode, Objects: infos, ReleaseID: id, SchemaVersion: 5, ValidFrom: desc.ValidFrom, ValidUntil: desc.ValidUntil}
+	pointer := Pointer{FormatVersion: 3, ManifestPath: "/_atlas/releases/" + id + "/manifest.json", ManifestSHA256: Hash(canonical(manifest)), ReleaseID: id}
 	reader, err := NewRelease(canonical(pointer), canonical(manifest), func(hash string) ([]byte, error) { return files[hash], nil }, func() int64 { return 1700000001 })
 	if err != nil {
 		t.Fatal(err)
@@ -312,9 +388,11 @@ func auditNetwork(prefix string, overlay bool, origin uint32) Shard {
 }
 func TestAuditRPKIInheritedOriginAndNetworkConsistency(t *testing.T) {
 	t.Run("inherited_RPKI_preserves_original_prefix_origin", func(t *testing.T) {
-		rpki := make([]byte, 16)
+		rpki := make([]byte, 32)
 		p32(rpki, 0, bits(20))
 		p32(rpki, 4, 13335)
+		p64(rpki, 16, 1699990000)
+		p64(rpki, 24, 1699993600)
 		rpki[8], rpki[9] = 1, 16
 		shard := newShard(9, rpki)
 		shard.set(8, prefixRows(key("203.0.0.0/16", false, 0)))
@@ -337,9 +415,11 @@ func TestAuditRPKIInheritedOriginAndNetworkConsistency(t *testing.T) {
 		}
 	})
 	t.Run("parent_announcement_validity_not_inherited_by_child", func(t *testing.T) {
-		rpki := make([]byte, 16)
+		rpki := make([]byte, 32)
 		p32(rpki, 0, bits(20))
 		p32(rpki, 4, 13335)
+		p64(rpki, 16, 1699990000)
+		p64(rpki, 24, 1699993600)
 		rpki[8], rpki[9] = 1, 16
 		shard := newShard(9, rpki)
 		shard.set(8, prefixRows(key("203.0.0.0/16", false, 0)))
@@ -528,10 +608,10 @@ func auditRelease(t *testing.T, item auditCase) auditReleaseCase {
 	routerInfo := ObjectInfo{Bytes: len(encoded), Kind: 1, Partition: "all", SHA256: Hash(encoded)}
 	objects := []ObjectInfo{routerInfo, fact.Info}
 	sort.Slice(objects, func(i, j int) bool { return objects[i].SHA256 < objects[j].SHA256 })
-	desc := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: objects, SchemaVersion: 4, ValidFrom: 1700000000, ValidUntil: 1700003600}
+	desc := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: objects, SchemaVersion: 5, ValidFrom: 1700000000, ValidUntil: 1700003600}
 	id := Hash(canonical(desc))
-	manifest := Manifest{Codec: desc.Codec, FormatVersion: 3, Mode: desc.Mode, Objects: objects, ReleaseID: id, SchemaVersion: 4, ValidFrom: desc.ValidFrom, ValidUntil: desc.ValidUntil}
-	pointer := Pointer{3, "/_atlas/releases/" + id + "/manifest.json", Hash(canonical(manifest)), id}
+	manifest := Manifest{Codec: desc.Codec, FormatVersion: 3, Mode: desc.Mode, Objects: objects, ReleaseID: id, SchemaVersion: 5, ValidFrom: desc.ValidFrom, ValidUntil: desc.ValidUntil}
+	pointer := Pointer{FormatVersion: 3, ManifestPath: "/_atlas/releases/" + id + "/manifest.json", ManifestSHA256: Hash(canonical(manifest)), ReleaseID: id}
 	return auditReleaseCase{item.name, pointer, manifest, []auditObject{{routerInfo.SHA256, base64.StdEncoding.EncodeToString(encoded)}, {fact.Info.SHA256, base64.StdEncoding.EncodeToString(data)}}, item.query, "record", 1700000001}
 }
 

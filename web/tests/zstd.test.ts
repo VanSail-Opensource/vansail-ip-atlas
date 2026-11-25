@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { test } from 'node:test'
-import { Decompress, decompress } from 'fzstd'
+import { Decompress, decompress, decompressInto } from 'fzstd'
 import { decodeZstd, inspectZstdFrame, zstdChecksum, ZstdError } from '../app/lib/zstd.ts'
 
 const vectors = JSON.parse(readFileSync(new URL('../../tools/hosted/fixtures/zstd.json', import.meta.url), 'utf8'))
@@ -188,5 +188,26 @@ test('patched decoder entry points preserve retained blocks across split and con
       assert.equal(createHash('sha256').update(retained).digest('hex'), expectedHash)
       assert.deepEqual(input, unchanged, 'Only decoder-owned backing stores may be detached')
     }
+  }
+})
+
+test('single-frame output ownership and actual produced lengths agree for ESM and CommonJS', () => {
+  const commonjs = createRequire(import.meta.url)('fzstd') as { decompressInto: typeof decompressInto }
+  // Non-single-segment frame with independent content size and a single raw block.
+  const frame = (declared: number) => Uint8Array.of(0x28, 0xb5, 0x2f, 0xfd, 0x84, 0, declared, 0, 0, 0, 25, 0, 0, 4, 5, 6, 0, 0, 0, 0)
+  for (const decode of [decompressInto, commonjs.decompressInto]) {
+    for (const declared of [2, 3, 4]) {
+      const input = frame(declared)
+      const unchanged = input.slice()
+      const backing = new Uint8Array(declared + 2).fill(99)
+      assert.equal(decode(input, backing.subarray(1, -1)), declared < 3 ? -1 : 3)
+      assert.deepEqual(input, unchanged)
+      assert.equal(backing[0], 99)
+      assert.equal(backing.at(-1), 99)
+      if (declared >= 3) assert.deepEqual([...backing.subarray(1, 4)], [4, 5, 6])
+    }
+    const input = frame(3)
+    assert.throws(() => decode(input, input.subarray(0, 3)))
+    assert.deepEqual(input, frame(3))
   }
 })

@@ -10,7 +10,7 @@ import subprocess
 import sys
 
 from tools.atlas_contracts.config import ContractError, ROOT, load_configs, load_yaml, validate_schema, validate_sources
-from tools.atlas_contracts.policy import Snapshot, adapter_code_hash, capability_report, fixture_issues, runtime_state, static_issues, utc
+from tools.atlas_contracts.policy import OPTIONAL_ROUTING_CAPABILITIES, Snapshot, adapter_code_hash, capability_report, fixture_issues, runtime_state, static_issues, utc
 
 
 class ConfigurationTests(unittest.TestCase):
@@ -20,30 +20,122 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_actual_catalog_is_blocked_and_has_shared_family(self):
         report = capability_report(self.configs["sources"], utc("2026-11-08T00:00:00Z"), ROOT)
-        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (14, 10, 0))
+        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (20, 20, 0))
         self.assertEqual({s["id"] for s in self.configs["sources"]["sources"] if s["admission"] == "active"}, {
             "sapics-user-country-v4", "sapics-user-country-v6", "sapics-server-country-v4", "ipverse-as-metadata",
-            "dbip-lite-direct", "ipapi-free-geo-v4", "ipapi-free-geo-v6", "x4b-vpn-v4", "tor-exits", "ipverse-asn-usage"})
+            "dbip-lite-direct", "ipapi-free-geo-v4", "ipapi-free-geo-v6", "x4b-vpn-v4", "tor-exits", "ipverse-asn-usage",
+            "google-network-organization", "nro-delegated-registration", "ffraud-ip", "iana-root-anycast", "tweetfeed-week", "azure-appservice-public", "routeviews-wide-rib", "ripe-mrt-rrc18", "caida-asrel2", "rpki-client-vrps"})
         self.assertFalse(report["production_eligible"])
         self.assertEqual(report["schema_version"], 3)
-        self.assertEqual(report["release_scope"], "release-scope-v5")
+        self.assertEqual(report["release_scope"], "release-scope-v6")
         self.assertEqual(report["dataset_attributions"], [])
         self.assertEqual(len(report["capabilities"]), 12)
         required = [row for row in report["capabilities"] if row["required"]]
         optional = [row for row in report["capabilities"] if not row["required"]]
-        self.assertEqual(len(required), 12)
+        self.assertEqual(len(required), 7)
         self.assertTrue(all(row["status"] == "blocked" for row in required))
-        self.assertEqual(optional, [])
-        self.assertEqual(report["required_capability_count"], 12)
-        self.assertEqual(report["blocked_required_capability_count"], 12)
+        self.assertEqual({row["capability"] for row in optional}, OPTIONAL_ROUTING_CAPABILITIES)
+        self.assertTrue(all(row["status"] == "blocked" and row["families"] == [] for row in optional))
+        self.assertEqual(report["required_capability_count"], 7)
+        self.assertEqual(report["blocked_required_capability_count"], 7)
         subscriptions = [s for s in self.configs["sources"]["sources"] if s["category"] == "proxy_subscription_ip"]
         self.assertEqual(subscriptions, [])
+
+    def test_google_owned_ranges_only_map_prefixes_to_network_organization(self):
+        catalog = self.configs["sources"]
+        source = next(row for row in catalog["sources"] if row["id"] == "google-network-organization")
+        self.assertEqual(source["public_fields"], ["network_organization"])
+        self.assertEqual(source["coverage"], {"kind": "positive_only", "scope": "prefix"})
+        self.assertEqual(source["signals"], [])
+        self.assertEqual(source["field_mappings"], {
+            "ipv4Prefix": "network_organization", "ipv6Prefix": "network_organization",
+            "syncToken": None, "creationTime": None,
+        })
+        self.assertEqual(source["publication_proof"], {
+            "kind": "embedded", "locator": "https://www.gstatic.com/ipranges/goog.json", "field": "syncToken",
+        })
+        self.assertEqual(source["license"]["distribution"], "user_authorized_educational_use")
+        self.assertEqual(source["license"]["attribution"]["name"], "Google")
+        for raw, public in [("syncToken", "network_organization"), ("creationTime", "network_organization"),
+                            ("ipv4Prefix", "isp"), ("ipv6Prefix", "organization"), ("ipv6Prefix", "origins")]:
+            changed = copy.deepcopy(source)
+            changed["field_mappings"][raw] = public
+            with self.subTest(raw=raw, public=public), self.assertRaises(ContractError):
+                validate_schema("sources", {**catalog, "sources": [changed]})
+
+    def test_community_phishing_reports_share_a_family_and_keep_reporter_data_private(self):
+        catalog = self.configs["sources"]
+        by_id = {source["id"]: source for source in catalog["sources"]}
+        weekly = by_id["tweetfeed-week"]
+        other = by_id["ffraud-ip"]
+        self.assertEqual(weekly["evidence_family"], other["evidence_family"])
+        self.assertEqual(weekly["trust"]["correlation_group"], other["trust"]["correlation_group"])
+        self.assertNotEqual(weekly["source_group"], other["source_group"])
+        self.assertEqual(weekly["coverage"], {"kind": "positive_only", "scope": "exact_ip"})
+        self.assertEqual(weekly["signals"], ["fraud"])
+        self.assertEqual(weekly["public_fields"], ["reason_flags"])
+        self.assertEqual(weekly["field_mappings"], {
+            "date": None, "user": None, "type": None, "value": "reason_flags",
+            "tags": "reason_flags", "tweet_url": None,
+        })
+        for field in ("date", "user", "tweet_url"):
+            source = copy.deepcopy(weekly)
+            source["field_mappings"][field] = "reason_flags"
+            with self.subTest(field=field), self.assertRaises(ContractError):
+                validate_schema("sources", {**catalog, "sources": [source]})
+
+    def test_delegated_country_is_a_prefix_registration_fact(self):
+        catalog = self.configs["sources"]
+        source = next(row for row in catalog["sources"] if row["id"] == "nro-delegated-registration")
+        self.assertEqual(source["coverage"], {"kind": "positive_only", "scope": "prefix"})
+        self.assertEqual(source["public_fields"], ["registration_country"])
+        self.assertEqual(source["signals"], [])
+        self.assertEqual(source["field_mappings"], {
+            "registry": None, "cc": "registration_country", "type": None,
+            "start": None, "value": None, "status": None,
+        })
+        self.assertEqual(source["publication_proof"], {
+            "kind": "embedded", "locator": source["download"]["url"], "field": "header.serial",
+        })
+        self.assertEqual(source["fixture"]["payload_format"], "nro-delegated-excerpt")
+        for field in ("physical_country", "asn_country", "isp", "organization"):
+            changed = copy.deepcopy(source)
+            changed["field_mappings"]["cc"] = field
+            with self.subTest(field=field), self.assertRaises(ContractError):
+                validate_schema("sources", {**catalog, "sources": [changed]})
+
+    def test_azure_appservice_limits_hosting_evidence_to_exact_service_addresses(self):
+        catalog = self.configs["sources"]
+        source = next(row for row in catalog["sources"] if row["id"] == "azure-appservice-public")
+        self.assertEqual(source["coverage"], {"kind": "positive_only", "scope": "exact_ip"})
+        self.assertEqual(source["signals"], ["hosting"])
+        self.assertEqual(source["public_fields"], ["reason_flags"])
+        self.assertEqual(source["field_mappings"]["properties.addressPrefixes"], "reason_flags")
+        for name in ("id", "name", "properties.systemService"):
+            self.assertIsNone(source["field_mappings"][name])
+            changed = copy.deepcopy(source)
+            changed["field_mappings"][name] = "reason_flags"
+            with self.subTest(name=name), self.assertRaises(ContractError):
+                validate_schema("sources", {**catalog, "sources": [changed]})
+
+    def test_root_zone_anycast_is_exact_and_only_maps_the_address(self):
+        catalog = self.configs["sources"]
+        root = next(source for source in catalog["sources"] if source["id"] == "iana-root-anycast")
+        self.assertEqual(root["coverage"], {"kind": "mapping", "scope": "exact_ip"})
+        self.assertEqual(root["public_fields"], ["anycast"])
+        self.assertEqual(root["signals"], [])
+        self.assertEqual(root["field_mappings"], {"ip": "anycast", "type": None, "observed_at": None})
+        self.assertEqual(root["publication_proof"], {
+            "kind": "embedded", "locator": root["download"]["url"], "field": "soa.serial",
+        })
+        self.assertTrue(root["license"]["attribution_required"])
+        self.assertEqual(root["license"]["distribution"], "user_authorized_educational_use")
 
     def test_cli_counts_only_required_capabilities_and_preserves_other_release_blocks(self):
         result = subprocess.run([sys.executable, str(ROOT / "tools/validate_blueprint.py"), "--now", "2026-11-08T00:00:00Z", "--require-production"],
                                 cwd=ROOT, capture_output=True, text=True, check=False)
         self.assertEqual(result.returncode, 2, result.stderr)
-        self.assertIn("12/12 required capabilities", result.stdout)
+        self.assertIn("7/7 required capabilities", result.stdout)
         self.assertIn("Observed risk: positive evidence only", result.stdout)
         production_line = next(line for line in result.stdout.splitlines() if line.startswith("Production BLOCKED"))
         self.assertNotIn("numeric_quality", production_line)
@@ -55,6 +147,15 @@ class ConfigurationTests(unittest.TestCase):
             invalid["unexpected"] = True
             with self.subTest(name=name), self.assertRaises(ContractError):
                 validate_schema(name, invalid)
+
+    def test_active_routing_feed_keeps_exact_discovery_guard(self):
+        valid = copy.deepcopy(self.configs['sources'])
+        candidate = next(source for source in valid['sources'] if source['id'] == 'caida-asrel2')
+        self.assertEqual(candidate['admission'], 'active')
+        validate_sources(valid)
+        candidate['download']['url'] = 'https://publicdata.caida.org/datasets/as-relationships/serial-2/20261101.as-rel2.txt.bz2'
+        with self.assertRaisesRegex(ContractError, 'deterministic current-snapshot discovery'):
+            validate_sources(valid)
 
     def test_unknown_nested_source_keys_and_obsolete_enabled_rejected(self):
         for path in [("enabled",), ("fixture", "extra"), ("parser", "extra"), ("license", "extra")]:

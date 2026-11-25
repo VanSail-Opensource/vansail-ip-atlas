@@ -6,6 +6,7 @@ import (
 	"os"
 	"reflect"
 	"testing"
+	"time"
 
 	"vansail-ip-atlas/internal/intelligence"
 	"vansail-ip-atlas/internal/via3"
@@ -57,7 +58,7 @@ func TestVerifiedGlobalVRPAbsenceSurvivesEmptySpatialBucket(t *testing.T) {
 	state.Sources[0].Records = records
 	for _, verified := range []bool{false, true} {
 		seen := 0
-		err := IntelligenceProducer(state, policy, state.EvaluatedAt, MaterializationInputs{VRPComplete: true, verifiedEmptyVRP: verified})(context.Background(), func(record via3.PublicRecord) error {
+		err := IntelligenceProducer(state, policy, state.EvaluatedAt, MaterializationInputs{VRPComplete: true, RPKIObservedAt: state.EvaluatedAt, RPKICoverageValidUntil: state.EvaluatedAt.Add(time.Hour), verifiedEmptyVRP: verified})(context.Background(), func(record via3.PublicRecord) error {
 			if record.Kind == 9 {
 				seen++
 				want := uint8(0)
@@ -155,6 +156,76 @@ func TestBulkMaterializerCrossPartitionASNContextAndCanonicalParity(t *testing.T
 		answer, err := got.ClassC(ctx, q)
 		if err != nil || !reflect.DeepEqual(answer, want) {
 			t.Fatalf("/24 changed at %s: %v", q, err)
+		}
+	}
+}
+
+func TestBulkMaterializerNoOriginsPreservesClusteredRiskAndNeighbors(t *testing.T) {
+	state, policy, _, _, _ := intelligenceFixture(t)
+	state.Sources[0].Records = nil
+	for i := 0; i < 12; i++ {
+		prefix := netip.PrefixFrom(netip.AddrFrom4([4]byte{8, 8, byte(i), 0}), 24)
+		state.Sources[0].Records = append(state.Sources[0].Records,
+			intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordGeo, Geo: &intelligence.GeoEvidence{Prefix: prefix, Family: "synthetic-geo", PhysicalCountry: "US", Weight: 70, Current: true}},
+			intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordEvidence, Evidence: &intelligence.Evidence{Address: prefix.Addr().Next(), Scope: intelligence.Exact, Family: "synthetic-risk", Signal: "abuse", Weight: 70, Current: true, SourcePublishedAt: state.EvaluatedAt}})
+	}
+	ctx := context.Background()
+	baseline := testOptions(t)
+	baseline.Limits = DefaultLimits()
+	if _, err := Build(ctx, baseline, IntelligenceProducer(state, policy, state.EvaluatedAt)); err != nil {
+		t.Fatal(err)
+	}
+	actual := testOptions(t)
+	actual.Limits = DefaultLimits()
+	spool, err := newBulkSpool(actual.Workspace, state.EvaluatedAt, state.PolicyHash, actual.Limits.ScratchBytes, func() uint64 { return 0 })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(spool.root)
+	spool.batchRecords = 4
+	if _, err = Build(ctx, actual, bulkIntelligenceProducer(actual.Workspace, state, policy, state.EvaluatedAt, ProductionInputs{}, spool)); err != nil {
+		t.Fatal(err)
+	}
+	if !spool.hasExact || len(spool.prefixIndex) != 0 {
+		t.Fatal("fixture did not exercise no-origin exact observations")
+	}
+	for _, bucket := range spool.all {
+		if len(bucket.parts) > 0 && bucket.prefix.Bits() > 1 {
+			goto narrowed
+		}
+	}
+	t.Fatal("fixture did not subdivide normalized spatial data")
+narrowed:
+	want, err := via3.OpenRelease(baseline.Output, func() int64 { return baseline.Clock })
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := via3.OpenRelease(actual.Output, func() int64 { return actual.Clock })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range []string{"8.8.0.0", "8.8.0.1", "8.8.0.2", "8.8.11.1", "8.8.11.255", "8.8.12.1", "8.9.0.1", "1.1.1.1"} {
+		a, err := want.Lookup(ctx, query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := got.Lookup(ctx, query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a.ReleaseID = b.ReleaseID
+		if !reflect.DeepEqual(a, b) {
+			t.Fatalf("no-origin lookup changed at %s: want=%+v got=%+v", query, a, b)
+		}
+	}
+	for _, query := range []string{"8.8.0.0", "8.8.11.0"} {
+		a, err := want.ClassC(ctx, query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := got.ClassC(ctx, query)
+		if err != nil || !reflect.DeepEqual(a, b) {
+			t.Fatalf("no-origin /24 changed at %s: %v", query, err)
 		}
 	}
 }

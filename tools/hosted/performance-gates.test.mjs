@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { previewBrowserPlan } from './preview-browser-plan.mjs'
 import { graph24FPSComparison, graphVisibleNodeCount, localGateResult } from './performance-gates.mjs'
 
 test('an actual budget failure makes the measurement process fail', () => {
@@ -59,4 +60,33 @@ test('offscreen or clipped circles cannot satisfy the actual graph population', 
   assert.equal(graphVisibleNodeCount({...sample,svg_bounds:{...sample.svg_bounds,right:700}}),23)
   sample.circles[0].left=NaN
   assert.equal(graphVisibleNodeCount(sample),23)
+})
+
+const env = {
+  GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'VanSail-Opensource/vansail-ip-atlas', GITHUB_REF: 'refs/heads/main',
+  GITHUB_SHA: 'a'.repeat(40), GITHUB_RUN_ID: '45045443442', GITHUB_RUN_ATTEMPT: '2',
+}
+
+test('all nine shards reproduce exactly the full serial browser workload', () => {
+  const full = previewBrowserPlan({})
+  const ids = ['320-light','320-dark','390-light','390-dark','1280-light','1280-dark','1440-light','1440-dark','queries']
+  const plans = ids.map(ATLAS_PREVIEW_SHARD => previewBrowserPlan({ ...env, ATLAS_PREVIEW_SHARD }))
+  assert.deepEqual(plans.flatMap(plan => plan.populations), full.populations)
+  assert.equal(full.populations.length, 8)
+  assert.equal(full.queries, true)
+  assert.equal(full.identity, null)
+  assert.deepEqual(plans.filter(plan => plan.queries).map(plan => plan.identity.shard), ['queries'])
+  for (const [index, plan] of plans.entries()) {
+    assert.deepEqual(plan.identity, { schema_version: 1, shard: ids[index], head_sha: env.GITHUB_SHA, run_id: env.GITHUB_RUN_ID, run_attempt: env.GITHUB_RUN_ATTEMPT })
+  }
+})
+
+test('empty, unmatched and unbound shard requests fail closed', () => {
+  for (const shard of ['', '320', '320-light/queries', 'all', 'Queries']) {
+    assert.throws(() => previewBrowserPlan({ ...env, ATLAS_PREVIEW_SHARD: shard }))
+  }
+  for (const [key, value] of [
+    ['GITHUB_ACTIONS','false'], ['GITHUB_REPOSITORY','other/repository'], ['GITHUB_REF','refs/pull/1/head'],
+    ['GITHUB_SHA','bad'], ['GITHUB_RUN_ID','0'], ['GITHUB_RUN_ATTEMPT','01'],
+  ]) assert.throws(() => previewBrowserPlan({ ...env, ATLAS_PREVIEW_SHARD: 'queries', [key]: value }))
 })

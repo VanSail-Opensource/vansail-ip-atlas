@@ -47,20 +47,38 @@ func (r quarantineReader) Read(p []byte) (int, error) {
 	return r.reader.Read(p)
 }
 
+var globalV6 = netip.MustParsePrefix("2000::/3")
+
+var excludedAddressSpace = func() []netip.Prefix {
+	var result []netip.Prefix
+	for _, raw := range strings.Fields("0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.0.2.0/24 192.88.99.0/24 192.168.0.0/16 198.18.0.0/15 198.51.100.0/24 203.0.113.0/24 224.0.0.0/4 240.0.0.0/4 2001::/23 2001:db8::/32 2002::/16 3fff::/20") {
+		result = append(result, netip.MustParsePrefix(raw))
+	}
+	return result
+}()
+
 func Public(ip netip.Addr) bool {
 	if !ip.IsValid() || ip.Zone() != "" {
 		return false
 	}
 	ip = ip.Unmap()
-	if !ip.IsValid() || ip.Zone() != "" || !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+	return PublicPrefix(netip.PrefixFrom(ip, ip.BitLen()))
+}
+
+// PublicPrefix checks the complete CIDR, including reserved address space in its interior.
+func PublicPrefix(prefix netip.Prefix) bool {
+	if !prefix.IsValid() || prefix.Addr().Is4In6() || prefix != prefix.Masked() {
 		return false
 	}
-	for _, p := range []string{"0.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "192.0.0.0/24", "192.0.2.0/24", "192.88.99.0/24", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4", "2001::/23", "2001:db8::/32", "2002::/16", "3fff::/20"} {
-		if netip.MustParsePrefix(p).Contains(ip) {
+	if prefix.Addr().Is6() && (prefix.Bits() < globalV6.Bits() || !globalV6.Contains(prefix.Addr())) {
+		return false
+	}
+	for _, denied := range excludedAddressSpace {
+		if prefix.Overlaps(denied) {
 			return false
 		}
 	}
-	return ip.Is4() || netip.MustParsePrefix("2000::/3").Contains(ip)
+	return true
 }
 
 // Decode is all-or-nothing for malformed containers and resource violations.

@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -120,8 +119,10 @@ type TierAnswer struct {
 	Stability    string `json:"stability"`
 }
 type RPKIAnswer struct {
-	Origin uint32 `json:"origin"`
-	Status string `json:"status"`
+	Origin     uint32 `json:"origin"`
+	Status     string `json:"status"`
+	ObservedAt *int64 `json:"observedAt"`
+	ValidUntil *int64 `json:"validUntil"`
 }
 type BGPAnswer struct {
 	Origins       []uint32             `json:"origins"`
@@ -168,7 +169,7 @@ type ASNPrefixPage struct {
 	NextCursor *uint32  `json:"nextCursor"`
 }
 
-func (r *Release) prefixPage(ctx context.Context, s *Shard, row []byte, asn, cursor uint32) (ASNPrefixPage, error) {
+func (r *Release) prefixPage(ctx context.Context, s *Shard, row []byte, asn, cursor uint32, descriptor []byte, budget *answerBudget) (ASNPrefixPage, error) {
 	answer := ASNPrefixPage{ASN: asn, Prefixes: []string{}}
 	count := u32(row, 40)
 	if count == 0 && cursor == 0 {
@@ -177,25 +178,54 @@ func (r *Release) prefixPage(ctx context.Context, s *Shard, row []byte, asn, cur
 	if cursor >= count {
 		return answer, fail("invalid_cursor")
 	}
-	pages, _ := s.Rows(12)
-	j := u32(row, 36) + cursor
-	p := pages[j*16 : (j+1)*16]
+	p := descriptor
+	if len(p) == 0 {
+		p = s.row(12, u32(row, 36)+cursor)
+	}
+	if budget != nil {
+		if err := budget.charge(64 * int(u32(p, 8))); err != nil {
+			return answer, err
+		}
+	}
 	target, err := r.reference(ctx, s, u32(p, 0))
 	if err != nil {
 		return answer, err
 	}
-	if target.Kind != 8 || len(target.RowsMust(2)) != 0 || len(target.RowsMust(3)) != 0 || len(target.RowsMust(7)) != 0 || len(target.RowsMust(12)) != 0 {
+	if target.Kind != 8 || target.rowCount(2) != 0 || target.rowCount(3) != 0 || target.rowCount(7) != 0 || target.rowCount(12) != 0 {
 		return answer, fail("record")
 	}
-	rows, _ := target.Rows(11)
+	physicalRows := target.rowCount(11)
 	first, total := u32(p, 4), u32(p, 8)
-	if !rangeOK(first, total, len(rows)/24) {
+	if !rangeOK(first, total, physicalRows) {
 		return answer, fail("record")
 	}
-	for k := first; k < first+total; k++ {
-		key := rows[k*24 : (k+1)*24]
-		ip, _ := keyAddr(key)
-		answer.Prefixes = append(answer.Prefixes, netip.PrefixFrom(ip, int(key[1])).String())
+	answer.Prefixes = make([]string, total)
+	if target.lookup != nil && len(target.lookup.prefixLabels) == physicalRows {
+		// Strings are immutable metadata; callers always own their slice and
+		// its mutable headers. No decoded shard bytes back these strings.
+		copy(answer.Prefixes, target.lookup.prefixLabels[first:first+total])
+	} else if target.disk != nil && total > 0 {
+		c := target.components()
+		key := target.componentKey(factPrefixes, first, total)
+		if v, ok := c.get(key); ok {
+			copy(answer.Prefixes, v.([]string))
+		} else {
+			target.disk.prefixStrings(first, total, answer.Prefixes)
+			if c.active {
+				c.put(key, slices.Clone(answer.Prefixes), prefixSpanBytes(answer.Prefixes)+24)
+			}
+		}
+	} else if labels := target.cachedPrefixSpan(first, total); labels != nil {
+		copy(answer.Prefixes, labels)
+	} else {
+		for k := first; k < first+total; k++ {
+			key := target.row(11, k)
+			ip, _ := keyAddr(key)
+			answer.Prefixes[k-first] = netip.PrefixFrom(ip, int(key[1])).String()
+		}
+		if physicalRows > prefixPageSize && physicalRows <= prefixObjectRows && s.lookup != nil {
+			r.retainPrefixSpan(s.lookup.references[u32(p, 0)], first, answer.Prefixes)
+		}
 	}
 	if cursor+1 < count {
 		next := cursor + 1
@@ -204,10 +234,11 @@ func (r *Release) prefixPage(ctx context.Context, s *Shard, row []byte, asn, cur
 	return answer, nil
 }
 func (s *Shard) RowsMust(id uint16) []byte { b, _ := s.Rows(id); return b }
-func (r *Release) Prefixes(ctx context.Context, q string, cursor uint32) (ASNPrefixPage, error) {
+func (r *Release) Prefixes(ctx context.Context, q string, cursor uint32) (result ASNPrefixPage, resultErr error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	input, err := querycontract.ParseInput(q)
+	defer recoverNativeRead(&resultErr)
+	input, err := querycontract.ParseValue(q)
 	if err != nil || input.Kind != "asn" {
 		return ASNPrefixPage{}, fail("invalid_input")
 	}
@@ -219,7 +250,7 @@ func (r *Release) Prefixes(ctx context.Context, q string, cursor uint32) (ASNPre
 	if err = r.current(); err != nil {
 		return ASNPrefixPage{}, err
 	}
-	answer, err := r.prefixes(ctx, q, cursor)
+	answer, err := r.prefixes(ctx, input.ASN, cursor)
 	if err == nil {
 		err = ctx.Err()
 	}
@@ -228,20 +259,14 @@ func (r *Release) Prefixes(ctx context.Context, q string, cursor uint32) (ASNPre
 	}
 	return answer, err
 }
-func (r *Release) prefixes(ctx context.Context, q string, cursor uint32) (ASNPrefixPage, error) {
-	input, err := querycontract.ParseInput(q)
-	if err != nil || input.Kind != "asn" {
-		return ASNPrefixPage{}, fail("invalid_input")
-	}
-	asn64, _ := strconv.ParseUint(input.Canonical[2:], 10, 32)
-	asn := uint32(asn64)
-	dest, err := r.destinations(ctx, input)
+func (r *Release) prefixes(ctx context.Context, asn, cursor uint32) (ASNPrefixPage, error) {
+	s, err := r.asnDestination(ctx, asn, 8)
 	if err != nil {
 		return ASNPrefixPage{}, err
 	}
-	if s := dest[8]; s != nil {
+	if s != nil {
 		if row, ok := s.ASNRecord(asn); ok {
-			return r.prefixPage(ctx, s, row, asn, cursor)
+			return r.prefixPage(ctx, s, row, asn, cursor, nil, nil)
 		}
 	}
 	if cursor != 0 {
@@ -258,6 +283,9 @@ type Release struct {
 	activeBytes    int
 	routerBytes    int
 	residentBytes  int
+	native         *nativeIndex
+	closed         bool
+	preparing      bool
 	router         *Shard
 	references     map[string]*objectReference
 	cacheHead      *objectReference
@@ -271,23 +299,38 @@ type Release struct {
 // The metadata is owned by its shard and is released with it on cache eviction.
 // Directory strings reuse canonical manifest hash strings; no mutable answer
 // or caller-owned scalar is retained here.
-// No decoded payload is copied: row slices are views, reference pointers cost
-// one machine word per 40-byte directory row, and the fixed row/depth tables
-// occur at most once per loaded manifest object (<18500). Reference-slot and
-// used-slot counts are likewise bounded by that manifest inventory. Decoded
-// section admission remains unchanged; process RSS still needs full-corpus
-// measurement including this bounded metadata and Go allocator overhead.
+// Prefix search adds one u32 ordinal per 32-byte
+// prefix row (at most 4 MiB for a 32 MiB decoded object), plus fixed family bounds.
+// These are native index metadata, not extra decoded bytes in the shared Go/TS
+// payload profile. They are owned and evicted with the shard; measured process
+// RSS includes their allocation. Reference pointers cost one word per directory
+// row; all metadata/slot populations remain bounded by the validated inventory.
+// Optional canonical prefix strings come from validated logical spans and are
+// charged to the same cache/live budgets as their owning decoded shard.
 type shardLookup struct {
-	rows       [13][]byte
-	widths     [13]int
-	depths     [2][129]bool
-	references []*objectReference
+	rows         [13][]byte
+	widths       [13]int
+	depths       [2][3]uint64
+	references   []*objectReference
+	prefixes     [2]prefixLookup
+	prefixLabels []string
+	prefixSpans  []cachedPrefixSpan
+	owner        *objectReference
+	graphIndex   *pathGraphIndex
+	routerASNs   *routerASNDirectory
+}
+
+type prefixLookup struct {
+	parents  []uint32  // immediate containing prefix, or None; never answer data
+	families [3]uint32 // contiguous ranges in the original address-ordered rows
 }
 
 type objectReference struct {
 	info                 ObjectInfo
 	shard                *Shard
 	size                 int
+	onsite               *indexedShard
+	prefixLabelBytes     int
 	query, cache, router bool
 	previous, next       *objectReference // bounded intrusive FIFO cache links
 }
@@ -298,15 +341,46 @@ func shardLookupMetadata(s *Shard, references []*objectReference) *shardLookup {
 		index.rows[section.ID] = section.Data[8:]
 		index.widths[section.ID] = int(u32(section.Data, 4))
 	}
-	for _, id := range []uint16{1, 8} {
+	for section, id := range []uint16{1, 8} {
 		rows := index.rows[id]
+		prefixes := &index.prefixes[section]
+		// RPKI has repeated prefix keys for distinct origins and retains its
+		// specialized origin-run search. Other validated prefix keys are unique.
+		if s.Kind != 9 {
+			prefixes.parents = make([]uint32, len(rows)/32)
+		}
+		var stack [2][130]uint32 // /0 through /128, plus explicit/exact tie
+		var heights [2]int
 		for p := 0; p < len(rows); p += 32 {
 			family := 0
 			if rows[p] == 6 {
 				family = 1
 			}
-			index.depths[family][rows[p+1]] = true
+			depth := int(rows[p+1])
+			index.depths[family][depth/64] |= 1 << (depth % 64)
+			prefixes.families[family+1]++
+			if s.Kind == 9 {
+				continue
+			}
+			addr, _ := keyAddr(rows[p : p+32])
+			height := heights[family]
+			for height > 0 {
+				previous := int(stack[family][height-1]) * 32
+				start, _ := keyAddr(rows[previous : previous+32])
+				if netip.PrefixFrom(start, int(rows[previous+1])).Contains(addr) {
+					break
+				}
+				height--
+			}
+			ordinal := uint32(p / 32)
+			prefixes.parents[ordinal] = None
+			if height > 0 {
+				prefixes.parents[ordinal] = stack[family][height-1]
+			}
+			stack[family][height] = ordinal
+			heights[family] = height + 1
 		}
+		prefixes.families[2] += prefixes.families[1]
 	}
 	return index
 }
@@ -369,13 +443,14 @@ func validPartition(value string) bool {
 func NewRelease(pointerBytes, manifestBytes []byte, load func(string) ([]byte, error), clock func() int64) (*Release, error) {
 	var pointer Pointer
 	var manifest Manifest
-	if strictJSON(pointerBytes, &pointer) != nil || strictJSON(manifestBytes, &manifest) != nil {
+	if strictJSON(pointerBytes, &pointer) != nil || strictJSON(manifestBytes, &manifest) != nil ||
+		pointer.BrowserSHA256 != "" && !validHash(pointer.BrowserSHA256) {
 		return nil, fail("manifest")
 	}
-	if len(pointerBytes) > 4096 || len(manifestBytes) > 4<<20 || !validHash(pointer.ReleaseID) || !validHash(pointer.ManifestSHA256) || pointer.FormatVersion != 3 || manifest.FormatVersion != 3 || manifest.SchemaVersion != 4 || manifest.Codec != "zstd-1" || (manifest.Mode != "synthetic" && manifest.Mode != "production") || len(manifest.Objects) == 0 || len(manifest.Objects) >= 18500 || pointer.ManifestPath != "/_atlas/releases/"+manifest.ReleaseID+"/manifest.json" || pointer.ReleaseID != manifest.ReleaseID || Hash(manifestBytes) != pointer.ManifestSHA256 || manifest.ValidFrom < 0 || manifest.ValidUntil <= manifest.ValidFrom || manifest.ValidUntil-manifest.ValidFrom > 720*3600 || manifest.ValidUntil > 9007199254740991 {
+	if len(pointerBytes) > 4096 || len(manifestBytes) > 4<<20 || !validHash(pointer.ReleaseID) || !validHash(pointer.ManifestSHA256) || pointer.FormatVersion != 3 || manifest.FormatVersion != 3 || manifest.SchemaVersion != 5 || manifest.Codec != "zstd-1" || (manifest.Mode != "synthetic" && manifest.Mode != "production") || len(manifest.Objects) == 0 || len(manifest.Objects) >= 18500 || pointer.ManifestPath != "/_atlas/releases/"+manifest.ReleaseID+"/manifest.json" || pointer.ReleaseID != manifest.ReleaseID || Hash(manifestBytes) != pointer.ManifestSHA256 || manifest.ValidFrom < 0 || manifest.ValidUntil <= manifest.ValidFrom || manifest.ValidUntil-manifest.ValidFrom > 720*3600 || manifest.ValidUntil > 9007199254740991 {
 		return nil, fail("manifest")
 	}
-	desc := Descriptor{Codec: manifest.Codec, FormatVersion: 3, Mode: manifest.Mode, Objects: manifest.Objects, SchemaVersion: 4, ValidFrom: manifest.ValidFrom, ValidUntil: manifest.ValidUntil}
+	desc := Descriptor{Codec: manifest.Codec, FormatVersion: 3, Mode: manifest.Mode, Objects: manifest.Objects, SchemaVersion: 5, ValidFrom: manifest.ValidFrom, ValidUntil: manifest.ValidUntil}
 	if Hash(canonical(desc)) != manifest.ReleaseID {
 		return nil, fail("manifest")
 	}
@@ -410,7 +485,7 @@ func NewRelease(pointerBytes, manifestBytes []byte, load func(string) ([]byte, e
 		return nil, err
 	}
 	r.router = router
-	r.routerBytes = decodedSize(router)
+	r.routerBytes = r.references[routerHash].size
 	r.references[routerHash].router = true
 	r.endQuery()
 	return r, nil
@@ -428,7 +503,7 @@ func OpenRelease(root string, clock func() int64) (*Release, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewRelease(p, m, func(hash string) ([]byte, error) {
+	r, err := NewRelease(p, m, func(hash string) ([]byte, error) {
 		if len(hash) != 64 {
 			return nil, fail("manifest")
 		}
@@ -446,8 +521,15 @@ func OpenRelease(root string, clock func() int64) (*Release, error) {
 		}
 		return io.ReadAll(io.LimitReader(file, MaxFile))
 	}, clock)
+	if err != nil {
+		return nil, err
+	}
+	return r, nil
 }
 func (r *Release) current() error {
+	if r.closed {
+		return fail("closed")
+	}
 	now := r.Clock()
 	if now < r.Manifest.ValidFrom || now >= r.Manifest.ValidUntil {
 		return fail("expired")
@@ -481,6 +563,14 @@ func (r *Release) objectReference(ctx context.Context, reference *objectReferenc
 				return nil, err
 			}
 		}
+		return reference.shard, nil
+	}
+	if reference.onsite != nil {
+		if err := r.admitReference(reference, reference.onsite.decoded); err != nil {
+			return nil, err
+		}
+		reference.shard = &reference.onsite.shard
+		r.cacheReference(reference)
 		return reference.shard, nil
 	}
 	info := reference.info
@@ -576,10 +666,54 @@ func (r *Release) objectReference(ctx context.Context, reference *objectReferenc
 		}
 	}
 	s.lookup = shardLookupMetadata(&s, references)
+	if s.Kind == 1 {
+		r.prepareRouterASNs(reference, &s)
+	}
+	if s.Kind == 11 || s.Kind == 12 {
+		s.lookup.owner = reference
+	}
+	if !r.preparing {
+		r.preparePrefixLabels(reference, &s)
+	}
 	reference.shard = &s
 	r.cacheReference(reference)
 	return &s, nil
 }
+
+// Prefix pages normally contain at most 256 rows. Preformat only this bounded
+// case, after complete payload validation, and charge the allocation before it
+// is made. Packed files retain only spans that are subsequently requested.
+// Individual strings avoid keeping an entire page alive for a one-prefix answer.
+func (r *Release) preparePrefixLabels(reference *objectReference, shard *Shard) {
+	if shard.Kind != 8 || shard.lookup == nil {
+		return
+	}
+	rows, _ := shard.Rows(11)
+	count := len(rows) / 24
+	if count == 0 || count > prefixPageSize {
+		return
+	}
+	// A string header occupies at most 16 bytes on supported Go architectures;
+	// canonical IPv6 prefix text is at most 43 bytes, including /128.
+	reserved := count * (16 + 43)
+	if !r.reservePrefixMetadata(reference, reserved) {
+		return
+	}
+	labels := make([]string, count)
+	used := count * 16
+	for i := range labels {
+		row := rows[i*24 : (i+1)*24]
+		address, _ := keyAddr(row)
+		labels[i] = netip.PrefixFrom(address, int(row[1])).String()
+		used += len(labels[i])
+	}
+	reference.size -= reserved - used
+	r.residentBytes -= reserved - used
+	r.activeBytes -= reserved - used
+	reference.prefixLabelBytes = used
+	shard.lookup.prefixLabels = labels
+}
+
 func (r *Release) reference(ctx context.Context, from *Shard, index uint32) (*Shard, error) {
 	if from.lookup != nil {
 		if uint64(index) >= uint64(len(from.lookup.references)) {
@@ -614,38 +748,94 @@ func (r *Release) label(ctx context.Context, from *Shard, row []byte, p int, tar
 	if dictionary.Kind != 14 {
 		return nil, fail("record")
 	}
-	offsets, _ := dictionary.Rows(5)
-	text, _ := dictionary.Rows(6)
-	if uint64(id)+1 >= uint64(len(offsets)/4) {
+	if uint64(id)+1 >= uint64(dictionary.rowCount(5)) {
 		return nil, fail("record")
 	}
-	return labels.add(text[u32(offsets, int(id)*4):u32(offsets, (int(id)+1)*4)], target)
+	var c *nativeComponents
+	var key componentKey
+	if dictionary.disk != nil {
+		c = dictionary.components()
+		if c.active {
+			key = dictionary.componentKey(factLabel, id, 0)
+			if v, ok := c.get(key); ok {
+				return labels.addKnown(v.(string), target)
+			}
+		}
+	}
+	offsets := dictionary.rowSpan(5, id, 2)
+	first, end := u32(offsets, 0), u32(offsets, 4)
+	value := dictionary.rowSpan(6, first, end-first)
+	if c != nil && c.active {
+		text := string(value)
+		if c.put(key, text, len(text)+16) {
+			return labels.addKnown(text, target)
+		}
+	}
+	return labels.add(value, target)
 }
 func (s *Shard) ASNRecord(asn uint32) ([]byte, bool) {
-	index, _ := s.Rows(2)
-	i := sort.Search(len(index)/8, func(i int) bool { return u32(index, i*8) >= asn })
-	if i == len(index)/8 || u32(index, i*8) != asn {
+	if s.lookup != nil && s.lookup.routerASNs != nil {
+		ordinal, ok := s.lookup.routerASNs.ordinal(asn)
+		if !ok {
+			return nil, false
+		}
+		index := u32(s.lookup.rows[2], int(ordinal)*8+4)
+		return s.Record(index), true
+	}
+	if s.disk != nil && s.components().active {
+		row := s.cachedASN(asn).row
+		return row, len(row) != 0
+	}
+	first, _, ok := s.asnBounds(asn)
+	if !ok {
 		return nil, false
 	}
-	return s.Record(u32(index, i*8+4)), true
+	return s.Record(first), true
 }
 
 type destinationSet [15]*Shard
 
-func (r *Release) destinations(ctx context.Context, input querycontract.Input) (destinationSet, error) {
-	var row []byte
-	var ok bool
-	if input.Kind == "ip" {
-		row, _, ok = r.router.findPrefix(netip.MustParseAddr(input.Canonical))
-	} else {
-		n, _ := strconv.ParseUint(input.Canonical[2:], 10, 32)
-		return r.asnDestinations(ctx, uint32(n))
+func (d destinationSet) ipRecord(kind uint16, addr netip.Addr) ([]byte, netip.Prefix) {
+	if s := d[kind]; s != nil {
+		row, p, _ := s.findPrefix(addr)
+		return row, p
 	}
-	return r.rowDestinations(ctx, row, ok)
+	return nil, netip.Prefix{}
 }
+
 func (r *Release) asnDestinations(ctx context.Context, asn uint32) (destinationSet, error) {
 	row, ok := r.router.ASNRecord(asn)
 	return r.rowDestinations(ctx, row, ok)
+}
+
+// Relationship lookup needs only its own routed shard. Loading every ASN fact
+// object for every observed adjacency would decode and pin unrelated data.
+func (r *Release) asnDestination(ctx context.Context, asn uint32, kind uint16) (*Shard, error) {
+	row, ok := r.router.ASNRecord(asn)
+	return r.rowDestination(ctx, row, ok, kind)
+}
+
+func (r *Release) rowDestination(ctx context.Context, row []byte, ok bool, kind uint16) (*Shard, error) {
+	if !ok {
+		return nil, nil
+	}
+	id, found := r.router.destinationID(row, kind)
+	if !found {
+		return nil, nil
+	}
+	return r.reference(ctx, r.router, id)
+}
+
+func (s *Shard) destinationID(row []byte, kind uint16) (uint32, bool) {
+	ints, _ := s.Rows(4)
+	directory, _ := s.Rows(7)
+	for j := uint32(0); j < uint32(u16(row, 4)); j++ {
+		object := u32(ints, int(u32(row, 0)+j)*4)
+		if u16(directory, int(object)*40) == kind {
+			return object, true
+		}
+	}
+	return 0, false
 }
 func (r *Release) rowDestinations(ctx context.Context, row []byte, ok bool) (destinationSet, error) {
 	var out destinationSet
@@ -693,18 +883,65 @@ type qualityLookupValues struct {
 	exact, prefix, asn, neighbors float64
 	score                         uint8
 }
+
+// Dense IP answers use one caller-owned allocation for the four present
+// families. Sparse coverage still creates only the individual values it has.
+type ipLookupValues struct {
+	geo     geoLookupValues
+	network networkLookupValues
+	usage   usageLookupValues
+	quality qualityLookupValues
+}
+
+type singleOriginValues struct {
+	values    [1]asnLookupValues
+	aggregate [1]ASNAnswer
+	tier      [1]TierAnswer
+	rpki      [1]RPKIAnswer
+}
+
 type asnLookupValues struct {
 	country, name, organization string
 	risk                        float64
 	customerCone, transitDegree uint32
 }
 
+// Wire country values are a fixed two-letter enum. Their immutable spelling
+// needs no per-answer byte allocation; each mutable string header is still
+// stored in its own caller-owned answer block.
+const countrySpellings = "AAABACADAEAFAGAHAIAJAKALAMANAOAPAQARASATAUAVAWAXAYAZ" +
+	"BABBBCBDBEBFBGBHBIBJBKBLBMBNBOBPBQBRBSBTBUBVBWBXBYBZ" +
+	"CACBCCCDCECFCGCHCICJCKCLCMCNCOCPCQCRCSCTCUCVCWCXCYCZ" +
+	"DADBDCDDDEDFDGDHDIDJDKDLDMDNDODPDQDRDSDTDUDVDWDXDYDZ" +
+	"EAEBECEDEEEFEGEHEIEJEKELEMENEOEPEQERESETEUEVEWEXEYEZ" +
+	"FAFBFCFDFEFFFGFHFIFJFKFLFMFNFOFPFQFRFSFTFUFVFWFXFYFZ" +
+	"GAGBGCGDGEGFGGGHGIGJGKGLGMGNGOGPGQGRGSGTGUGVGWGXGYGZ" +
+	"HAHBHCHDHEHFHGHHHIHJHKHLHMHNHOHPHQHRHSHTHUHVHWHXHYHZ" +
+	"IAIBICIDIEIFIGIHIIIJIKILIMINIOIPIQIRISITIUIVIWIXIYIZ" +
+	"JAJBJCJDJEJFJGJHJIJJJKJLJMJNJOJPJQJRJSJTJUJVJWJXJYJZ" +
+	"KAKBKCKDKEKFKGKHKIKJKKKLKMKNKOKPKQKRKSKTKUKVKWKXKYKZ" +
+	"LALBLCLDLELFLGLHLILJLKLLLMLNLOLPLQLRLSLTLULVLWLXLYLZ" +
+	"MAMBMCMDMEMFMGMHMIMJMKMLMMMNMOMPMQMRMSMTMUMVMWMXMYMZ" +
+	"NANBNCNDNENFNGNHNINJNKNLNMNNNONPNQNRNSNTNUNVNWNXNYNZ" +
+	"OAOBOCODOEOFOGOHOIOJOKOLOMONOOOPOQOROSOTOUOVOWOXOYOZ" +
+	"PAPBPCPDPEPFPGPHPIPJPKPLPMPNPOPPPQPRPSPTPUPVPWPXPYPZ" +
+	"QAQBQCQDQEQFQGQHQIQJQKQLQMQNQOQPQQQRQSQTQUQVQWQXQYQZ" +
+	"RARBRCRDRERFRGRHRIRJRKRLRMRNRORPRQRRRSRTRURVRWRXRYRZ" +
+	"SASBSCSDSESFSGSHSISJSKSLSMSNSOSPSQSRSSSTSUSVSWSXSYSZ" +
+	"TATBTCTDTETFTGTHTITJTKTLTMTNTOTPTQTRTSTTTUTVTWTXTYTZ" +
+	"UAUBUCUDUEUFUGUHUIUJUKULUMUNUOUPUQURUSUTUUUVUWUXUYUZ" +
+	"VAVBVCVDVEVFVGVHVIVJVKVLVMVNVOVPVQVRVSVTVUVVVWVXVYVZ" +
+	"WAWBWCWDWEWFWGWHWIWJWKWLWMWNWOWPWQWRWSWTWUWVWWWXWYWZ" +
+	"XAXBXCXDXEXFXGXHXIXJXKXLXMXNXOXPXQXRXSXTXUXVXWXXXYXZ" +
+	"YAYBYCYDYEYFYGYHYIYJYKYLYMYNYOYPYQYRYSYTYUYVYWYXYYYZ" +
+	"ZAZBZCZDZEZFZGZHZIZJZKZLZMZNZOZPZQZRZSZTZUZVZWZXZYZZ"
+
 func countryInto(v uint16, target *string) *string {
 	if v == 0 {
 		return nil
 	}
-	n := int(v) - 1
-	*target = string([]byte{byte(n/26) + 'A', byte(n%26) + 'A'})
+	n := (int(v) - 1) * 2
+	*target = countrySpellings[n : n+2]
 	return target
 }
 func confidence(v byte) string { return []string{"unrated", "low", "medium", "high"}[v] }
@@ -733,18 +970,29 @@ func riskValue(row []byte, p int, bit uint, target *float64) *float64 {
 	return target
 }
 func origins(s *Shard, row []byte) []uint32 {
-	ints, _ := s.Rows(4)
+	var c *nativeComponents
+	var key componentKey
+	if s.disk != nil && u32(row, 8) != 0 {
+		c = s.components()
+		key = s.componentKey(factOrigins, u32(row, 4), u32(row, 8))
+		if v, ok := c.get(key); ok {
+			return slices.Clone(v.([]uint32))
+		}
+	}
+	ints := s.rowSpan(4, u32(row, 4), u32(row, 8))
 	out := make([]uint32, u32(row, 8))
 	for i := range out {
-		out[i] = u32(ints, (int(u32(row, 4))+i)*4)
+		out[i] = u32(ints, i*4)
+	}
+	if c != nil && c.active {
+		c.put(key, slices.Clone(out), len(out)*4+24)
 	}
 	return out
 }
 
-func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	input, err := querycontract.ParseInput(q)
+func (r *Release) lookupOnce(ctx context.Context, q string) (result LookupAnswer, resultErr error) {
+	defer recoverNativeRead(&resultErr)
+	input, err := querycontract.ParseValue(q)
 	if err != nil {
 		return LookupAnswer{}, err
 	}
@@ -757,19 +1005,36 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 		return LookupAnswer{}, err
 	}
 	answer := LookupAnswer{Q: input.Canonical, Kind: input.Kind, ReleaseID: r.Manifest.ReleaseID, Synthetic: r.Manifest.Mode == "synthetic", ValidUntil: r.Manifest.ValidUntil, ASNs: []ASNAnswer{}, BGP: BGPAnswer{Origins: []uint32{}, Paths: []PathAnswer{}, Relationships: []RelationshipAnswer{}, Tier1: []TierAnswer{}, RPKI: []RPKIAnswer{}}}
-	dest, err := r.destinations(ctx, input)
-	if err != nil {
-		return answer, err
+	addr := input.Address
+	var dest destinationSet
+	if input.Kind == "ip" {
+		row, _, ok := r.router.findPrefix(addr)
+		dest, err = r.rowDestinations(ctx, row, ok)
+		if err != nil {
+			return answer, err
+		}
 	}
-	var addr netip.Addr
 	var announcement netip.Prefix
 	var geoValues *geoLookupValues
 	networkOriginsKnown := false
 	if input.Kind == "ip" {
-		addr = netip.MustParseAddr(input.Canonical)
+		geoRow, _ := dest.ipRecord(2, addr)
+		networkRow, networkPrefix := dest.ipRecord(4, addr)
+		usageRow, _ := dest.ipRecord(5, addr)
+		qualityRow, _ := dest.ipRecord(6, addr)
+		var network *networkLookupValues
+		var usage *usageLookupValues
+		var quality *qualityLookupValues
+		if geoRow != nil && networkRow != nil && usageRow != nil && qualityRow != nil {
+			all := new(ipLookupValues)
+			geoValues, network, usage, quality = &all.geo, &all.network, &all.usage, &all.quality
+		}
+
 		if s := dest[2]; s != nil {
-			if row, _, ok := s.findPrefix(addr); ok {
-				geoValues = &geoLookupValues{}
+			if row := geoRow; row != nil {
+				if geoValues == nil {
+					geoValues = new(geoLookupValues)
+				}
 				g := &geoValues.answer
 				g.Country, g.RegistrationCountry = countryInto(u16(row, 4), &geoValues.country), countryInto(u16(row, 6), &geoValues.registration)
 				if g.Region, err = r.label(ctx, s, row, 8, &geoValues.region, &labels); err != nil {
@@ -795,11 +1060,15 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 			}
 		}
 		if s := dest[4]; s != nil {
-			if row, prefix, ok := s.findPrefix(addr); ok {
+			if row, prefix := networkRow, networkPrefix; row != nil {
 				if err := budget.charge(4096 + 16*int(u32(row, 8))); err != nil {
 					return answer, err
 				}
-				values := &networkLookupValues{answer: NetworkAnswer{Prefix: prefix.String(), Origins: origins(s, row)}}
+				values := network
+				if values == nil {
+					values = new(networkLookupValues)
+				}
+				values.answer = NetworkAnswer{Prefix: prefix.String(), Origins: origins(s, row)}
 				n := &values.answer
 				if n.Name, err = r.label(ctx, s, row, 16, &values.name, &labels); err != nil {
 					return answer, err
@@ -819,8 +1088,12 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 			}
 		}
 		if s := dest[5]; s != nil {
-			if row, _, ok := s.findPrefix(addr); ok {
-				values := &usageLookupValues{answer: UsageAnswer{Type: usageName(row[4]), Assignment: []string{"unknown", "native", "broadcast_or_routed"}[row[5]]}}
+			if row := usageRow; row != nil {
+				values := usage
+				if values == nil {
+					values = new(usageLookupValues)
+				}
+				values.answer = UsageAnswer{Type: usageName(row[4]), Assignment: []string{"unknown", "native", "broadcast_or_routed"}[row[5]]}
 				u := &values.answer
 				if present(row, 7) {
 					values.anycast = row[6]&1 != 0
@@ -840,8 +1113,11 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 			}
 		}
 		if s := dest[6]; s != nil {
-			if row, _, ok := s.findPrefix(addr); ok {
-				values := &qualityLookupValues{}
+			if row := qualityRow; row != nil {
+				values := quality
+				if values == nil {
+					values = new(qualityLookupValues)
+				}
 				q := &values.answer
 				*q = QualityAnswer{Coverage: coverageAnswer(row[11], addr.Is6()), Confidence: confidence(row[10]), Reasons: reasons(u32(row, 4)), Layers: LayerAnswer{Exact: riskValue(row, 12, 10, &values.exact), Prefix: riskValue(row, 16, 11, &values.prefix), ASN: riskValue(row, 20, 12, &values.asn), Neighbors: riskValue(row, 24, 13, &values.neighbors)}}
 				if present(row, 9) {
@@ -867,20 +1143,42 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 			}
 		}
 	} else {
-		n, _ := strconv.ParseUint(input.Canonical[2:], 10, 32)
-		answer.BGP.Origins = []uint32{uint32(n)}
+		answer.BGP.Origins = []uint32{input.ASN}
 	}
+	var asnValues []asnLookupValues
+	var pairStorage [64]uint64
+	ordered := pairStorage[:0]
+	var sortedPairs bool
+	var components graphComponents
 	for _, asn := range answer.BGP.Origins {
 		asndest, err := r.asnDestinations(ctx, asn)
 		if err != nil {
 			return answer, err
 		}
 		if s := asndest[8]; s != nil {
-			if row, ok := s.ASNRecord(asn); ok {
+			var row, descriptor []byte
+			if s.disk != nil && s.components().active {
+				f := s.cachedASN(asn)
+				row, descriptor = f.row, f.firstPage
+			} else if found, ok := s.ASNRecord(asn); ok {
+				row = found
+			}
+			if len(row) != 0 {
 				if err := budget.charge(4096); err != nil {
 					return answer, err
 				}
-				values := &asnLookupValues{}
+				if asnValues == nil {
+					if len(answer.BGP.Origins) == 1 {
+						single := new(singleOriginValues)
+						asnValues = single.values[:]
+						answer.ASNs = single.aggregate[:0]
+						answer.BGP.Tier1 = single.tier[:0]
+						answer.BGP.RPKI = single.rpki[:0]
+					} else {
+						asnValues = make([]asnLookupValues, len(answer.BGP.Origins))
+					}
+				}
+				values := &asnValues[len(answer.ASNs)]
 				a := ASNAnswer{ASN: asn, Country: countryInto(u16(row, 24), &values.country), Risk: riskValue(row, 28, 23, &values.risk), RiskBand: []string{"unknown", "low", "medium", "high"}[row[26]], Confidence: confidence(row[27]), Prefixes: []string{}, NetworkClass: className(row[52]), Stability: stability(row[53])}
 				if a.Name, err = r.label(ctx, s, row, 8, &values.name, &labels); err != nil {
 					return answer, err
@@ -896,14 +1194,7 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 					values.transitDegree = u32(row, 48)
 					a.TransitDegree = &values.transitDegree
 				}
-				if u32(row, 40) > 0 {
-					pages, _ := s.Rows(12)
-					p := pages[u32(row, 36)*16 : (u32(row, 36)+1)*16]
-					if err := budget.charge(64 * int(u32(p, 8))); err != nil {
-						return answer, err
-					}
-				}
-				page, err := r.prefixPage(ctx, s, row, asn, 0)
+				page, err := r.prefixPage(ctx, s, row, asn, 0, descriptor, budget)
 				if err != nil {
 					return answer, err
 				}
@@ -915,42 +1206,26 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 			}
 		}
 		if s := asndest[11]; s != nil {
-			if first, end, ok := s.asnBounds(asn); ok {
-				if end-first > 12 {
-					return answer, fail("record")
+			graph := r.pathGraph(s, asn)
+			if graph != nil && graph.fits(budget) {
+				answer.BGP.Paths = graph.appendPaths(answer.BGP.Paths, asn, budget)
+				sortedPairs = len(answer.BGP.Origins) == 1
+				if sortedPairs {
+					ordered = graph.pairs
+					components.prepare(s, asn, graph)
+				} else {
+					ordered = append(ordered, graph.pairs...)
 				}
-				segments, _ := s.Rows(9)
-				ints, _ := s.Rows(4)
-				for ordinal := first; ordinal < end; ordinal++ {
-					row := s.Record(ordinal)
-					count := int(u16(row, 12))
-					total := 0
-					for j := u32(row, 8); j < u32(row, 8)+uint32(u16(row, 12)); j++ {
-						seg := segments[j*12 : (j+1)*12]
-						if err := budget.path(int(u32(seg, 8))); err != nil {
-							return answer, err
-						}
-						total += int(u32(seg, 8))
+			} else {
+				firstPath := len(answer.BGP.Paths)
+				answer.BGP.Paths, err = s.appendOriginPaths(answer.BGP.Paths, asn, budget)
+				if err != nil {
+					return answer, err
+				}
+				for _, path := range answer.BGP.Paths[firstPath:] {
+					if path.GraphEligible {
+						ordered = appendPathPairs(ordered, path.ASNs)
 					}
-					// Flat and per-segment values have disjoint caller-owned ranges.
-					// Full slice bounds also prevent an append from overwriting the
-					// next range. The complete allocation is reserved above first.
-					values := make([]uint32, 2*total)
-					p := PathAnswer{Origin: asn, ASNs: values[:total:total], Visibility: []string{"unknown", "low", "medium", "high"}[row[15]], GraphEligible: row[14]&1 != 0, Segments: make([]SegmentAnswer, count)}
-					start := 0
-					for offset := 0; offset < count; offset++ {
-						j := u32(row, 8) + uint32(offset)
-						seg := segments[j*12 : (j+1)*12]
-						end := start + int(u32(seg, 8))
-						a := values[total+start : total+end : total+end]
-						for k := range a {
-							a[k] = u32(ints, (int(u32(seg, 4))+k)*4)
-						}
-						p.Segments[offset] = SegmentAnswer{Type: []string{"", "sequence", "set", "confederation_sequence", "confederation_set"}[seg[0]], ASNs: a}
-						copy(p.ASNs[start:end], a)
-						start = end
-					}
-					answer.BGP.Paths = append(answer.BGP.Paths, p)
 				}
 			}
 		}
@@ -963,57 +1238,34 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 			}
 		}
 		if input.Kind == "ip" {
-			status := "unavailable"
+			observation := RPKIAnswer{Origin: asn, Status: "unavailable"}
 			if s := dest[9]; s != nil {
 				if row, ok := s.FindRPKI(addr, asn, announcement); ok {
-					status = []string{"unavailable", "valid", "invalid", "not_found"}[row[8]]
+					observation.Status = []string{"unavailable", "valid", "invalid", "not_found"}[row[8]]
+					if row[8] != 0 {
+						observedAt, validUntil := int64(u64(row, 16)), int64(u64(row, 24))
+						observation.ObservedAt, observation.ValidUntil = &observedAt, &validUntil
+					}
 				}
 			}
 			if cap(answer.BGP.RPKI) == 0 {
 				answer.BGP.RPKI = make([]RPKIAnswer, 0, len(answer.BGP.Origins))
 			}
-			answer.BGP.RPKI = append(answer.BGP.RPKI, RPKIAnswer{Origin: asn, Status: status})
+			answer.BGP.RPKI = append(answer.BGP.RPKI, observation)
 		}
 	}
 	// Only actual consecutive retained path hops are queried. Relationship runs
 	// may be large; binary lookup avoids allocating or scanning an ASN's degree.
-	pairs := make(map[uint64]bool)
-	for _, path := range answer.BGP.Paths {
-		if !path.GraphEligible {
-			continue
-		}
-		for i := 1; i < len(path.ASNs); i++ {
-			from, to := path.ASNs[i-1], path.ASNs[i]
-			if from != to {
-				pairs[uint64(from)<<32|uint64(to)] = true
-			}
-		}
+	if !sortedPairs {
+		slices.Sort(ordered)
+		ordered = slices.Compact(ordered)
 	}
-	ordered := make([]uint64, 0, len(pairs))
-	for pair := range pairs {
-		ordered = append(ordered, pair)
+	if err := budget.charge(256 * len(ordered)); err != nil {
+		return answer, err
 	}
-	slices.Sort(ordered)
-	for _, pair := range ordered {
-		if err := budget.charge(256); err != nil {
-			return answer, err
-		}
-		if err := ctx.Err(); err != nil {
-			return answer, err
-		}
-		from, to := uint32(pair>>32), uint32(pair)
-		related, err := r.asnDestinations(ctx, from)
-		if err != nil {
-			return answer, err
-		}
-		edge := RelationshipAnswer{From: from, To: to, Relation: "unknown", Observed: true}
-		if s := related[12]; s != nil {
-			if row, ok := s.FindRelationship(from, to); ok {
-				edge.Relation = []string{"unknown", "transit_upstream", "peer", "customer", "sibling"}[row[12]]
-				edge.Inferred = row[13]&2 != 0
-			}
-		}
-		answer.BGP.Relationships = append(answer.BGP.Relationships, edge)
+	answer.BGP.Relationships, err = r.relationshipAnswers(ctx, ordered, &components)
+	if err != nil {
+		return answer, err
 	}
 	labels.finish()
 	if err := ctx.Err(); err != nil {
@@ -1025,13 +1277,16 @@ func (r *Release) Lookup(ctx context.Context, q string) (LookupAnswer, error) {
 	if err := lookupFits(answer); err != nil {
 		return answer, err
 	}
+	r.retainGraphComponents(&components, len(ordered))
 	return answer, nil
 }
 
-func (r *Release) ClassC(ctx context.Context, q string) (*ClassCAnswer, error) {
+func (r *Release) ClassC(ctx context.Context, q string) (result *ClassCAnswer, resultErr error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, err := querycontract.ParseInput(q); err != nil {
+	defer recoverNativeRead(&resultErr)
+	input, err := querycontract.ParseValue(q)
+	if err != nil {
 		return nil, err
 	}
 	r.beginQuery()
@@ -1042,7 +1297,7 @@ func (r *Release) ClassC(ctx context.Context, q string) (*ClassCAnswer, error) {
 	if err := r.current(); err != nil {
 		return nil, err
 	}
-	answer, err := r.classC(ctx, q)
+	answer, err := r.classC(ctx, input.Address)
 	if err == nil {
 		err = answerFits(answer)
 	}
@@ -1054,27 +1309,19 @@ func (r *Release) ClassC(ctx context.Context, q string) (*ClassCAnswer, error) {
 	}
 	return answer, err
 }
-func (r *Release) classC(ctx context.Context, q string) (*ClassCAnswer, error) {
+func (r *Release) classC(ctx context.Context, addr netip.Addr) (*ClassCAnswer, error) {
 	budget := newAnswerBudget()
 	if err := budget.charge(256 * 512); err != nil {
 		return nil, err
 	}
-	input, err := querycontract.ParseInput(q)
-	if err != nil {
-		return nil, err
-	}
-	if input.Kind != "ip" {
-		return nil, nil
-	}
-	addr := netip.MustParseAddr(input.Canonical)
 	if !addr.Is4() {
 		return nil, nil
 	}
-	dest, err := r.destinations(ctx, input)
+	routed, _, known := r.router.findPrefix(addr)
+	s, err := r.rowDestination(ctx, routed, known, 7)
 	if err != nil {
 		return nil, err
 	}
-	s := dest[7]
 	if s == nil {
 		return nil, nil
 	}
@@ -1093,9 +1340,8 @@ func (r *Release) classC(ctx context.Context, q string) (*ClassCAnswer, error) {
 		a[3] = byte(suffix)
 		answer.Cells[suffix] = CellAnswer{IP: netip.AddrFrom4(a).String(), Confidence: "unrated", Coverage: "incomplete", Reasons: []string{}, Usage: "unknown", Origins: []uint32{}}
 	}
-	cells, _ := s.Rows(10)
 	for j := u32(row, 4); j < u32(row, 4)+uint32(u16(row, 8)); j++ {
-		cell := cells[j*32 : (j+1)*32]
+		cell := s.row(10, j)
 		c := &answer.Cells[cell[0]]
 		c.Observed = true
 		c.Confidence = confidence(cell[9])

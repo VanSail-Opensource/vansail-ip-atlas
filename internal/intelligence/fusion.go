@@ -75,6 +75,13 @@ func (g *GeoIndex) Lookup(addr netip.Addr, anycast bool) (GeoResult, error) {
 // index performs LPM first; source names and family IDs never enter GeoResult.
 func FuseGeo(policy Policy, records []GeoEvidence, anycast bool) (GeoResult, error) {
 	byFamily := map[string][]GeoEvidence{}
+	// With two complementary country observations, only the physical-country
+	// voter can support its region. A two-family region policy therefore
+	// resolves both countries independently and stops before place voting.
+	countryPair := len(records) == 2 && policy.GeoSupport[0] > 1 &&
+		(records[0].PhysicalCountry == "" && records[1].RegistrationCountry == "" ||
+			records[1].PhysicalCountry == "" && records[0].RegistrationCountry == "")
+	var physicalOnly, registrationOnly string
 	for _, v := range records {
 		if !v.Current {
 			continue
@@ -87,8 +94,6 @@ func FuseGeo(policy Policy, records []GeoEvidence, anycast bool) (GeoResult, err
 		}
 		v.PhysicalCountry = country(v.PhysicalCountry)
 		v.RegistrationCountry = country(v.RegistrationCountry)
-		v.Region = SafeLabel(v.Region)
-		v.City = SafeLabel(v.City)
 		if v.Prefix.IsValid() {
 			prefix, err := canonicalPrefix(v.Prefix)
 			if err != nil {
@@ -96,19 +101,43 @@ func FuseGeo(policy Policy, records []GeoEvidence, anycast bool) (GeoResult, err
 			}
 			v.Prefix = prefix
 		}
+		// One positive observation supplies both country votes independently.
+		// A policy requiring two families for a region also excludes city and
+		// coordinates, so their labels and coordinate candidates are unused.
+		if len(records) == 1 && policy.GeoSupport[0] > 1 {
+			return geoCountries(v.PhysicalCountry, v.RegistrationCountry), nil
+		}
+		if countryPair {
+			if v.PhysicalCountry != "" {
+				physicalOnly = v.PhysicalCountry
+			}
+			if v.RegistrationCountry != "" {
+				registrationOnly = v.RegistrationCountry
+			}
+			continue
+		}
+		v.Region = SafeLabel(v.Region)
+		v.City = SafeLabel(v.City)
 		byFamily[v.Family] = append(byFamily[v.Family], v)
 	}
+	if countryPair {
+		return geoCountries(physicalOnly, registrationOnly), nil
+	}
+	if len(byFamily) == 0 {
+		return GeoResult{}, nil
+	}
+	families := make([]string, 0, len(byFamily))
+	for family := range byFamily {
+		families = append(families, family)
+	}
+	sort.Strings(families)
 	selectVotes := func(field func(GeoEvidence) string, eligible func(GeoEvidence) bool) []geoVote {
 		votes := []geoVote{}
-		families := make([]string, 0, len(byFamily))
-		for family := range byFamily {
-			families = append(families, family)
-		}
-		sort.Strings(families)
 		for _, family := range families {
 			best := -1.0
 			longest := -2
-			values := map[string]struct{}{}
+			selected := ""
+			conflict := false
 			for _, v := range byFamily[family] {
 				value := field(v)
 				if !eligible(v) || value == "" {
@@ -118,40 +147,27 @@ func FuseGeo(policy Policy, records []GeoEvidence, anycast bool) (GeoResult, err
 				if prefixBits < longest {
 					continue
 				}
-				if prefixBits > longest {
-					longest = prefixBits
-					best = -1
-					values = map[string]struct{}{}
-				}
-				if v.Weight > best {
-					best = v.Weight
-					values = map[string]struct{}{value: {}}
-				} else if v.Weight == best {
-					values[value] = struct{}{}
+				if prefixBits > longest || v.Weight > best {
+					longest, best = prefixBits, v.Weight
+					selected, conflict = value, false
+				} else if v.Weight == best && value != selected {
+					conflict = true
 				}
 			}
-			if len(values) == 1 {
-				for value := range values {
-					votes = append(votes, geoVote{family, value, best})
-				}
+			if selected != "" && !conflict {
+				votes = append(votes, geoVote{family, selected, best})
 			}
 		}
 		return votes
 	}
 	all := func(GeoEvidence) bool { return true }
-	result := GeoResult{}
-	physical, _ := winningPlace(selectVotes(func(v GeoEvidence) string { return v.PhysicalCountry }, all), 1, 0)
-	registration, _ := winningPlace(selectVotes(func(v GeoEvidence) string { return v.RegistrationCountry }, all), 1, 0)
-	if physical != "" {
-		result.PhysicalCountry = &physical
-	}
-	if registration != "" {
-		result.RegistrationCountry = &registration
-	}
+	physical := winningPlace(selectVotes(func(v GeoEvidence) string { return v.PhysicalCountry }, all), 1, 0)
+	registration := winningPlace(selectVotes(func(v GeoEvidence) string { return v.RegistrationCountry }, all), 1, 0)
+	result := geoCountries(physical, registration)
 	if physical == "" {
 		return result, nil
 	}
-	region, _ := winningPlace(selectVotes(func(v GeoEvidence) string { return v.Region }, func(v GeoEvidence) bool { return v.PhysicalCountry == physical }), policy.GeoSupport[0], policy.GeoMargin)
+	region := winningPlace(selectVotes(func(v GeoEvidence) string { return v.Region }, func(v GeoEvidence) bool { return v.PhysicalCountry == physical }), policy.GeoSupport[0], policy.GeoMargin)
 	if region == "" {
 		return result, nil
 	}
@@ -159,7 +175,8 @@ func FuseGeo(policy Policy, records []GeoEvidence, anycast bool) (GeoResult, err
 	if anycast {
 		return result, nil
 	}
-	city, agreeing := winningPlace(selectVotes(func(v GeoEvidence) string { return v.City }, func(v GeoEvidence) bool { return v.PhysicalCountry == physical && v.Region == region }), policy.GeoSupport[1], policy.GeoMargin)
+	cityVotes := selectVotes(func(v GeoEvidence) string { return v.City }, func(v GeoEvidence) bool { return v.PhysicalCountry == physical && v.Region == region })
+	city := winningPlace(cityVotes, policy.GeoSupport[1], policy.GeoMargin)
 	if city == "" {
 		return result, nil
 	}
@@ -168,6 +185,12 @@ func FuseGeo(policy Policy, records []GeoEvidence, anycast bool) (GeoResult, err
 		weight  float64
 		value   Coordinates
 		encoded [9]byte
+	}
+	agreeing := make(map[string]struct{})
+	for _, vote := range cityVotes {
+		if vote.value == city {
+			agreeing[vote.family] = struct{}{}
+		}
 	}
 	candidates := []candidate{}
 	for family := range agreeing {
@@ -204,42 +227,61 @@ func FuseGeo(policy Policy, records []GeoEvidence, anycast bool) (GeoResult, err
 	return result, nil
 }
 
+func geoCountries(physical, registration string) GeoResult {
+	result := GeoResult{}
+	if physical != "" {
+		result.PhysicalCountry = &physical
+	}
+	if registration != "" {
+		result.RegistrationCountry = &registration
+	}
+	return result
+}
+
 type geoVote struct {
 	family, value string
 	weight        float64
 }
 
-func winningPlace(votes []geoVote, support int, margin float64) (string, map[string]struct{}) {
+// selectVotes supplies at most one positive-weight vote per independent family.
+func winningPlace(votes []geoVote, support int, margin float64) string {
+	if len(votes) == 0 || len(votes) < support {
+		return ""
+	}
+	if len(votes) == 1 {
+		if margin > 1 {
+			return ""
+		}
+		return votes[0].value
+	}
+	type tally struct {
+		weight   float64
+		families int
+	}
 	total := 0.0
-	weights := map[string]float64{}
-	families := map[string]map[string]struct{}{}
+	places := make(map[string]tally)
 	for _, v := range votes {
 		total += v.weight
-		weights[v.value] += v.weight
-		addFamily(families, v.value, v.family)
+		t := places[v.value]
+		t.weight += v.weight
+		t.families++
+		places[v.value] = t
 	}
-	places := make([]string, 0, len(weights))
-	for place := range weights {
-		places = append(places, place)
-	}
-	sort.Slice(places, func(i, j int) bool {
-		if weights[places[i]] != weights[places[j]] {
-			return weights[places[i]] > weights[places[j]]
+	winner := ""
+	var first, second float64
+	for place, t := range places {
+		if t.weight > first {
+			second = first
+			first = t.weight
+			winner = place
+		} else if t.weight > second {
+			second = t.weight
 		}
-		return places[i] < places[j]
-	})
-	if len(places) == 0 {
-		return "", nil
 	}
-	winner := places[0]
-	second := 0.0
-	if len(places) > 1 {
-		second = weights[places[1]]
+	if first == second || places[winner].families < support || (first-second)/total < margin {
+		return ""
 	}
-	if weights[winner] == second || len(families[winner]) < support || (weights[winner]-second)/total < margin {
-		return "", nil
-	}
-	return winner, families[winner]
+	return winner
 }
 func country(value string) string {
 	value = strings.ToUpper(strings.TrimSpace(value))
@@ -264,7 +306,7 @@ func SafeLabel(value string) string {
 	safe := words[:0]
 	for _, word := range words {
 		trim := strings.Trim(word, "()[]{}.,;\"'")
-		if strings.ContainsAny(trim, "@:/\\") || strings.Contains(trim, "://") {
+		if facts.UnsafeLabelToken(word) {
 			continue
 		}
 		parts := strings.Split(trim, ".")

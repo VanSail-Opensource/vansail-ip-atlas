@@ -115,7 +115,7 @@ func TestCorruptionClosedBeforeAllocation(t *testing.T) {
 	}{
 		{"short_header", "length", func(b []byte) []byte { return b[:63] }},
 		{"exactly_24_mib", "length", func([]byte) []byte { return make([]byte, MaxFile) }},
-		{"unknown_schema", "version", func(b []byte) []byte { p16(b, 6, 5); return b }},
+		{"unknown_schema", "version", func(b []byte) []byte { p16(b, 6, 6); return b }},
 		{"unknown_format", "version", func(b []byte) []byte { p16(b, 4, 4); return b }},
 		{"bad_magic", "version", func(b []byte) []byte { b[0] = 255; return b }},
 		{"reserved_header", "header", func(b []byte) []byte { b[45] = 1; return b }},
@@ -236,6 +236,11 @@ func TestManifestIdentityAndTraversal(t *testing.T) {
 	p.ManifestPath = "/_atlas/releases/current/manifest.json"
 	if _, err := NewRelease(canonical(p), canonical(g.Manifest), nil, func() int64 { return g.Clock }); ErrorCode(err) != "manifest" {
 		t.Fatal("manifest alias accepted")
+	}
+	p = g.Pointer
+	p.BrowserSHA256 = "invalid"
+	if _, err := NewRelease(canonical(p), canonical(g.Manifest), nil, func() int64 { return g.Clock }); ErrorCode(err) != "manifest" {
+		t.Fatal("malformed optional browser directory digest accepted")
 	}
 	if validPartition("4:000000000000000000000000cb007101/24") || validPartition("6:20010db8000000000000000000000000/129") || validPartition("asn:23455:23457") {
 		t.Fatal("invalid partition accepted")

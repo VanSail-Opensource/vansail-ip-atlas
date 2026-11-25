@@ -131,6 +131,7 @@ func run(ctx context.Context, args []string) error {
 			if err != nil {
 				return err
 			}
+			defer reader.Close()
 			queries := []string{"203.0.113.1", "203.0.113.2", "203.0.113.200", "203.0.114.1", "2001:db8::1", "::ffff:203.0.113.1", "AS13335", "AS15169", "8.8.8.8"}
 			if *graph24 {
 				queries = append(queries, "AS424240")
@@ -165,6 +166,7 @@ func run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
+		defer reader.Close()
 		if *classC {
 			answer, err := reader.ClassC(ctx, *q)
 			if err != nil {

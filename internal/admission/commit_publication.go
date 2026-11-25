@@ -26,13 +26,34 @@ func commitSource(locator, assetURL string) (acquire.GitHubCommitQuery, bool) {
 }
 
 func publicationSupported(source Source) bool {
+	if !validMRTArchivePolicy(source) {
+		return false
+	}
+	if source.Parser.ID == "ffraud-csv" {
+		return ffraudCommitSource(source)
+	}
+	if source.Parser.ID == "google-network-organization" {
+		return googleNetworkSource(source)
+	}
+	if source.Parser.ID == "nro-delegated-registration" {
+		return nroSource(source)
+	}
+	if source.Parser.ID == "azure-appservice-service-tag" {
+		return azureServiceSource(source)
+	}
+	if source.Parser.ID == "root-zone-anycast" {
+		return rootZoneSource(source)
+	}
+	if source.Parser.ID == "tweetfeed-week-csv" {
+		return tweetFeedSource(source)
+	}
 	if dbipProvider(source) {
 		return true
 	}
 	if _, ok := ipapiCSVMember(source); ok {
 		return true
 	}
-	if torExitSource(source) {
+	if torExitSource(source) || caidaSource(source) {
 		return true
 	}
 	switch source.Publication.Kind {
@@ -63,7 +84,7 @@ type commitMetadata struct {
 func (e *Engine) verifyCommit(ctx context.Context, metadataPath, quarantine string, source Source, digest [32]byte, size int64, now time.Time) (time.Time, error) {
 	deny := errors.New("publication proof rejected")
 	query, ok := commitSource(source.Publication.Locator, source.URL)
-	if !ok || now.IsZero() || size <= 0 || digest == ([32]byte{}) {
+	if !ok || now.IsZero() || size <= 0 || digest == ([32]byte{}) || source.Parser.ID == "ffraud-csv" && !ffraudCommitSource(source) {
 		return time.Time{}, deny
 	}
 	data, err := boundedFile(ctx, metadataPath, 4<<20)
@@ -102,6 +123,9 @@ func (e *Engine) verifyCommit(ctx context.Context, metadataPath, quarantine stri
 	actual, actualSize, err := hashFile(ctx, bound, source.MaxCompressedBytes)
 	if err != nil || actual != digest || actualSize != size {
 		return time.Time{}, deny
+	}
+	if source.Parser.ID == "ffraud-csv" {
+		return e.verifyFFraudGeneration(ctx, quarantine, metadata.SHA, bound, published)
 	}
 	return published, nil
 }

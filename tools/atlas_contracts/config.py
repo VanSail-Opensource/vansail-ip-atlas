@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 import ipaddress
 import math
 from pathlib import Path
@@ -16,12 +17,16 @@ CONFIG_NAMES = ("sources", "scoring", "tier1", "web", "release-approval")
 MAX_CONFIG_BYTES = 2 * 1024 * 1024
 FIELD_TARGETS = {
     "country_code": {"physical_country", "registration_country"},
-    "allocation_country": {"registration_country"}, "region": {"region"}, "city": {"city"},
+    "cc": {"registration_country"}, "allocation_country": {"registration_country"}, "region": {"region"}, "city": {"city"},
     "coordinates": {"latitude", "longitude", "coordinate_precision"},
     "latitude": {"latitude"}, "longitude": {"longitude"},
     "asn": {"asn", "origins", "bgp_origins"}, "organization": {"organization"}, "isp": {"isp"},
     "handle": {"as_name"}, "description": {"organization"}, "country-code": {"asn_country"},
     "network_type": {"usage_type"}, "usage_type": {"usage_type"}, "metadata.category": {"usage_type"},
+    "ip": {"reason_flags", "anycast"}, "category": {"reason_flags"}, "type": {"reason_flags"},
+    "properties.addressPrefixes": {"reason_flags"},
+    "ipv4Prefix": {"network_organization"}, "ipv6Prefix": {"network_organization"},
+    "value": {"reason_flags"}, "tags": {"reason_flags"},
     "as_path": {"bgp_paths"}, "as_relationship": {"as_relationships"},
     "roa": {"rpki_status"}, "roa_asn": {"rpki_status"}, "roa_max_length": {"rpki_status"},
     **{field: {"reason_flags"} for field in (
@@ -125,6 +130,33 @@ def safe_https(value, *, allow_query=False):
         return False
 
 
+def validate_mrt_archive_policy(source):
+    download = source.get("download", {})
+    if "mrt_archive_policy" not in download:
+        return
+    raw = download.get("url")
+    proof = source.get("publication_proof", {})
+    if (download["mrt_archive_policy"] != "latest-complete-v1"
+            or source.get("category") != "bgp" or source.get("scope") != "path"
+            or source.get("parser") != {"id": "mrt-table-dump-v2", "schema": "mrt-table-dump-v2-unicast-v1", "version": 1}
+            or proof != {"kind": "embedded", "locator": raw, "field": "mrt_frame_capture_timestamp"}
+            or not isinstance(raw, str)):
+        raise ContractError("MRT archive rotation controls invalid")
+    match = re.fullmatch(r"https://data\.ris\.ripe\.net/rrc18/(\d{4}\.\d{2})/bview\.(\d{8}\.\d{4})\.gz", raw)
+    period, codec = 8, "mrt-gz"
+    if match is None:
+        match = re.fullmatch(r"https://archive\.routeviews\.org/route-views\.wide/bgpdata/(\d{4}\.\d{2})/RIBS/rib\.(\d{8}\.\d{4})\.bz2", raw)
+        period, codec = 2, "mrt-bz2"
+    if match is None or download.get("format") != codec:
+        raise ContractError("MRT archive rotation collector or codec invalid")
+    try:
+        stamp = datetime.strptime(match[2], "%Y%m%d.%H%M")
+    except ValueError as exc:
+        raise ContractError("MRT archive rotation date invalid") from exc
+    if stamp.strftime("%Y.%m") != match[1] or stamp.minute != 0 or stamp.hour % period:
+        raise ContractError("MRT archive rotation slot invalid")
+
+
 def validate_sources(config):
     sources = config["sources"]
     ids = [s["id"] for s in sources]
@@ -132,6 +164,7 @@ def validate_sources(config):
         raise ContractError("duplicate source IDs")
     subscriptions = [s for s in sources if s["category"] == "proxy_subscription_ip"]
     for source in sources:
+        validate_mrt_archive_policy(source)
         sid = source["id"]
         dependencies = source["depends_on"]
         if any(dep not in ids or dep == sid for dep in dependencies):
@@ -147,10 +180,11 @@ def validate_sources(config):
             values = value if isinstance(value, list) else [] if value is None else [value]
             if any(target not in source["public_fields"] or target not in FIELD_TARGETS.get(key, set()) for target in values):
                 raise ContractError(f"{sid}: mapping bypasses field-specific normalization")
-        if source["admission"] == "rights_approved" and (
-            source["license"]["status"] != "reviewed" or source["license"]["distribution"] != "allow"
-        ):
-            raise ContractError(f"{sid}: invalid rights milestone")
+        if source["admission"] == "rights_approved":
+            from .policy import reviewed_distribution_decision
+            if (not reviewed_distribution_decision(source["license"])
+                    or type(source["license"].get("attribution_required")) is not bool):
+                raise ContractError(f"{sid}: invalid rights milestone")
         if "attribution" in source["license"]:
             from .policy import attribution_issues
             if attribution_issues(source["license"]["attribution"]):
@@ -219,8 +253,9 @@ def validate_sources(config):
         raise ContractError("unresolved relationship alias")
     if bgp["max_mrt_sources_per_run"] < 2:
         raise ContractError("cold build cannot acquire two independent path families")
-    caida = by_id["caida-asrel2"]
-    if caida["download"].get("url") is not None or not isinstance(caida.get("discovery"), dict):
+    caida = by_id.get("caida-asrel2")
+    from .policy import caida_discovery_supported
+    if caida is not None and not caida_discovery_supported(caida):
         raise ContractError("CAIDA requires deterministic current-snapshot discovery")
 
 

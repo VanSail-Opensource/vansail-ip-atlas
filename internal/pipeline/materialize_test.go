@@ -8,6 +8,7 @@ import (
 	"os"
 	"slices"
 	"testing"
+	"time"
 
 	"vansail-ip-atlas/internal/intelligence"
 	"vansail-ip-atlas/internal/via3"
@@ -39,7 +40,7 @@ func intelligenceFixture(t *testing.T) (intelligence.BuildState, intelligence.Po
 		state.Sources[0].Records = append(state.Sources[0].Records, intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordCoverage, Coverage: &coverage[i]})
 	}
 	state.Sources[0].Records = append(state.Sources[0].Records,
-		intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordVRP, VRP: &intelligence.VRP{Prefix: parent, MaxLength: 16, ASN: 13335}},
+		intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordVRP, VRP: &intelligence.VRP{Prefix: parent, MaxLength: 16, ASN: 13335, ValidUntil: state.EvaluatedAt.Add(time.Hour)}},
 		intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordRelationship, Relationship: &intelligence.RelationshipRecord{From: 13335, To: 15169, Relation: intelligence.TransitUpstream}},
 		intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordPath, Path: &intelligence.ScopedPath{Prefix: parent, Observation: intelligence.PathObservation{Origin: 13335, Family: "private-alpha", Current: true, OriginOutward: true, Segments: []intelligence.PathSegment{{Type: intelligence.ASSequence, ASNs: []uint32{13335, 15169}}}}}},
 		intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordPath, Path: &intelligence.ScopedPath{Prefix: parent, Observation: intelligence.PathObservation{Origin: 15169, Family: "private-alpha", Current: true, OriginOutward: true, Segments: []intelligence.PathSegment{{Type: intelligence.ASSequence, ASNs: []uint32{15169, 13335}}}}}},
@@ -55,7 +56,7 @@ func TestIntelligenceMaterializerQualityBoundariesMOASAndDirectedPaths(t *testin
 	}
 	opts := testOptions(t)
 	opts.Limits = DefaultLimits()
-	candidate, err := BuildIntelligence(context.Background(), opts, state, policy, MaterializationInputs{VRPComplete: true})
+	candidate, err := BuildIntelligence(context.Background(), opts, state, policy, MaterializationInputs{VRPComplete: true, RPKIObservedAt: state.EvaluatedAt, RPKICoverageValidUntil: state.EvaluatedAt.Add(time.Hour)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +101,7 @@ func TestIntelligenceMaterializerQualityBoundariesMOASAndDirectedPaths(t *testin
 	for i := range state.Sources {
 		slices.Reverse(state.Sources[i].Records)
 	}
-	again, err := BuildIntelligence(context.Background(), second, state, policy, MaterializationInputs{VRPComplete: true})
+	again, err := BuildIntelligence(context.Background(), second, state, policy, MaterializationInputs{VRPComplete: true, RPKIObservedAt: state.EvaluatedAt, RPKICoverageValidUntil: state.EvaluatedAt.Add(time.Hour)})
 	if err != nil || candidate.Pointer != again.Pointer {
 		t.Fatal("source ordering changed materialization", err)
 	}
@@ -154,12 +155,12 @@ func TestIntelligenceMaterializerIPv6MappedAndNonlinearPaths(t *testing.T) {
 		intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordEvidence, Evidence: &intelligence.Evidence{Family: "private-test", Signal: "proxy", Scope: intelligence.Exact, Address: netip.MustParseAddr("2001:db8::"), SourcePublishedAt: state.EvaluatedAt, Current: true, Weight: 100}},
 		intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordOrigins, Origins: &intelligence.OriginMapping{Prefix: netip.MustParsePrefix("2001:db8::/32"), Origins: []uint32{13335}}},
 		intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordOrigins, Origins: &intelligence.OriginMapping{Prefix: netip.MustParsePrefix("::ffff:198.51.100.0/120"), Origins: []uint32{13335}}},
-		intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordVRP, VRP: &intelligence.VRP{Prefix: netip.MustParsePrefix("::ffff:198.51.100.0/120"), MaxLength: 120, ASN: 13335}},
+		intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordVRP, VRP: &intelligence.VRP{Prefix: netip.MustParsePrefix("::ffff:198.51.100.0/120"), MaxLength: 120, ASN: 13335, ValidUntil: state.EvaluatedAt.Add(time.Hour)}},
 		intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordPath, Path: &intelligence.ScopedPath{Prefix: netip.MustParsePrefix("2001:db8::/32"), Observation: intelligence.PathObservation{Origin: 13335, Family: "private-test", Current: true, OriginOutward: true, Segments: []intelligence.PathSegment{{Type: intelligence.ASSequence, ASNs: []uint32{13335, 64512, 15169}}}}}},
 	)
 	opts := testOptions(t)
 	opts.Limits = DefaultLimits()
-	if _, err := BuildIntelligence(context.Background(), opts, state, policy, MaterializationInputs{VRPComplete: true}); err != nil {
+	if _, err := BuildIntelligence(context.Background(), opts, state, policy, MaterializationInputs{VRPComplete: true, RPKIObservedAt: state.EvaluatedAt, RPKICoverageValidUntil: state.EvaluatedAt.Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 	reader, err := via3.OpenRelease(opts.Output, func() int64 { return opts.Clock })

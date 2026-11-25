@@ -15,6 +15,54 @@ import (
 
 const maxQualifiedRelationshipEdges = 4_000_000
 
+// This discovery is built only while the private verifier decodes every exact
+// authenticated record. Its source positions are bound to that complete state;
+// neither caller statistics nor a catalog family can assert path absence.
+// The graph becomes read-only when verification returns. No path rows are kept.
+type tier1Discovery struct {
+	stateHash [32]byte
+	relations *RelationshipIndex
+	sources   []tier1SourceDiscovery
+	failed    bool
+}
+
+type tier1SourceDiscovery struct {
+	hasPaths, hasRelationships bool
+	err                        error
+}
+
+func discoverTier1Record(relations *RelationshipIndex, source *tier1SourceDiscovery, record NormalizedRecord) error {
+	switch record.Kind {
+	case RecordRelationship:
+		source.hasRelationships = true
+		v := record.Relationship
+		if err := relations.Add(v.From, v.To, v.Relation); err != nil {
+			return err
+		}
+		if len(relations.nodes) > 200_000 || len(relations.edges) > maxQualifiedRelationshipEdges {
+			return ErrGraphBudget
+		}
+	case RecordPath:
+		if !record.Path.Observation.Current || len(record.Path.Observation.Family) == 0 || len(record.Path.Observation.Family) > 256 {
+			return errors.New("noncurrent Tier-1 path receipt")
+		}
+		source.hasPaths = true
+	}
+	return nil
+}
+
+func (d *tier1Discovery) collect(index int, record NormalizedRecord) {
+	if d.failed {
+		return
+	}
+	source := &d.sources[index]
+	if source.err = discoverTier1Record(d.relations, source, record); source.err != nil {
+		// Preserve the first error's source position, and stop graph growth while
+		// the verifier independently finishes structural validation of all rows.
+		d.failed = true
+	}
+}
+
 // QualifyTier1State is the production compiler entry point. Its supplied state
 // must match the independently authenticated complete state/chunk identity.
 func QualifyTier1State(ctx context.Context, workspace string, state BuildState, binding [32]byte, now time.Time) (*QualifiedTier1, error) {
@@ -46,6 +94,18 @@ func ObserveTier1State(ctx context.Context, workspace string, state BuildState, 
 		return nil, errors.New("Tier-1 observation must match the authenticated complete state")
 	}
 	return observeTier1State(ctx, workspace, sealed, binding, now, 100_000_000)
+}
+
+// ObserveTier1State preserves the same pending and evaluated source-epoch
+// history while reusing only the handle's prior normalized-union validation.
+// Callers must hold the admission workspace writer lock and call this before
+// unrelated source-capability or output gates, including failed release builds.
+func (v *VerifiedPrivateState) ObserveTier1State(ctx context.Context, workspace string, binding [32]byte, now time.Time) (*QualifiedTier1, error) {
+	state, err := v.RevalidateFor(ctx, workspace, binding)
+	if err != nil {
+		return nil, err
+	}
+	return observeTier1StateDiscovered(ctx, workspace, state, binding, now, 100_000_000, func() error { return v.recheckAuthentication(ctx) }, v.tier1)
 }
 
 // QualifiedTier1 is a read-only context derived from the exact sealed private
@@ -81,12 +141,23 @@ func BuildQualifiedTier1(ctx context.Context, workspace string, policyHash [32]b
 }
 
 func observeTier1State(ctx context.Context, workspace string, state BuildState, policyHash [32]byte, now time.Time, maxWork int) (*QualifiedTier1, error) {
+	return observeTier1StateChecked(ctx, workspace, state, policyHash, now, maxWork, nil)
+}
+
+func observeTier1StateChecked(ctx context.Context, workspace string, state BuildState, policyHash [32]byte, now time.Time, maxWork int, finalCheck func() error) (*QualifiedTier1, error) {
+	return observeTier1StateDiscovered(ctx, workspace, state, policyHash, now, maxWork, finalCheck, nil)
+}
+
+func observeTier1StateDiscovered(ctx context.Context, workspace string, state BuildState, policyHash [32]byte, now time.Time, maxWork int, finalCheck func() error, discovery *tier1Discovery) (*QualifiedTier1, error) {
 	if now.IsZero() || !state.EvaluatedAt.Equal(now) || maxWork <= 0 {
 		return nil, errors.New("same-clock qualified Tier-1 inputs required")
 	}
 	identity, err := stateIdentity(state)
 	if err != nil {
 		return nil, err
+	}
+	if discovery != nil && (discovery.stateHash != identity || len(discovery.sources) != len(state.Sources) || discovery.relations == nil) {
+		return nil, errors.New("Tier-1 discovery does not bind the authenticated state")
 	}
 	history, err := loadTier1History(ctx, workspace, policyHash)
 	if err != nil {
@@ -101,6 +172,9 @@ func observeTier1State(ctx context.Context, workspace string, state BuildState, 
 		return nil, err
 	}
 	qualified := &QualifiedTier1{stateHash: identity, policyHash: policyHash, clock: now, relations: NewRelationships(true)}
+	if discovery != nil {
+		qualified.relations = discovery.relations
+	}
 	var captured time.Time
 	var relevantExpiry time.Time
 	type relevantSource struct {
@@ -109,7 +183,7 @@ func observeTier1State(ctx context.Context, workspace string, state BuildState, 
 		Observed    time.Time
 	}
 	var relevant []relevantSource
-	for _, source := range state.Sources {
+	for index, source := range state.Sources {
 		receipt := source.Receipt
 		if receipt == nil || !receipt.PayloadVerified || !receipt.SchemaVerified || receipt.PayloadHash == ([32]byte{}) || receipt.PayloadHash != receipt.ProofPayloadHash || receipt.PublishedAt.IsZero() || receipt.PublishedAt.After(now.Add(24*time.Hour)) || !now.Before(source.ExpiresAt) || source.ExpiresAt.After(receipt.PublishedAt.Add(720*time.Hour)) {
 			return nil, errors.New("qualified Tier-1 requires current payload-bound source receipts")
@@ -125,33 +199,22 @@ func observeTier1State(ctx context.Context, workspace string, state BuildState, 
 		if qualified.expires.IsZero() || source.ExpiresAt.Before(qualified.expires) {
 			qualified.expires = source.ExpiresAt
 		}
-		hasPaths, hasRelationships := false, false
-		err = WalkStoredSource(ctx, workspace, source, func(record NormalizedRecord) error {
-			switch record.Kind {
-			case RecordRelationship:
-				hasRelationships = true
-				v := record.Relationship
-				if err := qualified.relations.Add(v.From, v.To, v.Relation); err != nil {
-					return err
-				}
-				if len(qualified.relations.nodes) > 200_000 || len(qualified.relations.edges) > maxQualifiedRelationshipEdges {
-					return ErrGraphBudget
-				}
-			case RecordPath:
-				if !record.Path.Observation.Current || len(record.Path.Observation.Family) == 0 || len(record.Path.Observation.Family) > 256 {
-					return errors.New("noncurrent Tier-1 path receipt")
-				}
-				hasPaths = true
-			}
-			return nil
-		})
+		found := tier1SourceDiscovery{}
+		if discovery != nil {
+			found = discovery.sources[index]
+			err = found.err
+		} else {
+			err = WalkStoredSource(ctx, workspace, source, func(record NormalizedRecord) error {
+				return discoverTier1Record(qualified.relations, &found, record)
+			})
+		}
 		if err != nil {
 			return nil, err
 		}
-		if hasPaths && (captured.IsZero() || observed.Before(captured)) {
+		if found.hasPaths && (captured.IsZero() || observed.Before(captured)) {
 			captured = observed
 		}
-		if hasPaths || hasRelationships {
+		if found.hasPaths || found.hasRelationships {
 			if source.Fingerprint == ([32]byte{}) {
 				return nil, errors.New("Tier-1 relevant source fingerprint missing")
 			}
@@ -192,7 +255,10 @@ func observeTier1State(ctx context.Context, workspace string, state BuildState, 
 		}
 	}
 	walk := func(visit func(PathObservation) error) error {
-		for _, source := range state.Sources {
+		for index, source := range state.Sources {
+			if discovery != nil && !discovery.sources[index].hasPaths {
+				continue
+			}
 			if err := WalkStoredSource(ctx, workspace, source, func(record NormalizedRecord) error {
 				if record.Kind == RecordPath {
 					return visit(record.Path.Observation)
@@ -243,6 +309,12 @@ func observeTier1State(ctx context.Context, workspace string, state BuildState, 
 	if len(epoch.Stable) > 0 && epoch.Anchor != nil && (qualified.expires.IsZero() || epoch.Anchor.ExpiresAt.Before(qualified.expires)) {
 		qualified.expires = epoch.Anchor.ExpiresAt
 	}
+	// A changed authenticated input cannot clear the pending failure marker.
+	if finalCheck != nil {
+		if err = finalCheck(); err != nil {
+			return nil, err
+		}
+	}
 	history.Pending = [32]byte{}
 	history.Epochs = []tier1HistoryEpoch{epoch}
 	if err = writeTier1History(ctx, workspace, history); err != nil {
@@ -252,18 +324,54 @@ func observeTier1State(ctx context.Context, workspace string, state BuildState, 
 }
 
 func (q *QualifiedTier1) Validate(state BuildState, now time.Time) error {
-	if q == nil || !q.snapshot.Eligible || q.stateHash == ([32]byte{}) || q.policyHash != state.PolicyHash || !state.EvaluatedAt.Equal(q.clock) || now.Before(q.clock) || !now.Before(q.expires) {
-		return errors.New("qualified Tier-1 context binding or lifetime invalid")
+	if err := q.ValidateObservation(state, now); err != nil {
+		return err
 	}
-	identity, err := stateIdentity(state)
-	if err != nil || identity != q.stateHash {
-		return errors.New("qualified Tier-1 context does not match the complete state")
+	if !q.snapshot.Eligible {
+		return errors.New("qualified Tier-1 observations unavailable")
 	}
 	return nil
 }
 
+// ValidateObservation authenticates the complete state and lifetime without
+// asserting enough observations for a Tier-1 classification. An unavailable
+// observation remains unknown and still records an intervening failed epoch.
+func (q *QualifiedTier1) ValidateObservation(state BuildState, now time.Time) error {
+	if q == nil || q.stateHash == ([32]byte{}) || q.policyHash == ([32]byte{}) || q.policyHash != state.PolicyHash || !state.EvaluatedAt.Equal(q.clock) || now.Before(q.clock) || !now.Before(q.expires) {
+		return errors.New("authenticated Tier-1 observation binding or lifetime invalid")
+	}
+	identity, err := stateIdentity(state)
+	if err != nil || identity != q.stateHash {
+		return errors.New("authenticated Tier-1 observation does not match the complete state")
+	}
+	return nil
+}
+
+// MaterializationIdentity binds every derived classification, including real
+// history-dependent stability. The normalized state alone cannot distinguish
+// those outcomes. This private digest is not source or release qualification;
+// callers must still validate the observation against the complete state.
+func (q *QualifiedTier1) MaterializationIdentity() ([32]byte, error) {
+	if q == nil || q.stateHash == ([32]byte{}) || q.policyHash == ([32]byte{}) || q.observationHash == ([32]byte{}) || q.clock.IsZero() || !q.clock.Before(q.expires) {
+		return [32]byte{}, errors.New("authenticated Tier-1 materialization identity required")
+	}
+	data, err := json.Marshal(struct {
+		Version         uint16
+		StateHash       [32]byte
+		PolicyHash      [32]byte
+		ObservationHash [32]byte
+		Clock, Expires  time.Time
+		Snapshot        Tier1Snapshot
+	}{1, q.stateHash, q.policyHash, q.observationHash, q.clock, q.expires, q.snapshot})
+	if err != nil {
+		return [32]byte{}, err
+	}
+	// Relationships are already bound by the complete state and compiler code.
+	return sha256.Sum256(append([]byte("tier1-materialization-v1\x00"), data...)), nil
+}
+
 func (q *QualifiedTier1) Result(asn uint32) Tier1Result {
-	if q != nil {
+	if q != nil && q.snapshot.Eligible {
 		i := sort.Search(len(q.snapshot.Results), func(i int) bool { return q.snapshot.Results[i].ASN >= asn })
 		if i < len(q.snapshot.Results) && q.snapshot.Results[i].ASN == asn {
 			return q.snapshot.Results[i]
@@ -433,21 +541,50 @@ func loadTier1History(ctx context.Context, workspace string, policyHash [32]byte
 // ObserveTier1State already persisted the actual outcome before release gates;
 // publication success must never advance or replace the source-epoch history.
 func SaveQualifiedTier1History(ctx context.Context, workspace string, qualified *QualifiedTier1) error {
-	if qualified == nil {
+	if qualified == nil || !qualified.snapshot.Eligible {
 		return errors.New("qualified Tier-1 context required")
+	}
+	return VerifyTier1ObservationHistory(ctx, workspace, qualified)
+}
+
+// VerifyTier1ObservationHistory checks the persisted outcome, including a
+// truthful unavailable observation, without advancing or rewriting history.
+func VerifyTier1ObservationHistory(ctx context.Context, workspace string, qualified *QualifiedTier1) error {
+	if qualified == nil {
+		return errors.New("authenticated Tier-1 observation required")
 	}
 	state, err := VerifyPrivateStateSeal(ctx, workspace, qualified.policyHash)
 	if err != nil {
 		return err
 	}
-	if err = qualified.Validate(state, qualified.clock); err != nil {
+	return verifyTier1ObservationHistory(ctx, workspace, state, qualified)
+}
+
+// VerifyTier1ObservationHistory checks the persisted outcome without recording
+// a new epoch, including when the observed routing capability was unavailable.
+func (v *VerifiedPrivateState) VerifyTier1ObservationHistory(ctx context.Context, workspace string, qualified *QualifiedTier1) error {
+	if qualified == nil {
+		return errors.New("authenticated Tier-1 observation required")
+	}
+	state, err := v.RevalidateFor(ctx, workspace, qualified.policyHash)
+	if err != nil {
+		return err
+	}
+	if err = verifyTier1ObservationHistory(ctx, workspace, state, qualified); err != nil {
+		return err
+	}
+	return v.recheckAuthentication(ctx)
+}
+
+func verifyTier1ObservationHistory(ctx context.Context, workspace string, state BuildState, qualified *QualifiedTier1) error {
+	if err := qualified.ValidateObservation(state, qualified.clock); err != nil {
 		return err
 	}
 	history, err := loadTier1History(ctx, workspace, qualified.policyHash)
 	if err != nil {
 		return err
 	}
-	if history.Pending != ([32]byte{}) || len(history.Epochs) != 1 || history.Epochs[0].InputHash != qualified.observationHash || !history.Epochs[0].PublishedAt.Equal(qualified.snapshot.PublishedAt) || !history.Epochs[0].Eligible || !equalTier1Candidates(history.Epochs[0].Candidates, tier1Candidates(qualified.snapshot)) || !equalTier1Candidates(history.Epochs[0].Stable, tier1StableCandidates(qualified.snapshot)) {
+	if history.Pending != ([32]byte{}) || len(history.Epochs) != 1 || history.Epochs[0].StateHash != qualified.stateHash || history.Epochs[0].InputHash != qualified.observationHash || !history.Epochs[0].PublishedAt.Equal(qualified.snapshot.PublishedAt) || history.Epochs[0].Eligible != qualified.snapshot.Eligible || !equalTier1Candidates(history.Epochs[0].Candidates, tier1Candidates(qualified.snapshot)) || !equalTier1Candidates(history.Epochs[0].Stable, tier1StableCandidates(qualified.snapshot)) {
 		return errors.New("Tier-1 evaluation outcome changed before publication")
 	}
 	return nil

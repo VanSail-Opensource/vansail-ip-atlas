@@ -138,7 +138,7 @@ def main():
     report={'schema_version':1,'execution_envelope':profile,'raw_host':{'logical_cpus':os.cpu_count(),
        'memory_bytes':os.sysconf('SC_PAGE_SIZE')*os.sysconf('SC_PHYS_PAGES'),'disk_bytes':shutil.disk_usage(workspace).total},
        'workspace_peak_bytes':0,'physical_free_low_water_bytes':shutil.disk_usage(workspace).free,'errors':[]}
-    start=time.monotonic();process=subprocess.Popen(command,start_new_session=True)
+    start=time.monotonic_ns();process=subprocess.Popen(command,start_new_session=True)
     try:
         while True:
             occupied=sum(usage(path) for path in disk_roots)
@@ -153,7 +153,7 @@ def main():
         report['exit_code']=process.returncode
     finally:
         if process.poll() is None: os.killpg(process.pid,signal.SIGKILL);process.wait()
-        report['runtime_ms']=(time.monotonic()-start)*1000
+        report['runtime_ms']=(time.monotonic_ns()-start+999_999)//1_000_000
         report['cgroup_memory_peak_bytes']=int((root/'memory.peak').read_text())
         report['memory_events']={k:int(v) for k,v in (line.split() for line in (root/'memory.events').read_text().splitlines())}
         args.report.parent.mkdir(parents=True,exist_ok=True);args.report.write_text(json.dumps(report)+'\n')

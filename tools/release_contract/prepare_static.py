@@ -22,6 +22,7 @@ import time
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from tools.release_contract.browser_index import stage_browser_index, verified_browser_files
 from tools.release_contract.contracts import (
     ContractError, canonical_bytes, parse_canonical, rollback_eligible,
     scan_frontend_text, scan_public_records, sha256, tree_inventory, verify_manifest,
@@ -104,6 +105,7 @@ def verify_atlas(atlas: Path, now: int, *, production: bool = False, credits: bo
         credit_files = validate_credit_tree(atlas.parent, release_id, modes)
         expected.update(path.removeprefix("_atlas/") for path in credit_files if path.startswith("_atlas/"))
     actual_entries, _ = tree_inventory(atlas)
+    expected.update(verified_browser_files(atlas, pointer))
     if {entry[0] for entry in actual_entries} != expected:
         raise ContractError("atlas contains missing, private or unreferenced extra files")
     for name, size, digest in actual_entries:
@@ -301,6 +303,7 @@ def prepare(atlas: Path, public: Path, now: int, *, production_receipts: dict[st
     index_managed = False
     try:
         shutil.copytree(atlas, stage / "_atlas")
+        stage_browser_index(stage / "_atlas")
         verify_atlas(stage / "_atlas", now, production=production)
         if target.exists():
             previous = stage / "previous"

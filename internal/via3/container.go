@@ -1,4 +1,4 @@
-// Package via3 implements the frozen, source-free VIA3 schema-4 container.
+// Package via3 implements the frozen, source-free VIA3 schema-5 container.
 package via3
 
 import (
@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"sync"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -42,6 +43,7 @@ type Section struct {
 type Shard struct {
 	Kind     uint16
 	Sections []Section
+	disk     *indexedShard
 	lookup   *shardLookup // immutable release-side metadata; never serialized
 }
 
@@ -80,7 +82,7 @@ func schema(kind uint16) (int, []uint16) {
 	case 8:
 		return 64, []uint16{2, 3, 7, 11, 12}
 	case 9:
-		return 16, []uint16{1, 3, 8}
+		return 32, []uint16{1, 3, 8}
 	case 10:
 		return 16, []uint16{1, 3, 4, 8}
 	case 11:
@@ -126,6 +128,10 @@ func (s *Shard) Rows(id uint16) ([]byte, int) {
 	if s.lookup != nil && id < uint16(len(s.lookup.rows)) {
 		return s.lookup.rows[id], s.lookup.widths[id]
 	}
+	return s.unindexedRows(id)
+}
+
+func (s *Shard) unindexedRows(id uint16) ([]byte, int) {
 	b := s.Section(id)
 	if len(b) < 8 {
 		return nil, 0
@@ -133,28 +139,84 @@ func (s *Shard) Rows(id uint16) ([]byte, int) {
 	return b[8:], int(u32(b, 4))
 }
 func (s *Shard) Record(index uint32) []byte {
+	if s.disk != nil {
+		if uint64(index) >= uint64(s.rowCount(3)) {
+			return nil
+		}
+		return s.row(3, index)
+	}
 	b, w := s.Rows(3)
-	if w == 0 || uint64(index) >= uint64(len(b)/w) {
+	// Widths are u32 on disk. Computing the end in u64 keeps the complete
+	// bound check without a variable-width division on every indexed record.
+	end := (uint64(index) + 1) * uint64(w)
+	if w == 0 || end > uint64(len(b)) {
 		return nil
 	}
-	return b[int(index)*w : (int(index)+1)*w]
+	return b[int(end)-w : int(end)]
+}
+
+// PublicEncoder owns a bounded compression workspace for one compilation. Each
+// Write still emits independent frames using the frozen options. It must not be
+// copied after use; Close releases its workspace and permanently closes it.
+// The zero value is ready for use. Nothing is pooled across builds.
+type PublicEncoder struct {
+	mu      sync.Mutex
+	encoder *zstd.Encoder
+	closed  bool
+}
+
+func (e *PublicEncoder) checkOpen() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return errors.New("public encoder closed")
+	}
+	return nil
+}
+
+func (e *PublicEncoder) Close() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return nil
+	}
+	e.closed = true
+	if e.encoder == nil {
+		return nil
+	}
+	err := e.encoder.Close()
+	e.encoder = nil
+	return err
 }
 
 func Write(ctx context.Context, shard Shard) ([]byte, error) {
+	var encoder PublicEncoder
+	defer encoder.Close()
+	return encoder.Write(ctx, shard)
+}
+
+func (e *PublicEncoder) Write(ctx context.Context, shard Shard) ([]byte, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return nil, errors.New("public encoder closed")
+	}
 	if err := Validate(shard); err != nil {
 		return nil, err
 	}
-	encoder, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.EncoderLevelFromZstd(3)), zstd.WithEncoderConcurrency(1), zstd.WithWindowSize(MaxWindow), zstd.WithEncoderCRC(true), zstd.WithSingleSegment(true))
-	if err != nil {
-		return nil, err
+	if e.encoder == nil {
+		var err error
+		e.encoder, err = zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.EncoderLevelFromZstd(3)), zstd.WithEncoderConcurrency(1), zstd.WithWindowSize(MaxWindow), zstd.WithEncoderCRC(true), zstd.WithSingleSegment(true))
+		if err != nil {
+			return nil, err
+		}
 	}
-	defer encoder.Close()
 	count := len(shard.Sections)
 	offset := 64 + count*64
 	b := make([]byte, offset)
 	copy(b, "VIA3")
 	p16(b, 4, 3)
-	p16(b, 6, 4)
+	p16(b, 6, 5)
 	p16(b, 8, 64)
 	p16(b, 10, shard.Kind)
 	p32(b, 16, uint32(count))
@@ -167,7 +229,7 @@ func Write(ctx context.Context, shard Shard) ([]byte, error) {
 		}
 		var frame []byte
 		if len(section.Data) <= MaxWindow {
-			frame = encoder.EncodeAll(section.Data, nil)
+			frame = e.encoder.EncodeAll(section.Data, nil)
 		} else {
 			large, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.EncoderLevelFromZstd(3)), zstd.WithEncoderConcurrency(1), zstd.WithWindowSize(MaxWindow), zstd.WithEncoderCRC(true), zstd.WithSingleSegment(false))
 			if err != nil {
@@ -243,7 +305,7 @@ func Read(ctx context.Context, b []byte) (Shard, error) {
 	if len(b) < 64 || len(b) >= MaxFile {
 		return Shard{}, fail("length")
 	}
-	if string(b[:4]) != "VIA3" || u16(b, 4) != 3 || u16(b, 6) != 4 {
+	if string(b[:4]) != "VIA3" || u16(b, 4) != 3 || u16(b, 6) != 5 {
 		return Shard{}, fail("version")
 	}
 	if u16(b, 8) != 64 || u32(b, 12) != 0 || b[44] != 1 || !zero(b[45:64]) {

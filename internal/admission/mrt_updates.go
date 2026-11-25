@@ -20,6 +20,7 @@ func mrtUpdatesSource(source Source) (Source, error) {
 	companion.Parser = Parser{"mrt-bgp4mp", "mrt-bgp4mp-unicast-v1", 1}
 	companion.Fixture = *source.MRTUpdatesFixture
 	companion.MRTUpdatesFixture = nil
+	companion.MRTArchivePolicy = "" // the base alone selects complete RIB archives
 	return companion, nil
 }
 

@@ -91,16 +91,77 @@ func readPrivateInput(ctx context.Context, path string, maximum int64) ([]byte, 
 func loadProductionBinding(ctx context.Context, root string, now time.Time) (productionBinding, error) {
 	return loadProductionBindingAtHash(ctx, root, now, nil)
 }
+
+func loadVerifiedProductionBinding(ctx context.Context, root string, now time.Time, verified *admission.VerifiedSourceRecords) (productionBinding, error) {
+	b, err := loadProductionControls(ctx, root, now)
+	if err != nil {
+		return b, err
+	}
+	b.currentStateHash, err = privateStateHash(ctx, root)
+	if err != nil {
+		return b, err
+	}
+	b.stateHash = b.currentStateHash
+	qualificationPhase := beginCompilePhase(ctx, phaseQualification)
+	b.qualification, err = verified.Qualify(ctx, root, b.catalog, now, b.policyHash)
+	qualificationPhase(err == nil)
+	if err != nil {
+		return b, err
+	}
+	return b, b.validateStateIdentity()
+}
+
 func loadProductionBindingAtHash(ctx context.Context, root string, now time.Time, requested *[32]byte) (productionBinding, error) {
-	b := productionBinding{root: root}
-	var err error
+	b, err := loadProductionControls(ctx, root, now)
+	if err != nil {
+		return b, err
+	}
+	b.currentStateHash, err = privateStateHash(ctx, root)
+	if err != nil {
+		return b, err
+	}
+	b.stateHash = b.currentStateHash
+	qualificationPhase := beginCompilePhase(ctx, phaseQualification)
+	if requested == nil {
+		b.qualification, err = admission.QualifyProductionState(ctx, root, b.catalog, now, b.policyHash)
+	} else {
+		b.stateHash = *requested
+		b.qualification, err = admission.QualifyProductionStateAtHash(ctx, root, b.catalog, now, b.policyHash, *requested)
+	}
+	qualificationPhase(err == nil)
+	if err != nil {
+		return b, err
+	}
+	return b, b.validateStateIdentity()
+}
+
+func (b productionBinding) validateStateIdentity() error {
+	if b.qualification == nil {
+		return errors.New("production qualification required")
+	}
+	stateBytes, err := json.Marshal(b.qualification.State())
+	if err != nil || sha256.Sum256(stateBytes) != b.stateHash {
+		return errors.New("production qualification state identity changed")
+	}
+	return nil
+}
+
+func loadProductionControls(ctx context.Context, root string, now time.Time) (binding productionBinding, err error) {
+	finish := beginCompilePhase(ctx, phaseConfig)
+	defer func() { finish(err == nil) }()
 	// Full closed-schema validation is independent of the executable projection.
 	// Its stdout is deliberately withheld because source audit details are private.
 	command := exec.CommandContext(ctx, "python", filepath.Join(root, "tools", "validate_blueprint.py"), "--now", now.Format(time.RFC3339))
 	command.Dir = root
 	if command.Run() != nil {
-		return b, errors.New("production requires valid closed configuration contracts")
+		return productionBinding{}, errors.New("production requires valid closed configuration contracts")
 	}
+	return readProductionControls(ctx, root)
+}
+
+func readProductionControls(ctx context.Context, root string) (productionBinding, error) {
+	b := productionBinding{root: root}
+	var err error
 	var sourceBytes []byte
 	b.configHash, sourceBytes, err = intakeConfigHash(root)
 	if err != nil {
@@ -116,24 +177,6 @@ func loadProductionBindingAtHash(ctx context.Context, root string, now time.Time
 		return b, err
 	}
 	b.policyHash = sha256.Sum256(append(append([]byte("intake-policy-v1\x00"), b.configHash[:]...), b.certificationHash[:]...))
-	b.currentStateHash, err = privateStateHash(ctx, root)
-	if err != nil {
-		return b, err
-	}
-	b.stateHash = b.currentStateHash
-	if requested == nil {
-		b.qualification, err = admission.QualifyProductionState(ctx, root, b.catalog, now, b.policyHash)
-	} else {
-		b.stateHash = *requested
-		b.qualification, err = admission.QualifyProductionStateAtHash(ctx, root, b.catalog, now, b.policyHash, *requested)
-	}
-	if err != nil {
-		return b, err
-	}
-	stateBytes, err := json.Marshal(b.qualification.State())
-	if err != nil || sha256.Sum256(stateBytes) != b.stateHash {
-		return b, errors.New("production qualification state identity changed")
-	}
 	audit, err := readPrivateInput(ctx, filepath.Join(root, "SOURCES_AUDIT.md"), 4<<20)
 	if err != nil {
 		return b, err
@@ -141,6 +184,41 @@ func loadProductionBindingAtHash(ctx context.Context, root string, now time.Time
 	b.rightsHash = sha256.Sum256(audit)
 	b.implementationHash, err = admission.ImplementationFingerprint(ctx, root)
 	return b, err
+}
+
+func (b productionBinding) sameControls(other productionBinding) bool {
+	return b.root == other.root && b.configHash == other.configHash && b.catalogHash == other.catalogHash && b.certificationHash == other.certificationHash && b.rightsHash == other.rightsHash && b.implementationHash == other.implementationHash && b.policyHash == other.policyHash
+}
+
+// revalidateCurrent is confined to this process's exact compile clock and
+// authenticated current generation. Independent verification and rollback still
+// use loadProductionBindingAtHash and decode every normalized record anew.
+func (b productionBinding) revalidateCurrent(ctx context.Context, now time.Time) error {
+	if b.qualification == nil || b.stateHash == ([32]byte{}) || b.stateHash != b.currentStateHash {
+		return errors.New("production binding has no current qualification")
+	}
+	current, err := loadProductionControls(ctx, b.root, now)
+	if err != nil {
+		return err
+	}
+	if !b.sameControls(current) {
+		return errors.New("production controls changed during materialization")
+	}
+	if err = b.qualification.RevalidateCurrent(ctx, b.root, current.catalog, now, current.policyHash); err != nil {
+		return err
+	}
+	// The chunk walk may take substantial time. Reject a concurrent review or
+	// configuration edit at this boundary as well as at the next one. The exact
+	// controls were closed-schema validated above; unchanged hashes preserve it.
+	after, err := readProductionControls(ctx, b.root)
+	if err != nil {
+		return err
+	}
+	state, err := privateStateHash(ctx, b.root)
+	if err != nil || state != b.stateHash || !b.sameControls(after) {
+		return errors.New("production inputs changed during revalidation")
+	}
+	return ctx.Err()
 }
 func digestString(hash [32]byte) string { return hex.EncodeToString(hash[:]) }
 func (b productionBinding) receipt(manifest via3.Manifest, manifestBytes []byte) (productionReceipt, error) {
@@ -151,7 +229,7 @@ func (b productionBinding) receipt(manifest via3.Manifest, manifestBytes []byte)
 		return productionReceipt{}, err
 	}
 	capHash := sha256.Sum256(caps)
-	r := productionReceipt{CertificationSHA256: digestString(b.certificationHash), EvaluatedAt: state.EvaluatedAt.Unix(), ImplementationSHA256: digestString(b.implementationHash), IncludedSources: []includedProductionSource{}, Mode: "production", NormalizationConfigSHA256: digestString(b.configHash), NormalizedStateSHA256: digestString(b.stateHash), ReleaseID: manifest.ReleaseID, ReleaseManifestSHA256: via3.Hash(manifestBytes), ReleaseScope: "release-scope-v5", RightsAuditSHA256: digestString(b.rightsHash), SchemaVersion: 1, SourceCapabilitiesSHA256: digestString(capHash), SourceCatalogSHA256: digestString(b.catalogHash), ValidUntil: manifest.ValidUntil}
+	r := productionReceipt{CertificationSHA256: digestString(b.certificationHash), EvaluatedAt: state.EvaluatedAt.Unix(), ImplementationSHA256: digestString(b.implementationHash), IncludedSources: []includedProductionSource{}, Mode: "production", NormalizationConfigSHA256: digestString(b.configHash), NormalizedStateSHA256: digestString(b.stateHash), ReleaseID: manifest.ReleaseID, ReleaseManifestSHA256: via3.Hash(manifestBytes), ReleaseScope: admission.ProductionReleaseScope, RightsAuditSHA256: digestString(b.rightsHash), SchemaVersion: 1, SourceCapabilitiesSHA256: digestString(capHash), SourceCatalogSHA256: digestString(b.catalogHash), ValidUntil: manifest.ValidUntil}
 	if manifest.Mode != "production" || manifest.ValidFrom != r.EvaluatedAt || manifest.ValidUntil > q.ValidUntil().Unix() {
 		return r, errors.New("production manifest outlives qualified input")
 	}

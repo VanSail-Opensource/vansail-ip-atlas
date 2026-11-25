@@ -57,7 +57,7 @@ class MemoryProfileTests(unittest.TestCase):
             self.assertEqual(metric["decoded_bytes"], struct.unpack_from("<Q", data, 36)[0])
             self.assertLessEqual(metric["decoder_window_bytes"], BUDGETS["decoder_window_bytes"])
         data = base64.b64decode(objects[0]["base64"])
-        for offset, value in ((6, 3), (36, 1), (44, 0), (64 + 2, 0)):
+        for offset, value in ((4, 2), (6, 3), (6, 4), (6, 6), (36, 1), (44, 0), (64 + 2, 0)):
             changed = bytearray(data)
             changed[offset] = value
             with self.subTest(offset=offset), self.assertRaises(ContractError):

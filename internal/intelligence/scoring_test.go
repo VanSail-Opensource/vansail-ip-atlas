@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -190,6 +191,48 @@ func TestSparseProfileDoesNotImputeCleanAndLPM(t *testing.T) {
 		t.Fatalf("sparse profile imputed facts: %+v", profile)
 	}
 }
+
+func TestEmptyOriginsPreserveAbsentAndNormalizedAddressResults(t *testing.T) {
+	queries := []netip.Addr{
+		{}, netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("2001:db8::1"),
+		netip.MustParseAddr("::ffff:192.0.2.1"), netip.MustParseAddr("fe80::1%zone"),
+		netip.MustParseAddr("::ffff:192.0.2.1%zone"),
+	}
+	// An unrelated populated index exercises the ordinary no-match path; empty
+	// indexes must preserve its nil result for valid and rejected addresses.
+	for _, origins := range []map[netip.Prefix][]uint32{
+		nil, {}, {netip.MustParsePrefix("203.0.113.0/24"): {13335}},
+	} {
+		engine := Engine{origins: origins}
+		for _, query := range queries {
+			if got := engine.Origins(query); got != nil {
+				t.Fatalf("absent origins changed for %v: %v", query, got)
+			}
+		}
+	}
+	engine, err := NewEngine(testPolicy(t), nil, nil, []OriginMapping{{Prefix: netip.MustParsePrefix("192.0.2.0/24"), Origins: []uint32{13335, 15169}}}, clock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []uint32{13335, 15169}
+	for _, query := range queries[1:4] {
+		got := engine.Origins(query)
+		if query.Is6() && !query.Is4In6() {
+			if got != nil {
+				t.Fatal("IPv4 origins crossed into IPv6")
+			}
+			continue
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatal("mapped normalization changed origins", got)
+		}
+		got[0] = 1
+		if !reflect.DeepEqual(engine.Origins(query), want) {
+			t.Fatal("origin result aliases the frozen index")
+		}
+	}
+}
+
 func TestInvalidInputsAndClock(t *testing.T) {
 	p := testPolicy(t)
 	v := riskEvidence("192.0.2.1", "a", "malware")
@@ -313,6 +356,97 @@ func TestGeoHierarchySupportCoordinatesAndAnycast(t *testing.T) {
 	}
 	if result.Region != nil || result.City != nil {
 		t.Fatal("one family manufactured fine location")
+	}
+}
+
+func TestRegistrationAndPhysicalCountryMatchIndependentFamilyVotes(t *testing.T) {
+	policy := testPolicy(t)
+	physical := GeoEvidence{Family: "locations", Weight: 70, Current: true, Prefix: netip.MustParsePrefix("192.0.2.0/24"), PhysicalCountry: " us ", Region: "West", City: "Harbor"}
+	registration := GeoEvidence{Family: "registry", Weight: 100, Current: true, Prefix: netip.MustParsePrefix("192.0.2.64/26"), RegistrationCountry: " jp "}
+	for _, change := range []func(*GeoEvidence){
+		func(*GeoEvidence) {},
+		func(v *GeoEvidence) { v.Current = false },
+		func(v *GeoEvidence) { v.Weight = 0 },
+		func(v *GeoEvidence) { v.Weight = math.NaN() },
+		func(v *GeoEvidence) { v.Family = "" },
+		func(v *GeoEvidence) { v.Family = physical.Family },
+		func(v *GeoEvidence) { v.PhysicalCountry, v.Region, v.City = "US", "West", "Harbor" },
+		func(v *GeoEvidence) { v.Region, v.City = "West", "Harbor" },
+	} {
+		r := registration
+		change(&r)
+		for _, pair := range [][]GeoEvidence{{physical, r}, {r, physical}} {
+			got, err := FuseGeo(policy, pair, false)
+			// An inactive third row exercises the general family vote without changing the evidence.
+			want, wantErr := FuseGeo(policy, append(pair, GeoEvidence{}), false)
+			if (err == nil) != (wantErr == nil) || !reflect.DeepEqual(got, want) {
+				t.Fatalf("country pair differs from family vote: %#v %v, want %#v %v", got, err, want, wantErr)
+			}
+		}
+	}
+}
+
+func TestSingleGeoObservationMatchesIndependentFamilyVote(t *testing.T) {
+	p := testPolicy(t)
+	base := GeoEvidence{Family: "alpha", Weight: 70, Prefix: netip.MustParsePrefix("::ffff:192.0.2.0/120"), PhysicalCountry: " us ", RegistrationCountry: "ca", Region: "North", City: "Cafe\u0301", Coordinates: &Coordinates{10.1115, -20.1115, 3}, Current: true}
+	defaultSupport := p.GeoSupport
+	for _, mutate := range []func(*GeoEvidence){
+		func(*GeoEvidence) {},
+		func(v *GeoEvidence) { v.PhysicalCountry = "zz" },
+		func(v *GeoEvidence) { v.RegistrationCountry = "" },
+		func(v *GeoEvidence) { v.Region = "x@example.com"; v.City = "\u202e" },
+		func(v *GeoEvidence) { v.Coordinates = &Coordinates{Latitude: math.NaN(), Longitude: 181} },
+		func(v *GeoEvidence) { v.Family = "" },
+		func(v *GeoEvidence) { v.Weight = math.NaN() },
+		func(v *GeoEvidence) { v.Weight = 0; v.Prefix = netip.MustParsePrefix("::ffff:0:0/80") },
+		func(v *GeoEvidence) { v.Prefix = netip.MustParsePrefix("::ffff:0:0/80") },
+		func(v *GeoEvidence) { v.Current = false; v.Weight = -1 },
+	} {
+		v := base
+		mutate(&v)
+		for _, support := range [][2]int{defaultSupport, {1, 1}, {1, 2}, {2, 1}} {
+			p.GeoSupport = support
+			for _, anycast := range []bool{false, true} {
+				got, err := FuseGeo(p, []GeoEvidence{v}, anycast)
+				// The second observation is filtered by the general voting path.
+				want, wantErr := FuseGeo(p, []GeoEvidence{v, {}}, anycast)
+				if (err == nil) != (wantErr == nil) || err != nil && err.Error() != wantErr.Error() || !reflect.DeepEqual(got, want) {
+					t.Fatalf("single observation diverged for support %v and anycast %v: got %+v, %v, want %+v, %v", support, anycast, got, err, want, wantErr)
+				}
+			}
+		}
+	}
+}
+
+func TestGeoPerFamilyFieldVoteTiesAndOverrides(t *testing.T) {
+	policy := testPolicy(t)
+	parent, child := netip.MustParsePrefix("192.0.0.0/16"), netip.MustParsePrefix("192.0.2.0/24")
+	record := func(family string, prefix netip.Prefix, weight float64, physical, registration string) GeoEvidence {
+		return GeoEvidence{Family: family, Prefix: prefix, Weight: weight, PhysicalCountry: physical, RegistrationCountry: registration, Current: true}
+	}
+	base := []GeoEvidence{record("a", parent, 100, "US", "JP"), record("a", child, 80, "GB", ""), record("a", child, 80, "GB", ""), record("b", child, 40, "DE", "FR")}
+	for _, tc := range []struct {
+		name, want string
+		extra      []GeoEvidence
+	}{
+		{"duplicate top vote", "GB", nil},
+		{"disagreeing top votes", "DE", []GeoEvidence{record("a", child, 80, "CA", "")}},
+		{"stronger vote resolves tie", "AU", []GeoEvidence{record("a", child, 80, "CA", ""), record("a", child, 90, "AU", "")}},
+		{"weak disagreement ignored", "GB", []GeoEvidence{record("a", child, 70, "CA", "")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows := append(slices.Clone(base), tc.extra...)
+			for range 2 {
+				for offset := range len(rows) {
+					ordered := append(slices.Clone(rows[offset:]), rows[:offset]...)
+					result, err := FuseGeo(policy, ordered, false)
+					if err != nil || result.PhysicalCountry == nil || *result.PhysicalCountry != tc.want || result.RegistrationCountry == nil || *result.RegistrationCountry != "JP" {
+						t.Fatal("per-family field vote changed", result, err)
+					}
+				}
+				slices.Reverse(rows)
+			}
+		})
 	}
 }
 
@@ -467,5 +601,24 @@ func TestTier1BootstrapStabilityMissingInputsCyclesAndBudget(t *testing.T) {
 	cyclic, _ := DeriveTier1(context.Background(), r, paths, clock(), clock(), "policy", nil, 10000)
 	if cyclic.Eligible {
 		t.Fatal("cyclic graph qualified")
+	}
+}
+
+func TestPrefixLengthsRetainEmptyBoundariesByFamily(t *testing.T) {
+	entries := make(map[netip.Prefix][]uint32)
+	for _, prefix := range []string{"0.0.0.0/0", "192.0.2.0/24", "192.0.2.5/32", "203.0.113.0/24", "::/0", "2001:db8::/32", "2001:db8::1/128"} {
+		entries[netip.MustParsePrefix(prefix)] = nil
+	}
+	entries[netip.Prefix{}] = []uint32{100}
+	depths := indexPrefixLengths(entries)
+	for _, tc := range []struct {
+		address string
+		want    []uint8
+	}{
+		{"192.0.2.5", []uint8{32, 24, 0}}, {"2001:db8::1", []uint8{128, 32, 0}},
+	} {
+		if got := depths.forAddress(netip.MustParseAddr(tc.address)); !slices.Equal(got, tc.want) {
+			t.Fatalf("wrong prefix lengths for %s: %v", tc.address, got)
+		}
 	}
 }

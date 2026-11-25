@@ -1,8 +1,30 @@
 diff --git a/esm/index.mjs b/esm/index.mjs
-index 5d3c01b4130fdc4cdba432b9643bbd2a1ee04226..81f9fadcf94c8f0bf53c41c9dd5bfb624e67ec27 100644
+index 5d3c01b4130fdc4cdba432b9643bbd2a1ee04226..a0454e4e180fc51b130e902646dfdaaac4b330bc 100644
 --- a/esm/index.mjs
 +++ b/esm/index.mjs
-@@ -571,8 +571,12 @@ var rzb = function (dat, st, out) {
+@@ -444,6 +444,8 @@ var rzb = function (dat, st, out) {
+         var buf = out ? out.subarray(st.y, st.y + st.m) : new u8(st.m);
+         // starting point for literals
+         var spl = buf.length - lss;
++        if (st.borrowWindow != null && spl < 0)
++            err(0);
+         if (lbt == 0)
+             buf.set(dat.subarray(bt, bt += lss), spl);
+         else if (lbt == 1)
+@@ -542,6 +544,12 @@ var rzb = function (dat, st, out) {
+                     else
+                         off = st.o[0];
+                 }
++                if (st.borrowWindow != null) {
++                    if (off < 1 || off > st.borrowWindow || off > st.e + oubt + ll)
++                        err(4);
++                    if (ll > buf.length - spl || ll + ml > buf.length - oubt)
++                        err(0);
++                }
+                 for (var i = 0; i < ll; ++i) {
+                     buf[oubt + i] = buf[spl + i];
+                 }
+@@ -571,8 +579,12 @@ var rzb = function (dat, st, out) {
                  oubt = buf.length;
              if (out)
                  st.y += oubt;
@@ -16,7 +38,7 @@ index 5d3c01b4130fdc4cdba432b9643bbd2a1ee04226..81f9fadcf94c8f0bf53c41c9dd5bfb62
          }
          else if (out) {
              st.y += lss;
-@@ -582,8 +586,11 @@ var rzb = function (dat, st, out) {
+@@ -582,8 +594,11 @@ var rzb = function (dat, st, out) {
                  }
              }
          }
@@ -29,7 +51,41 @@ index 5d3c01b4130fdc4cdba432b9643bbd2a1ee04226..81f9fadcf94c8f0bf53c41c9dd5bfb62
          st.b = ebt;
          return buf;
      }
-@@ -739,6 +746,8 @@ var Decompress = /*#__PURE__*/ (function () {
+@@ -648,6 +663,33 @@ export function decompress(dat, buf) {
+     }
+     return cct(bufs, ol);
+ }
++/** Decode one preflighted frame, borrowing only its already written window. */
++export function decompressInto(dat, output) {
++    var st = rzfh(dat, new u8(0));
++    if (typeof st != 'object' || st.u != output.length || dat.buffer === output.buffer)
++        err(0);
++    var windowSize = st.e, written = 0;
++    st.borrowWindow = windowSize;
++    while (!st.l) {
++        st.w = output.subarray(Math.max(0, written - windowSize), written);
++        st.e = st.w.length;
++        var block = rzb(dat, st);
++        if (!block)
++            err(5);
++        try {
++            if (block.length > output.length - written)
++                return -1;
++            output.set(block, written);
++            written += block.length;
++        } finally {
++            // rzb's block is independent of the input and output/history views.
++            block.buffer.transfer(0);
++        }
++    }
++    if (st.b + st.c * 4 != dat.length)
++        err(0);
++    return written;
++}
+ /**
+  * Decompressor for Zstandard streamed data
+  */
+@@ -739,6 +781,8 @@ var Decompress = /*#__PURE__*/ (function () {
                  }
                  if (this.s.l) {
                      var rest = chunk.subarray(this.s.b);
@@ -38,11 +94,47 @@ index 5d3c01b4130fdc4cdba432b9643bbd2a1ee04226..81f9fadcf94c8f0bf53c41c9dd5bfb62
                      this.s = this.s.c * 4;
                      this.push(rest, final);
                      return;
+diff --git a/lib/index.d.ts b/lib/index.d.ts
+index 6ca669157fdb1ed73294a778696162359298e1bf..3e17398a3e80f3797c726f192dac7a2f01e91193 100644
+--- a/lib/index.d.ts
++++ b/lib/index.d.ts
+@@ -29,6 +29,9 @@ export interface ZstdError extends Error {
+  * @returns The decompressed data
+  */
+ export declare function decompress(dat: Uint8Array, buf?: Uint8Array): Uint8Array;
++/** Decode a single preflighted frame into independent owned storage. Returns
++ * the actual output length, or -1 if the decoded bytes would exceed it. */
++export declare function decompressInto(dat: Uint8Array, output: Uint8Array): number;
+ /**
+  * Callback to handle data in Zstandard streams
+  * @param data The data that was (de)compressed
 diff --git a/lib/index.js b/lib/index.js
-index fc3a45d5dbf22d7512203c714019b0a8eb130ee6..0644db7b8af5c3c2b4a6c03715c57ec40dc8ba37 100644
+index fc3a45d5dbf22d7512203c714019b0a8eb130ee6..51e936a33c17fa9c0aaed3178c2ab93e92ab852f 100644
 --- a/lib/index.js
 +++ b/lib/index.js
-@@ -572,8 +572,12 @@ var rzb = function (dat, st, out) {
+@@ -445,6 +445,8 @@ var rzb = function (dat, st, out) {
+         var buf = out ? out.subarray(st.y, st.y + st.m) : new u8(st.m);
+         // starting point for literals
+         var spl = buf.length - lss;
++        if (st.borrowWindow != null && spl < 0)
++            err(0);
+         if (lbt == 0)
+             buf.set(dat.subarray(bt, bt += lss), spl);
+         else if (lbt == 1)
+@@ -543,6 +545,12 @@ var rzb = function (dat, st, out) {
+                     else
+                         off = st.o[0];
+                 }
++                if (st.borrowWindow != null) {
++                    if (off < 1 || off > st.borrowWindow || off > st.e + oubt + ll)
++                        err(4);
++                    if (ll > buf.length - spl || ll + ml > buf.length - oubt)
++                        err(0);
++                }
+                 for (var i = 0; i < ll; ++i) {
+                     buf[oubt + i] = buf[spl + i];
+                 }
+@@ -572,8 +580,12 @@ var rzb = function (dat, st, out) {
                  oubt = buf.length;
              if (out)
                  st.y += oubt;
@@ -56,7 +148,7 @@ index fc3a45d5dbf22d7512203c714019b0a8eb130ee6..0644db7b8af5c3c2b4a6c03715c57ec4
          }
          else if (out) {
              st.y += lss;
-@@ -583,8 +587,11 @@ var rzb = function (dat, st, out) {
+@@ -583,8 +595,11 @@ var rzb = function (dat, st, out) {
                  }
              }
          }
@@ -69,7 +161,42 @@ index fc3a45d5dbf22d7512203c714019b0a8eb130ee6..0644db7b8af5c3c2b4a6c03715c57ec4
          st.b = ebt;
          return buf;
      }
-@@ -741,6 +748,8 @@ var Decompress = /*#__PURE__*/ (function () {
+@@ -650,6 +665,34 @@ function decompress(dat, buf) {
+     return cct(bufs, ol);
+ }
+ exports.decompress = decompress;
++/** Decode one preflighted frame, borrowing only its already written window. */
++function decompressInto(dat, output) {
++    var st = rzfh(dat, new u8(0));
++    if (typeof st != 'object' || st.u != output.length || dat.buffer === output.buffer)
++        err(0);
++    var windowSize = st.e, written = 0;
++    st.borrowWindow = windowSize;
++    while (!st.l) {
++        st.w = output.subarray(Math.max(0, written - windowSize), written);
++        st.e = st.w.length;
++        var block = rzb(dat, st);
++        if (!block)
++            err(5);
++        try {
++            if (block.length > output.length - written)
++                return -1;
++            output.set(block, written);
++            written += block.length;
++        } finally {
++            // rzb's block is independent of the input and output/history views.
++            block.buffer.transfer(0);
++        }
++    }
++    if (st.b + st.c * 4 != dat.length)
++        err(0);
++    return written;
++}
++exports.decompressInto = decompressInto;
+ /**
+  * Decompressor for Zstandard streamed data
+  */
+@@ -741,6 +784,8 @@ var Decompress = /*#__PURE__*/ (function () {
                  }
                  if (this.s.l) {
                      var rest = chunk.subarray(this.s.b);

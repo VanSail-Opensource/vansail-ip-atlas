@@ -2,10 +2,59 @@ package intelligence
 
 import (
 	"context"
+	"errors"
 	"math"
 	"net/netip"
 	"sort"
+	"time"
 )
+
+type exactRiskVisitor struct {
+	ctx  context.Context
+	emit func(netip.Addr, float64, []string, []uint32) error
+}
+
+// newEngine has already validated policy, publication times and routes and
+// sorted this bounded leaf's exact addresses in canonical accumulation order.
+func (v *exactRiskVisitor) walk(policy Policy, observations map[netip.Addr][]Evidence, addresses []netip.Addr, engine *Engine, clock time.Time) error {
+	for _, addr := range addresses {
+		if err := v.ctx.Err(); err != nil {
+			return err
+		}
+		layer, err := policy.layer(observations[addr], clock)
+		if err != nil {
+			return err
+		}
+		if layer.Risk <= 0 {
+			continue
+		}
+		if origins := engine.Origins(addr); len(origins) > 0 {
+			if err := v.emit(addr, layer.Risk, layer.Families, origins); err != nil {
+				return err
+			}
+		}
+	}
+	return v.ctx.Err()
+}
+
+// WalkRoutedExactRisks uses the ordinary origin index, timestamp admission,
+// independent-family scoring and canonical address order. It streams directly
+// into the global ASN accumulator without constructing unrelated lookup tables.
+func WalkRoutedExactRisks(ctx context.Context, policy Policy, evidence []Evidence, origins []OriginMapping, clock time.Time, emit func(netip.Addr, float64, []string, []uint32) error) error {
+	if ctx == nil || emit == nil {
+		return errors.New("exact risk sink is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for _, v := range evidence {
+		if v.Scope != Exact || !v.Current || !v.Address.IsValid() || v.Address.Zone() != "" {
+			return errors.New("routed exact risk requires current exact input")
+		}
+	}
+	_, err := newEngine(policy, evidence, nil, origins, clock, &exactRiskVisitor{ctx: ctx, emit: emit})
+	return err
+}
 
 // WalkExactRisks exposes only already fused exact facts for the offline global
 // ASN aggregate. Sorted addresses preserve the canonical accumulation order.

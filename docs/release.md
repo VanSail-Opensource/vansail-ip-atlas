@@ -4,9 +4,9 @@ This contract freezes C07/C08; its executable vectors are
 `tools/release_contract/test_contracts.py`. Passing these vectors does not certify
 a real dataset, a complete binary scanner, a hosted preview or a production release.
 
-Current `release-scope-v5` preserves CC BY-SA 4.0 compiled-data licensing while
-adding public schema 4 observed risk, verified global publisher logos, encrypted
-private-state transport and automatic promotion under reviewed policy. Source rights
+Current `release-scope-v6` licenses original compilation contributions under CC BY-SA 4.0 while
+adding public schema 5 dated RPKI snapshots and observed risk, verified global publisher logos, encrypted
+private-state transport and automatic promotion under reviewed policy. Source terms and explicit distribution decisions
 remain individually reviewed and current; no license or policy revision activates
 a source. Source code and dependency licenses stay separate.
 
@@ -28,7 +28,7 @@ The descriptor has exactly these keys:
 
 | Key | Encoding |
 |---|---|
-| `format_version`, `schema_version` | Integer `3`, integer `4` respectively |
+| `format_version`, `schema_version` | Integer `3`, integer `5` respectively |
 | `codec` | `zstd-1` |
 | `mode` | Public candidates: `synthetic` or `production`; synthetic cannot be approved. Private `engineering` artifacts are never publishable. |
 | `valid_from` | Nonnegative UTC Unix seconds; evaluation clock, not an upstream clock |
@@ -156,11 +156,23 @@ The compiled-data grant does not change public-domain inputs' status, relicense
 software dependencies, approve an unreviewed dataset, or override upstream
 copyright/notice, derivative-license, placement or other conditions. Retain each
 included dataset's applicable reviewed obligations. Unresolved or incompatible
-conditions exclude that source. Neither the notice nor credits may associate a
+conditions remain documented. Under the 2026-11-15 owner amendment, an explicit
+`user_authorized_educational_use` decision may admit a technically qualified source
+without claiming compatible redistribution rights. The notice grants only rights
+held by the project and preserves upstream terms. Neither the notice nor credits may associate a
 publisher with a queried IP, ASN, field or reason. Source-rich qualification and
 included-source receipts stay private.
 
 ## Expiry, withdrawal and suspended sessions
+
+RPKI snapshot observations have an explicit user-approved exception: the original
+publisher snapshot freshness contributes to release `valid_until`, while each
+observed RPKI status carries its own observation time and authorization/coverage
+expiry under public schema 5. The status remains visible after that expiry with
+a neutral as-of/expired indication and must never be presented as a current
+authorization claim. Authorization expiry alone does not clear the page or renew
+any clock. This does not change whole-release publication freshness, withdrawal,
+pointer revalidation, or expiry rules for other facts.
 
 `valid_until` is the minimum applicable contributing observation expiry, never
 `built_at + 720h`. A normal snapshot expires at its verified publication clock plus
@@ -169,7 +181,9 @@ included-source receipts stay private.
 expiry. Missing verified upstream item publication time quarantines that item;
 first observation, fetch time and snapshot republication cannot invent its clock.
 The payload itself still requires exact upstream publication proof. A stricter reviewed source limit wins. Public
-metadata exposes only aggregate `valid_until`, no source-specific expiry list.
+metadata exposes aggregate release `valid_until`, no source-specific expiry list.
+The RPKI observation exception exposes only its fact-level observation and
+authorization/coverage clocks, never per-source provenance.
 
 Eligibility is `valid_from <= now < valid_until`; equality at expiry is ineligible.
 The evaluation clock and all upstream clocks are UTC. Future publication tolerance
@@ -258,14 +272,44 @@ not grant approval. No report is stored in the public tree.
 
 Automatic production authorization is defined by `configs/production-policy.json`
 and recomputed by `promotion.py --automatic`. It requires successful exact-head
-integration/candidate/preview runs, current source-store qualification, every raw
+integration/candidate/benchmark-matrix/benchmark-join/preview runs and exact attempts,
+current source-store qualification, every raw
 measurement gate, protected main and a main-only production environment. The legacy
 manual approval validator remains available only for historical contract fixtures;
 it is not the active release path. Policy booleans alone are never evidence.
 
 Official `ubuntu-24.04` intake starts on main push, hourly at minute 17 or manual
-recovery and waits for exact-head integration success. Candidate, preview and
-promotion follow through three `workflow_run` levels. Enforced cgroup limits and
+recovery and waits for exact-head integration success. A completed candidate
+triggers a read-only-state relay that dispatches the benchmark matrix with scoped
+Actions write permission. The relay first verifies the completed successful
+exact-head candidate; it holds no private-state or Cloudflare credentials. This
+explicit dispatch starts a new chain because GitHub permits only three successive
+`workflow_run` levels. The completed matrix triggers the separate benchmark join,
+then preview, then promotion. Every consumer independently verifies its completed
+producer; no in-progress workflow can supply accepted artifacts.
+
+The matrix runs all five real scenarios with three samples each in fifteen
+independent official hosted jobs. Each restores the original authenticated
+candidate checkpoint and checks current source eligibility before and after its
+case. Warm preparation and the actual measured native workload are unchanged.
+Finalized outer runner-budget reports are uploaded only after the measurement
+command exits. Mutated engineering outputs never become production artifacts.
+
+The join authenticates exactly fifteen completed successful current-attempt job
+names and fifteen immutable case artifacts, including GitHub ZIP digests, exact
+JSON digests, candidate/state/configuration/clock/limit identities and each job's
+finished resource report. Missing, duplicated, cross-attempt or failed cases
+block the join. It reconstructs the same raw measurement gates and preserves the
+candidate's original 100,000 native lookup timings. The native strict 2-microsecond
+p95 gate also runs before candidate completion. The join restores the original
+candidate checkpoint independently, rechecks current eligibility and packs only
+authenticated original state plus the joined source-free evidence.
+
+Preview and promotion continue downloading the original public tree from
+`candidate_run_id`. The version-2 acceptance packet binds candidate, benchmark-join
+and preview artifact attempts. Promotion independently fetches and verifies all
+fifteen matrix job/artifact bindings again and reconstructs the aggregate report;
+an aggregate success flag alone never authorizes production. Enforced cgroup limits and
 workspace accounting establish the 2-CPU/8-GiB/14-GiB workload budget independently
 of the public runner's larger physical host. No self-hosted label is used.
 
@@ -310,6 +354,8 @@ finishes within this bound; do not extend expiry to create a rollback.
 Private approved snapshots/normalized evidence have a maximum 168-hour rollback
 retention after removal, shortened by rights withdrawal and source expiry. Delete
 expired input snapshots and derived output immediately from eligible build state;
+RPKI authorization expiry alone leaves its explicitly dated snapshot observation
+eligible until the unchanged source publication-freshness deadline;
 retention is isolated audit storage, never an ingestion cache. Raw subscription
 bytes remain only in controlled parsing quarantine and are deleted immediately
 after parsing or failure (retention zero hours). Redacted audit decisions and hashes

@@ -29,8 +29,66 @@ type VRP struct {
 	ValidUntil time.Time `json:",omitzero"`
 }
 type VRPIndex struct {
-	records map[netip.Prefix][]VRP
-	current bool
+	records                        map[netip.Prefix][]VRP
+	current                        bool
+	observedAt, coverageValidUntil time.Time
+}
+
+// RPKIObservation describes validation at a complete publisher snapshot's
+// observation time. ValidUntil records the evidence deadline, not a claim that
+// the authorization remains current when this retained observation is read.
+type RPKIObservation struct {
+	Status                 RPKIStatus
+	MaximumLength          uint8
+	ObservedAt, ValidUntil time.Time
+}
+
+func NewVRPObservationIndex(records []VRP, observedAt, coverageValidUntil time.Time) (*VRPIndex, error) {
+	if !validVRPClock(observedAt) || !validVRPClock(coverageValidUntil) || !coverageValidUntil.After(observedAt) {
+		return nil, errors.New("complete VRP observation clocks required")
+	}
+	for _, record := range records {
+		if !validVRPClock(record.ValidUntil) || !record.ValidUntil.After(observedAt) || record.ValidUntil.Before(coverageValidUntil) {
+			return nil, errors.New("VRP authorization does not bind snapshot observation")
+		}
+	}
+	index, err := NewVRPIndex(records, true)
+	if err != nil {
+		return nil, err
+	}
+	index.observedAt, index.coverageValidUntil = observedAt, coverageValidUntil
+	return index, nil
+}
+
+func validVRPClock(clock time.Time) bool {
+	return !clock.IsZero() && clock.Nanosecond() == 0 && clock.Unix() > 0 && clock.Unix() <= 9007199254740991
+}
+
+// Observe preserves exact announcement/origin validation. Positive validity
+// lasts through the latest matching authorization; negative results depend on
+// the whole complete snapshot and use its earliest authorization deadline.
+func (v *VRPIndex) Observe(prefix netip.Prefix, origin uint32) RPKIObservation {
+	result := RPKIObservation{Status: RPKIUnknown}
+	if v == nil || !v.current || v.observedAt.IsZero() || !prefix.IsValid() || !IsPublicASN(origin) {
+		return result
+	}
+	result.Status, result.ObservedAt, result.ValidUntil = RPKINotFound, v.observedAt, v.coverageValidUntil
+	prefix = prefix.Masked()
+	for bits := prefix.Bits(); bits >= 0; bits-- {
+		for _, roa := range v.records[netip.PrefixFrom(prefix.Addr(), bits).Masked()] {
+			if result.Status != RPKIValid {
+				result.Status = RPKIInvalid
+			}
+			if roa.ASN == origin && prefix.Bits() <= int(roa.MaxLength) {
+				if result.Status != RPKIValid || roa.ValidUntil.After(result.ValidUntil) {
+					result.ValidUntil = roa.ValidUntil
+				}
+				result.Status = RPKIValid
+				result.MaximumLength = max(result.MaximumLength, roa.MaxLength)
+			}
+		}
+	}
+	return result
 }
 
 func NewVRPIndex(records []VRP, current bool) (*VRPIndex, error) {
@@ -46,7 +104,7 @@ func NewVRPIndex(records []VRP, current bool) (*VRPIndex, error) {
 	return index, nil
 }
 func (v *VRPIndex) Validate(prefix netip.Prefix, origin uint32) RPKIStatus {
-	if v == nil || !v.current || !prefix.IsValid() || origin == 0 {
+	if v == nil || !v.current || !v.observedAt.IsZero() || !prefix.IsValid() || origin == 0 {
 		return RPKIUnknown
 	}
 	prefix = prefix.Masked()

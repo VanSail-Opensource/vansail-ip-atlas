@@ -19,10 +19,18 @@ import (
 // These adapters recognize observed publisher schemas. They do not certify
 // redistribution rights, upstream independence, freshness or assessment coverage.
 func selectRiskAdapter(s Source) bool {
-	if s.Parser.Version != 1 || s.Category != "abuse" || s.Coverage != "positive_only" || s.Scope != "exact_ip" || !fieldsEqual(s.PublicFields, "reason_flags") {
+	version := uint32(1)
+	if s.Parser.ID == "ffraud-csv" {
+		version = 2
+	}
+	if s.Parser.Version != version || s.Category != "abuse" || s.Coverage != "positive_only" || s.Scope != "exact_ip" || !fieldsEqual(s.PublicFields, "reason_flags") {
 		return false
 	}
 	switch s.Parser.ID {
+	case "tweetfeed-week-csv":
+		return tweetFeedSource(s)
+	case "ffraud-csv":
+		return selectFFraudAdapter(s)
 	case "ip-count-tsv":
 		return s.Parser.Schema == "ip-positive-count-tsv-v1" && s.Format == "tsv" && fieldsEqual(s.Signals, "abuse") && mappedFields(s, map[string]string{"ip": "reason_flags"})
 	case "feodo-csv":
@@ -52,6 +60,13 @@ func parseRiskPayload(ctx context.Context, input io.Reader, s Source, published 
 	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if s.Parser.ID == "tweetfeed-week-csv" {
+		_, err := scanTweetFeed(ctx, input, published, maximum, emit)
+		return err
+	}
+	if s.Parser.ID == "ffraud-csv" {
+		return parseFFraudPayload(ctx, input, s, published, maximum, emit)
 	}
 	r := &io.LimitedReader{R: contextReader{ctx, input}, N: (3 << 30) + 1}
 	scanner := bufio.NewScanner(r)

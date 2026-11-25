@@ -23,6 +23,7 @@ type tier1Discovery struct {
 	stateHash [32]byte
 	relations *RelationshipIndex
 	sources   []tier1SourceDiscovery
+	paths     tier1PathSummary
 	failed    bool
 }
 
@@ -60,6 +61,8 @@ func (d *tier1Discovery) collect(index int, record NormalizedRecord) {
 		// Preserve the first error's source position, and stop graph growth while
 		// the verifier independently finishes structural validation of all rows.
 		d.failed = true
+	} else if record.Kind == RecordPath {
+		d.paths.collect(record.Path.Observation)
 	}
 }
 
@@ -270,7 +273,20 @@ func observeTier1StateDiscovered(ctx context.Context, workspace string, state Bu
 		}
 		return nil
 	}
-	qualified.snapshot, err = deriveTier1(ctx, qualified.relations, walk, captured, now, hex.EncodeToString(policyHash[:]), previous, maxWork)
+	read := pathVisibilityReader(walk)
+	if discovery != nil && discovery.paths.available() {
+		read = func(relations *RelationshipIndex) (tier1Visibility, error) {
+			for i, source := range state.Sources {
+				if discovery.sources[i].hasPaths {
+					if err := VerifyStoredSourceObjects(ctx, workspace, source); err != nil {
+						return tier1Visibility{}, err
+					}
+				}
+			}
+			return discovery.paths.resolve(ctx, relations)
+		}
+	}
+	qualified.snapshot, err = deriveTier1WithVisibility(ctx, qualified.relations, read, captured, now, hex.EncodeToString(policyHash[:]), previous, maxWork)
 	if err != nil {
 		return nil, err
 	}

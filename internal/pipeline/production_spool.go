@@ -66,6 +66,7 @@ type bulkSpool struct {
 	observe      func(context.Context, Stage) func(bool)
 	reuse        *spatialCache
 	publicStream *spatialStreamWriter
+	replaySink   *spatialReplaySink
 	publicRows   uint64
 	started      bool
 

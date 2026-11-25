@@ -76,7 +76,9 @@ func (s *bulkSpool) openLocations(ctx context.Context, bucket *bulkBucket, polic
 	if err != nil {
 		return nil, err
 	}
-	p.rows = &runReader{reader: p.input.reader, limit: DefaultLimits().RecordBytes}
+	// resolve copies geographic and coordinate values before advancing. Equal
+	// bodies in this leaf can safely share the original strict decode.
+	p.rows = &runReader{reader: p.input.reader, limit: DefaultLimits().RecordBytes, leafBodies: &leafPayloads{}}
 	if err = p.advance(); err != nil {
 		return nil, errors.Join(err, p.close())
 	}

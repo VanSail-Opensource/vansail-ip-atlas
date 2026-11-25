@@ -6,8 +6,8 @@ import (
 	"vansail-ip-atlas/internal/via3"
 )
 
-// A leaf's scalar facts often repeat across unrelated addresses. The encoder
-// reads these payloads without mutation. Share only strictly decoded values of
+// A leaf's scalar facts often repeat across unrelated addresses. The consumer
+// must read these payloads without mutation. Share only strictly decoded values of
 // identical type and bytes during one leaf scan. Prefix, rank, inheritance,
 // exactness and the original logical byte limit are verified on every frame.
 type leafPayloads struct {

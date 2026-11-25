@@ -22,7 +22,7 @@ given IP has any observation depends on the included edition.
 | Proxy, datacenter, Tor and VPN | FFraud typed records, Tor exit observations and X4B VPN prefixes where applicable |
 | Hosting | Individual addresses in mature Microsoft Azure App Service allocations |
 
-The twenty-one-source catalog provides observed network prefixes, registration
+The twenty-two-source catalog provides observed network prefixes, registration
 countries, Google address-block ownership, RIPE IPv6 network names and origin ASNs. ISP, assignment
 mode and IPv4 directed-broadcast status display as unknown without an explicit
 address-level mapping. The ASN identity fields belong to the autonomous system. A
@@ -83,6 +83,25 @@ result. GeoLite City is outside the release catalog pending edition-aware
 retirement of hosted data or a verified alternative usage arrangement.
 [GeoLite terms, section 6](https://www.maxmind.com/en/geolite/eula) ·
 [Pages deployment retention](https://developers.cloudflare.com/changelog/post/2026-11-19-workers-pages-version-retention/)
+
+## November 25 subscriber ISP review
+
+Three Japanese mobile operators publish customer-facing address ranges. NTT
+DOCOMO's sp-mode page records a June 10 addition. KDDI dates its LTE NET and
+5G NET list to January 2025 and excludes some data-only services. SoftBank
+dates its smartphone egress list to April 8, 2026. The review found no current,
+dated edition of these lists within the intake freshness window. They remain
+documented candidates for operator-specific subscriber ISP coverage.
+[NTT DOCOMO](https://www.docomo.ne.jp/service/developer/smart_phone/spmode/) ·
+[KDDI](https://www.au.com/mobile/charge/internet-connection/network/) ·
+[SoftBank](https://s4.itc.softbank.jp/partner_st/home_tech1/ios/index.cfm)
+
+DB-IP's commercial IP to ISP database distinguishes subscriber ISP from the
+organization that holds an address. The review confirmed the product schema.
+The project has no authenticated bulk edition of that product. Its separate
+IP to City Lite edition contributes geographic observations to the catalog.
+[IP to ISP fields](https://db-ip.com/db/format/ip-to-isp/csv.html) ·
+[IP to City Lite](https://db-ip.com/db/download/ip-to-city-lite)
 
 ## November 25 RIPE IPv6 network names
 

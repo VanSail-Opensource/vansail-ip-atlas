@@ -1,9 +1,14 @@
 package admission
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 	"vansail-ip-atlas/internal/acquire"
@@ -38,10 +43,43 @@ func TestOriginalEditionAdmission(t *testing.T) {
 		t.Fatal("source engine")
 	}
 	defer engine.Close()
+
+	query := appleWitnessAPI + "?path=" + appleWitnessFile + "&sha=master&per_page=1"
+	req, _ := http.NewRequestWithContext(ctx, "GET", query, nil)
+	req.Header.Set("User-Agent", "VanSail-IP-Atlas/3")
+	probeResponse, httpErr := http.DefaultClient.Do(req)
+	if httpErr == nil {
+		t.Logf("witness_http: status=%d rate_exhausted=%t", probeResponse.StatusCode, probeResponse.Header.Get("X-RateLimit-Remaining") == "0")
+		probeResponse.Body.Close()
+	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "original")
 	current, parent, currentErr := engine.appleWitness(ctx, dir, "current", "master")
 	t.Logf("current_evidence: passed=%t prefixes=%d", currentErr == nil, current.Prefixes)
+
+	if currentErr != nil {
+		b, er := os.ReadFile(filepath.Join(dir, "apple-current-commit"))
+		var rows []appleCommit
+		validObj := len(b) > 0 && uniqueJSON(b) == nil && json.Unmarshal(b, &rows) == nil && len(rows) == 1
+		t.Logf("witness_metadata: downloaded=%t parsed=%t", er == nil, validObj)
+		if validObj {
+			m := rows[0]
+			t.Logf("witness_commit: identity=%t parent=%t same_dates=%t edition_previously_checked=%t", commitSHA(m.SHA) && m.URL == appleWitnessAPI+"/"+m.SHA, len(m.Parents) == 1, m.Commit.Author.Date == m.Commit.Committer.Date, m.SHA == "120b5e4958c8af42d837583978b9a53cda887475")
+			data, er := os.ReadFile(filepath.Join(dir, "apple-current-prefixes"))
+			t.Logf("witness_prefix_file: downloaded=%t bytes=%d", er == nil, len(data))
+			if er == nil {
+				prefixes, _, parseErr := readApplePrefixes(ctx, bytes.NewReader(data), true, intelligence.AppleRelayMaxPrefixes, nil)
+				t.Logf("witness_prefix_shape: complete=%t count=%d source_declared=%t", parseErr == nil, len(prefixes), bytes.Contains(data, []byte("# source: "+acquire.AppleRelayURL+"\n")))
+			} else {
+				alt, er := http.DefaultClient.Get(appleWitnessRaw + m.SHA + "/" + appleWitnessFile)
+				if er == nil {
+					n, err := io.Copy(io.Discard, io.LimitReader(alt.Body, 32<<20))
+					alt.Body.Close()
+					t.Logf("immutable_file_http: status=%d bytes=%d complete=%t gzip=%t", alt.StatusCode, n, err == nil, strings.EqualFold(alt.Header.Get("Content-Encoding"), "gzip"))
+				}
+			}
+		}
+	}
 	if currentErr == nil {
 		earlier, _, er := engine.appleWitness(ctx, dir, "previous", parent)
 		t.Logf("preceding_evidence: passed=%t prefixes=%d changed=%t", er == nil, earlier.Prefixes, er == nil && earlier.PrefixHash != current.PrefixHash)

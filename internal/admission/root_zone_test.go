@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"vansail-ip-atlas/internal/acquire"
 	"vansail-ip-atlas/internal/intelligence"
 )
 
@@ -195,6 +196,85 @@ func TestRootZoneCompleteAdmissionAndWithdrawal(t *testing.T) {
 	}
 }
 
+type datedRootZoneFetch struct {
+	*fixtureFetch
+	modified map[string]time.Time
+}
+
+func (f datedRootZoneFetch) Fetch(ctx context.Context, url, dest string, bound int64) (acquire.Result, error) {
+	r, err := f.fixtureFetch.Fetch(ctx, url, dest, bound)
+	r.LastModified = f.modified[url]
+	return r, err
+}
+
+func TestRootZonePublisherCopyRecoversOnlyAnIdenticalCurrentEdition(t *testing.T) {
+	body, source := rootZoneFixture(t)
+	engine, original, fetch, _, binding := prepared(t, body, "csv")
+	source.Fixture = original.Fixture
+	source.Fixture.Parser, source.Fixture.Schema = source.Parser.ID, source.Parser.Schema
+	source.Fixture.TestedAt = "2026-11-22T06:00:00Z"
+	certifyGeoTestSource(t, engine, source)
+	clock := time.Date(2026, 11, 22, 9, 0, 0, 0, time.UTC)
+	addRootZoneTestAssets(t, fetch, body)
+	older := bytes.ReplaceAll(body, []byte("2026112200"), []byte("2026112102"))
+	newer := bytes.ReplaceAll(body, []byte("2026112200"), []byte("2026112201"))
+	compressed := fetch.assets[rootZoneURL+".gz"]
+	archived := gzipMRTFixture(t, older)
+	sameSerialDifferentBytes := gzipMRTFixture(t, append(bytes.Clone(body), []byte("unrelated.invalid. 7200 IN A 8.8.8.8\n")...))
+	fetch.assets[rootZoneAlternateGzipURL] = compressed
+	changed := map[string]time.Time{}
+	engine.fetch = datedRootZoneFetch{fetch, changed}
+	check := func(t *testing.T, at time.Time, want bool, wantCalls int) Result {
+		t.Helper()
+		start := fetch.calls
+		r, err := engine.IngestPartitioned(t.Context(), source, at, binding)
+		if err != nil || (r.Snapshot != nil) != want || fetch.calls-start != wantCalls {
+			t.Fatalf("snapshot=%t decision=%+v calls=%d error=%v", r.Snapshot != nil, r.Decision, fetch.calls-start, err)
+		}
+		return r
+	}
+	baseline := check(t, clock, true, 3)
+	fetch.assets[rootZoneURL+".gz"] = archived
+	fresh := check(t, clock.Add(time.Hour), true, 4)
+	if fresh.Snapshot.PayloadHash != baseline.Snapshot.PayloadHash || !fresh.Snapshot.PublishedAt.Equal(baseline.Snapshot.PublishedAt) || !fresh.Snapshot.ContentValidUntil.Equal(baseline.Snapshot.ContentValidUntil) {
+		t.Fatal("mirror changed original identity or lifetime")
+	}
+	check(t, baseline.Snapshot.ContentValidUntil, false, 4)
+	delete(fetch.assets, rootZoneURL+".gz")
+	check(t, clock, true, 4)
+	for _, tc := range []struct {
+		name               string
+		primary, alternate []byte
+		calls              int
+	}{
+		{"both old", archived, archived, 4},
+		{"newer primary cannot roll back", gzipMRTFixture(t, newer), compressed, 3},
+		{"equivocal primary serial", sameSerialDifferentBytes, compressed, 3},
+		{"corrupt primary", compressed[:len(compressed)-4], compressed, 3},
+		{"equivocal alternate serial", archived, sameSerialDifferentBytes, 4},
+		{"short alternate", archived, compressed[:len(compressed)-4], 4},
+		{"second member", archived, append(bytes.Clone(compressed), compressed...), 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fetch.assets[rootZoneURL+".gz"], fetch.assets[rootZoneAlternateGzipURL] = tc.primary, tc.alternate
+			check(t, clock, false, tc.calls)
+		})
+	}
+	fetch.assets[rootZoneURL+".gz"], fetch.assets[rootZoneAlternateGzipURL] = archived, compressed
+	for _, tc := range []struct {
+		url   string
+		calls int
+	}{{rootZoneURL, 1}, {rootZoneURL + ".md5", 2}, {rootZoneAlternateGzipURL, 4}} {
+		changed[tc.url] = clock.Add(time.Second)
+		check(t, clock, false, tc.calls)
+		delete(changed, tc.url)
+	}
+	// A later observed file modification can withhold a current claim. An
+	// earlier modification or retrieval clock cannot extend the SOA lifetime.
+	fetch.assets[rootZoneURL+".md5"] = []byte(strings.Repeat("0", 32) + "\n")
+	check(t, clock, false, 2)
+}
+
 func TestRootZonePrivateCompleteCapture(t *testing.T) {
 	dir := os.Getenv("ATLAS_DNS_ROOT_OBSERVED_DIRECTORY")
 	if dir == "" {
@@ -211,12 +291,19 @@ func TestRootZonePrivateCompleteCapture(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	alternate, alternateErr := os.ReadFile(filepath.Join(dir, "zones", "root.zone.gz"))
+	if alternateErr == nil {
+		assets[rootZoneAlternateGzipURL] = alternate
+	} else if !os.IsNotExist(alternateErr) {
+		t.Fatal(alternateErr)
+	}
 	root := t.TempDir()
 	file := filepath.Join(root, "payload")
 	if err = os.WriteFile(file, b, 0600); err != nil {
 		t.Fatal(err)
 	}
-	engine := Engine{fetch: &fixtureFetch{assets: assets}}
+	fetch := &fixtureFetch{assets: assets}
+	engine := Engine{fetch: fetch}
 	z, err := engine.verifyRootZone(context.Background(), file, sha256.Sum256(b), int64(len(b)), time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
@@ -226,5 +313,5 @@ func TestRootZonePrivateCompleteCapture(t *testing.T) {
 	if err != nil || reported != 26 {
 		t.Fatal(reported, err)
 	}
-	t.Logf("Verified %d full text bytes (%x), independent gzip %d bytes, SOA %s, %d exact anycast addresses, content valid through %s", len(b), sha256.Sum256(b), len(assets[rootZoneURL+".gz"]), z.serial, reported, z.until.Format(time.RFC3339))
+	t.Logf("Verified %d original text bytes (%x), %d corroboration fetches, SOA %s, %d exact anycast addresses, content valid through %s", len(b), sha256.Sum256(b), fetch.calls, z.serial, reported, z.until.Format(time.RFC3339))
 }

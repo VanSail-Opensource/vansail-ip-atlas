@@ -314,6 +314,13 @@ bounds these 26 positives to November 28 at 00:00 UTC.
 [RSSAC FAQ](https://www.icann.org/en/rssac/faq) ·
 [SOA serial convention](https://newgtlds.icann.org/sites/default/files/root-scaling-27jun12-en.pdf)
 
+On November 25 the primary text and its published MD5 agreed on serial
+`2026112500` while the primary gzip still held `2026112402`. InterNIC's
+second published gzip decoded to the same 2,246,005 bytes as the current
+original, with SHA-256 `d26cf5211ad2bab34db2fd5c1dfccf5d0acfb61a332d9e8d865284d5a3205da5`.
+All 26 exact addresses retained their original clock and December 1 deadline.
+[InterNIC alternate distribution](https://www.internic.net/zones/)
+
 Other IPs receive no anycast or location assertion from this source. The
 weekly or daily anycast censuses considered during research report measured
 prefixes. Some IPv4 ranges mix unicast and anycast, and published prefix

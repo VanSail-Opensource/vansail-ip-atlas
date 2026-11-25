@@ -10,6 +10,7 @@ import { cpus, totalmem } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import { graphVisibleNodeCount } from './performance-gates.mjs'
 import { auditAccessibility } from './browser-accessibility.mjs'
+import { previewBrowserPlan } from './preview-browser-plan.mjs'
 import { visitOwner as owner, submitLookup, waitForAtlasView } from './production-interactions.mjs'
 import { hasMapLocation } from '../../web/app/lib/via3.ts'
 import { parseInput } from '../../web/app/lib/query.ts'
@@ -18,7 +19,8 @@ const root = new URL('../../', import.meta.url)
 const base = new URL(process.env.ATLAS_PREVIEW_URL ?? '')
 if (base.protocol !== 'https:' || !/^[0-9a-f]{8,64}\.[a-z0-9][a-z0-9-]*\.pages\.dev$/.test(base.host) || base.username || base.password || base.pathname !== '/' || base.search || base.hash)
   throw new Error('Production browser acceptance requires an immutable HTTPS Pages preview origin')
-const reportPath = new URL('reports/production-browser.json', root)
+const plan = previewBrowserPlan(process.env)
+const reportPath = new URL(plan.identity ? 'reports/production-browser-part.json' : 'reports/production-browser.json', root)
 const candidate = JSON.parse(await readFile(new URL('reports/static-candidate.json', root), 'utf8'))
 if (candidate.mode !== 'production' || candidate.status !== 'passed' || !/^[a-f0-9]{64}$/.test(candidate.qualification_receipt_sha256 ?? ''))
   throw new Error('A qualified frozen production candidate is required')
@@ -79,6 +81,7 @@ const axeSource = await readFile(createRequire(import.meta.url).resolve('axe-cor
 const tile = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j9zEAAAAASUVORK5CYII=', 'base64')
 const report = { scope:'hosted-production-browser-v3',release_scope:'release-scope-v6',mode:'production',url:base.origin,
   release_id:candidate.release_id,candidate_bundle_sha256:candidate.candidate_bundle_sha256,
+  qualification_receipt_sha256:candidate.qualification_receipt_sha256,
   corpus_release_id:corpus.release_id,corpus_availability:corpus.availability,
   corpus_ipv4_network_coverage: corpus.ipv4_network_coverage && Object.fromEntries(['covered_addresses','router_intervals','network_objects'].map(k=>[k,corpus.ipv4_network_coverage[k]])),
   corpus_features:{map:corpus.map_query!==null,graph:corpus.graph_query!==null},
@@ -98,7 +101,7 @@ const report = { scope:'hosted-production-browser-v3',release_scope:'release-sco
 report.graph_component_fixture={scope:'isolated-synthetic-capacity',fixture_sha256:sha256(fixtureBytes),worker_sha256:report.worst_case_worker_memory.worker_sha256,candidate_bundle_sha256:report.candidate_bundle_sha256}
 if (!/^[a-f0-9]{64}$/.test(report.graph_component_fixture.worker_sha256 ?? '')) throw new Error('Component capacity must bind the exact measured emitted worker')
 
-let browser,server,memoryTimer,memoryBusy=false,rootPid
+let browser,server,memoryTimer,pendingMemorySample=null,rootPid
 async function processTreeRSS() {
   if (process.platform !== 'linux') return {supported:false,reason:'Linux procfs required'}
   const rows=[]
@@ -355,11 +358,32 @@ async function componentPopulation(width,theme,index) {
   } finally {report.component_populations.push(row);await s.context.close()}
 }
 
+async function measureQueries() {
+  const ipQueries=corpus.queries.filter(query=>isIP(query.q))
+  if(ipQueries.length<100)throw new Error('Cold payload corpus needs at least100 real IP queries')
+  for(let index=0;index<100;index++){
+    const s=await newSample(390,'light',{measureColdPayload:true}),query=ipQueries[Math.floor(index*ipQueries.length/100)]
+    try{await s.page.goto(new URL(`/ip/overview/?q=${encodeURIComponent(query.q)}`,base).href,{waitUntil:'networkidle'});await s.page.getByRole('heading',{name:'Overview',exact:true}).waitFor();await waitForAtlasView(s.page);await s.page.locator('.fact-list').waitFor();if(await s.page.getByRole('alert').count())throw new Error('Cold lookup failed');await s.settle();if(s.atlas.length<2)throw new Error('Cold lookup did not fetch required controls');report.cold_queries.push({sample:index+1,stratum:query.stratum,atlas_body_bytes:s.atlas.reduce((sum,x)=>sum+x.body_bytes,0),responses:s.atlas})}finally{await s.context.close()}
+  }
+  for(let index=1;index<=3;index++){
+    const s=await newSample(1280,'light')
+    try{
+      await s.page.goto(new URL(`/ip/overview/?q=${encodeURIComponent(corpus.interaction_query)}`,base).href,{waitUntil:'networkidle'});await s.page.locator('.fact-list').waitFor()
+      const result=await s.page.evaluate(async queries=>{const worker=window.__atlasWorkers[0];if(!worker)throw new Error('No actual atlas worker');let id=-1;const lookup=q=>new Promise((resolve,reject)=>{const current=id--;const timeout=setTimeout(()=>{worker.removeEventListener('message',receive);reject(new Error('Worker timing timeout'))},30000);const receive=e=>{if(e.data.id!==current)return;clearTimeout(timeout);worker.removeEventListener('message',receive);if(e.data.error)reject(new Error('Worker lookup failed'));else resolve(e.data.answer)};worker.addEventListener('message',receive);worker.postMessage({action:'lookup',id:current,q})});for(const query of queries)await lookup(query);const samples=[];for(const query of queries){const start=performance.now();await lookup(query);samples.push(performance.now()-start)}return {samples_ms:samples,warmups:queries.length}},corpus.queries.slice(0,1000).map(q=>q.q))
+      report.hot_queries.push({context:index,timing:'actual-worker-indexed-lookups',...result})
+    }finally{await s.context.close()}
+  }
+}
+
 try {
   server=await chromium.launchServer({channel:'chrome',headless:true})
   rootPid=server.process().pid;browser=await chromium.connect(server.wsEndpoint());report.browser=browser.version()
-  memoryTimer=setInterval(async()=>{if(memoryBusy)return;memoryBusy=true;try{report.worker_memory_samples.push(await processTreeRSS())}catch{report.errors.push('Browser RSS observation failed')}finally{memoryBusy=false}},100)
-  for(const width of [320,390,1280,1440])for(const theme of ['light','dark'])for(let index=1;index<=30;index++){
+  memoryTimer=setInterval(()=>{
+    if(pendingMemorySample)return
+    pendingMemorySample=processTreeRSS().then(sample=>report.worker_memory_samples.push(sample))
+      .catch(()=>report.errors.push('Browser RSS observation failed')).finally(()=>{pendingMemorySample=null})
+  },100)
+  for(const {width,theme} of plan.populations)for(let index=1;index<=30;index++){
     const s=await newSample(width,theme),checks=[],row={width,theme,sample:index}
     try {
       await s.page.goto(new URL('/ip/',base).href,{waitUntil:'networkidle'});await s.page.getByRole('textbox',{name:'IP address or ASN'}).waitFor();await s.settle()
@@ -388,25 +412,18 @@ try {
     await componentPopulation(width,theme,index)
     console.log(`Production browser population ${width}/${theme} ${index}/30`)
   }
-  const ipQueries=corpus.queries.filter(query=>isIP(query.q))
-  if(ipQueries.length<100)throw new Error('Cold payload corpus needs at least100 real IP queries')
-  for(let index=0;index<100;index++){
-    const s=await newSample(390,'light',{measureColdPayload:true}),query=ipQueries[Math.floor(index*ipQueries.length/100)]
-    try{await s.page.goto(new URL(`/ip/overview/?q=${encodeURIComponent(query.q)}`,base).href,{waitUntil:'networkidle'});await s.page.getByRole('heading',{name:'Overview',exact:true}).waitFor();await waitForAtlasView(s.page);await s.page.locator('.fact-list').waitFor();if(await s.page.getByRole('alert').count())throw new Error('Cold lookup failed');await s.settle();if(s.atlas.length<2)throw new Error('Cold lookup did not fetch required controls');report.cold_queries.push({sample:index+1,stratum:query.stratum,atlas_body_bytes:s.atlas.reduce((sum,x)=>sum+x.body_bytes,0),responses:s.atlas})}finally{await s.context.close()}
-  }
-  for(let index=1;index<=3;index++){
-    const s=await newSample(1280,'light')
-    try{
-      await s.page.goto(new URL(`/ip/overview/?q=${encodeURIComponent(corpus.interaction_query)}`,base).href,{waitUntil:'networkidle'});await s.page.locator('.fact-list').waitFor()
-      const result=await s.page.evaluate(async queries=>{const worker=window.__atlasWorkers[0];if(!worker)throw new Error('No actual atlas worker');let id=-1;const lookup=q=>new Promise((resolve,reject)=>{const current=id--;const timeout=setTimeout(()=>{worker.removeEventListener('message',receive);reject(new Error('Worker timing timeout'))},30000);const receive=e=>{if(e.data.id!==current)return;clearTimeout(timeout);worker.removeEventListener('message',receive);if(e.data.error)reject(new Error('Worker lookup failed'));else resolve(e.data.answer)};worker.addEventListener('message',receive);worker.postMessage({action:'lookup',id:current,q})});for(const query of queries)await lookup(query);const samples=[];for(const query of queries){const start=performance.now();await lookup(query);samples.push(performance.now()-start)}return {samples_ms:samples,warmups:queries.length}},corpus.queries.slice(0,1000).map(q=>q.q))
-      report.hot_queries.push({context:index,timing:'actual-worker-indexed-lookups',...result})
-    }finally{await s.context.close()}
-  }
+  if(plan.queries)await measureQueries()
 } catch(error) {console.error(error);report.errors.push('production-browser-scenario-failed')}
 finally {
-  clearInterval(memoryTimer);if(browser)await browser.close();if(server)await server.close()
-  report.browser_process_tree_rss_peak_bytes=Math.max(0,...report.worker_memory_samples.filter(x=>x.supported).map(x=>x.rss_bytes))
-  await mkdir(new URL('reports/',root),{recursive:true});await writeFile(reportPath,JSON.stringify(report)+'\n')
+  clearInterval(memoryTimer)
+  await pendingMemorySample
+  if(browser)await browser.close();if(server)await server.close()
+  report.browser_process_tree_rss_peak_bytes=report.worker_memory_samples.reduce((peak,sample)=>sample.supported?Math.max(peak,sample.rss_bytes):peak,0)
+  const packet = plan.identity ? {...plan.identity,report} : report
+  await mkdir(new URL('reports/',root),{recursive:true});await writeFile(reportPath,JSON.stringify(packet)+'\n')
 }
-const validation=spawnSync('python',['-c','import json,sys;from tools.release_contract.acceptance import browser_gates,require_all;g=browser_gates(json.load(open(sys.argv[1])));print(json.dumps(g,indent=2));require_all(g)',fileURLToPath(reportPath)],{cwd:root,stdio:'inherit'})
+const validationArgs = plan.identity
+  ? ['tools/hosted/preview_shards.py','--part',fileURLToPath(reportPath),'--shard',plan.identity.shard]
+  : ['-c','import json,sys;from tools.release_contract.acceptance import browser_gates,require_all;g=browser_gates(json.load(open(sys.argv[1])));print(json.dumps(g,indent=2));require_all(g)',fileURLToPath(reportPath)]
+const validation=spawnSync('python',validationArgs,{cwd:root,stdio:'inherit'})
 process.exitCode=validation.status===0?0:1

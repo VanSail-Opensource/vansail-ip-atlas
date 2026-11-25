@@ -75,6 +75,13 @@ func (g *GeoIndex) Lookup(addr netip.Addr, anycast bool) (GeoResult, error) {
 // index performs LPM first; source names and family IDs never enter GeoResult.
 func FuseGeo(policy Policy, records []GeoEvidence, anycast bool) (GeoResult, error) {
 	byFamily := map[string][]GeoEvidence{}
+	// With two complementary country observations, only the physical-country
+	// voter can support its region. A two-family region policy therefore
+	// resolves both countries independently and stops before place voting.
+	countryPair := len(records) == 2 && policy.GeoSupport[0] > 1 &&
+		(records[0].PhysicalCountry == "" && records[1].RegistrationCountry == "" ||
+			records[1].PhysicalCountry == "" && records[0].RegistrationCountry == "")
+	var physicalOnly, registrationOnly string
 	for _, v := range records {
 		if !v.Current {
 			continue
@@ -100,9 +107,21 @@ func FuseGeo(policy Policy, records []GeoEvidence, anycast bool) (GeoResult, err
 		if len(records) == 1 && policy.GeoSupport[0] > 1 {
 			return geoCountries(v.PhysicalCountry, v.RegistrationCountry), nil
 		}
+		if countryPair {
+			if v.PhysicalCountry != "" {
+				physicalOnly = v.PhysicalCountry
+			}
+			if v.RegistrationCountry != "" {
+				registrationOnly = v.RegistrationCountry
+			}
+			continue
+		}
 		v.Region = SafeLabel(v.Region)
 		v.City = SafeLabel(v.City)
 		byFamily[v.Family] = append(byFamily[v.Family], v)
+	}
+	if countryPair {
+		return geoCountries(physicalOnly, registrationOnly), nil
 	}
 	if len(byFamily) == 0 {
 		return GeoResult{}, nil

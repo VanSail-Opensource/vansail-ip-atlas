@@ -359,6 +359,33 @@ func TestGeoHierarchySupportCoordinatesAndAnycast(t *testing.T) {
 	}
 }
 
+func TestRegistrationAndPhysicalCountryMatchIndependentFamilyVotes(t *testing.T) {
+	policy := testPolicy(t)
+	physical := GeoEvidence{Family: "locations", Weight: 70, Current: true, Prefix: netip.MustParsePrefix("192.0.2.0/24"), PhysicalCountry: " us ", Region: "West", City: "Harbor"}
+	registration := GeoEvidence{Family: "registry", Weight: 100, Current: true, Prefix: netip.MustParsePrefix("192.0.2.64/26"), RegistrationCountry: " jp "}
+	for _, change := range []func(*GeoEvidence){
+		func(*GeoEvidence) {},
+		func(v *GeoEvidence) { v.Current = false },
+		func(v *GeoEvidence) { v.Weight = 0 },
+		func(v *GeoEvidence) { v.Weight = math.NaN() },
+		func(v *GeoEvidence) { v.Family = "" },
+		func(v *GeoEvidence) { v.Family = physical.Family },
+		func(v *GeoEvidence) { v.PhysicalCountry, v.Region, v.City = "US", "West", "Harbor" },
+		func(v *GeoEvidence) { v.Region, v.City = "West", "Harbor" },
+	} {
+		r := registration
+		change(&r)
+		for _, pair := range [][]GeoEvidence{{physical, r}, {r, physical}} {
+			got, err := FuseGeo(policy, pair, false)
+			// An inactive third row exercises the general family vote without changing the evidence.
+			want, wantErr := FuseGeo(policy, append(pair, GeoEvidence{}), false)
+			if (err == nil) != (wantErr == nil) || !reflect.DeepEqual(got, want) {
+				t.Fatalf("country pair differs from family vote: %#v %v, want %#v %v", got, err, want, wantErr)
+			}
+		}
+	}
+}
+
 func TestSingleGeoObservationMatchesIndependentFamilyVote(t *testing.T) {
 	p := testPolicy(t)
 	base := GeoEvidence{Family: "alpha", Weight: 70, Prefix: netip.MustParsePrefix("::ffff:192.0.2.0/120"), PhysicalCountry: " us ", RegistrationCountry: "ca", Region: "North", City: "Cafe\u0301", Coordinates: &Coordinates{10.1115, -20.1115, 3}, Current: true}

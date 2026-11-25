@@ -6,10 +6,11 @@ import (
 	"time"
 )
 
-// decodeWriterMRT recognizes the ordinary writer shape for a single observed
-// origin or a single AS_SEQUENCE. The strict general decoder handles all other
-// layouts, including AS sets and confederations. Row admission is unchanged.
-func decodeWriterMRT(data []byte) (NormalizedRecord, bool) {
+// decodeWriterRouting recognizes common writer shapes for a single origin, a
+// single AS_SEQUENCE and a VRP. Spatial spools strip private MRT peer identity,
+// while original observations retain it. Other layouts use the strict general
+// decoder, including AS sets and confederations. Row admission is unchanged.
+func decodeWriterRouting(data []byte) (NormalizedRecord, bool) {
 	var record NormalizedRecord
 	r := writerFrameReader{remaining: data}
 	const start = `{"Version":3,"Kind":`
@@ -28,6 +29,27 @@ func decodeWriterMRT(data []byte) (NormalizedRecord, bool) {
 		record.Kind = RecordOrigins
 		record.Origins = &OriginMapping{Prefix: p, Origins: []uint32{r.unsigned(32)}}
 		r.take(`]}`)
+	case '6':
+		if !r.take(`6,"VRP":{"Prefix":`) {
+			return record, false
+		}
+		p, err := netip.ParsePrefix(r.plainString())
+		if err != nil || !r.take(`,"MaxLength":`) {
+			return record, false
+		}
+		row := &VRP{Prefix: p, MaxLength: uint8(r.unsigned(8))}
+		r.take(`,"ASN":`)
+		row.ASN = r.unsigned(32)
+		if !bytes.Equal(r.remaining, []byte(`}}`)) {
+			if !r.take(`,"ValidUntil":`) {
+				return record, false
+			}
+			row.ValidUntil = r.utcSecond()
+		}
+		if !bytes.Equal(r.remaining, []byte(`}}`)) {
+			return record, false
+		}
+		return NormalizedRecord{Version: 3, Kind: RecordVRP, VRP: row}, true
 	case '7':
 		if !r.take(`7,"Path":{"Prefix":`) {
 			return record, false
@@ -64,6 +86,10 @@ func decodeWriterMRT(data []byte) (NormalizedRecord, bool) {
 		record.Kind, record.Path = RecordPath, path
 	default:
 		return record, false
+	}
+	if bytes.Equal(r.remaining, []byte(`}`)) {
+		record.Version = 3
+		return record, true
 	}
 	if !r.take(`,"MRTOriginatedAt":`) {
 		return record, false

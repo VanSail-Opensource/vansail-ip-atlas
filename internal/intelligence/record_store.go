@@ -616,7 +616,7 @@ func decodeRecordFrame(data []byte) (NormalizedRecord, error) {
 		record := NormalizedRecord{Version: 3, Kind: RecordGeo, Geo: geo}
 		return record, record.Validate()
 	}
-	if record, ok := decodeWriterMRT(data); ok {
+	if record, ok := decodeWriterRouting(data); ok {
 		return record, record.Validate()
 	}
 	var record NormalizedRecord

@@ -52,7 +52,12 @@ reports may overlap. Each publisher retains its own withdrawal identity.
 The IANA DNS root zone supplies exact anycast positives for its thirteen
 delegated root identities under the RSSAC operating description. Intake
 compares complete uncompressed text against a separately downloaded gzip
-edition and the publisher checksum. The SOA serial supplies the conservative
+edition and the publisher checksum. If the normal gzip is unavailable or is a
+complete but strictly older SOA edition, compare the alternate gzip from
+InterNIC's fixed `/zones/` directory with the original plain file. The
+uncompressed length and SHA-256 must match in full. Malformed gzip, different
+bytes under the same serial, a newer normal gzip or a future publisher
+modification time withhold the observation. The SOA serial supplies the conservative
 UTC publication day. Delegation and address TTLs and the apex NS signature
 expiration bound the lifetime of the observation. Address-family changes,
 missing identities and ambiguous glue fail verification. Other addresses

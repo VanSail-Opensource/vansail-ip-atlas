@@ -272,11 +272,13 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		if err != nil {
 			return deny("quarantined", "publication_not_payload_bound")
 		}
-	} else if _, err := e.fetch.Fetch(ctx, assetURL, payload, source.MaxCompressedBytes); err != nil {
+	} else if original, err := e.fetch.Fetch(ctx, assetURL, payload, source.MaxCompressedBytes); err != nil {
 		if ctx.Err() != nil {
 			return result, ctx.Err()
 		}
 		return deny("missing", "asset_unavailable")
+	} else if adapter == rootServiceZone && original.LastModified.After(now) {
+		return deny("quarantined", "publication_not_payload_bound")
 	}
 	hash, size, err := hashFile(ctx, payload, source.MaxCompressedBytes)
 	if err != nil {

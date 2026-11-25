@@ -41,6 +41,27 @@ STATE_FILES = frozenset({'state-v1.json','state-seal.key','state-seal-v2.json','
 STATE_DIRECTORIES = frozenset({'records-v2','state-history-v2','production-receipts-v1'})
 ENVELOPE_KEYS = {'format_version','kind','repository','head_sha','run_id','run_attempt',
                  'created_at','expires_at','ciphertext_sha256','ciphertext_bytes','key_id'}
+LEGACY_PATH_RECORD = re.compile(
+    rb'(111|117) path=(\.atlas-private/(?:production-receipts-v1/[0-9a-f]{64}\.json'
+    rb'|state-history-v2/[0-9a-f]{64}\.(?:json|seal)))\n')
+
+class CheckpointMember(tarfile.TarInfo):
+    """Accept only the previous writer's content-addressed history and receipt headers."""
+
+    def _proc_pax(self, archive):
+        if self.type != tarfile.XHDTYPE or self.name != '././@PaxHeader' or self.size not in (111, 117):
+            raise ContractError('invalid checkpoint extended header')
+        block = archive.fileobj.read(tarfile.BLOCKSIZE)
+        match = LEGACY_PATH_RECORD.fullmatch(block[:self.size])
+        if not match or int(match[1]) != self.size or len(block) != tarfile.BLOCKSIZE or any(block[self.size:]):
+            raise ContractError('invalid checkpoint extended path')
+        name = match[2].decode('ascii')
+        entry = self.fromtarfile(archive)
+        if (entry.type != tarfile.REGTYPE or entry.name != name[:tarfile.LENGTH_NAME]
+                or entry.offset_data != self.offset + 3 * tarfile.BLOCKSIZE):
+            raise ContractError('checkpoint extended path differs from physical member')
+        entry.name = name
+        return entry
 
 def digest(path: Path) -> str:
     with path.open('rb') as stream:
@@ -103,7 +124,7 @@ def pack(workspace: Path, output: Path, kind: str, now: int) -> dict:
         process = subprocess.Popen(['age','--encrypt','--recipient',recipient], stdin=subprocess.PIPE,
                                    stdout=destination, stderr=errors)
         try:
-            with tarfile.open(fileobj=process.stdin, mode='w|gz') as archive:
+            with tarfile.open(fileobj=process.stdin, mode='w|gz', format=tarfile.USTAR_FORMAT) as archive:
                 for path in sorted(private.rglob('*')):
                     if path.is_symlink():
                         raise ContractError('checkpoint cannot contain links')
@@ -139,7 +160,7 @@ def pack(workspace: Path, output: Path, kind: str, now: int) -> dict:
 def extract_authenticated(stream, workspace: Path) -> None:
     count = total = 0; seen = set()
     # Called only after the entire age stream has authenticated successfully.
-    with tarfile.open(fileobj=stream, mode='r:*') as archive:
+    with tarfile.open(fileobj=stream, mode='r:*', tarinfo=CheckpointMember) as archive:
         for entry in archive:
             name = member_name(entry.name)
             count += 1; total += entry.size

@@ -50,6 +50,25 @@ func (f *Fetcher) VerifyAppleRelayClock(ctx context.Context, tag string, size in
 			return time.Time{}, ErrFetch
 		}
 	}
+	// The publisher's edge can briefly fail a single condition. Only a complete
+	// fresh bracket against the same strong value can establish the clock.
+	for attempt := 0; attempt < max(1, min(f.attempts, 2)); attempt++ {
+		if attempt > 0 {
+			if f.delay == nil || f.delay(ctx, time.Second) != nil {
+				return time.Time{}, ErrFetch
+			}
+		}
+		if f.appleRelayBracket(ctx, tag, size, candidate) == nil {
+			return candidate, nil
+		}
+		if ctx.Err() != nil {
+			return time.Time{}, ErrFetch
+		}
+	}
+	return time.Time{}, ErrFetch
+}
+
+func (f *Fetcher) appleRelayBracket(ctx context.Context, tag string, size int64, candidate time.Time) error {
 	conditions := [...]struct {
 		header string
 		date   time.Time
@@ -62,7 +81,7 @@ func (f *Fetcher) VerifyAppleRelayClock(ctx context.Context, tag string, size in
 	for _, condition := range conditions {
 		req, err := http.NewRequestWithContext(ctx, http.MethodHead, AppleRelayURL, nil)
 		if err != nil {
-			return time.Time{}, ErrFetch
+			return ErrFetch
 		}
 		req.Header.Set(condition.header, condition.date.Format(http.TimeFormat))
 		req.Header.Set("Accept-Encoding", "identity")
@@ -70,11 +89,11 @@ func (f *Fetcher) VerifyAppleRelayClock(ctx context.Context, tag string, size in
 		req.Header.Set("User-Agent", fetchUserAgent)
 		response, err := f.client.Do(req)
 		if err != nil {
-			return time.Time{}, ErrFetch
+			return ErrFetch
 		}
 		closeErr := response.Body.Close()
 		if closeErr != nil || response.StatusCode != condition.status || ctx.Err() != nil {
-			return time.Time{}, ErrFetch
+			return ErrFetch
 		}
 		// Apple omits the ETag on 412 and may describe its error response
 		// with an unrelated length. A supplied validator must still agree.
@@ -82,8 +101,8 @@ func (f *Fetcher) VerifyAppleRelayClock(ctx context.Context, tag string, size in
 			continue
 		}
 		if !appleRelayRepresentation(response, tag) || condition.status == http.StatusOK && response.ContentLength != size {
-			return time.Time{}, ErrFetch
+			return ErrFetch
 		}
 	}
-	return candidate, nil
+	return nil
 }

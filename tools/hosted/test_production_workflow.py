@@ -28,6 +28,25 @@ class CandidateClockTests(unittest.TestCase):
         self.environment = {'ATLAS_UPSTREAM_RUN':'11','ATLAS_UPSTREAM_ATTEMPT':'1','GITHUB_RUN_ID':'12',
                             'GITHUB_RUN_ATTEMPT':'1','GITHUB_SHA':'a'*40}
 
+    def test_every_browser_job_uses_the_verified_immutable_deployment(self):
+        reports = self.root/'reports'
+        reports.mkdir()
+        identity = {'candidate_bundle_sha256':'b'*64, 'release_id':'d'*64}
+        origin = 'https://1234abcd.atlas.pages.dev'
+        deployed = dict(identity, status='verified', operation='preview', environment='preview',
+                        head_sha=self.environment['GITHUB_SHA'], url=origin)
+        (reports/'static-candidate.json').write_text(json.dumps(identity))
+        with patch.object(workflow,'ROOT',self.root), patch.dict(os.environ,self.environment):
+            path = reports/'pages-deployment.json'
+            path.write_text(json.dumps(deployed))
+            self.assertEqual(workflow.preview_origin(), origin)
+            for field, value in (('status','failed'),('environment','production'),('operation','promote'),
+                                 ('release_id','e'*64),('candidate_bundle_sha256','f'*64),
+                                 ('head_sha','0'*40),('url','https://atlas.pages.dev')):
+                path.write_text(json.dumps(dict(deployed, **{field:value})))
+                with self.subTest(field=field), self.assertRaises(ContractError):
+                    workflow.preview_origin()
+
     def test_delayed_candidate_uses_intake_clock_only_for_compilation(self):
         with patch.object(workflow, 'ROOT', self.root), patch.dict(os.environ, self.environment), \
                 patch.object(workflow.time, 'time', return_value=self.evaluated_at + 600), \

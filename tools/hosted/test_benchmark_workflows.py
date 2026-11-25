@@ -43,4 +43,28 @@ class BenchmarkWorkflowChainTests(unittest.TestCase):
         public=next(step for step in preview if step.get('with',{}).get('name')=='atlas-production-public')
         self.assertEqual(public['with']['run-id'],'${{ steps.candidate.outputs.run_id }}')
 
+    def test_complete_preview_joins_all_nine_browser_jobs_on_one_deployment(self):
+        jobs=self.workflow('production-preview.yml')['jobs']
+        self.assertEqual(set(jobs), {'preview','browser','join'})
+        browser=jobs['browser']
+        expected={f'{width}-{theme}' for width in (320,390,1280,1440) for theme in ('light','dark')} | {'queries'}
+        self.assertEqual(browser['strategy']['fail-fast'], 'false')
+        self.assertCountEqual(browser['strategy']['matrix']['shard'], expected)
+        self.assertEqual(browser['needs'], 'preview')
+        self.assertCountEqual(jobs['join']['needs'], ('preview','browser'))
+        for job in jobs.values():
+            self.assertEqual(job['runs-on'],'ubuntu-24.04')
+            self.assertEqual(job['environment'],'atlas-preview')
+            self.assertTrue(any('context --kind preview' in step.get('run','') for step in job['steps']))
+            self.assertTrue(any('restore --kind benchmark' in step.get('run','') for step in job['steps']))
+        uploads=lambda job: [s['with'] for s in jobs[job]['steps'] if s.get('uses','').startswith('actions/upload-artifact')]
+        self.assertEqual([a['name'] for a in uploads('preview')], ['atlas-preview-inputs-${{ github.run_attempt }}'])
+        self.assertEqual(uploads('browser')[0]['path'], 'reports/production-browser-part.json')
+        self.assertEqual(uploads('browser')[0]['name'], 'atlas-browser-part-${{ github.run_attempt }}-${{ matrix.shard }}')
+        self.assertFalse(any('CLOUDFLARE_API_TOKEN' in str(jobs[job]) for job in ('browser','join')))
+        parts=next(s['with'] for s in jobs['join']['steps'] if 'pattern' in s.get('with',{}))
+        self.assertEqual(parts['pattern'],'atlas-browser-part-${{ github.run_attempt }}-*')
+        self.assertEqual(parts['merge-multiple'],'false')
+        self.assertIn('production-preview-evidence', [a['name'] for a in uploads('join')])
+
 if __name__=='__main__':unittest.main()

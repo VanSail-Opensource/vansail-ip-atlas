@@ -24,6 +24,14 @@ invalidates old adapter certifications. This is not a public VIA3 change: the
 existing kind-8 ASN name/organization/country layout and Go/browser answer fields
 already represent these facts. No source metadata is added to those records.
 
+Internal normalized kind 10 `NetworkOrganization` carries an address prefix and
+its verified owner. The Google-owned address inventory supplies one such
+mapping. The public network row uses the existing organization slot. Its
+matched prefix can come from either an ownership boundary or an observed route.
+Routing and RPKI use the original announced prefix, including when the ownership
+record covers a more specific range. Equal-scope conflicting owners yield an
+unknown organization. The ASN identity and subscriber ISP are separate fields.
+
 CSV normalization maps `handle` to `as_name`, `description` to `organization`,
 and `country-code` to `asn_country`. The latter identifies the ASN registration
 country and never supplies an IP's physical or registration-country fact. Labels

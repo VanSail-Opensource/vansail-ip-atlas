@@ -30,7 +30,7 @@ type MaterializationInputs struct {
 	encodedLengths []int
 }
 
-// BuildIntelligence connects all nine normalized record kinds to the bounded
+// BuildIntelligence connects the typed normalized records to the bounded
 // public-fact planner. This engineering entry point refuses production: its
 // BuildState lacks certified Tier-1 history and complete streamed bulk state,
 // and does not replace the real-source admission/capability gate.

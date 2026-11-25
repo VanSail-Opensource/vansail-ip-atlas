@@ -87,7 +87,7 @@ needs streamed table-specific risk/BGP/ASN materialization and real-source
 certification. A mapping-only release must not satisfy the full production gate.
 
 `BuildIntelligence(ctx, options, state, policy, MaterializationInputs)` now
-materializes all nine currently defined normalized record kinds for engineering
+materializes the typed normalized record kinds for engineering
 releases. It reuses geographic/usage/MOAS fusion and adds four-layer quality,
 sparse exact-observation `/24` profiles, ASN contextual risk and prefix pages,
 per-announcement/per-origin RPKI, ranked typed observed paths and directed

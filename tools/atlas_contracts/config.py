@@ -179,7 +179,13 @@ def validate_sources(config):
             raise ContractError(f"{sid}: mapping references undeclared source field")
         for key, value in source["field_mappings"].items():
             values = value if isinstance(value, list) else [] if value is None else [value]
-            if any(target not in source["public_fields"] or target not in FIELD_TARGETS.get(key, set()) for target in values):
+            targets = FIELD_TARGETS.get(key, set())
+            if source["parser"]["id"] == "mullvad-relay-geolocation":
+                if key == "location":
+                    targets = {"physical_country"}
+                elif key == "city":
+                    targets = {"city", "region"}  # The US city label also contains its postal state code.
+            if any(target not in source["public_fields"] or target not in targets for target in values):
                 raise ContractError(f"{sid}: mapping bypasses field-specific normalization")
         if source["admission"] == "rights_approved":
             from .policy import reviewed_distribution_decision

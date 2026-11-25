@@ -20,10 +20,10 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_actual_catalog_is_blocked_and_has_shared_family(self):
         report = capability_report(self.configs["sources"], utc("2026-11-08T00:00:00Z"), ROOT)
-        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (21, 21, 0))
+        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (22, 22, 0))
         self.assertEqual({s["id"] for s in self.configs["sources"]["sources"] if s["admission"] == "active"}, {
             "sapics-user-country-v4", "sapics-user-country-v6", "sapics-server-country-v4", "ipverse-as-metadata",
-            "dbip-lite-direct", "ipapi-free-geo-v4", "ipapi-free-geo-v6", "x4b-vpn-v4", "tor-exits", "ipverse-asn-usage",
+            "dbip-lite-direct", "mullvad-relay-geolocation", "ipapi-free-geo-v4", "ipapi-free-geo-v6", "x4b-vpn-v4", "tor-exits", "ipverse-asn-usage",
             "google-network-organization", "ripe-ipv6-network-names", "nro-delegated-registration", "ffraud-ip", "iana-root-anycast", "tweetfeed-week", "azure-appservice-public", "routeviews-wide-rib", "ripe-mrt-rrc18", "caida-asrel2", "rpki-client-vrps"})
         self.assertFalse(report["production_eligible"])
         self.assertEqual(report["schema_version"], 3)
@@ -106,6 +106,17 @@ class ConfigurationTests(unittest.TestCase):
             source["field_mappings"][field] = "reason_flags"
             with self.subTest(field=field), self.assertRaises(ContractError):
                 validate_schema("sources", {**catalog, "sources": [source]})
+
+    def test_relay_location_scope_and_subdivision_mapping(self):
+        catalog = self.configs["sources"]
+        source = next(row for row in catalog["sources"] if row["id"] == "mullvad-relay-geolocation")
+        self.assertEqual(source["coverage"], {"kind": "mapping", "scope": "exact_ip"})
+        self.assertEqual(source["signals"], [])
+        self.assertEqual(source["field_mappings"]["city"], ["region", "city"])
+        for key in ("active", "include_in_country", "ipv4_addr_in", "ipv6_addr_in"):
+            self.assertIsNone(source["field_mappings"][key])
+        self.assertEqual(source["license"]["distribution"], "user_authorized_educational_use")
+        self.assertTrue(source["license"]["attribution_required"])
 
     def test_delegated_country_is_a_prefix_registration_fact(self):
         catalog = self.configs["sources"]

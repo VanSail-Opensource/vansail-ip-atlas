@@ -1,0 +1,47 @@
+{
+  "locations": {
+    "us-chi": {
+      "country": "USA",
+      "city": "Chicago, IL",
+      "latitude": 41.881832,
+      "longitude": -87.623177
+    },
+    "ch-zrh": {
+      "country": "Switzerland",
+      "city": "Zurich",
+      "latitude": 47.366667,
+      "longitude": 8.55
+    },
+    "au-per": {
+      "country": "Australia",
+      "city": "Perth",
+      "latitude": -31.953512,
+      "longitude": 115.857048
+    }
+  },
+  "wireguard": {
+    "relays": [
+      {
+        "location": "us-chi",
+        "active": true,
+        "include_in_country": true,
+        "ipv4_addr_in": "135.136.54.2",
+        "ipv6_addr_in": "2a0d:5600:144:30::f001"
+      },
+      {
+        "location": "ch-zrh",
+        "active": true,
+        "include_in_country": true,
+        "ipv4_addr_in": "193.32.127.71",
+        "ipv6_addr_in": "2a03:1b20:a:f011:6::f001"
+      },
+      {
+        "location": "au-per",
+        "active": false,
+        "include_in_country": true,
+        "ipv4_addr_in": "158.173.123.81",
+        "ipv6_addr_in": "2406:d501:f:dff::f001"
+      }
+    ]
+  }
+}

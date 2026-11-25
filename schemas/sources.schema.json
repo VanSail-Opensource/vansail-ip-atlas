@@ -1762,7 +1762,12 @@
                 "source",
                 "last-modified",
                 "start",
-                "status"
+                "status",
+                "location",
+                "active",
+                "include_in_country",
+                "ipv4_addr_in",
+                "ipv6_addr_in"
               ]
             },
             "uniqueItems": true,
@@ -7194,6 +7199,11 @@
               "ipv6Prefix": {"const": "network_organization"},
               "inet6num": {"type": "null"},
               "netname": {"const": "network_name"},
+              "location": {"const": "physical_country"},
+              "active": {"type": "null"},
+              "include_in_country": {"type": "null"},
+              "ipv4_addr_in": {"type": "null"},
+              "ipv6_addr_in": {"type": "null"},
               "source": {"type": "null"},
               "last-modified": {"type": "null"},
               "start": {"type": "null"},
@@ -7573,7 +7583,8 @@
                   "decoded-csv",
                   "rpki-client-excerpt",
                   "nro-delegated-excerpt",
-                  "ripe-inet6num-excerpt"
+                  "ripe-inet6num-excerpt",
+                  "mullvad-relay-excerpt"
                 ]
               }
             },

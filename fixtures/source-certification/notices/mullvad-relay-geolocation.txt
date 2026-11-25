@@ -1,0 +1,12 @@
+Mullvad VPN AB publishes the city locations of its relay servers. VanSail IP
+Atlas uses these observations only for the listed entry addresses. Map points
+represent the city center. The project records educational use of these facts
+under its source policy. Mullvad's published service terms describe use of
+its VPN. A separate grant for the relay dataset has not been established.
+
+Operator server list
+https://mullvad.net/en/servers
+How Mullvad describes its physical locations
+https://mullvad.net/en/help/server-list
+Mullvad VPN AB terms of service
+https://mullvad.net/en/help/terms-service

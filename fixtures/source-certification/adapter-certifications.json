@@ -92,6 +92,15 @@
       "implementation_sha256": "8136ad84bd63b574b0d706c09a1474fe8e1ec4d7bf30c8ed9163f3bc48480792"
     },
     {
+      "source_id": "mullvad-relay-geolocation",
+      "parser": "mullvad-relay-geolocation",
+      "schema": "mullvad-transparent-relay-json-v1",
+      "version": 1,
+      "fixture_sha256": "a89c1640132bad6427fd5170941818c645876991f8e3450f67b907f80223028a",
+      "tested_at": "2026-11-25T07:08:37Z",
+      "implementation_sha256": "7eac5104902bd2bc281b2312400559e99ea58411d6d005e506cbaa0329cee2d3"
+    },
+    {
       "source_id": "nro-delegated-registration",
       "parser": "nro-delegated-registration",
       "schema": "nro-global-extended-v2",

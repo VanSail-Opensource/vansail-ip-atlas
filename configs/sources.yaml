@@ -653,6 +653,76 @@ sources:
     latitude: latitude
     longitude: longitude
   signals: []
+- id: mullvad-relay-geolocation
+  evidence_family: mullvad-relay-locations
+  source_group: mullvad-relay-locations
+  category: geolocation
+  admission: active
+  discovery: https://mullvad.net/en/servers
+  download:
+    url: https://api.mullvad.net/app/v1/relays
+    format: json
+    max_compressed_mib: 4
+  refresh:
+    interval: 6h
+    max_stale: 720h
+  fields: [location, city, latitude, longitude, active, include_in_country, ipv4_addr_in, ipv6_addr_in]
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: Mullvad-VPN-Terms-of-Service
+    distribution: user_authorized_educational_use
+    evidence_url: https://mullvad.net/en/help/terms-service
+    review_basis: Mullvad publishes its own relay locations. Its January 2026 service
+      terms cover use of the VPN. The project records its educational-use decision
+      for these geographic facts and credits Mullvad. A separate dataset grant has
+      not been established.
+    attribution_required: true
+    attribution:
+      name: Mullvad VPN AB
+      text: Mullvad publishes the cities of its relay servers. VanSail IP Atlas
+        uses these locations for listed relay addresses. Map points represent city centers.
+      url: https://mullvad.net/en/servers
+      license_url: https://mullvad.net/en/help/terms-service
+  trust:
+    source_weight: 70
+    correlation_group: mullvad-relay-locations
+  scope: exact_ip
+  notes: Only active WireGuard entry addresses that Mullvad includes in the advertised
+    country receive geographic evidence. An explicit US postal state suffix supplies
+    a subdivision. All other subdivisions remain unknown. Coordinates describe the city.
+  publication_proof:
+    kind: snapshot_metadata
+    locator: https://api.mullvad.net/trl/v1/timestamps/latest
+    field: sigsum.timestamp.digest
+  coverage:
+    kind: mapping
+    scope: exact_ip
+  fixture:
+    status: passed
+    path: fixtures/source-certification/observed-mullvad-relay-locations.json
+    sha256: a89c1640132bad6427fd5170941818c645876991f8e3450f67b907f80223028a
+    parser: mullvad-relay-geolocation
+    schema: mullvad-transparent-relay-json-v1
+    schema_observed: true
+    tested_at: '2026-11-25T07:08:37Z'
+    synthetic: false
+    payload_format: mullvad-relay-excerpt
+  parser:
+    id: mullvad-relay-geolocation
+    schema: mullvad-transparent-relay-json-v1
+    version: 1
+  public_fields: [physical_country, region, city, latitude, longitude]
+  field_mappings:
+    location: physical_country
+    city: [region, city]
+    latitude: latitude
+    longitude: longitude
+    active: null
+    include_in_country: null
+    ipv4_addr_in: null
+    ipv6_addr_in: null
+  signals: []
 - id: ipapi-free-geo-v4
   evidence_family: ipapi-free-geo
   source_group: ipapi-free-geo

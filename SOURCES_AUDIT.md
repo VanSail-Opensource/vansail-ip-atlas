@@ -8,7 +8,7 @@ given IP has any observation depends on the included edition.
 
 | Facts | Contributing data |
 |---|---|
-| Physical country, region, city and coordinates | Sapics supplies physical country. DB-IP and ipapi.is supply physical country and finer geographic observations. |
+| Physical country, region, city and coordinates | Sapics supplies physical country. DB-IP and ipapi.is supply physical country and finer geographic observations. Mullvad supplies city-center observations for its listed relay ingress addresses. |
 | IP registration country | NRO extended delegation statistics report the recipient’s country for assigned and allocated IPv4 and IPv6 ranges. |
 | Address-level network organization | Google documents the IPv4 and IPv6 prefixes in its published list as Google-owned address space. |
 | IPv6 network name | The RIPE Database publishes the registered network identifier for IPv6 allocations and assignments. |
@@ -47,6 +47,42 @@ with each publisher update.
 The public /24 view derives its cells from the admitted address and network
 facts. An unobserved cell carries unknown values. Source qualification,
 runtime coverage and hosted availability are measured for each build.
+
+## November 25 geolocation fallback
+
+Mullvad publishes its own relay locations. Its signed November 24 edition
+contained 530 active, included WireGuard relays with 1,060 distinct global
+entry addresses in 91 cities and 50 countries. Each observation covers a
+single IPv4 or IPv6 address. An explicit US postal suffix supplied the state
+for 207 relays. Other city names carry no subdivision claim. Coordinates
+describe the center of the advertised city. Atlas still requires independent
+support for the city before displaying its map. A private engineering replay
+matched all eligible addresses against both original ipapi.is archives. The
+compiled reader returned a city centroid for 20 IPv4 and 29 IPv6 relays. The
+other 1,011 relays and 21 adjacent control addresses had no corroborated city.
+[Operator location policy](https://mullvad.net/en/help/server-list) ·
+[Signed publication](https://api.mullvad.net/trl/v1/timestamps/latest) ·
+[US Census state codes](https://www2.census.gov/geo/docs/reference/state.txt)
+
+The signing timestamp was `2026-11-24T16:07:32Z` and the signed payload SHA-256
+was `8f8718b6b72f0686cace4a0030b0107f6b86d800bc4789495e73d6c712d3b426`.
+The project credits Mullvad under its educational-use decision. The published
+service terms address its VPN service and supply no separate dataset grant.
+[Service terms](https://mullvad.net/en/help/terms-service) ·
+[Reviewed notice](fixtures/source-certification/notices/mullvad-relay-geolocation.txt)
+
+The broad GeoLite City edition built November 20 was independently located in
+two publisher-fed mirrors. Its MMDB and preserved archive member were identical.
+MaxMind’s GeoLite terms require outdated editions of its database and data to
+be destroyed within 30 days of an update. Intake archives are temporary and
+private checkpoints have a seven-day retention period. Atlas can select a
+provider’s own coordinates for an output record. Historical Pages URLs can
+continue to serve those bytes because the current deployment and the 100
+most recent are retained. The terms do not expressly classify every fused
+result. GeoLite City is outside the release catalog pending edition-aware
+retirement of hosted data or a verified alternative usage arrangement.
+[GeoLite terms, section 6](https://www.maxmind.com/en/geolite/eula) ·
+[Pages deployment retention](https://developers.cloudflare.com/changelog/post/2026-11-19-workers-pages-version-retention/)
 
 ## November 25 RIPE IPv6 network names
 

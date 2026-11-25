@@ -394,6 +394,9 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 		var nroDigest NRORegistrationDigest
 		process := func(record NormalizedRecord) error {
 			if snapshot.RIPENetworkProof != nil {
+				if record.NetworkName != nil && record.NetworkName.ModifiedAt.After(now) {
+					return errors.New("network name modification is later than reconciliation")
+				}
 				if err := ripeDigest.Add(record); err != nil {
 					return err
 				}

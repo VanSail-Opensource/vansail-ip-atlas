@@ -375,17 +375,45 @@ def candidate():
     run(['python','tools/hosted/production_workflow.py','native-gate'])
     run(['python','tools/hosted/candidate.py','--public','web/.output/public'])
 
-def preview():
+def preview_origin():
+    from tools.hosted.candidate import check_preview_origin
+    deployment = json.loads((ROOT/'reports/pages-deployment.json').read_text())
+    candidate = json.loads((ROOT/'reports/static-candidate.json').read_text())
+    if (deployment.get('status') != 'verified' or deployment.get('operation') != 'preview'
+            or deployment.get('environment') != 'preview' or deployment.get('head_sha') != os.environ['GITHUB_SHA']
+            or any(deployment.get(key) != candidate[key] for key in ('release_id','candidate_bundle_sha256'))):
+        raise ContractError('Pages deployment differs from the frozen preview candidate')
+    return check_preview_origin(deployment['url'])
+
+def preview_deploy():
     update_context('preview')
     run(['python','tools/release_contract/pages.py','preview','--public','build-private/frozen-production',
        '--qualification-receipt','.atlas-private/production-receipt.json','--account',os.environ['ATLAS_ACCOUNT'],
        '--project',os.environ['ATLAS_PROJECT'],'--head',os.environ['GITHUB_SHA']])
-    deployment=json.loads((ROOT/'reports/pages-deployment.json').read_text())
-    os.environ['ATLAS_PREVIEW_URL']=deployment['url']
-    run(['python','tools/hosted/candidate.py','--public','build-private/frozen-production','--preview-url',deployment['url']])
-    run(['python','tools/hosted/worker_memory.py','--public','build-private/frozen-production','--preview-url',deployment['url']])
+    origin=preview_origin()
+    run(['python','tools/hosted/candidate.py','--public','build-private/frozen-production','--preview-url',origin])
+    run(['python','tools/hosted/worker_memory.py','--public','build-private/frozen-production','--preview-url',origin])
+
+def preview_shard():
+    update_context('preview')
+    if not os.environ.get('ATLAS_PREVIEW_SHARD'):
+        raise ContractError('a preview browser shard is required')
+    os.environ['ATLAS_PREVIEW_URL']=preview_origin()
     run(['node','tools/hosted/production-browser.mjs'])
-    run(['python','tools/hosted/candidate.py','--public','build-private/frozen-production','--preview-url',deployment['url']])
+
+def preview_join():
+    update_context('preview')
+    origin=preview_origin()
+    run(['python','tools/hosted/preview_shards.py','--directory','build-private/preview-shards','--output','reports/production-browser.json'])
+    run(['python','tools/hosted/candidate.py','--public','build-private/frozen-production','--preview-url',origin])
+
+def preview():
+    if os.environ.get('ATLAS_PREVIEW_SHARD'):
+        raise ContractError('serial preview requires the complete browser population')
+    preview_deploy()
+    os.environ['ATLAS_PREVIEW_URL']=preview_origin()
+    run(['node','tools/hosted/production-browser.mjs'])
+    run(['python','tools/hosted/candidate.py','--public','build-private/frozen-production','--preview-url',os.environ['ATLAS_PREVIEW_URL']])
 
 def promotion():
     state=update_context('promotion')
@@ -411,7 +439,7 @@ def promotion():
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('operation',choices=('context','intake','candidate','preview','promotion','dispatch-benchmarks','native-gate','benchmark-case','benchmark-resolve','benchmark-join','cleanup-private'))
+    parser.add_argument('operation',choices=('context','intake','candidate','preview','preview-deploy','preview-shard','preview-join','promotion','dispatch-benchmarks','native-gate','benchmark-case','benchmark-resolve','benchmark-join','cleanup-private'))
     parser.add_argument('--kind',choices=STAGES)
     parser.add_argument('--upstream-run-id',type=int)
     parser.add_argument('--scenario',choices=('cold_full','warm_unchanged','warm_changed','clock_advance','withdrawal'))

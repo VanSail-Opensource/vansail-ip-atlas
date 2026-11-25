@@ -9,6 +9,14 @@ the complete measured command, including authentication and freshness checks,
 remains inside. A completed-run join verifies every sample and its original
 candidate identity before preview. Parallel scheduling does not change any gate.
 
+After deployment, eight independent Chrome jobs each measure one viewport and
+theme on the same immutable preview. Each runs all 30 real user journeys and
+30 graph capacity samples for its assigned population. A ninth job runs the
+100 cold payload lookups and three cached lookup populations. The preview
+workflow joins all nine reports for the same commit, run attempt, candidate
+and deployment, applies the full browser gates, and rechecks the live inventory
+before promotion.
+
 ## Absolute gates and measurement population
 
 | Gate | Requirement |

@@ -130,7 +130,7 @@ func TestQualityRegionsNeverSampleDescendantAtAncestorAddress(t *testing.T) {
 		}
 	}
 	var got []netip.Prefix
-	if err := regions.visit(context.Background(), func(prefix netip.Prefix) error { got = append(got, prefix); return nil }); err != nil {
+	if err := regions.visit(context.Background(), netip.Prefix{}, func(prefix netip.Prefix) error { got = append(got, prefix); return nil }); err != nil {
 		t.Fatal(err)
 	}
 	for _, query := range []string{"::", "::1", "2001:db8::", "2001:db8::1", "0.0.0.0", "0.0.0.1", "203.0.113.0", "203.0.113.1", "255.255.255.255"} {
@@ -142,6 +142,22 @@ func TestQualityRegionsNeverSampleDescendantAtAncestorAddress(t *testing.T) {
 		}
 		if count != 1 {
 			t.Fatal("non-disjoint quality regions", query, count)
+		}
+	}
+	for _, value := range []string{"0.0.0.0/0", "203.0.113.0/24", "203.0.113.17/32", "::/0", "2001:db8::/32", "2001:db8::/128"} {
+		scope := netip.MustParsePrefix(value)
+		var expected, scoped []netip.Prefix
+		for _, prefix := range got {
+			if prefix.Bits() >= scope.Bits() && scope.Contains(prefix.Addr()) {
+				expected = append(expected, prefix)
+			}
+		}
+		err := regions.visit(context.Background(), scope, func(prefix netip.Prefix) error {
+			scoped = append(scoped, prefix)
+			return nil
+		})
+		if err != nil || !slices.Equal(scoped, expected) {
+			t.Fatal("scoped quality traversal differs from filtering complete regions", scope, err)
 		}
 	}
 	if !slices.Contains(got, netip.MustParsePrefix("::/128")) || !slices.Contains(got, netip.MustParsePrefix("203.0.113.0/32")) {

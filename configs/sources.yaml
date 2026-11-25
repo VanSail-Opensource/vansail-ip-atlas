@@ -448,7 +448,7 @@ sources:
     parser: country-range-csv
     schema: start-end-country-csv-v1
     schema_observed: true
-    tested_at: '2026-11-25T07:54:22Z'
+    tested_at: '2026-11-25T07:58:18Z'
     synthetic: false
   parser:
     id: country-range-csv
@@ -504,7 +504,7 @@ sources:
     parser: country-range-csv
     schema: start-end-country-csv-v1
     schema_observed: true
-    tested_at: '2026-11-25T07:54:22Z'
+    tested_at: '2026-11-25T07:58:18Z'
     synthetic: false
   parser:
     id: country-range-csv
@@ -560,7 +560,7 @@ sources:
     parser: country-range-csv
     schema: start-end-country-csv-v1
     schema_observed: true
-    tested_at: '2026-11-25T07:54:22Z'
+    tested_at: '2026-11-25T07:58:18Z'
     synthetic: false
   parser:
     id: country-range-csv
@@ -630,7 +630,7 @@ sources:
     status: passed
     sha256: 9f1d79394ceedd24445922f84d17325c0f1809cadac60da410a5c7610bbf57ef
     schema_observed: true
-    tested_at: '2026-11-25T07:54:22Z'
+    tested_at: '2026-11-25T07:58:18Z'
     path: fixtures/source-certification/observed-dbip-city.csv
     parser: city-range-csv
     schema: dbip-city-eight-columns-v1
@@ -652,6 +652,76 @@ sources:
     city: city
     latitude: latitude
     longitude: longitude
+  signals: []
+- id: mullvad-relay-geolocation
+  evidence_family: mullvad-relay-locations
+  source_group: mullvad-relay-locations
+  category: geolocation
+  admission: active
+  discovery: https://mullvad.net/en/servers
+  download:
+    url: https://api.mullvad.net/app/v1/relays
+    format: json
+    max_compressed_mib: 4
+  refresh:
+    interval: 6h
+    max_stale: 720h
+  fields: [location, city, latitude, longitude, active, include_in_country, ipv4_addr_in, ipv6_addr_in]
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: Mullvad-VPN-Terms-of-Service
+    distribution: user_authorized_educational_use
+    evidence_url: https://mullvad.net/en/help/terms-service
+    review_basis: Mullvad publishes its own relay locations. Its January 2026 service
+      terms cover use of the VPN. The project records its educational-use decision
+      for these geographic facts and credits Mullvad. A separate dataset grant has
+      not been established.
+    attribution_required: true
+    attribution:
+      name: Mullvad VPN AB
+      text: Mullvad publishes the cities of its relay servers. VanSail IP Atlas
+        uses these locations for listed relay addresses. Map points represent city centers.
+      url: https://mullvad.net/en/servers
+      license_url: https://mullvad.net/en/help/terms-service
+  trust:
+    source_weight: 70
+    correlation_group: mullvad-relay-locations
+  scope: exact_ip
+  notes: Only active WireGuard entry addresses that Mullvad includes in the advertised
+    country receive geographic evidence. An explicit US postal state suffix supplies
+    a subdivision. All other subdivisions remain unknown. Coordinates describe the city.
+  publication_proof:
+    kind: snapshot_metadata
+    locator: https://api.mullvad.net/trl/v1/timestamps/latest
+    field: sigsum.timestamp.digest
+  coverage:
+    kind: mapping
+    scope: exact_ip
+  fixture:
+    status: passed
+    path: fixtures/source-certification/observed-mullvad-relay-locations.json
+    sha256: a89c1640132bad6427fd5170941818c645876991f8e3450f67b907f80223028a
+    parser: mullvad-relay-geolocation
+    schema: mullvad-transparent-relay-json-v1
+    schema_observed: true
+    tested_at: '2026-11-25T07:58:18Z'
+    synthetic: false
+    payload_format: mullvad-relay-excerpt
+  parser:
+    id: mullvad-relay-geolocation
+    schema: mullvad-transparent-relay-json-v1
+    version: 1
+  public_fields: [physical_country, region, city, latitude, longitude]
+  field_mappings:
+    location: physical_country
+    city: [region, city]
+    latitude: latitude
+    longitude: longitude
+    active: null
+    include_in_country: null
+    ipv4_addr_in: null
+    ipv6_addr_in: null
   signals: []
 - id: ipapi-free-geo-v4
   evidence_family: ipapi-free-geo
@@ -709,7 +779,7 @@ sources:
     status: passed
     sha256: 4df74d3dbe3a08c3bc7e6a63d4c3912f7bf4932fc203a69f566656f1f71e2836
     schema_observed: true
-    tested_at: '2026-11-25T07:54:22Z'
+    tested_at: '2026-11-25T07:58:18Z'
     path: fixtures/source-certification/observed-ipapi-city-ipv4.csv
     parser: ipapi-free-city-csv
     schema: ipapi-free-fourteen-columns-v1
@@ -788,7 +858,7 @@ sources:
     status: passed
     sha256: 99f6c0ba9fbeacda88749d62782ba1a9eadb55aea2a5e4940a6f4a20b03704b7
     schema_observed: true
-    tested_at: '2026-11-25T07:54:22Z'
+    tested_at: '2026-11-25T07:58:18Z'
     path: fixtures/source-certification/observed-ipapi-city-ipv6.csv
     parser: ipapi-free-city-csv
     schema: ipapi-free-fourteen-columns-v1
@@ -857,7 +927,7 @@ sources:
     parser: asn-identity-csv
     schema: asn-handle-description-country-csv-v1
     schema_observed: true
-    tested_at: '2026-11-25T07:54:22Z'
+    tested_at: '2026-11-25T07:58:18Z'
     synthetic: false
   parser:
     id: asn-identity-csv
@@ -933,7 +1003,7 @@ sources:
     status: passed
     sha256: a7038a372eebed2e872c8e8ee92c52ce5340c62c585f891b13f139de75d8f640
     schema_observed: true
-    tested_at: '2026-11-25T07:54:22Z'
+    tested_at: '2026-11-25T07:58:18Z'
     path: fixtures/source-certification/observed-x4b-vpn-ipv4.txt
     parser: literal-prefix-text
     schema: one-literal-ip-or-prefix-per-line-v1
@@ -993,7 +1063,7 @@ sources:
     parser: tor-exit-addresses
     schema: tordnsel-exit-addresses-v1
     schema_observed: true
-    tested_at: '2026-11-25T07:54:22Z'
+    tested_at: '2026-11-25T07:58:18Z'
     synthetic: false
   parser:
     id: tor-exit-addresses
@@ -1052,7 +1122,7 @@ sources:
     parser: ipverse-asn-usage-json
     schema: ipverse-as-category-json-v1
     schema_observed: true
-    tested_at: '2026-11-25T07:54:22Z'
+    tested_at: '2026-11-25T07:58:18Z'
     synthetic: false
   parser:
     id: ipverse-asn-usage-json
@@ -1135,7 +1205,7 @@ sources:
     parser: ffraud-csv
     schema: ffraud-five-column-risk-csv-v2
     schema_observed: true
-    tested_at: '2026-11-25T07:54:22Z'
+    tested_at: '2026-11-25T07:58:18Z'
     synthetic: false
     payload_format: original
   parser:
@@ -1213,7 +1283,7 @@ sources:
     parser: google-network-organization
     schema: google-owned-ip-ranges-v1
     schema_observed: true
-    tested_at: '2026-11-25T07:54:22Z'
+    tested_at: '2026-11-25T07:58:18Z'
     synthetic: false
     payload_format: original
   parser:
@@ -1240,7 +1310,7 @@ sources:
   refresh:
     interval: 24h
     max_stale: 720h
-  fields: [inet6num, netname, source, last-modified]
+  fields: [inet6num, netname, source, last-modified, country, descr, mnt-by, status]
   depends_on: []
   license:
     status: reviewed
@@ -1254,8 +1324,8 @@ sources:
     attribution_required: true
     attribution:
       name: RIPE NCC — RIPE Database
-      text: Registered IPv6 network names are from the daily RIPE Database export published
-        by the RIPE NCC. The contents of this file are subject to RIPE Database Terms and
+      text: Registered IPv6 network names and subscriber ISP observations are from
+        the daily RIPE Database export published by the RIPE NCC. The contents of this file are subject to RIPE Database Terms and
         Conditions. Registered names may have changed since the export.
       url: https://docs.db.ripe.net/RPSL-Object-Types/Descriptions-of-Primary-Objects/
       license_url: https://www.ripe.net/manage-ips-and-asns/db/support/documentation/terms/
@@ -1264,8 +1334,11 @@ sources:
     correlation_group: ripe-registry
   scope: prefix
   notes: Use the RIPE Database IPv6 split file and its companion ripe.db.inet6num.utf8.gz.
-    Verify the accepted prefix, registered identifier and generated modification clock
-    across both complete encodings. An accepted object's generated clock supplies a
+    Verify each prefix, registered name, subscriber ISP projection and generated
+    modification clock across both complete encodings. Four reviewed operators
+    explicitly describe their subscriber ranges. Require their exact maintainer,
+    country, status and subscriber description. Each more-specific registry object
+    replaces the enclosing subscriber assertion within its boundaries. An accepted object's generated clock supplies a
     conservative lower bound on when the export was made. Keep contact and free-text
     attributes outside the published data.
   publication_proof:
@@ -1278,21 +1351,25 @@ sources:
   fixture:
     status: passed
     path: fixtures/source-certification/observed-ripe-inet6num.txt
-    sha256: 4e1b22c2b8b446f27f487f8ac0a18b0df3b721846aaf74798fdf14f8e40c03c0
+    sha256: d34797a2aede30630349ce4ca3fce001073d24f462e425ec551739deb3dc1cd1
     parser: ripe-ipv6-network-names
-    schema: ripe-db-inet6num-v1
+    schema: ripe-db-inet6num-v2
     schema_observed: true
-    tested_at: '2026-11-25T07:54:22Z'
+    tested_at: '2026-11-25T07:58:18Z'
     synthetic: false
     payload_format: ripe-inet6num-excerpt
   parser:
     id: ripe-ipv6-network-names
-    schema: ripe-db-inet6num-v1
-    version: 1
-  public_fields: [network_name]
+    schema: ripe-db-inet6num-v2
+    version: 2
+  public_fields: [network_name, isp]
   field_mappings:
     inet6num: null
     netname: network_name
+    descr: isp
+    country: null
+    mnt-by: null
+    status: null
     source: null
     last-modified: null
   signals: []
@@ -1352,7 +1429,7 @@ sources:
     parser: nro-delegated-registration
     schema: nro-global-extended-v2
     schema_observed: true
-    tested_at: '2026-11-25T07:54:22Z'
+    tested_at: '2026-11-25T07:58:18Z'
     synthetic: false
     payload_format: nro-delegated-excerpt
   parser:
@@ -1423,7 +1500,7 @@ sources:
     parser: azure-appservice-service-tag
     schema: azure-service-tags-json-v1
     schema_observed: true
-    tested_at: '2026-11-25T07:54:22Z'
+    tested_at: '2026-11-25T07:58:18Z'
     synthetic: false
   parser:
     id: azure-appservice-service-tag
@@ -1489,7 +1566,7 @@ sources:
     parser: root-zone-anycast
     schema: root-zone-in-soa-glue-v1
     schema_observed: true
-    tested_at: '2026-11-25T07:54:22Z'
+    tested_at: '2026-11-25T07:58:18Z'
     synthetic: false
   parser:
     id: root-zone-anycast
@@ -1545,7 +1622,7 @@ sources:
     parser: tweetfeed-week-csv
     schema: tweetfeed-six-column-ioc-v1
     schema_observed: true
-    tested_at: '2026-11-25T07:54:22Z'
+    tested_at: '2026-11-25T07:58:18Z'
     synthetic: false
   parser:
     id: tweetfeed-week-csv
@@ -1630,7 +1707,7 @@ sources:
     path: fixtures/source-certification/routeviews-wide-20261115-1200.mrt.bz2
     sha256: 5361ec3605f86ecab79f210df266602bb8833ec9b64bb47705efce4c2c345818
     schema_observed: true
-    tested_at: '2026-11-25T07:54:22Z'
+    tested_at: '2026-11-25T07:58:18Z'
     parser: mrt-table-dump-v2
     schema: mrt-table-dump-v2-unicast-v1
     synthetic: false
@@ -1721,7 +1798,7 @@ sources:
     path: fixtures/source-certification/ris-rrc18-20261115-0800.mrt.gz
     sha256: 37931b008476cfd2fb385bff603c9a68badffa51411649c912a35b14adc4bbb3
     schema_observed: true
-    tested_at: '2026-11-25T07:54:22Z'
+    tested_at: '2026-11-25T07:58:18Z'
     parser: mrt-table-dump-v2
     schema: mrt-table-dump-v2-unicast-v1
     synthetic: false
@@ -1794,7 +1871,7 @@ sources:
     path: fixtures/source-certification/observed-caida-asrel2.txt.bz2
     sha256: e36b548f613b4ae09f9a848cf9893fb02fc326185d7439db6b0a0995aeccc6a8
     schema_observed: true
-    tested_at: '2026-11-25T07:54:22Z'
+    tested_at: '2026-11-25T07:58:18Z'
     parser: caida-relationships
     schema: asn-asn-relation-pipe-v1
     synthetic: false
@@ -1877,7 +1954,7 @@ sources:
     path: fixtures/source-certification/observed-rpki-client-excerpt.json
     sha256: fedd54c17bd596ecb93792aa5b31566549698edbfee914cc06c27002dc5db91b
     schema_observed: true
-    tested_at: '2026-11-25T07:54:22Z'
+    tested_at: '2026-11-25T07:58:18Z'
     parser: rpki-client-json
     schema: rpki-client-payloads-json-v1
     synthetic: false

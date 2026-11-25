@@ -1,13 +1,13 @@
-RIPE Database IPv6 network names
+RIPE Database IPv6 network names and subscriber ranges
 
 The contents of this file are subject to RIPE Database Terms and Conditions.
 https://docs.db.ripe.net/terms-conditions.html
 
 The RIPE NCC publishes the daily IPv6 split files. VanSail IP Atlas extracts
-registered network identifiers on public IPv6 allocations and assignments.
-These registrations may have changed after the observed edition. The adjacent
-fixture retains three institutional examples with the original file notice.
-It excludes contact references, free-text descriptions and remarks.
+registered network identifiers and explicitly described subscriber ISP ranges
+on public IPv6 allocations and assignments. Registrations may have changed
+after the observed edition. The fixture contains selected institutional
+attributes and the original file notice. Contacts and remarks are excluded.
 
 Article 3 of the RIPE Database Terms and Conditions includes scientific
 research into network operations and topology. Article 4.5 limits compilation,

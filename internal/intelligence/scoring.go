@@ -335,6 +335,7 @@ type Engine struct {
 	policy                  Policy
 	now                     time.Time
 	exact                   map[netip.Addr]exactFact
+	exactAddresses          []netip.Addr
 	prefix                  map[netip.Prefix][]Evidence
 	asn                     map[uint32]ASNContext
 	globalASN               map[uint32]ASNContext
@@ -458,6 +459,7 @@ func newEngine(p Policy, evidence []Evidence, coverage []Coverage, mapping []Ori
 	if visitor != nil {
 		return nil, visitor.walk(p, exacts, addresses, e, now)
 	}
+	e.exactAddresses = addresses
 	type aggregate struct {
 		mass     float64
 		count    int

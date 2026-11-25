@@ -449,11 +449,12 @@ func (e *Engine) Profile24(addr netip.Addr) (Profile24, error) {
 	sum := 0
 	ambiguous := false
 	// Only observed exact addresses become cells. There is no 256-host imputation.
-	for host := prefix.Addr(); prefix.Contains(host); host = host.Next() {
-		fact, ok := e.exact[host]
-		if !ok {
-			continue
+	first := sort.Search(len(e.exactAddresses), func(i int) bool { return !e.exactAddresses[i].Less(prefix.Addr()) })
+	for _, host := range e.exactAddresses[first:] {
+		if !prefix.Contains(host) {
+			break
 		}
+		fact := e.exact[host]
 		quality, err := e.Lookup(host)
 		if err != nil {
 			return out, err

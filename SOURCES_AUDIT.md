@@ -8,10 +8,10 @@ given IP has any observation depends on the included edition.
 
 | Facts | Contributing data |
 |---|---|
-| Physical country, region, city and coordinates | Sapics supplies physical country. DB-IP and ipapi.is supply physical country and finer geographic observations. |
+| Physical country, region, city and coordinates | Sapics supplies physical country. DB-IP and ipapi.is supply physical country and finer geographic observations. Mullvad supplies city-center observations for its listed relay ingress addresses. |
 | IP registration country | NRO extended delegation statistics report the recipient’s country for assigned and allocated IPv4 and IPv6 ranges. |
 | Address-level network organization | Google documents the IPv4 and IPv6 prefixes in its published list as Google-owned address space. |
-| IPv6 network name | The RIPE Database publishes the registered network identifier for IPv6 allocations and assignments. |
+| IPv6 network name and subscriber ISP | The RIPE Database supplies registered IPv6 network identifiers. Four operators explicitly describe subscriber broadband ranges in their own registrations. |
 | ASN identity and contextual usage | Ipverse supplies ASN names, organizations and ASN registration countries. Dated ASN roles join to observed origins. |
 | Network prefixes, origin ASNs, observed AS paths | RouteViews and RIPE RIS RIB snapshots |
 | AS relationships and Tier-1 candidates | CAIDA directional relationships with observed paths and current snapshot evidence |
@@ -22,8 +22,9 @@ given IP has any observation depends on the included edition.
 | Proxy, datacenter, Tor and VPN | FFraud typed records, Tor exit observations and X4B VPN prefixes where applicable |
 | Hosting | Individual addresses in mature Microsoft Azure App Service allocations |
 
-The twenty-one-source catalog provides observed network prefixes, registration
-countries, Google address-block ownership, RIPE IPv6 network names and origin ASNs. ISP, assignment
+The twenty-two-source catalog provides observed network prefixes, registration
+countries, Google address-block ownership, RIPE IPv6 network names, selected
+subscriber ISP observations and origin ASNs. ISP outside the supported ranges, assignment
 mode and IPv4 directed-broadcast status display as unknown without an explicit
 address-level mapping. The ASN identity fields belong to the autonomous system. A
 routed prefix supplies no per-address assignment or broadcast classification.
@@ -47,6 +48,80 @@ with each publisher update.
 The public /24 view derives its cells from the admitted address and network
 facts. An unobserved cell carries unknown values. Source qualification,
 runtime coverage and hosted availability are measured for each build.
+
+## November 25 geolocation fallback
+
+Mullvad publishes its own relay locations. Its signed November 24 edition
+contained 530 active, included WireGuard relays with 1,060 distinct global
+entry addresses in 91 cities and 50 countries. Each observation covers a
+single IPv4 or IPv6 address. An explicit US postal suffix supplied the state
+for 207 relays. Other city names carry no subdivision claim. Coordinates
+describe the center of the advertised city. Atlas still requires independent
+support for the city before displaying its map. A private engineering replay
+matched all eligible addresses against both original ipapi.is archives. The
+compiled reader returned a city centroid for 20 IPv4 and 29 IPv6 relays. The
+other 1,011 relays and 21 adjacent control addresses had no corroborated city.
+[Operator location policy](https://mullvad.net/en/help/server-list) ·
+[Signed publication](https://api.mullvad.net/trl/v1/timestamps/latest) ·
+[US Census state codes](https://www2.census.gov/geo/docs/reference/state.txt)
+
+The signing timestamp was `2026-11-24T16:07:32Z` and the signed payload SHA-256
+was `8f8718b6b72f0686cace4a0030b0107f6b86d800bc4789495e73d6c712d3b426`.
+The project credits Mullvad under its educational-use decision. The published
+service terms address its VPN service and supply no separate dataset grant.
+[Service terms](https://mullvad.net/en/help/terms-service) ·
+[Reviewed notice](fixtures/source-certification/notices/mullvad-relay-geolocation.txt)
+
+The broad GeoLite City edition built November 20 was independently located in
+two publisher-fed mirrors. Its MMDB and preserved archive member were identical.
+MaxMind’s GeoLite terms require outdated editions of its database and data to
+be destroyed within 30 days of an update. Intake archives are temporary and
+private checkpoints have a seven-day retention period. Atlas can select a
+provider’s own coordinates for an output record. Historical Pages URLs can
+continue to serve those bytes because the current deployment and the 100
+most recent are retained. The terms do not expressly classify every fused
+result. GeoLite City is outside the release catalog pending edition-aware
+retirement of hosted data or a verified alternative usage arrangement.
+[GeoLite terms, section 6](https://www.maxmind.com/en/geolite/eula) ·
+[Pages deployment retention](https://developers.cloudflare.com/changelog/post/2026-11-19-workers-pages-version-retention/)
+
+## November 25 subscriber ISP review
+
+Both complete November 24 RIPE Database IPv6 exports agreed on 467 registered
+broadband prefixes. Of these, 258 describe wilhelm.tel GmbH customers in
+Germany, 173 describe stc residential broadband in Saudi Arabia, 19 describe
+Vectra broadband users in Poland and 17 describe Telenet residential
+broadband in Belgium. Each positive requires the operator's maintainer,
+country, registration status and full subscriber description. Four
+more-specific Vectra registrations with different descriptions mask the
+enclosing ISP claim. The displayed German label uses a space between the
+brand words. These records convey the operator's declared address range.
+They supply no evidence of a specific user's location or assignment mode.
+[RIPE Database IPv6 object template](https://docs.db.ripe.net/RPSL-Object-Types/Descriptions-of-Primary-Objects/) ·
+[Complete IPv6 export](https://ftp.ripe.net/ripe/dbase/split/ripe.db.inet6num.gz)
+
+The newest original modification among those 467 objects was September 25.
+The complete export established their continued membership on November 24.
+The source's original edition clock and 30-day freshness limit govern the
+scope. Each new edition replaces withdrawn or changed registrations.
+[RIPE daily split exports](https://ftp.ripe.net/ripe/dbase/split/)
+
+Three Japanese mobile operators publish customer-facing address ranges. NTT
+DOCOMO's sp-mode page records a June 10 addition. KDDI dates its LTE NET and
+5G NET list to January 2025 and excludes some data-only services. SoftBank
+dates its smartphone egress list to April 8, 2026. The review found no current,
+dated edition of these lists within the intake freshness window. They remain
+documented candidates for operator-specific subscriber ISP coverage.
+[NTT DOCOMO](https://www.docomo.ne.jp/service/developer/smart_phone/spmode/) ·
+[KDDI](https://www.au.com/mobile/charge/internet-connection/network/) ·
+[SoftBank](https://s4.itc.softbank.jp/partner_st/home_tech1/ios/index.cfm)
+
+DB-IP's commercial IP to ISP database distinguishes subscriber ISP from the
+organization that holds an address. The review confirmed the product schema.
+The project has no authenticated bulk edition of that product. Its separate
+IP to City Lite edition contributes geographic observations to the catalog.
+[IP to ISP fields](https://db-ip.com/db/format/ip-to-isp/csv.html) ·
+[IP to City Lite](https://db-ip.com/db/download/ip-to-city-lite)
 
 ## November 25 RIPE IPv6 network names
 

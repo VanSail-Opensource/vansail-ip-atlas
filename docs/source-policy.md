@@ -326,7 +326,7 @@ collection rules. Retained generations and no-change cache hits preserve origina
 clocks, proofs and exact policy bindings; they never renew observation age. This
 amendment is RPKI-specific and changes no subscription or other item expiry.
 
-## Registered IPv6 network names
+## Registered IPv6 network names and subscriber ISP
 
 The RIPE Database defines `netname` as a required, single identifier of the
 registered IPv6 allocation or assignment. Its value applies to that prefix.
@@ -349,6 +349,16 @@ The global credit names the RIPE NCC and links the RIPE Database terms.
 Article 4.5 restricts compilation and reuse of substantial parts without
 permission. The catalog records the educational-use decision and the scope of
 the retrieved data. [RIPE Database terms](https://www.ripe.net/manage-ips-and-asns/db/support/documentation/terms/)
+
+A separate subscriber ISP value requires the registry authority, a valid
+network identifier and the reviewed combination of maintainer, country,
+status and explicit customer broadband descriptions in one IPv6 object.
+The parser matches the complete set of descriptions and rejects ambiguous
+attributes. A more-specific registration replaces the ISP claim at its
+own boundary. Registry objects supply no static or dynamic assignment
+classification. The complete daily exports establish current membership,
+and original modification dates remain available in private evidence.
+[Subscriber scope and observed counts](../SOURCES_AUDIT.md#november-25-subscriber-isp-review)
 
 ## Address-block ownership
 

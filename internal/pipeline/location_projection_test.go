@@ -92,6 +92,24 @@ func TestLocationProjectionClockAndASNUsageWithdrawal(t *testing.T) {
 	}
 }
 
+func TestLocationProjectionRetainsGeographicWorkingSetLimit(t *testing.T) {
+	state, policy := mappingFixture(t)
+	state.Sources = state.Sources[:1]
+	source := &state.Sources[0]
+	geo := source.Records[0]
+	source.Records = make([]intelligence.NormalizedRecord, 8193)
+	for i := range source.Records {
+		source.Records[i] = geo
+	}
+	for _, projection := range []*locationProjection{nil, {hit: true}} {
+		build := mappingProducer(state, policy, state.EvaluatedAt, nil, false, netip.Prefix{}, projection)
+		err := build(context.Background(), func(via3.PublicRecord) error { return nil })
+		if err == nil || err.Error() != "mapping boundary working set exceeded" {
+			t.Fatalf("geographic ancestry bound lost during materialization: %v", err)
+		}
+	}
+}
+
 func TestLocationProjectionRejectsInvalidChanges(t *testing.T) {
 	scope := netip.MustParsePrefix("203.0.0.0/16")
 	child := netip.MustParsePrefix("203.0.113.0/24")

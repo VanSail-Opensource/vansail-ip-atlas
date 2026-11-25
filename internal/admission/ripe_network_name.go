@@ -33,10 +33,10 @@ func ripeNamesSource(s Source) bool {
 	return s.ID == intelligence.RIPENetworkNameSourceID && s.Family == "ripe-registry" && s.URL == ripeNamesURL &&
 		s.Category == "network_identity" && s.Format == "text-gz" && s.Scope == "prefix" && s.Coverage == "positive_only" &&
 		s.MaxCompressedBytes > 0 && s.MaxCompressedBytes <= ripeNamesCompressed && len(s.Signals) == 0 &&
-		s.Parser == (Parser{intelligence.RIPENetworkNameSourceID, "ripe-db-inet6num-v1", 1}) &&
+		s.Parser == (Parser{intelligence.RIPENetworkNameSourceID, "ripe-db-inet6num-v2", 2}) &&
 		s.Publication == (Publication{"embedded", ripeNamesURL, "last-modified"}) &&
-		fieldsEqual(s.Fields, "inet6num", "netname", "source", "last-modified") && fieldsEqual(s.PublicFields, "network_name") &&
-		mappedFields(s, map[string]string{"netname": "network_name"})
+		fieldsEqual(s.Fields, "inet6num", "netname", "source", "last-modified", "country", "descr", "mnt-by", "status") && fieldsEqual(s.PublicFields, "network_name", "isp") &&
+		mappedFields(s, map[string]string{"netname": "network_name", "descr": "isp"})
 }
 
 type ripeNamesInventory struct {
@@ -48,6 +48,7 @@ type ripeNamesInventory struct {
 type ripeNamesObject struct {
 	resource, name, authority, modified                       string
 	started, nameSet, suppressName, authoritySet, modifiedSet bool
+	subscriber                                                ripeSubscriberEvidence
 }
 
 // RPSL continuation lines can contain free text. Consume them only for framing;
@@ -132,7 +133,7 @@ func readRIPENames(ctx context.Context, input io.Reader, now time.Time, maxRecor
 					out.newest = modified
 				}
 			}
-			record := intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordNetworkName, NetworkName: &intelligence.NetworkNameRecord{Prefix: p, Name: name, ModifiedAt: modified}}
+			record := intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordNetworkName, NetworkName: &intelligence.NetworkNameRecord{Prefix: p, Name: name, ModifiedAt: modified, SubscriberISP: row.subscriber.operator(name)}}
 			if err := digest.Add(record); err != nil {
 				return err
 			}
@@ -164,6 +165,9 @@ func readRIPENames(ctx context.Context, input io.Reader, now time.Time, maxRecor
 		if line[0] == ' ' || line[0] == '\t' || line[0] == '+' {
 			if !row.started || lastAttr == 'p' || lastAttr == 's' || lastAttr == 't' {
 				return out, 0, errRIPENames
+			}
+			if lastAttr == 'i' {
+				row.subscriber.invalid = true
 			}
 			if lastAttr == 'n' {
 				row.suppressName = true
@@ -201,6 +205,9 @@ func readRIPENames(ctx context.Context, input io.Reader, now time.Time, maxRecor
 			row.started = true
 			row.resource = string(bytes.TrimSpace(value))
 			lastAttr = 'p'
+		case "country", "mnt-by", "status", "descr":
+			row.subscriber.observe(string(attr), bytes.TrimSpace(value))
+			lastAttr = 'i'
 		case "netname":
 			if row.nameSet {
 				row.suppressName = true

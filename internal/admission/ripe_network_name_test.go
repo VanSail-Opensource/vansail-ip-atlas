@@ -14,8 +14,8 @@ import (
 func ripeNamesTestSource() Source {
 	return Source{ID: intelligence.RIPENetworkNameSourceID, Family: "ripe-registry", Category: "network_identity", URL: ripeNamesURL,
 		Format: "text-gz", Scope: "prefix", Coverage: "positive_only", MaxCompressedBytes: ripeNamesCompressed, MaxAge: 720 * time.Hour, Weight: 100,
-		Parser: Parser{intelligence.RIPENetworkNameSourceID, "ripe-db-inet6num-v1", 1}, Publication: Publication{"embedded", ripeNamesURL, "last-modified"},
-		Fields: []string{"inet6num", "netname", "source", "last-modified"}, PublicFields: []string{"network_name"}, FieldMappings: map[string][]string{"netname": {"network_name"}}}
+		Parser: Parser{intelligence.RIPENetworkNameSourceID, "ripe-db-inet6num-v2", 2}, Publication: Publication{"embedded", ripeNamesURL, "last-modified"},
+		Fields: []string{"inet6num", "netname", "source", "last-modified", "country", "descr", "mnt-by", "status"}, PublicFields: []string{"network_name", "isp"}, FieldMappings: map[string][]string{"netname": {"network_name"}, "descr": {"isp"}}}
 }
 
 const ripeTestInventory = `# RIPE test export
@@ -48,6 +48,10 @@ last-modified: 2026-11-07T00:00:00Z
 
 inet6num: 2a00:1900::/32
 netname: OTHER-V6
+country: BE
+mnt-by: TELENET-DBM
+status: AGGREGATED-BY-LIR
+descr: Telenet N.V. Mobile Residential Broadband
 source: RIPE
 last-modified: 2026-11-08T00:00:00Z
 `
@@ -155,7 +159,7 @@ func TestRIPENamesPairedIntakeReceiptAndRetraction(t *testing.T) {
 	if e != nil || stale.Snapshot != nil || stale.Decision.State != "stale" {
 		t.Fatal("retrieval renewed an expired edition", e, stale.Decision)
 	}
-	for _, change := range [][2]string{{"OTHER-V6", "OTHER-V7"}, {"2001:db8::/32", "2001:db8:1::/48"}, {"source: OTHER", "source: ANOTHER"}, {"2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z"}} {
+	for _, change := range [][2]string{{"TELENET-DBM", "OTHER-MNT"}, {"OTHER-V6", "OTHER-V7"}, {"2001:db8::/32", "2001:db8:1::/48"}, {"source: OTHER", "source: ANOTHER"}, {"2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z"}} {
 		fetch.assets[ripeNamesUTF8URL] = gzipMRTFixture(t, bytes.Replace(text, []byte(change[0]), []byte(change[1]), 1))
 		denied, e := eng.IngestPartitioned(ctx, s, now, binding)
 		if e != nil || denied.Snapshot != nil {

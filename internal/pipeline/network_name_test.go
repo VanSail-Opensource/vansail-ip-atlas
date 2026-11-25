@@ -17,8 +17,8 @@ func TestRegisteredNetworkNamesPreserveIndependentScopesAndWithdrawals(t *testin
 	observed := base.EvaluatedAt.Add(-time.Hour)
 	expiry := base.EvaluatedAt.Add(time.Hour)
 	prefix := netip.MustParsePrefix
-	blockName := func(p, name string) intelligence.NormalizedRecord {
-		return intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordNetworkName, NetworkName: &intelligence.NetworkNameRecord{Prefix: prefix(p), Name: name, ModifiedAt: observed}}
+	blockName := func(p, name string, isp intelligence.RIPESubscriberISP) intelligence.NormalizedRecord {
+		return intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordNetworkName, NetworkName: &intelligence.NetworkNameRecord{Prefix: prefix(p), Name: name, ModifiedAt: observed, SubscriberISP: isp}}
 	}
 	base.Sources[0].Records = []intelligence.NormalizedRecord{
 		{Version: 3, Kind: intelligence.RecordOrigins, Origins: &intelligence.OriginMapping{Prefix: prefix("2a00:1450::/32"), Origins: []uint32{15169}}},
@@ -26,11 +26,11 @@ func TestRegisteredNetworkNamesPreserveIndependentScopesAndWithdrawals(t *testin
 		{Version: 3, Kind: intelligence.RecordVRP, VRP: &intelligence.VRP{Prefix: prefix("2a00:1450::/32"), MaxLength: 32, ASN: 15169, ValidUntil: expiry}},
 	}
 	base.Sources[1].Records = []intelligence.NormalizedRecord{
-		blockName("2a00:1450::/32", "ALLOCATION"),
-		blockName("2a00:1450:1100::/40", "SUBNET"),
-		blockName("2a00:1450:1110::/44", ""),
-		blockName("2a00:1450:1200::/40", "CONFLICT-A"),
-		blockName("2a00:1450:1200::/40", "CONFLICT-B"),
+		blockName("2a00:1450::/32", "ALLOCATION", intelligence.RIPETelenet),
+		blockName("2a00:1450:1100::/40", "SUBNET", intelligence.RIPESTC),
+		blockName("2a00:1450:1110::/44", "", intelligence.RIPEUnknownISP),
+		blockName("2a00:1450:1200::/40", "CONFLICT-A", intelligence.RIPETelenet),
+		blockName("2a00:1450:1200::/40", "CONFLICT-B", intelligence.RIPESTC),
 	}
 	for _, streamed := range []bool{false, true} {
 		for _, withdrawn := range []bool{false, true} {
@@ -55,16 +55,16 @@ func TestRegisteredNetworkNamesPreserveIndependentScopesAndWithdrawals(t *testin
 				t.Fatal(err)
 			}
 			for _, tc := range []struct {
-				ip, name, org string
+				ip, name, org, isp string
 			}{
-				{"2a00:1450::1", "ALLOCATION", ""},
-				{"2a00:1450:1300::1", "ALLOCATION", "Google"},
-				{"2a00:1450:1101::1", "SUBNET", "Google"},
-				{"2a00:1450:1111::1", "", "Google"},
-				{"2a00:1450:1201::1", "", "Google"},
-				{"2a00:1450:2101::1", "ALLOCATION", ""},
-				{"2a01:1450::1", "", ""},
-				{"8.8.8.8", "", ""},
+				{"2a00:1450::1", "ALLOCATION", "", "Telenet"},
+				{"2a00:1450:1300::1", "ALLOCATION", "Google", "Telenet"},
+				{"2a00:1450:1101::1", "SUBNET", "Google", "stc"},
+				{"2a00:1450:1111::1", "", "Google", ""},
+				{"2a00:1450:1201::1", "", "Google", ""},
+				{"2a00:1450:2101::1", "ALLOCATION", "", "Telenet"},
+				{"2a01:1450::1", "", "", ""},
+				{"8.8.8.8", "", "", ""},
 			} {
 				result, err := reader.Lookup(ctx, tc.ip)
 				if err != nil {
@@ -76,12 +76,12 @@ func TestRegisteredNetworkNamesPreserveIndependentScopesAndWithdrawals(t *testin
 					}
 					continue
 				}
-				wantName := tc.name
+				wantName, wantISP := tc.name, tc.isp
 				if withdrawn {
-					wantName = ""
+					wantName, wantISP = "", ""
 				}
 				net := result.Network
-				if net == nil || !matchesOptionalLabel(net.Name, wantName) || !matchesOptionalLabel(net.Organization, tc.org) || net.ISP != nil || !slices.Equal(net.Origins, []uint32{15169}) || !slices.Equal(result.BGP.Origins, net.Origins) {
+				if net == nil || !matchesOptionalLabel(net.Name, wantName) || !matchesOptionalLabel(net.Organization, tc.org) || !matchesOptionalLabel(net.ISP, wantISP) || !slices.Equal(net.Origins, []uint32{15169}) || !slices.Equal(result.BGP.Origins, net.Origins) {
 					t.Fatalf("%s streamed=%t withdrawn=%t network=%+v bgp=%+v", tc.ip, streamed, withdrawn, net, result.BGP.Origins)
 				}
 				if !streamed && (len(result.BGP.RPKI) != 1 || result.BGP.RPKI[0].Status != "valid") {

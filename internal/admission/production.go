@@ -33,6 +33,7 @@ type Capability struct {
 }
 type SourceStatistics struct {
 	ripeNameDigest                              *intelligence.RIPENetworkNameDigest
+	mullvadProjection                           [32]byte
 	googleProjection                            [32]byte
 	googleIPv4                                  uint64
 	nroProjection                               [32]byte
@@ -409,6 +410,9 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 		if ripeNamesSource(s) != (r.RIPENetworkProof != nil) || r.RIPENetworkProof != nil && (r.ProofKind != "embedded" || r.RIPENetworkProof.Validate(state.EvaluatedAt, r.PublishedAt, r.PayloadHash) != nil) {
 			return report, nil, errors.New("production RIPE inet6num proof invalid")
 		}
+		if mullvadSource(s) != (r.MullvadProof != nil) || r.MullvadProof != nil && (r.ProofKind != "snapshot_metadata" || r.MullvadProof.Validate(state.EvaluatedAt, r.PublishedAt, r.PayloadHash) != nil) {
+			return report, nil, errMullvad
+		}
 		if googleNetworkSource(s) != (r.GoogleNetworkProof != nil) || r.GoogleNetworkProof != nil && (r.ProofKind != "embedded" || r.GoogleNetworkProof.Validate(state.EvaluatedAt, r.PublishedAt, r.PayloadHash) != nil) {
 			return report, nil, errors.New("production Google network report proof invalid")
 		}
@@ -509,6 +513,9 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 				return report, nil, errors.New("production evidence independence changed")
 			}
 			scan.stat.ripeNameDigest = scan.ripeNameDigest
+			if scan.mullvadDigest != nil {
+				_, scan.stat.mullvadProjection = scan.mullvadDigest.Sum()
+			}
 			if scan.googleDigest != nil {
 				_, scan.stat.googleProjection = scan.googleDigest.Sum()
 			}
@@ -527,6 +534,9 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 		if s.Parser.ID == "ipverse-asn-usage-json" && (stat.Kinds[intelligence.RecordUsage-1] != stat.Records ||
 			!stat.oldestASNRole.After(asnUsageObservedAfter(state.EvaluatedAt, s.MaxAge))) {
 			return report, nil, errors.New("ASN role projection differs from the intake serving window")
+		}
+		if p := v.Receipt.MullvadProof; p != nil && (p.Hosts != stat.Records || p.Projection != stat.mullvadProjection) {
+			return report, nil, errMullvad
 		}
 		if p := v.Receipt.GoogleNetworkProof; p != nil && (p.Prefixes != stat.Records || p.IPv4 != stat.googleIPv4 || p.Projection != stat.googleProjection) {
 			return report, nil, errors.New("network organization population differs from complete Google report")

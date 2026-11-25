@@ -18,9 +18,41 @@ const RIPENetworkNameMaxRecords = 5000000
 // A matching registry object can have an unpublished name. Retaining its
 // boundary prevents an enclosing allocation's label from reaching that child.
 type NetworkNameRecord struct {
-	Prefix     netip.Prefix
-	Name       string
-	ModifiedAt time.Time
+	Prefix        netip.Prefix
+	Name          string
+	ModifiedAt    time.Time
+	SubscriberISP RIPESubscriberISP `json:",omitempty"`
+}
+
+// RIPESubscriberISP is a reviewed operator identity supported by an explicit
+// subscriber description in the same registry object. Zero is unknown.
+type RIPESubscriberISP uint8
+
+const (
+	RIPEUnknownISP RIPESubscriberISP = iota
+	RIPEWilhelmTel
+	RIPETelenet
+	RIPESTC
+	RIPEVectra
+)
+
+func (s RIPESubscriberISP) Label() string {
+	switch s {
+	case RIPEWilhelmTel:
+		// Public labels omit hostname-shaped tokens. Retain both brand words.
+		return "wilhelm tel GmbH"
+	case RIPETelenet:
+		return "Telenet"
+	case RIPESTC:
+		return "stc"
+	case RIPEVectra:
+		return "Vectra"
+	}
+	return ""
+}
+
+func (r *NetworkNameRecord) validSubscriberISP() bool {
+	return r.SubscriberISP == RIPEUnknownISP || r.SubscriberISP.Label() != "" && r.Name != "" && !r.ModifiedAt.IsZero()
 }
 
 // ValidRIPENetworkName enforces the registry's published inet6num netname
@@ -88,18 +120,19 @@ type RIPENetworkNameDigest struct {
 
 func (d *RIPENetworkNameDigest) Add(r NormalizedRecord) error {
 	x := r.NetworkName
-	if r.Kind != RecordNetworkName || x == nil || !x.Prefix.Addr().Is6() || !subscription.PublicPrefix(x.Prefix) || d.count >= RIPENetworkNameMaxRecords || x.Name != "" && (!ValidRIPENetworkName(x.Name) || x.ModifiedAt.IsZero()) || !x.ModifiedAt.IsZero() && (x.ModifiedAt.Year() < 1970 || x.ModifiedAt.Nanosecond() != 0) {
+	if r.Kind != RecordNetworkName || x == nil || !x.validSubscriberISP() || !x.Prefix.Addr().Is6() || !subscription.PublicPrefix(x.Prefix) || d.count >= RIPENetworkNameMaxRecords || x.Name != "" && (!ValidRIPENetworkName(x.Name) || x.ModifiedAt.IsZero()) || !x.ModifiedAt.IsZero() && (x.ModifiedAt.Year() < 1970 || x.ModifiedAt.Nanosecond() != 0) {
 		return errors.New("invalid RIPE IPv6 network name record")
 	}
 	if d.stream == nil {
 		d.stream = sha256.New()
 	}
-	var entry [26]byte
+	var entry [27]byte
 	ip := x.Prefix.Addr().As16()
 	copy(entry[:16], ip[:])
 	entry[16] = byte(x.Prefix.Bits())
 	entry[17] = byte(len(x.Name))
-	binary.BigEndian.PutUint64(entry[18:], uint64(x.ModifiedAt.Unix()))
+	binary.BigEndian.PutUint64(entry[18:26], uint64(x.ModifiedAt.Unix()))
+	entry[26] = byte(x.SubscriberISP)
 	d.stream.Write(entry[:])
 	d.stream.Write([]byte(x.Name))
 	d.count++

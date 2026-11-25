@@ -49,7 +49,6 @@ type spatialDependencies struct {
 	Clock                                  time.Time
 	Usage                                  asnUsageIndex
 	Coverage                               []intelligence.RecordPartition
-	Contexts                               map[uint32]intelligence.ASNContext
 	VRPComplete                            bool
 	RPKIObservedAt, RPKICoverageValidUntil time.Time
 }

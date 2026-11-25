@@ -80,15 +80,23 @@ func CompareCanonicalFrames(ctx context.Context, workspace string, part RecordPa
 		return CanonicalPartition{}, err
 	}
 	equal := true
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
 	err = walkPartitionFrames(ctx, root, part, func(record NormalizedRecord, data []byte) error {
-		encoded, err := json.Marshal(record)
-		if err != nil {
+		if record.Geo != nil && canonicalWriterGeo(data, record.Geo) {
+			return emit(CanonicalRecordFrame{record: record, data: data})
+		}
+		buffer.Reset()
+		if err := encoder.Encode(record); err != nil {
 			return err
 		}
+		// Encode uses the writer's default JSON encoding plus a trailing newline.
+		encoded := buffer.Bytes()[:buffer.Len()-1]
 		if !bytes.Equal(data, encoded) {
 			equal = false
+			data = bytes.Clone(encoded)
 		}
-		return emit(CanonicalRecordFrame{record: record, data: encoded})
+		return emit(CanonicalRecordFrame{record: record, data: data})
 	})
 	if err != nil || !equal {
 		return CanonicalPartition{}, err

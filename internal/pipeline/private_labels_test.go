@@ -39,4 +39,31 @@ func TestCatalogLabelCollisionRedactsOnlyMatchingPublicFields(t *testing.T) {
 			}
 		}
 	}
+	opts := testOptions(t)
+	opts.PrivateLabelValues = c.options.PrivateLabelValues
+	if _, err := Build(t.Context(), opts, producer(records)); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := via3.OpenRelease(opts.Output, func() int64 { return opts.Clock })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	ip, err := reader.Lookup(t.Context(), "8.8.8.8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ip.Geo == nil || ip.Geo.City != nil || !matchesOptionalLabel(ip.Geo.Country, "DE") || !matchesOptionalLabel(ip.Geo.Region, "Bavaria") {
+		t.Fatal(ip.Geo)
+	}
+	if ip.Network == nil || ip.Network.Name != nil || ip.Network.ISP != nil || !matchesOptionalLabel(ip.Network.Organization, "Independent") || len(ip.BGP.Origins) != 1 || ip.BGP.Origins[0] != 15169 {
+		t.Fatal(ip.Network, ip.BGP.Origins)
+	}
+	asn, err := reader.Lookup(t.Context(), "AS15169")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(asn.ASNs) != 1 || asn.ASNs[0].Name != nil || !matchesOptionalLabel(asn.ASNs[0].Organization, "Independent") || !matchesOptionalLabel(asn.ASNs[0].Country, "US") {
+		t.Fatal(asn.ASNs)
+	}
 }

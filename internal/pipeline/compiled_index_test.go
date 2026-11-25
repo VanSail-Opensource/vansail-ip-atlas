@@ -89,7 +89,7 @@ func TestCompiledIndexASNDeltaBoundsAndExactMembership(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(restored, entry) {
 		t.Fatal("changed ASN membership", err)
 	}
-	if _, err = unpackCompiledASNs(packed.Routes[0].ASNDeltas, 3); !errors.Is(err, errSpatialCache) {
+	if _, err = unpackASNDeltas(packed.Routes[0].ASNDeltas, 3); !errors.Is(err, errSpatialCache) {
 		t.Fatal("ignored decoded count bound", err)
 	}
 	for _, encoded := range [][]byte{
@@ -169,7 +169,7 @@ func TestCurrentSpatialIndexUpgradesAuthenticatedLegacyGenerations(t *testing.T)
 		})
 	}
 	// Recreate each previous wire shape with its original authenticated domain.
-	for _, version := range []int{1, 2} {
+	for _, version := range []int{1, 2, 3, 4} {
 		t.Run("migrate "+strconv.Itoa(version), func(t *testing.T) {
 			index := index
 			index.Version = version
@@ -177,7 +177,7 @@ func TestCurrentSpatialIndexUpgradesAuthenticatedLegacyGenerations(t *testing.T)
 			if version == 1 {
 				index.Entries[0].Packed = nil
 				index.Entries[0].Compiled = entry
-			} else {
+			} else if version == 2 {
 				legacy := *generated.Packed
 				legacy.Objects, legacy.Table = entry.Objects, nil
 				index.Entries[0].Packed = &legacy

@@ -10,6 +10,7 @@ import (
 
 type bulkLeafReuse struct {
 	domain                string
+	contexts              map[uint32]intelligence.ASNContext
 	dependencies          [32]byte
 	locationPolicy        [32]byte
 	riskPolicy, riskInput [32]byte
@@ -41,7 +42,7 @@ func (r *bulkLeafReuse) begin(ctx context.Context) error {
 	return nil
 }
 
-func (r *bulkLeafReuse) finish(ctx context.Context, key [32]byte) (returnErr error) {
+func (r *bulkLeafReuse) finish(ctx context.Context, key [32]byte, origins []uint32) (returnErr error) {
 	writer := r.writer
 	r.writer = nil
 	r.spool.publicStream = nil
@@ -71,6 +72,13 @@ func (r *bulkLeafReuse) finish(ctx context.Context, key [32]byte) (returnErr err
 		return nil
 	}
 	entry := spatialCacheEntry{Domain: r.domain, Key: key, Leaf: &spatialCacheLeaf{Stream: stream, RiskInput: r.riskInput}}
+	if r.domain == "public" {
+		scope, err := newLeafOriginContexts(origins, r.contexts)
+		if err != nil {
+			return err
+		}
+		entry.Leaf.OriginContexts = scope
+	}
 	files := map[[32]byte]string{}
 	if stream != (spatialCacheStream{}) {
 		files[stream.SHA256] = path
@@ -176,6 +184,12 @@ func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, cove
 		if err != nil {
 			return err
 		}
+		if hit && reuse.domain == "public" && !entry.Leaf.Split {
+			hit, err = entry.Leaf.OriginContexts.matches(reuse.contexts)
+			if err != nil {
+				return err
+			}
+		}
 		if hit {
 			if err := s.verifyParts(ctx, bucket.parts); err != nil {
 				return err
@@ -216,9 +230,10 @@ func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, cove
 					return errors.Join(err, reuse.abort())
 				}
 				bucket.recordBytes = nil
-				if err := reuse.finish(ctx, key); err != nil {
+				if err := reuse.finish(ctx, key, bucket.originASNs); err != nil {
 					return err
 				}
+				bucket.originASNs = nil
 				leaves = append(leaves, bucket)
 				return nil
 			}

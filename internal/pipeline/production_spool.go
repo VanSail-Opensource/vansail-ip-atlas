@@ -7,16 +7,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math/bits"
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"time"
 
 	"vansail-ip-atlas/internal/facts"
 	"vansail-ip-atlas/internal/intelligence"
 )
+
+const maxMaterializationASNs = 200000
 
 var errBulkPartition = errors.New("normalized working partition requires subdivision")
 var errRawBulkPartition = fmt.Errorf("raw spatial input exceeds collection limit: %w: %w", errBulkPartition, intelligence.ErrVerifyRecordPrefix)
@@ -33,6 +37,7 @@ type bulkBucket struct {
 	scattered   [2]*bulkBucket
 	// Retained only for the synchronous visit of an owned collected state.
 	recordBytes []int
+	originASNs  []uint32
 }
 type bulkSpool struct {
 	root         string
@@ -230,6 +235,9 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 			return nil
 		}); err != nil {
 			return intelligence.BuildState{}, err
+		}
+		if s.reuse != nil {
+			b.originASNs = slices.Sorted(maps.Keys(asns))
 		}
 	}
 	if collectRisk {
@@ -642,7 +650,7 @@ func (s *bulkSpool) addASN(asn uint32) error {
 		return errors.New("invalid global materialization ASN")
 	}
 	s.known[asn] = true
-	if len(s.known) > 200000 {
+	if len(s.known) > maxMaterializationASNs {
 		return errors.New("global ASN population exceeded")
 	}
 	return nil

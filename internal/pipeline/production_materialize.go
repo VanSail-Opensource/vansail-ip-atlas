@@ -467,12 +467,11 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 			if err != nil {
 				return err
 			}
-			dependencies.Contexts = contexts
-			key, keyErr := spatialReuseKey("public-dependencies", dependencies)
+			key, keyErr := spatialReuseKey("public-origin-scoped-dependencies", dependencies)
 			if keyErr != nil {
 				return keyErr
 			}
-			publicReuse = &bulkLeafReuse{domain: "public", dependencies: key, locationPolicy: locationPolicy, spool: spool, public: emit}
+			publicReuse = &bulkLeafReuse{domain: "public", dependencies: key, contexts: contexts, locationPolicy: locationPolicy, spool: spool, public: emit}
 		}
 		spatial, err = spool.leavesReusing(ctx, spatial, true, publicReuse, func(bucket *bulkBucket, part intelligence.BuildState) (visitErr error) {
 			locations, err := spool.openLocations(ctx, bucket, locationPolicy)

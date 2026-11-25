@@ -19,7 +19,7 @@ import (
 	"vansail-ip-atlas/internal/intelligence"
 )
 
-const spatialCacheVersion = 4
+const spatialCacheVersion = 5
 const spatialCacheIndexLimit = 16 << 20
 const spatialCacheEntryLimit = 16384
 const spatialCacheObjectLimit = 32768
@@ -39,9 +39,10 @@ type spatialCacheStream struct {
 	Bytes, DecodedBytes, Records uint64
 }
 type spatialCacheLeaf struct {
-	RiskInput [32]byte `json:",omitzero"`
-	Split     bool
-	Stream    spatialCacheStream
+	OriginContexts *leafOriginContexts `json:",omitempty"`
+	RiskInput      [32]byte            `json:",omitzero"`
+	Split          bool
+	Stream         spatialCacheStream
 }
 type spatialCacheEntry struct {
 	Domain     string
@@ -113,6 +114,14 @@ func spatialCacheFiles(e spatialCacheEntry) (map[[32]byte]uint64, error) {
 	}
 	if e.Leaf != nil && e.Leaf.RiskInput != ([32]byte{}) && (e.Domain != "risk" || e.Leaf.Split || e.Key == e.Leaf.RiskInput) {
 		return nil, errSpatialCache
+	}
+	if e.Leaf != nil && e.Leaf.OriginContexts != nil {
+		if e.Domain != "public" || e.Leaf.Split {
+			return nil, errSpatialCache
+		}
+		if _, err := e.Leaf.OriginContexts.origins(); err != nil {
+			return nil, err
+		}
 	}
 	if e.Domain == "compiled" {
 		if e.Compiled == nil || e.Seed != nil || e.Scatter != nil || e.Leaf != nil {
@@ -235,6 +244,8 @@ func spatialIndexMAC(key [32]byte, index spatialCacheIndex) [32]byte {
 		_, _ = mac.Write([]byte("atlas-spatial-cache-v3\x00"))
 	case 4:
 		_, _ = mac.Write([]byte("atlas-spatial-cache-v4\x00"))
+	case 5:
+		_, _ = mac.Write([]byte("atlas-spatial-cache-v5\x00"))
 	}
 	_, _ = mac.Write(data)
 	var out [32]byte
@@ -446,6 +457,11 @@ func cloneSpatialEntry(e spatialCacheEntry) spatialCacheEntry {
 	}
 	if e.Leaf != nil {
 		value := *e.Leaf
+		if value.OriginContexts != nil {
+			origins := *value.OriginContexts
+			origins.ASNDeltas = append([]byte(nil), origins.ASNDeltas...)
+			value.OriginContexts = &origins
+		}
 		e.Leaf = &value
 	}
 	if e.Compiled != nil {

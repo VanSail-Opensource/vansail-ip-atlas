@@ -13,6 +13,7 @@ import (
 // typed records. One family can be observed per source. Its final canonical
 // family is checked once all receipt payload aliases are known.
 type sourceRecordScan struct {
+	googleDigest  *intelligence.GoogleNetworkDigest
 	nroDigest     *intelligence.NRORegistrationDigest
 	rootAddresses rootAddressSet
 	azureHosts    map[netip.Addr]bool
@@ -27,6 +28,9 @@ func newSourceRecordScan(s Source, clocks intelligence.SourceRecordClocks, now t
 	s.Signals = append([]string(nil), s.Signals...)
 	s.PublicFields = append([]string(nil), s.PublicFields...)
 	scan := &sourceRecordScan{source: s, clocks: clocks, now: now, stat: SourceStatistics{ID: clocks.ID, Signals: map[intelligence.Signal]bool{}}}
+	if googleNetworkSource(s) {
+		scan.googleDigest = new(intelligence.GoogleNetworkDigest)
+	}
 	if nroSource(s) {
 		scan.nroDigest = new(intelligence.NRORegistrationDigest)
 	}
@@ -43,6 +47,11 @@ func (scan *sourceRecordScan) accept(record intelligence.NormalizedRecord) error
 	s, v, now, stat := &scan.source, &scan.clocks, scan.now, &scan.stat
 	if err := record.Validate(); err != nil {
 		return err
+	}
+	if scan.googleDigest != nil {
+		if err := scan.googleDigest.Add(record); err != nil {
+			return err
+		}
 	}
 	if scan.nroDigest != nil {
 		if err := scan.nroDigest.Add(record); err != nil {
@@ -120,6 +129,13 @@ func (scan *sourceRecordScan) accept(record intelligence.NormalizedRecord) error
 			return errors.New("production usage item expiry extended")
 		}
 		stat.Usage = stat.Usage || x.Type != "" && x.Type != "unknown"
+	case intelligence.RecordNetworkOrganization:
+		if scan.googleDigest == nil {
+			return errors.New("production network organization source binding invalid")
+		}
+		if record.NetworkOrganization.Prefix.Addr().Is4() {
+			stat.googleIPv4++
+		}
 	case intelligence.RecordOrigins:
 		if !contains(s.PublicFields, "origins") && !contains(s.PublicFields, "bgp_origins") {
 			return errors.New("production origin binding invalid")

@@ -32,11 +32,13 @@ type Capability struct {
 	Required   bool     `json:"required"`
 }
 type SourceStatistics struct {
+	googleProjection                            [32]byte
+	googleIPv4                                  uint64
 	nroProjection                               [32]byte
 	azureHostHash                               [32]byte
 	ID                                          string
 	Records                                     uint64
-	Kinds                                       [9]uint64
+	Kinds                                       [intelligence.RecordNetworkOrganization]uint64
 	OriginObservations, UnknownOriginBoundaries uint64
 	Family                                      string
 	Country, City, Coordinates, Usage, Exact    bool
@@ -396,6 +398,9 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 		} else if s.Parser.ID == "mrt-table-dump-v2" {
 			return report, nil, errors.New("production MRT snapshot proof missing")
 		}
+		if googleNetworkSource(s) != (r.GoogleNetworkProof != nil) || r.GoogleNetworkProof != nil && (r.ProofKind != "embedded" || r.GoogleNetworkProof.Validate(state.EvaluatedAt, r.PublishedAt, r.PayloadHash) != nil) {
+			return report, nil, errors.New("production Google network report proof invalid")
+		}
 		if nroSource(s) != (r.NROProof != nil) || r.NROProof != nil && (r.ProofKind != "embedded" || r.NROProof.Validate(state.EvaluatedAt, r.PublishedAt, r.PayloadHash) != nil) {
 			return report, nil, errors.New("production NRO report proof invalid")
 		}
@@ -492,6 +497,9 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 			if scan.stat.Family != "" && scan.stat.Family != family {
 				return report, nil, errors.New("production evidence independence changed")
 			}
+			if scan.googleDigest != nil {
+				_, scan.stat.googleProjection = scan.googleDigest.Sum()
+			}
 			if scan.nroDigest != nil {
 				_, scan.stat.nroProjection = scan.nroDigest.Sum()
 			}
@@ -500,6 +508,9 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 			}
 			stat = scan.stat
 			stat.Family = family
+		}
+		if p := v.Receipt.GoogleNetworkProof; p != nil && (p.Prefixes != stat.Records || p.IPv4 != stat.googleIPv4 || p.Projection != stat.googleProjection) {
+			return report, nil, errors.New("network organization population differs from complete Google report")
 		}
 		if p := v.Receipt.NROProof; p != nil && (p.Prefixes != stat.Records || p.Projection != stat.nroProjection) {
 			return report, nil, errors.New("NRO registration population differs from complete report")

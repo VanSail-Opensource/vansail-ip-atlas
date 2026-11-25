@@ -282,6 +282,7 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 	if err != nil {
 		return deny("invalid", "payload_integrity_failed")
 	}
+	var googleProof *intelligence.GoogleNetworkProof
 	var nroProof *intelligence.NRORegistrationProof
 	var geoProof *intelligence.GeoSourceProof
 	var vrpProof *intelligence.VRPSourceProof
@@ -307,6 +308,11 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		caidaProof, err = verifyCAIDAFile(ctx, payload, size, source, assetURL, caidaIndexHash, hash, now)
 		if err == nil {
 			published = caidaProof.FirstObservedAt
+		}
+	} else if adapter == googleNetwork {
+		googleProof, err = verifyGoogleNetwork(ctx, payload, source, hash, now)
+		if err == nil {
+			published = googleProof.PublishedAt
 		}
 	} else if adapter == nroRegistration {
 		nroProof, err = e.verifyNRO(ctx, payload, hash, source, now)
@@ -430,6 +436,7 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		ProofPayloadHash: hash, NormalizationPolicyHash: normalizationPolicyHash,
 		ParserVersion: source.Parser.Version, SchemaVersion: 3, PublishedAt: published, ContentValidUntil: contentValidUntil,
 		ProofKind: source.Publication.Kind, PayloadVerified: true, SchemaVerified: true, ImmutableCommitBound: source.Publication.Kind == "github_commit", Records: records, RecordPartitions: partitions}
+	result.Snapshot.GoogleNetworkProof = googleProof
 	result.Snapshot.NROProof = nroProof
 	result.Snapshot.AzureProof = azureProof
 	result.Snapshot.GeoProof = geoProof

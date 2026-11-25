@@ -1,0 +1,22 @@
+#
+# The contents of this file are subject to 
+# RIPE Database Terms and Conditions
+#
+# https://docs.db.ripe.net/terms-conditions.html
+#
+
+inet6num:       2001:67c:2e8::/48
+netname:        RIPE-NCC-NET
+last-modified:  2026-03-19T09:18:20Z
+source:         RIPE
+
+inet6num:       2001:7fd::/32
+netname:        RIPE-NCC-K-ROOT-V6
+last-modified:  2026-01-15T13:10:37Z
+source:         RIPE
+
+inet6num:       2a00:16f8:17::/48
+netname:        Amazon_EU_SARL__succursale_francaise
+last-modified:  2026-11-18T08:52:26Z
+source:         RIPE
+

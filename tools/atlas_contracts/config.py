@@ -26,6 +26,7 @@ FIELD_TARGETS = {
     "ip": {"reason_flags", "anycast"}, "category": {"reason_flags"}, "type": {"reason_flags"},
     "properties.addressPrefixes": {"reason_flags"},
     "ipv4Prefix": {"network_organization"}, "ipv6Prefix": {"network_organization"},
+    "netname": {"network_name"},
     "value": {"reason_flags"}, "tags": {"reason_flags"},
     "as_path": {"bgp_paths"}, "as_relationship": {"as_relationships"},
     "roa": {"rpki_status"}, "roa_asn": {"rpki_status"}, "roa_max_length": {"rpki_status"},

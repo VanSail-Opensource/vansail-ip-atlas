@@ -1,0 +1,29 @@
+RIPE Database IPv6 network names
+
+The contents of this file are subject to RIPE Database Terms and Conditions.
+https://docs.db.ripe.net/terms-conditions.html
+
+The RIPE NCC publishes the daily IPv6 split files. VanSail IP Atlas extracts
+registered network identifiers on public IPv6 allocations and assignments.
+These registrations may have changed after the observed edition. The adjacent
+fixture retains three institutional examples with the original file notice.
+It excludes contact references, free-text descriptions and remarks.
+
+Article 3 of the RIPE Database Terms and Conditions includes scientific
+research into network operations and topology. Article 4.5 limits compilation,
+redistribution and reuse to an insubstantial part unless RIPE NCC permission
+is granted. The RIPE NCC retains rights under Article 9. The project owner
+has recorded an educational-use decision for the compiled facts. No separate
+permission for substantial reuse has been verified.
+
+RIPE Database Terms and Conditions
+https://www.ripe.net/manage-ips-and-asns/db/support/documentation/terms/
+
+RIPE Database Acceptable Use Policy
+https://docs.db.ripe.net/RIPE-Database-Acceptable-Use-Policy/
+
+IPv6 object template and attribute meanings
+https://docs.db.ripe.net/RPSL-Object-Types/Descriptions-of-Primary-Objects/
+
+Original daily split files
+https://ftp.ripe.net/ripe/dbase/split/

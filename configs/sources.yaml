@@ -53,6 +53,7 @@ build:
     - asn_country
     - organization
     - network_organization
+    - network_name
     - isp
     - origins
     - usage_type
@@ -1224,6 +1225,75 @@ sources:
     creationTime: null
     ipv4Prefix: network_organization
     ipv6Prefix: network_organization
+  signals: []
+- id: ripe-ipv6-network-names
+  evidence_family: ripe-registry
+  source_group: ripe-registry
+  category: network_identity
+  admission: active
+  discovery: https://ftp.ripe.net/ripe/dbase/split/
+  download:
+    url: https://ftp.ripe.net/ripe/dbase/split/ripe.db.inet6num.gz
+    format: text-gz
+    max_compressed_mib: 512
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields: [inet6num, netname, source, last-modified]
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: RIPE-Database-Terms-and-Conditions
+    distribution: user_authorized_educational_use
+    evidence_url: https://www.ripe.net/manage-ips-and-asns/db/support/documentation/terms/
+    review_basis: Article 3 includes scientific research into network operations and topology.
+      Article 4.5 limits compilation, redistribution and reuse to an insubstantial part
+      unless the RIPE NCC grants permission. This project records its educational-use
+      decision. No separate permission for substantial reuse has been verified.
+    attribution_required: true
+    attribution:
+      name: RIPE NCC — RIPE Database
+      text: Registered IPv6 network names are from the daily RIPE Database export published
+        by the RIPE NCC. The contents of this file are subject to RIPE Database Terms and
+        Conditions. Registered names may have changed since the export.
+      url: https://docs.db.ripe.net/RPSL-Object-Types/Descriptions-of-Primary-Objects/
+      license_url: https://www.ripe.net/manage-ips-and-asns/db/support/documentation/terms/
+  trust:
+    source_weight: 100
+    correlation_group: ripe-registry
+  scope: prefix
+  notes: Use the RIPE Database IPv6 split file and its companion ripe.db.inet6num.utf8.gz.
+    Verify the accepted prefix, registered identifier and generated modification clock
+    across both complete encodings. An accepted object's generated clock supplies a
+    conservative lower bound on when the export was made. Keep contact and free-text
+    attributes outside the published data.
+  publication_proof:
+    kind: embedded
+    locator: https://ftp.ripe.net/ripe/dbase/split/ripe.db.inet6num.gz
+    field: last-modified
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: passed
+    path: fixtures/source-certification/observed-ripe-inet6num.txt
+    sha256: 4e1b22c2b8b446f27f487f8ac0a18b0df3b721846aaf74798fdf14f8e40c03c0
+    parser: ripe-ipv6-network-names
+    schema: ripe-db-inet6num-v1
+    schema_observed: true
+    tested_at: '2026-11-25T06:10:30Z'
+    synthetic: false
+    payload_format: ripe-inet6num-excerpt
+  parser:
+    id: ripe-ipv6-network-names
+    schema: ripe-db-inet6num-v1
+    version: 1
+  public_fields: [network_name]
+  field_mappings:
+    inet6num: null
+    netname: network_name
+    source: null
+    last-modified: null
   signals: []
 - id: nro-delegated-registration
   evidence_family: nro-rir-delegation

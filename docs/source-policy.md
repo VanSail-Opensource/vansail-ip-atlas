@@ -316,6 +316,30 @@ collection rules. Retained generations and no-change cache hits preserve origina
 clocks, proofs and exact policy bindings; they never renew observation age. This
 amendment is RPKI-specific and changes no subscription or other item expiry.
 
+## Registered IPv6 network names
+
+The RIPE Database defines `netname` as a required, single identifier of the
+registered IPv6 allocation or assignment. Its value applies to that prefix.
+Use the most specific registered prefix. A child with an unusable name
+retains an unknown boundary. A name gives no separate evidence for network
+ownership, the subscriber's ISP, a service, location, or routing origin.
+[RIPE IPv6 object template](https://docs.db.ripe.net/RPSL-Object-Types/Descriptions-of-Primary-Objects/) ·
+[Registered network names](https://docs.db.ripe.net/FAQ/)
+
+Read the complete primary and UTF-8 IPv6 split files with a combined 3 GiB
+decoded limit. Verify the scope, names and generated UTC modification times
+across those originals. RIPE assigns the `last-modified` attribute during
+database updates. Use the latest eligible modification as a conservative
+observation clock. Retrieval time cannot renew a registration. Preserve the
+earlier clock for the same data under the ordinary source-freshness policy.
+
+Only the published network identifier is eligible for display. Discard contact
+handles, remarks, descriptions, email addresses and all other free-text fields.
+The global credit names the RIPE NCC and links the RIPE Database terms.
+Article 4.5 restricts compilation and reuse of substantial parts without
+permission. The catalog records the educational-use decision and the scope of
+the retrieved data. [RIPE Database terms](https://www.ripe.net/manage-ips-and-asns/db/support/documentation/terms/)
+
 ## Address-block ownership
 
 Google's `goog.json` documents the address space that Google owns. For a

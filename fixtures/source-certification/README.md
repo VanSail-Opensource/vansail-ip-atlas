@@ -154,3 +154,13 @@ complete reviewed original contained 148 prefixes. Current intake uses the
 original publisher URL and its embedded edition clocks.
 [Publisher range definitions](https://docs.cloud.google.com/vpc/docs/access-apis-external-ip#ip-addr-defaults) ·
 [Attribution and source terms](notices/google-network-organization.txt)
+
+`observed-ripe-inet6num.txt` retains the original terms header and the
+`inet6num`, `netname`, `last-modified` and `source` lines of three
+institutional registrations in the November 24, 2026 IPv6 split export. Two
+of the labels identify RIPE NCC networks and the third identifies an Amazon
+EU registration. The 529-byte excerpt omits contact fields and free text.
+Live intake validates the complete primary and UTF-8 exports with their
+original server-generated observation clocks.
+[RIPE IPv6 object definition](https://docs.db.ripe.net/RPSL-Object-Types/Descriptions-of-Primary-Objects/) ·
+[Attribution and terms](notices/ripe-ipv6-network-names.txt)

@@ -219,6 +219,7 @@
                 "asn_country",
                 "organization",
                 "network_organization",
+                "network_name",
                 "isp",
                 "origins",
                 "usage_type",
@@ -1756,6 +1757,10 @@
                 "creationTime",
                 "ipv4Prefix",
                 "ipv6Prefix",
+                "inet6num",
+                "netname",
+                "source",
+                "last-modified",
                 "start",
                 "status"
               ]
@@ -1780,6 +1785,7 @@
                 "asn_country",
                 "organization",
                 "network_organization",
+                "network_name",
                 "isp",
                 "origins",
                 "usage_type",
@@ -7186,6 +7192,10 @@
               "creationTime": {"type": "null"},
               "ipv4Prefix": {"const": "network_organization"},
               "ipv6Prefix": {"const": "network_organization"},
+              "inet6num": {"type": "null"},
+              "netname": {"const": "network_name"},
+              "source": {"type": "null"},
+              "last-modified": {"type": "null"},
               "start": {"type": "null"},
               "status": {"type": "null"},
               "properties.addressPrefixes": {
@@ -7562,7 +7572,8 @@
                   "original",
                   "decoded-csv",
                   "rpki-client-excerpt",
-                  "nro-delegated-excerpt"
+                  "nro-delegated-excerpt",
+                  "ripe-inet6num-excerpt"
                 ]
               }
             },

@@ -20,11 +20,11 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_actual_catalog_is_blocked_and_has_shared_family(self):
         report = capability_report(self.configs["sources"], utc("2026-11-08T00:00:00Z"), ROOT)
-        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (20, 20, 0))
+        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (21, 21, 0))
         self.assertEqual({s["id"] for s in self.configs["sources"]["sources"] if s["admission"] == "active"}, {
             "sapics-user-country-v4", "sapics-user-country-v6", "sapics-server-country-v4", "ipverse-as-metadata",
             "dbip-lite-direct", "ipapi-free-geo-v4", "ipapi-free-geo-v6", "x4b-vpn-v4", "tor-exits", "ipverse-asn-usage",
-            "google-network-organization", "nro-delegated-registration", "ffraud-ip", "iana-root-anycast", "tweetfeed-week", "azure-appservice-public", "routeviews-wide-rib", "ripe-mrt-rrc18", "caida-asrel2", "rpki-client-vrps"})
+            "google-network-organization", "ripe-ipv6-network-names", "nro-delegated-registration", "ffraud-ip", "iana-root-anycast", "tweetfeed-week", "azure-appservice-public", "routeviews-wide-rib", "ripe-mrt-rrc18", "caida-asrel2", "rpki-client-vrps"})
         self.assertFalse(report["production_eligible"])
         self.assertEqual(report["schema_version"], 3)
         self.assertEqual(report["release_scope"], "release-scope-v6")
@@ -40,6 +40,29 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(report["blocked_required_capability_count"], 7)
         subscriptions = [s for s in self.configs["sources"]["sources"] if s["category"] == "proxy_subscription_ip"]
         self.assertEqual(subscriptions, [])
+
+    def test_ripe_ipv6_registry_names_only_expose_the_network_identifier(self):
+        catalog = self.configs["sources"]
+        source = next(row for row in catalog["sources"] if row["id"] == "ripe-ipv6-network-names")
+        self.assertEqual(source["public_fields"], ["network_name"])
+        self.assertEqual(source["coverage"], {"kind": "positive_only", "scope": "prefix"})
+        self.assertEqual(source["field_mappings"], {
+            "inet6num": None, "netname": "network_name", "source": None, "last-modified": None,
+        })
+        self.assertEqual(source["signals"], [])
+        self.assertEqual(source["publication_proof"], {
+            "kind": "embedded", "locator": "https://ftp.ripe.net/ripe/dbase/split/ripe.db.inet6num.gz",
+            "field": "last-modified",
+        })
+        self.assertEqual(source["fixture"]["payload_format"], "ripe-inet6num-excerpt")
+        self.assertEqual(source["license"]["distribution"], "user_authorized_educational_use")
+        self.assertIn("RIPE Database Terms and Conditions", source["license"]["attribution"]["text"])
+        for raw, target in [("netname", "isp"), ("netname", "network_organization"),
+                            ("inet6num", "origins"), ("source", "network_name"), ("last-modified", "network_name")]:
+            changed = copy.deepcopy(source)
+            changed["field_mappings"][raw] = target
+            with self.subTest(raw=raw, target=target), self.assertRaises(ContractError):
+                validate_schema("sources", {**catalog, "sources": [changed]})
 
     def test_google_owned_ranges_only_map_prefixes_to_network_organization(self):
         catalog = self.configs["sources"]

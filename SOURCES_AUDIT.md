@@ -11,6 +11,7 @@ given IP has any observation depends on the included edition.
 | Physical country, region, city and coordinates | Sapics supplies physical country. DB-IP and ipapi.is supply physical country and finer geographic observations. |
 | IP registration country | NRO extended delegation statistics report the recipient’s country for assigned and allocated IPv4 and IPv6 ranges. |
 | Address-level network organization | Google documents the IPv4 and IPv6 prefixes in its published list as Google-owned address space. |
+| IPv6 network name | The RIPE Database publishes the registered network identifier for IPv6 allocations and assignments. |
 | ASN identity and contextual usage | Ipverse supplies ASN names, organizations and ASN registration countries. Dated ASN roles join to observed origins. |
 | Network prefixes, origin ASNs, observed AS paths | RouteViews and RIPE RIS RIB snapshots |
 | AS relationships and Tier-1 candidates | CAIDA directional relationships with observed paths and current snapshot evidence |
@@ -21,8 +22,8 @@ given IP has any observation depends on the included edition.
 | Proxy, datacenter, Tor and VPN | FFraud typed records, Tor exit observations and X4B VPN prefixes where applicable |
 | Hosting | Individual addresses in mature Microsoft Azure App Service allocations |
 
-The twenty-source catalog provides observed network prefixes, registration
-countries, network organization for Google-owned ranges and origin ASNs. Network name, ISP, assignment
+The twenty-one-source catalog provides observed network prefixes, registration
+countries, Google address-block ownership, RIPE IPv6 network names and origin ASNs. ISP, assignment
 mode and IPv4 directed-broadcast status display as unknown without an explicit
 address-level mapping. The ASN identity fields belong to the autonomous system. A
 routed prefix supplies no per-address assignment or broadcast classification.
@@ -46,6 +47,34 @@ with each publisher update.
 The public /24 view derives its cells from the admitted address and network
 facts. An unobserved cell carries unknown values. Source qualification,
 runtime coverage and hosted availability are measured for each build.
+
+## November 25 RIPE IPv6 network names
+
+The November 24 daily IPv6 exports contained 1,584,323 registered resource
+objects. The two complete encodings yielded 1,584,281 eligible network
+identifiers and 40 explicit unknowns on public prefixes. A more specific
+registration without a usable name masks a broader registration's name.
+The most recent eligible server-generated modification was
+`2026-11-24T22:53:38Z`. The build dates the edition conservatively from
+that change. The registered identifier names an allocation or assignment.
+[RIPE IPv6 object template](https://docs.db.ripe.net/RPSL-Object-Types/Descriptions-of-Primary-Objects/) ·
+[RIPE attribute definition](https://docs.db.ripe.net/FAQ/)
+
+The primary export contained 45,080,740 compressed bytes with SHA-256
+`c42dbe96b7e80aa432efe141fd9ed62e657eb5d7b8b23f6db1ba4a2a51f9b4c5`.
+The UTF-8 edition contained 45,103,039 bytes with SHA-256
+`4cc7111df3712f73b71103a5d56258685b2f71499e716bf272f91c9082b88f4c`.
+Both files yielded the same ordered prefix, network name and modification
+time observations. Their combined decoded size was 2,927,510,159 bytes.
+[Primary export](https://ftp.ripe.net/ripe/dbase/split/ripe.db.inet6num.gz) ·
+[UTF-8 export](https://ftp.ripe.net/ripe/dbase/split/ripe.db.inet6num.utf8.gz)
+
+The publisher permits substantial reuse with its permission and limits
+unpermitted reuse to an insubstantial part. The catalog records the project
+owner's educational-use decision. No separate permission for substantial
+reuse has been verified. A dedicated global notice identifies the RIPE NCC
+and links to the terms attached to the split export.
+[RIPE Database Terms and Conditions, Articles 3, 4.5 and 9](https://www.ripe.net/manage-ips-and-asns/db/support/documentation/terms/)
 
 ## November 25 Google-owned address space
 

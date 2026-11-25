@@ -97,7 +97,7 @@ jobs:
     # Intake repeats config/certification validation before any fetch. All four
     # independent jobs must still succeed before production trusts this run.
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 240
     env:
       RUNNER_TOOL_CACHE: ${{ github.workspace }}/build-private/toolcache
     steps:
@@ -111,6 +111,9 @@ jobs:
         run: python tools/hosted/runner_budget.py --report reports/intake-runner-budget.json -- python tools/hosted/source_intake.py
       - name: Compile and measure actual admitted data without publishing
         run: python tools/hosted/runner_budget.py --report reports/data-check-runner-budget.json -- python tools/hosted/production_data_check.py
+      - name: Measure one isolated genuine warm expiry before release
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/production-warm-diagnostic'
+        run: python tools/hosted/runner_budget.py --report reports/engineering-warm-budget.json -- python tools/hosted/engineering_warm_probe.py
       - uses: actions/upload-artifact@v7.0.0
         if: always()
         with:
@@ -121,6 +124,8 @@ jobs:
             reports/production-data-check.json
             reports/production-lookup-integration.json
             reports/data-check-runner-budget.json
+            reports/engineering-warm-preflight.json
+            reports/engineering-warm-budget.json
           if-no-files-found: ignore
           retention-days: 7
       # Source payloads, fixture receipts, lineage and normalized partitions stay

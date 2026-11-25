@@ -94,6 +94,15 @@ func TestOwnedIntermediateRunRefusesSubstitutionAndLateFailure(t *testing.T) {
 			if proof := c.runProofs.lookup(filepath.Join(c.scratch, fmt.Sprintf("run-%08d.bin", c.serial))); proof != nil {
 				t.Fatal("failed merge retained its output proof")
 			}
+			before := c.serial
+			if _, err := c.classify([]string{path}); err == nil {
+				t.Fatal("classified a changed run")
+			}
+			for i := before + 1; i <= c.serial; i++ {
+				if c.runProofs.lookup(filepath.Join(c.scratch, fmt.Sprintf("run-%08d.bin", i))) != nil {
+					t.Fatal("failed classification retained an output proof")
+				}
+			}
 		})
 	}
 }
@@ -125,6 +134,13 @@ func TestOwnedMergeRequiresEveryInputProofIncludingDuplicates(t *testing.T) {
 	if err = reader.next(); err != io.EOF {
 		t.Fatal("duplicate identity survived or EOF changed", err)
 	}
+	runs, err := c.classify([]string{a, b})
+	if err != nil || len(runs) != 1 || c.stats.UniqueRecords != 1 {
+		t.Fatal("classification lost or duplicated the mixed input", err)
+	}
+	if c.runProofs.lookup(runs[0].path) != nil {
+		t.Fatal("classification sealed a run with an unproved duplicate")
+	}
 }
 
 func TestOwnedMergeRetainsStrictBytesAcrossFanInBoundaries(t *testing.T) {
@@ -142,7 +158,11 @@ func TestOwnedMergeRetainsStrictBytesAcrossFanInBoundaries(t *testing.T) {
 			}
 			paths = append(paths, proofMergeOne(t, c, frame))
 		}
-		path, err := c.merge(paths)
+		remaining, err := c.prepareMerge(paths)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path, err := c.mergeGroup(remaining)
 		if err != nil || c.runProofs.lookup(path) == nil {
 			t.Fatal("multi-pass proof lost", err)
 		}

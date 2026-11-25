@@ -16,6 +16,10 @@ The single global credit display may include reviewed required publisher logos: 
 
 ## 1. Mission, scope, architecture
 
+The November 25, 2026 launch amendment sets the native full-answer lookup p95
+limit to strictly below 25 microseconds. Use the public Go reader, 10,000 warmups
+and 100,000 individually timed calls on the verified 10,000-query corpus.
+
 - Build **VanSail IP Atlas**: Go data compiler, custom compressed read-only VIA3 files, Nuxt 4 static site on Cloudflare Pages.
 - All enrichment is via downloaded bulk datasets. No live IP lookup API, server runtime, Pages Function, network scan, proxy connectivity validation, proxy execution, or DNS resolution of subscription hosts.
 - Every IP lookup must be indexed: adaptive radix O(1) bounded depth or O(log n); ASN index O(1) expected or O(log n). Sorting and external merge during offline compilation may be O(n log n).

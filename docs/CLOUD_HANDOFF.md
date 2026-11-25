@@ -684,6 +684,19 @@ on a retained fifteen-source release. The original 2-microsecond limit still
 applies. Source qualification and release gates must run on the complete
 nineteen-source candidate before its production deployment.
 
+## November 25 launch decision
+
+The nineteen-source GitHub run admitted all 19 sources. It compiled
+36,817,082 records in 26 minutes 21 seconds and produced 113,789,628 bytes of
+database objects. Both the independent receipt verification and the real corpus
+checks passed. The full native lookup measured 5.049 µs p50, 17.152 µs p95
+and 34.433 µs p99 across 100,000 calls. Its 17.152 µs p95 exceeded the
+then-current 2 µs limit. The user reviewed the observed timings and approved
+a strict 25 µs limit for launch on November 25. The updated commit runs the
+integration and production checks against this limit. At the time of review
+the canonical Pages hostname still returned HTTP 404.
+[Official nineteen-source run](https://github.com/VanSail-Opensource/vansail-ip-atlas/actions/runs/45045443442)
+
 ## Resume next
 
 1. Verify the branch and clean checkout. Run strict schemas, Go tests/vet, Python

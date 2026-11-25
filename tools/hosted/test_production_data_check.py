@@ -16,12 +16,12 @@ class ActualLookupGateTests(unittest.TestCase):
         return {'timing': 'individual-indexed-lookups', 'corpus_queries': 10000,
                 'warmups': 10000, 'samples_ns': [value] * 100000, 'p95_ns': value}
 
-    def test_original_strict_ceiling_and_observed_percentile(self):
-        self.assertEqual(verify_lookup_measurement(self.report(1999)), 1999)
+    def test_launch_ceiling_and_observed_percentile(self):
+        self.assertEqual(verify_lookup_measurement(self.report(24_999)), 24_999)
         with self.assertRaises(ContractError):
-            verify_lookup_measurement(self.report(2000))
-        report = self.report(2500)
-        report['p95_ns'] = 1999
+            verify_lookup_measurement(self.report(25_000))
+        report = self.report(26_000)
+        report['p95_ns'] = 24_999
         diagnostics = {}
         with self.assertRaises(ContractError):
             verify_lookup_measurement(report, diagnostics=diagnostics)
@@ -38,7 +38,7 @@ class ActualLookupGateTests(unittest.TestCase):
                 verify_lookup_measurement(report)
 
     def test_main_writes_canonical_success_and_failure_reports(self):
-        for lookup_ns, passed in ((1999, True), (2000, False)):
+        for lookup_ns, passed in ((24_999, True), (25_000, False)):
             with self.subTest(passed=passed), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 def run(argv):

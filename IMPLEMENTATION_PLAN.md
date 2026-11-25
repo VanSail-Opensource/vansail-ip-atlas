@@ -29,6 +29,10 @@ observation semantics is enabled for a production source.
 
 ## Implementation contracts
 
+The approved November 25 launch limit for a complete native indexed lookup is
+p95 below 25 microseconds. Integration and production independently evaluate
+100,000 individual timings. Website and build measurements retain their limits.
+
 - Go ingests approved downloaded bulk files and emits deterministic VIA3 objects.
   There is no live enrichment API, probe, subscription-host DNS or server runtime.
 - Nuxt 4 generates static Pages assets. Every database object belongs to the same

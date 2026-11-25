@@ -15,7 +15,7 @@ import re
 import unicodedata
 from urllib.parse import unquote
 
-NATIVE_LOOKUP_P95_LIMIT_NS = 2_000
+NATIVE_LOOKUP_P95_LIMIT_NS = 25_000
 MAX_FILES = 18_500
 MAX_ASSET_BYTES = 24 * 1024 * 1024
 MAX_TREE_BYTES = 3072 * 1024 * 1024

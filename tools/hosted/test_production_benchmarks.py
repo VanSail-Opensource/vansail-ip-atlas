@@ -147,8 +147,15 @@ class BenchmarkEvidenceTests(unittest.TestCase):
             native = copy.deepcopy(self.native); change(native)
             with self.subTest(change=change), self.assertRaises(ContractError): self.aggregate(native=native)
         native = copy.deepcopy(self.native)
-        native.update(samples_ns=[2000]*100000, p50_ns=2000, p95_ns=2000, p99_ns=2000)
-        with self.assertRaises(ContractError): self.aggregate(native=native)
+        for sample in (24_999, 25_000):
+            native.update(samples_ns=[sample]*100000, p50_ns=sample, p95_ns=sample, p99_ns=sample)
+            for stratum in native['strata']:
+                if stratum['timed_samples']:
+                    stratum.update(p50_ns=sample, p95_ns=sample, p99_ns=sample)
+            if sample == 24_999:
+                self.assertEqual(b.verify_native_lookup(self.candidate, native), sample)
+            else:
+                with self.assertRaises(ContractError): self.aggregate(native=native)
 
 
 if __name__ == '__main__':

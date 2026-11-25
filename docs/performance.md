@@ -20,7 +20,7 @@ candidate identity before preview. Parallel scheduling does not change any gate.
 | Whole-process-group peak RSS | Below 6656 MiB |
 | Peak scratch | Below 10240 MiB |
 | Complete generated static tree | At most 3072 MiB |
-| Go indexed lookup p95 | Below 2 microseconds |
+| Complete Go indexed lookup p95 | Below 25 microseconds for launch |
 | Cached browser lookup p95 | Below 15 milliseconds |
 | Typical cold-query compressed payload | Below 400 KiB |
 | Initial executed JS, gzip | Below 200 KiB |

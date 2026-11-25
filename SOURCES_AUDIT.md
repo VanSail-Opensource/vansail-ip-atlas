@@ -49,6 +49,30 @@ The public /24 view derives its cells from the admitted address and network
 facts. An unobserved cell carries unknown values. Source qualification,
 runtime coverage and hosted availability are measured for each build.
 
+## November 25 iCloud Private Relay egress ranges
+
+Apple publishes the egress IP ranges that website operators may use to
+recognize Private Relay connections. The November 19 CSV contains 285,226
+unique public prefixes, including 41,863 IPv4 and 243,363 IPv6. The IPv4
+prefixes cover 105,776 distinct addresses. Atlas uses only prefix membership
+as positive proxy evidence. The source supplies no subscriber ISP, assignment
+mode, per-address VPN usage, abuse finding or negative coverage.
+[Apple’s network guidance](https://developer.apple.com/icloud/prepare-your-network-for-icloud-private-relay/) ·
+[Publisher CSV](https://mask-api.icloud.com/egress-ip-ranges.csv)
+
+The original contains 12,052,078 bytes with SHA-256
+`270b5cf4642d9e3d22ebc9c7ee874fa22dd5a8ce707906f854a4c228f6c31495`.
+Conditional requests against Apple's identified representation agreed on its
+modification time, November 19 at 15:46:45 UTC. Immutable independent captures
+bracket the edition change. Seven prefixes appeared between the November 19
+and 20 captures. The November 20 witness matches the complete set in the
+original. The witnesses describe the address scope only. The publisher CSV
+supplies the input. The project records its educational-use decision under
+Apple's terms and includes a global Apple credit.
+[November 19 witness](https://github.com/disposable/cloud-ip-ranges/commit/847236eaf3ec188ca51b06a5a77895a0c936bcc3) ·
+[November 20 witness](https://github.com/disposable/cloud-ip-ranges/commit/120b5e4958c8af42d837583978b9a53cda887475) ·
+[Apple’s terms](https://www.apple.com/legal/internet-services/terms/site.html)
+
 ## November 25 geolocation fallback
 
 Mullvad publishes its own relay locations. Its signed November 24 edition

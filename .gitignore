@@ -17,6 +17,7 @@ fixtures/source-samples/
 fixtures/source-certification/*
 !fixtures/source-certification/README.md
 !fixtures/source-certification/adapter-certifications.json
+!fixtures/source-certification/observed-apple-private-relay.csv
 !fixtures/source-certification/observed-azure-appservice.json
 !fixtures/source-certification/observed-google-owned-prefixes.json
 !fixtures/source-certification/observed-mullvad-relay-locations.json

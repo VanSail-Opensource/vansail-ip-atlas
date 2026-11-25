@@ -663,8 +663,8 @@ func (s *bulkSpool) addEdge(edge intelligence.ASNEdge, observed bool) error {
 
 // Seed category streams end at every original input partition boundary. A
 // changed normalized object therefore cannot shift the packing identity of
-// unrelated objects. The full source walker still validates its aggregate
-// storage shape, every frame and the final object counts/hashes.
+// unrelated objects. Capture source effects only after a complete strict walk.
+// A replay rechecks the original physical objects and all derived groups.
 func (s *bulkSpool) seedStable(ctx context.Context, workspace string, state intelligence.BuildState) ([]*bulkBucket, *bulkBucket, error) {
 	if err := s.refresh(); err != nil {
 		return nil, nil, err
@@ -673,10 +673,22 @@ func (s *bulkSpool) seedStable(ctx context.Context, workspace string, state inte
 	s.riskParts = map[[32]byte]bool{}
 	var categories [6][]intelligence.RecordPartition
 	for _, source := range state.Sources {
-		type seedGroup struct {
-			entry spatialCacheEntry
-			hit   bool
-			risk  [2]bool
+		var replayKey [32]byte
+		var capture *seedSourceCapture
+		if s.reuse != nil && len(source.RecordPartitions) > 0 && len(source.Records) == 0 {
+			key, err := spatialReuseKey(seedSourceDomain, source.RecordPartitions)
+			if err != nil {
+				return nil, nil, err
+			}
+			replayKey = key
+			hit, err := s.replaySeedSource(ctx, workspace, source, key, &categories)
+			if err != nil {
+				return nil, nil, err
+			}
+			if hit {
+				continue
+			}
+			capture = &seedSourceCapture{eligible: true}
 		}
 		var groups []seedGroup
 		var current *seedGroup
@@ -735,6 +747,7 @@ func (s *bulkSpool) seedStable(ctx context.Context, workspace string, state inte
 			if err := s.seedRecord(record, emit); err != nil {
 				return err
 			}
+			capture.observe(record)
 			remaining--
 			if remaining != 0 {
 				return nil
@@ -765,33 +778,13 @@ func (s *bulkSpool) seedStable(ctx context.Context, workspace string, state inte
 		if remaining != 0 {
 			return nil, nil, errors.New("seed source record count differs")
 		}
-		// Cache adoption follows the complete strict source walk, including every
-		// final framing/count/hash check. Side effects were reconstructed above
-		// for hits and misses alike; no stored flag substitutes for source data.
-		var imports [][]intelligence.RecordPartition
-		for _, group := range groups {
-			if group.hit {
-				imports = append(imports, group.entry.Seed.Parts[:]...)
-			}
+		if err := s.adoptSeedGroups(ctx, groups, &categories); err != nil {
+			return nil, nil, err
 		}
-		if len(imports) != 0 {
-			if err := s.importCachedGroups(ctx, imports); err != nil {
+		if capture != nil && capture.eligible {
+			summary := capture.summary(groups)
+			if _, err := s.reuse.Retain(ctx, spatialCacheEntry{Domain: seedSourceDomain, Key: replayKey, SeedSource: &summary}, nil); err != nil {
 				return nil, nil, err
-			}
-		}
-		for _, group := range groups {
-			for i, parts := range group.entry.Seed.Parts {
-				categories[i] = append(categories[i], parts...)
-				if i < 2 && group.risk[i] {
-					for _, part := range parts {
-						s.riskParts[part.SHA256] = true
-					}
-				}
-			}
-			if s.reuse != nil && group.entry.Key != ([32]byte{}) {
-				if _, err := s.reuse.Retain(ctx, group.entry, s.cachePartFiles(group.entry.Seed.Parts[:]...)); err != nil {
-					return nil, nil, err
-				}
 			}
 		}
 	}

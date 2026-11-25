@@ -221,6 +221,9 @@ func (e spatialCacheEntry) expanded() (spatialCacheEntry, error) {
 }
 
 func (e spatialCacheEntry) matchesIndexVersion(version int) bool {
+	if e.Domain == seedSourceDomain && version < 4 {
+		return false
+	}
 	if e.Domain != "compiled" {
 		return e.Packed == nil && e.Compiled == nil
 	}
@@ -229,7 +232,7 @@ func (e spatialCacheEntry) matchesIndexVersion(version int) bool {
 		return e.Compiled != nil && e.Packed == nil
 	case 2:
 		return e.Compiled == nil && e.Packed != nil && e.Packed.Objects != nil && e.Packed.Table == nil
-	case 3:
+	case 3, 4:
 		return e.Compiled == nil && e.Packed != nil && e.Packed.Objects == nil && e.Packed.Table != nil
 	}
 	return false

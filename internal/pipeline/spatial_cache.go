@@ -19,7 +19,7 @@ import (
 	"vansail-ip-atlas/internal/intelligence"
 )
 
-const spatialCacheVersion = 3
+const spatialCacheVersion = 4
 const spatialCacheIndexLimit = 16 << 20
 const spatialCacheEntryLimit = 16384
 const spatialCacheObjectLimit = 32768
@@ -44,13 +44,14 @@ type spatialCacheLeaf struct {
 	Stream    spatialCacheStream
 }
 type spatialCacheEntry struct {
-	Domain   string
-	Key      [32]byte
-	Seed     *spatialCacheSeed       `json:",omitempty"`
-	Scatter  *spatialCacheScatter    `json:",omitempty"`
-	Leaf     *spatialCacheLeaf       `json:",omitempty"`
-	Compiled *compiledPartitionEntry `json:",omitempty"`
-	Packed   *compiledIndexEntry     `json:",omitempty"`
+	Domain     string
+	Key        [32]byte
+	SeedSource *seedSourceSummary      `json:",omitempty"`
+	Seed       *spatialCacheSeed       `json:",omitempty"`
+	Scatter    *spatialCacheScatter    `json:",omitempty"`
+	Leaf       *spatialCacheLeaf       `json:",omitempty"`
+	Compiled   *compiledPartitionEntry `json:",omitempty"`
+	Packed     *compiledIndexEntry     `json:",omitempty"`
 }
 type spatialCacheIndex struct {
 	Version  int
@@ -103,6 +104,12 @@ func spatialCacheFiles(e spatialCacheEntry) (map[[32]byte]uint64, error) {
 	files := map[[32]byte]uint64{}
 	if e.Key == ([32]byte{}) {
 		return nil, errSpatialCache
+	}
+	if e.Domain == seedSourceDomain || e.SeedSource != nil {
+		if e.Domain != seedSourceDomain || e.SeedSource == nil || e.Seed != nil || e.Leaf != nil || e.Scatter != nil || e.Compiled != nil || !e.SeedSource.valid() {
+			return nil, errSpatialCache
+		}
+		return files, nil
 	}
 	if e.Leaf != nil && e.Leaf.RiskInput != ([32]byte{}) && (e.Domain != "risk" || e.Leaf.Split || e.Key == e.Leaf.RiskInput) {
 		return nil, errSpatialCache
@@ -215,6 +222,8 @@ func spatialIndexMAC(key [32]byte, index spatialCacheIndex) [32]byte {
 		_, _ = mac.Write([]byte("atlas-spatial-cache-v2\x00"))
 	case 3:
 		_, _ = mac.Write([]byte("atlas-spatial-cache-v3\x00"))
+	case 4:
+		_, _ = mac.Write([]byte("atlas-spatial-cache-v4\x00"))
 	}
 	_, _ = mac.Write(data)
 	var out [32]byte
@@ -403,6 +412,12 @@ func spatialEntryLess(a, b spatialCacheEntry) bool {
 	return bytes.Compare(a.Key[:], b.Key[:]) < 0
 }
 func cloneSpatialEntry(e spatialCacheEntry) spatialCacheEntry {
+	if e.SeedSource != nil {
+		summary := *e.SeedSource
+		summary.ASNs = append([]uint32(nil), summary.ASNs...)
+		summary.Risk = append([]byte(nil), summary.Risk...)
+		e.SeedSource = &summary
+	}
 	if e.Seed != nil {
 		value := *e.Seed
 		for i := range value.Parts {
@@ -483,7 +498,7 @@ func (c *spatialCache) Lookup(ctx context.Context, domain string, key [32]byte) 
 	if err := c.checkRoot(); err != nil {
 		return spatialCacheEntry{}, false, err
 	}
-	if key == ([32]byte{}) || domain != "seed" && domain != "scatter" && domain != "risk" && domain != "risk-input" && domain != "public" && domain != "compiled" && domain != "location" && domain != rawSplitDomain {
+	if key == ([32]byte{}) || domain != "seed" && domain != seedSourceDomain && domain != "scatter" && domain != "risk" && domain != "risk-input" && domain != "public" && domain != "compiled" && domain != "location" && domain != rawSplitDomain {
 		return spatialCacheEntry{}, false, errSpatialCache
 	}
 	id := spatialCacheEntryKey{domain, key}

@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"encoding/hex"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -25,6 +26,16 @@ func TestSeedSourceReplayRequiresOriginalObjectsAndAllGroups(t *testing.T) {
 				source.Records = append(source.Records, r)
 			}
 		}
+	}
+	// A registered IPv6 name and a nested unnamed boundary each remain a
+	// spatial record without introducing an ASN, a route, or a risk flag.
+	for _, value := range []intelligence.NetworkNameRecord{
+		{Prefix: netip.MustParsePrefix("2001:4860::/32"), Name: "TEST-NET", ModifiedAt: state.EvaluatedAt},
+		{Prefix: netip.MustParsePrefix("2001:4860:1::/48")},
+	} {
+		source.Records = append(source.Records, intelligence.NormalizedRecord{
+			Version: 3, Kind: intelligence.RecordNetworkName, NetworkName: &value,
+		})
 	}
 	state.Sources = []intelligence.StoredSource{source}
 	state = partitionSpatialFixture(t, root, state)

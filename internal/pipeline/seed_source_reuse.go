@@ -62,7 +62,7 @@ func (c *seedSourceCapture) observe(r intelligence.NormalizedRecord) {
 	// Keep role and relationship contributions on the strict path, including
 	// mixed sources with one such row anywhere in their partition sequence.
 	switch r.Kind {
-	case intelligence.RecordGeo, intelligence.RecordVRP, intelligence.RecordNetworkOrganization:
+	case intelligence.RecordGeo, intelligence.RecordVRP, intelligence.RecordNetworkOrganization, intelligence.RecordNetworkName:
 	case intelligence.RecordUsage:
 		if r.Usage.ASN != 0 {
 			c.eligible = false

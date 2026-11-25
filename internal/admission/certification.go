@@ -93,6 +93,13 @@ func (e *Engine) certify(ctx context.Context, source Source, adapter adapter, no
 	// Review evidence is necessary, but not sufficient: the current adapter must
 	// still successfully parse the exact reviewed fixture on this run.
 	count := uint64(0)
+	if fixture.PayloadFormat == "mullvad-relay-excerpt" {
+		if adapter != mullvadRelaysJSON || !mullvadSource(source) || fixture.ContentEncoding != "" && fixture.ContentEncoding != "identity" {
+			return errMullvad
+		}
+		_, err := parseMullvadRelays(ctx, file, source, 64000, func(r intelligence.NormalizedRecord) error { return r.Validate() })
+		return err
+	}
 	if fixture.PayloadFormat == "ripe-inet6num-excerpt" {
 		_, err := validateRIPENamesExcerpt(ctx, file, source, adapter, tested)
 		return err

@@ -256,8 +256,17 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		assetURL = dbipPlan.AssetURL
 	}
 	var published, contentValidUntil time.Time
+	var mullvadProof *intelligence.MullvadRelayProof
 	var azureProof *intelligence.AzureServiceProof
-	if adapter == azureAppService {
+	if adapter == mullvadRelaysJSON {
+		mullvadProof, published, err = e.fetchMullvad(ctx, payload, source, now)
+		if err != nil {
+			if ctx.Err() != nil {
+				return result, ctx.Err()
+			}
+			return deny("quarantined", "publication_not_payload_bound")
+		}
+	} else if adapter == azureAppService {
 		azureProof, err = e.fetchAzureService(ctx, payload, source, now)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -287,7 +296,15 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 	var geoProof *intelligence.GeoSourceProof
 	var vrpProof *intelligence.VRPSourceProof
 	var caidaProof *intelligence.CAIDASourceProof
-	if dbipProvider(source) || adapter == ipapiCityZIP {
+	if mullvadProof != nil {
+		err = mullvadProof.Validate(now, published, hash)
+		if err == nil {
+			published, err = e.retainClock(ctx, hash, published)
+		}
+		if err == nil {
+			published, err = e.retainClock(ctx, mullvadProof.Projection, published)
+		}
+	} else if dbipProvider(source) || adapter == ipapiCityZIP {
 		proofFile, openErr := os.Open(payload)
 		if openErr != nil {
 			return deny("invalid", "payload_read_failed")
@@ -457,6 +474,7 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 	result.Snapshot.GoogleNetworkProof = googleProof
 	result.Snapshot.NROProof = nroProof
 	result.Snapshot.AzureProof = azureProof
+	result.Snapshot.MullvadProof = mullvadProof
 	result.Snapshot.GeoProof = geoProof
 	result.Snapshot.VRPProof = vrpProof
 	result.Snapshot.CAIDAProof = caidaProof

@@ -14,6 +14,7 @@ import (
 // family is checked once all receipt payload aliases are known.
 type sourceRecordScan struct {
 	ripeNameDigest *intelligence.RIPENetworkNameDigest
+	mullvadDigest  *intelligence.MullvadRelayDigest
 	googleDigest   *intelligence.GoogleNetworkDigest
 	nroDigest      *intelligence.NRORegistrationDigest
 	rootAddresses  rootAddressSet
@@ -31,6 +32,9 @@ func newSourceRecordScan(s Source, clocks intelligence.SourceRecordClocks, now t
 	scan := &sourceRecordScan{source: s, clocks: clocks, now: now, stat: SourceStatistics{ID: clocks.ID, Signals: map[intelligence.Signal]bool{}}}
 	if ripeNamesSource(s) {
 		scan.ripeNameDigest = new(intelligence.RIPENetworkNameDigest)
+	}
+	if mullvadSource(s) {
+		scan.mullvadDigest = new(intelligence.MullvadRelayDigest)
 	}
 	if googleNetworkSource(s) {
 		scan.googleDigest = new(intelligence.GoogleNetworkDigest)
@@ -55,6 +59,14 @@ func (scan *sourceRecordScan) accept(record intelligence.NormalizedRecord) error
 	if scan.ripeNameDigest != nil {
 		if err := scan.ripeNameDigest.Add(record); err != nil {
 			return err
+		}
+	}
+	if scan.mullvadDigest != nil {
+		if err := scan.mullvadDigest.Add(record); err != nil {
+			return err
+		}
+		if record.Geo.Weight != s.Weight {
+			return errMullvad
 		}
 	}
 	if scan.googleDigest != nil {

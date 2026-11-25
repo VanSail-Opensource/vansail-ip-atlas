@@ -24,6 +24,7 @@ type SourceReceipt struct {
 	GeoProof                                                            *GeoSourceProof       `json:",omitempty"`
 	VRPProof                                                            *VRPSourceProof       `json:",omitempty"`
 	CAIDAProof                                                          *CAIDASourceProof     `json:",omitempty"`
+	MullvadProof                                                        *MullvadRelayProof    `json:",omitempty"`
 	AzureProof                                                          *AzureServiceProof    `json:",omitempty"`
 	NROProof                                                            *NRORegistrationProof `json:",omitempty"`
 	GoogleNetworkProof                                                  *GoogleNetworkProof   `json:",omitempty"`
@@ -31,7 +32,7 @@ type SourceReceipt struct {
 }
 
 func receipt(policy SourcePolicy, snapshot SourceSnapshot) *SourceReceipt {
-	return &SourceReceipt{PayloadHash: snapshot.PayloadHash, ProofPayloadHash: snapshot.ProofPayloadHash, NormalizationPolicyHash: snapshot.NormalizationPolicyHash, ParserVersion: snapshot.ParserVersion, SchemaVersion: snapshot.SchemaVersion, PublishedAt: snapshot.PublishedAt, ContentValidUntil: snapshot.ContentValidUntil, ProofKind: snapshot.ProofKind, PayloadVerified: snapshot.PayloadVerified, SchemaVerified: snapshot.SchemaVerified, ImmutableCommitBound: snapshot.ImmutableCommitBound, Subscription: policy.Subscription, MRTProof: cloneMRTProof(snapshot.MRTProof), GeoProof: cloneGeoProof(snapshot.GeoProof), VRPProof: cloneVRPProof(snapshot.VRPProof), CAIDAProof: cloneCAIDAProof(snapshot.CAIDAProof), AzureProof: cloneAzureProof(snapshot.AzureProof), NROProof: cloneNROProof(snapshot.NROProof), GoogleNetworkProof: cloneGoogleNetworkProof(snapshot.GoogleNetworkProof), RIPENetworkProof: cloneRIPENetworkProof(snapshot.RIPENetworkProof)}
+	return &SourceReceipt{PayloadHash: snapshot.PayloadHash, ProofPayloadHash: snapshot.ProofPayloadHash, NormalizationPolicyHash: snapshot.NormalizationPolicyHash, ParserVersion: snapshot.ParserVersion, SchemaVersion: snapshot.SchemaVersion, PublishedAt: snapshot.PublishedAt, ContentValidUntil: snapshot.ContentValidUntil, ProofKind: snapshot.ProofKind, PayloadVerified: snapshot.PayloadVerified, SchemaVerified: snapshot.SchemaVerified, ImmutableCommitBound: snapshot.ImmutableCommitBound, Subscription: policy.Subscription, MRTProof: cloneMRTProof(snapshot.MRTProof), GeoProof: cloneGeoProof(snapshot.GeoProof), VRPProof: cloneVRPProof(snapshot.VRPProof), CAIDAProof: cloneCAIDAProof(snapshot.CAIDAProof), AzureProof: cloneAzureProof(snapshot.AzureProof), MullvadProof: cloneMullvadProof(snapshot.MullvadProof), NROProof: cloneNROProof(snapshot.NROProof), GoogleNetworkProof: cloneGoogleNetworkProof(snapshot.GoogleNetworkProof), RIPENetworkProof: cloneRIPENetworkProof(snapshot.RIPENetworkProof)}
 }
 
 type reconcileStorage struct {

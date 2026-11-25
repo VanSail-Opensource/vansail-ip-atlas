@@ -116,7 +116,9 @@ async function processTreeRSS() {
   return {supported:count>0,at_ms:performance.now(),rss_bytes:rss,processes:count}
 }
 
-async function newSample(width,theme,{componentFixture=false}={}) {
+function atlasPath(path) { return path.startsWith('/_atlas/') || path === '/dataset-credits.json' }
+
+async function newSample(width,theme,{componentFixture=false,measureColdPayload=false}={}) {
   const mobile=width<1000
   const context=await browser.newContext({viewport:{width,height:mobile?844:900},deviceScaleFactor:mobile?2:1,colorScheme:theme,reducedMotion:'no-preference',serviceWorkers:'block'})
   await context.route('**/*',route=>{
@@ -143,8 +145,17 @@ async function newSample(width,theme,{componentFixture=false}={}) {
   await cdp.send('Emulation.setCPUThrottlingRate',{rate:mobile?4:1})
   await cdp.send('Network.emulateNetworkConditions',{offline:false,latency:150,downloadThroughput:1600000/8,uploadThroughput:750000/8,connectionType:'cellular3g'})
   const js=new Map(),jsHashes=new Map(),atlas=[],pending=[]
+  const unfinished=new Set()
+  let coldRequests=0
+  if(measureColdPayload){
+    context.on('request',request=>{
+      const url=new URL(request.url())
+      if(url.origin===base.origin && atlasPath(url.pathname)){unfinished.add(request);coldRequests++}
+    })
+    context.on('requestfinished',request=>unfinished.delete(request))
+  }
   context.on('response',response=>{
-    const url=new URL(response.url());if(url.origin!==base.origin||(!/\.(?:m?js)$/.test(url.pathname)&&!url.pathname.startsWith('/_atlas/')))return
+    const url=new URL(response.url());if(url.origin!==base.origin||(!/\.(?:m?js)$/.test(url.pathname)&&!atlasPath(url.pathname)))return
     pending.push((async()=>{
       if(response.status()!==200)throw new Error('Static asset unavailable')
       if(/\.(?:m?js)$/.test(url.pathname)){
@@ -158,7 +169,13 @@ async function newSample(width,theme,{componentFixture=false}={}) {
       }
     })().catch(()=>report.errors.push('Static response accounting failed')))
   })
-  const settle=async()=>{await page.waitForLoadState('networkidle');await Promise.all(pending)}
+  const settle=async()=>{
+    await page.waitForLoadState('networkidle')
+    await Promise.all(pending)
+    // Playwright can use Content-Length for an interrupted response. Require
+    // Chrome's successful transfer completion for every cold atlas request.
+    if(measureColdPayload && (unfinished.size || coldRequests!==atlas.length))throw new Error('Incomplete cold atlas transfer')
+  }
   return {context,page,cdp,js,jsHashes,atlas,settle}
 }
 
@@ -374,7 +391,7 @@ try {
   const ipQueries=corpus.queries.filter(query=>isIP(query.q))
   if(ipQueries.length<100)throw new Error('Cold payload corpus needs at least100 real IP queries')
   for(let index=0;index<100;index++){
-    const s=await newSample(390,'light'),query=ipQueries[Math.floor(index*ipQueries.length/100)]
+    const s=await newSample(390,'light',{measureColdPayload:true}),query=ipQueries[Math.floor(index*ipQueries.length/100)]
     try{await s.page.goto(new URL(`/ip/overview/?q=${encodeURIComponent(query.q)}`,base).href,{waitUntil:'networkidle'});await s.page.getByRole('heading',{name:'Overview',exact:true}).waitFor();await waitForAtlasView(s.page);await s.page.locator('.fact-list').waitFor();if(await s.page.getByRole('alert').count())throw new Error('Cold lookup failed');await s.settle();if(s.atlas.length<2)throw new Error('Cold lookup did not fetch required controls');report.cold_queries.push({sample:index+1,stratum:query.stratum,atlas_body_bytes:s.atlas.reduce((sum,x)=>sum+x.body_bytes,0),responses:s.atlas})}finally{await s.context.close()}
   }
   for(let index=1;index<=3;index++){

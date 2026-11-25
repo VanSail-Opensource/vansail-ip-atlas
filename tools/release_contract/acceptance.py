@@ -34,6 +34,29 @@ def comparison(values: list, limit: float, *, minimum: int = 1, maximum=False, i
     return "passed" if (value <= limit if inclusive else value < limit) else "failed"
 
 
+def cold_payload_bytes(row: object) -> int | None:
+    """Sum the actual cold response population, including release and credit controls."""
+    if not isinstance(row, dict) or not isinstance(row.get("responses"), list):
+        return None
+    paths = set()
+    total = 0
+    for response in row["responses"]:
+        if not isinstance(response, dict):
+            return None
+        path, size = response.get("path"), response.get("body_bytes")
+        if not isinstance(path, str) or not (path.startswith("/_atlas/") or path == "/dataset-credits.json"):
+            return None
+        if type(size) is not int or size <= 0:
+            return None
+        paths.add(path)
+        total += size
+    if not {"/_atlas/current.json", "/dataset-credits.json"}.issubset(paths):
+        return None
+    if not any(path.startswith("/_atlas/credits/") for path in paths):
+        return None
+    return total if type(row.get("atlas_body_bytes")) is int and row["atlas_body_bytes"] == total else None
+
+
 def graph_gate(graph: object) -> str:
     if type(graph) is not dict or graph.get("visible_nodes") != 24:
         return "unmeasured"
@@ -204,8 +227,7 @@ def browser_gates(report: dict) -> dict[str, str]:
             and memory.get('memory_events',{}).get('oom_kill') == 0):
         result["worker_memory"] = comparison([memory["peak_bytes"]], 384 * 1024**2, maximum=True)
     cold = report.get("cold_queries", [])
-    result["cold_payload"] = comparison([row.get("atlas_body_bytes") for row in cold if isinstance(row, dict)],
-                                         400 * 1024, minimum=100)
+    result["cold_payload"] = comparison([cold_payload_bytes(row) for row in cold], 400 * 1024, minimum=100)
     hot = report.get("hot_queries", [])
     for context in range(1, 4):
         rows = [row for row in hot if isinstance(row, dict) and row.get("context") == context]

@@ -342,7 +342,7 @@ type Engine struct {
 	origins                 map[netip.Prefix][]uint32
 	coverage                [4]map[netip.Prefix]map[string]struct{}
 	asnCoverage             map[uint32]map[string]struct{}
-	neighbors               map[netip.Prefix][]netip.Addr
+	neighbors               map[netip.Prefix]neighborBlock
 	neighborPartialCoverage map[netip.Prefix]bool
 
 	originDepths, evidenceDepths prefixLengths
@@ -368,7 +368,7 @@ func newEngine(p Policy, evidence []Evidence, coverage []Coverage, mapping []Ori
 	}
 	p.Signals = cloneSignals(p.Signals)
 	p.Order = append([]Signal(nil), p.Order...)
-	e := &Engine{policy: p, now: now, exact: map[netip.Addr]exactFact{}, prefix: map[netip.Prefix][]Evidence{}, asn: map[uint32]ASNContext{}, origins: map[netip.Prefix][]uint32{}, asnCoverage: map[uint32]map[string]struct{}{}, neighbors: map[netip.Prefix][]netip.Addr{}, neighborPartialCoverage: map[netip.Prefix]bool{}}
+	e := &Engine{policy: p, now: now, exact: map[netip.Addr]exactFact{}, prefix: map[netip.Prefix][]Evidence{}, asn: map[uint32]ASNContext{}, origins: map[netip.Prefix][]uint32{}, asnCoverage: map[uint32]map[string]struct{}{}, neighborPartialCoverage: map[netip.Prefix]bool{}}
 	for i := range e.coverage {
 		e.coverage[i] = map[netip.Prefix]map[string]struct{}{}
 	}
@@ -473,10 +473,6 @@ func newEngine(p Policy, evidence []Evidence, coverage []Coverage, mapping []Ori
 		}
 		e.exact[addr] = exactFact{layer, layer.Families}
 		if layer.Risk > 0 {
-			if addr.Is4() {
-				key := netip.PrefixFrom(addr, 24).Masked()
-				e.neighbors[key] = append(e.neighbors[key], addr)
-			}
 			for _, asn := range e.Origins(addr) {
 				a := aggregates[asn]
 				if a == nil {
@@ -491,6 +487,7 @@ func newEngine(p Policy, evidence []Evidence, coverage []Coverage, mapping []Ori
 			}
 		}
 	}
+	e.neighbors = indexNeighbors(addresses, e.exact)
 	for asn, list := range direct {
 		if aggregates[asn] == nil {
 			aggregates[asn] = &aggregate{families: map[string]struct{}{}}
@@ -732,32 +729,6 @@ func canonicalPrefix(prefix netip.Prefix) (netip.Prefix, error) {
 	return prefix.Masked(), nil
 }
 
-func (e *Engine) NeighborContext(addr netip.Addr) ASNContext {
-	if addr.Zone() != "" {
-		return ASNContext{}
-	}
-	addr = addr.Unmap()
-	if !addr.Is4() {
-		return ASNContext{}
-	}
-	families := map[string]struct{}{}
-	mass := 0.0
-	count := 0
-	for _, neighbor := range e.neighbors[netip.PrefixFrom(addr, 24).Masked()] {
-		if neighbor == addr {
-			continue
-		}
-		fact := e.exact[neighbor]
-		mass += fact.layer.Risk
-		count++
-		for _, f := range fact.positiveFamilies {
-			families[f] = struct{}{}
-		}
-	}
-	risk := 1 - math.Exp(-16*mass/255)
-	confidence := math.Min(1, float64(count)/16) * math.Min(1, float64(len(families))/3)
-	return ASNContext{risk, confidence, e.policy.Weights[3] * confidence * risk, count > 0, uint8(min(len(families), 4))}
-}
 func (e *Engine) ASNContext(asn uint32) ASNContext {
 	if e.globalASN != nil {
 		return e.globalASN[asn]

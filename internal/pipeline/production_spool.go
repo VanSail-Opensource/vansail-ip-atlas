@@ -7,16 +7,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math/bits"
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"time"
 
 	"vansail-ip-atlas/internal/facts"
 	"vansail-ip-atlas/internal/intelligence"
 )
+
+const maxMaterializationASNs = 200000
 
 var errBulkPartition = errors.New("normalized working partition requires subdivision")
 var errRawBulkPartition = fmt.Errorf("raw spatial input exceeds collection limit: %w: %w", errBulkPartition, intelligence.ErrVerifyRecordPrefix)
@@ -27,16 +31,19 @@ type bulkBucket struct {
 	asn         bool
 	parts       []intelligence.RecordPartition
 	riskDigest  [32]byte
+	riskOnly    bool
 	active      bool
 	cover       netip.Prefix
 	scattered   [2]*bulkBucket
 	// Retained only for the synchronous visit of an owned collected state.
 	recordBytes []int
+	originASNs  []uint32
 }
 type bulkSpool struct {
 	root         string
 	store        *intelligence.RecordStore
 	canonical    map[[32]byte]intelligence.CanonicalPartition
+	riskParts    map[[32]byte]bool
 	clock        time.Time
 	binding      [32]byte
 	maximum      uint64
@@ -197,7 +204,7 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 		return intelligence.BuildState{}, err
 	}
 	overflow = errBulkPartition
-	if !b.asn && len(s.usage) > 0 {
+	if !b.asn && !b.riskOnly && len(s.usage) > 0 {
 		origins := map[netip.Prefix][]uint32{}
 		for _, r := range source.Records {
 			if r.Origins != nil {
@@ -229,6 +236,9 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 		}); err != nil {
 			return intelligence.BuildState{}, err
 		}
+		if s.reuse != nil {
+			b.originASNs = slices.Sorted(maps.Keys(asns))
+		}
 	}
 	if collectRisk {
 		copy(b.riskDigest[:], riskDigest.Sum(nil))
@@ -250,6 +260,8 @@ func spatialPrefix(record intelligence.NormalizedRecord) (netip.Prefix, error) {
 		if record.Coverage.Layer != intelligence.ASN {
 			p = record.Coverage.Prefix
 		}
+	case intelligence.RecordNetworkName:
+		p = record.NetworkName.Prefix
 	case intelligence.RecordNetworkOrganization:
 		p = record.NetworkOrganization.Prefix
 	case intelligence.RecordOrigins:
@@ -638,7 +650,7 @@ func (s *bulkSpool) addASN(asn uint32) error {
 		return errors.New("invalid global materialization ASN")
 	}
 	s.known[asn] = true
-	if len(s.known) > 200000 {
+	if len(s.known) > maxMaterializationASNs {
 		return errors.New("global ASN population exceeded")
 	}
 	return nil
@@ -659,18 +671,32 @@ func (s *bulkSpool) addEdge(edge intelligence.ASNEdge, observed bool) error {
 
 // Seed category streams end at every original input partition boundary. A
 // changed normalized object therefore cannot shift the packing identity of
-// unrelated objects. The full source walker still validates its aggregate
-// storage shape, every frame and the final object counts/hashes.
+// unrelated objects. Capture source effects only after a complete strict walk.
+// A replay rechecks the original physical objects and all derived groups.
 func (s *bulkSpool) seedStable(ctx context.Context, workspace string, state intelligence.BuildState) ([]*bulkBucket, *bulkBucket, error) {
 	if err := s.refresh(); err != nil {
 		return nil, nil, err
 	}
 	s.usage = asnUsageIndex{}
+	s.riskParts = map[[32]byte]bool{}
 	var categories [6][]intelligence.RecordPartition
 	for _, source := range state.Sources {
-		type seedGroup struct {
-			entry spatialCacheEntry
-			hit   bool
+		var replayKey [32]byte
+		var capture *seedSourceCapture
+		if s.reuse != nil && len(source.RecordPartitions) > 0 && len(source.Records) == 0 {
+			key, err := spatialReuseKey(seedSourceDomain, source.RecordPartitions)
+			if err != nil {
+				return nil, nil, err
+			}
+			replayKey = key
+			hit, err := s.replaySeedSource(ctx, workspace, source, key, &categories)
+			if err != nil {
+				return nil, nil, err
+			}
+			if hit {
+				continue
+			}
+			capture = &seedSourceCapture{eligible: true}
 		}
 		var groups []seedGroup
 		var current *seedGroup
@@ -688,6 +714,9 @@ func (s *bulkSpool) seedStable(ctx context.Context, workspace string, state inte
 			remaining = source.RecordPartitions[0].Records
 		}
 		appendRecord := func(category int, record intelligence.NormalizedRecord) error {
+			if category < 2 && exactRiskInput(record) {
+				current.risk[category] = true
+			}
 			if current.hit {
 				return nil
 			}
@@ -726,6 +755,7 @@ func (s *bulkSpool) seedStable(ctx context.Context, workspace string, state inte
 			if err := s.seedRecord(record, emit); err != nil {
 				return err
 			}
+			capture.observe(record)
 			remaining--
 			if remaining != 0 {
 				return nil
@@ -756,28 +786,13 @@ func (s *bulkSpool) seedStable(ctx context.Context, workspace string, state inte
 		if remaining != 0 {
 			return nil, nil, errors.New("seed source record count differs")
 		}
-		// Cache adoption follows the complete strict source walk, including every
-		// final framing/count/hash check. Side effects were reconstructed above
-		// for hits and misses alike; no stored flag substitutes for source data.
-		var imports [][]intelligence.RecordPartition
-		for _, group := range groups {
-			if group.hit {
-				imports = append(imports, group.entry.Seed.Parts[:]...)
-			}
+		if err := s.adoptSeedGroups(ctx, groups, &categories); err != nil {
+			return nil, nil, err
 		}
-		if len(imports) != 0 {
-			if err := s.importCachedGroups(ctx, imports); err != nil {
+		if capture != nil && capture.eligible {
+			summary := capture.summary(groups)
+			if _, err := s.reuse.Retain(ctx, spatialCacheEntry{Domain: seedSourceDomain, Key: replayKey, SeedSource: &summary}, nil); err != nil {
 				return nil, nil, err
-			}
-		}
-		for _, group := range groups {
-			for i, parts := range group.entry.Seed.Parts {
-				categories[i] = append(categories[i], parts...)
-			}
-			if s.reuse != nil && group.entry.Key != ([32]byte{}) {
-				if _, err := s.reuse.Retain(ctx, group.entry, s.cachePartFiles(group.entry.Seed.Parts[:]...)); err != nil {
-					return nil, nil, err
-				}
 			}
 		}
 	}

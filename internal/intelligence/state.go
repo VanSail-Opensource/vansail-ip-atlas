@@ -26,6 +26,7 @@ const (
 	RecordRelationship
 	RecordASNIdentity
 	RecordNetworkOrganization
+	RecordNetworkName
 )
 
 type ScopedUsage struct {
@@ -57,13 +58,14 @@ type NormalizedRecord struct {
 	Path                *ScopedPath                `json:",omitempty"`
 	Relationship        *RelationshipRecord        `json:",omitempty"`
 	ASNIdentity         *ASNIdentityEvidence       `json:",omitempty"`
+	NetworkName         *NetworkNameRecord         `json:",omitempty"`
 	NetworkOrganization *NetworkOrganizationRecord `json:",omitempty"`
 	MRTOriginatedAt     *time.Time                 `json:",omitempty"` // private route-heard clock, never a public fact
 	MRT                 *MRTRouteIdentity          `json:",omitempty"`
 }
 
 func (r NormalizedRecord) Validate() error {
-	present := [...]bool{r.Evidence != nil, r.Coverage != nil, r.Origins != nil, r.Geo != nil, r.Usage != nil, r.VRP != nil, r.Path != nil, r.Relationship != nil, r.ASNIdentity != nil, r.NetworkOrganization != nil}
+	present := [...]bool{r.Evidence != nil, r.Coverage != nil, r.Origins != nil, r.Geo != nil, r.Usage != nil, r.VRP != nil, r.Path != nil, r.Relationship != nil, r.ASNIdentity != nil, r.NetworkOrganization != nil, r.NetworkName != nil}
 	count := 0
 	for _, yes := range present {
 		if yes {
@@ -78,6 +80,9 @@ func (r NormalizedRecord) Validate() error {
 	}
 	if r.MRT != nil && (r.Kind != RecordOrigins && r.Kind != RecordPath || r.MRT.PeerTable == 0 || r.MRT.CapturedAt.IsZero() || !r.MRT.AddPath && r.MRT.PathID != 0) {
 		return errors.New("private MRT route identity invalid")
+	}
+	if v := r.NetworkName; v != nil && (!v.validSubscriberISP() || !v.Prefix.IsValid() || !v.Prefix.Addr().Is6() || v.Prefix.Addr().Is4In6() || v.Prefix != v.Prefix.Masked() || v.Name != "" && (!ValidRIPENetworkName(v.Name) || v.ModifiedAt.IsZero()) || !v.ModifiedAt.IsZero() && (v.ModifiedAt.Year() < 1970 || v.ModifiedAt.Nanosecond() != 0)) {
+		return errors.New("normalized network name invalid")
 	}
 	if v := r.NetworkOrganization; v != nil && (!v.Prefix.IsValid() || v.Prefix.Addr().Is4In6() || v.Prefix != v.Prefix.Masked() || len(v.Organization) == 0 || len(v.Organization) > 128 || SafeLabel(v.Organization) != v.Organization) {
 		return errors.New("normalized network organization invalid")
@@ -121,9 +126,11 @@ type SourceSnapshot struct {
 	GeoProof                                              *GeoSourceProof       `json:",omitempty"`
 	VRPProof                                              *VRPSourceProof       `json:",omitempty"`
 	CAIDAProof                                            *CAIDASourceProof     `json:",omitempty"`
+	MullvadProof                                          *MullvadRelayProof    `json:",omitempty"`
 	AzureProof                                            *AzureServiceProof    `json:",omitempty"`
 	NROProof                                              *NRORegistrationProof `json:",omitempty"`
 	GoogleNetworkProof                                    *GoogleNetworkProof   `json:",omitempty"`
+	RIPENetworkProof                                      *RIPEIPv6NetworkProof `json:",omitempty"`
 }
 type SourceDecision struct{ ID, State, Reason string }
 type StoredSource struct {
@@ -240,11 +247,17 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 					deny("invalid", "geolocation_payload_or_clock_invalid")
 				}
 			}
+			if (id == RIPENetworkNameSourceID) != (snapshot.RIPENetworkProof != nil) || snapshot.RIPENetworkProof != nil && (snapshot.ProofKind != "embedded" || snapshot.RIPENetworkProof.Validate(now, snapshot.PublishedAt, snapshot.PayloadHash) != nil) {
+				deny("invalid", "ripe_network_name_proof_invalid")
+			}
 			if (id == GoogleNetworkSourceID) != (snapshot.GoogleNetworkProof != nil) || snapshot.GoogleNetworkProof != nil && (snapshot.ProofKind != "embedded" || snapshot.GoogleNetworkProof.Validate(now, snapshot.PublishedAt, snapshot.PayloadHash) != nil) {
 				deny("invalid", "google_network_organization_proof_invalid")
 			}
 			if (id == NRORegistrationID) != (snapshot.NROProof != nil) || snapshot.NROProof != nil && (snapshot.ProofKind != "embedded" || snapshot.NROProof.Validate(now, snapshot.PublishedAt, snapshot.PayloadHash) != nil) {
 				deny("invalid", "nro_registration_proof_invalid")
+			}
+			if (id == MullvadRelaySourceID) != (snapshot.MullvadProof != nil) || snapshot.MullvadProof != nil && (snapshot.ProofKind != "snapshot_metadata" || snapshot.MullvadProof.Validate(now, snapshot.PublishedAt, snapshot.PayloadHash) != nil) {
+				deny("invalid", "invalid_relay_geography_proof")
 			}
 			if (id == AzureServiceSourceID) != (snapshot.AzureProof != nil) {
 				deny("invalid", "azure_service_proof_binding_invalid")
@@ -380,9 +393,26 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 			}
 		}
 
+		var ripeDigest RIPENetworkNameDigest
+		var mullvadDigest MullvadRelayDigest
 		var googleDigest GoogleNetworkDigest
 		var nroDigest NRORegistrationDigest
 		process := func(record NormalizedRecord) error {
+			if snapshot.MullvadProof != nil {
+				if err := mullvadDigest.Add(record); err != nil {
+					return err
+				}
+			}
+			if snapshot.RIPENetworkProof != nil {
+				if record.NetworkName != nil && record.NetworkName.ModifiedAt.After(now) {
+					return errors.New("network name modification is later than reconciliation")
+				}
+				if err := ripeDigest.Add(record); err != nil {
+					return err
+				}
+			} else if record.Kind == RecordNetworkName {
+				return errors.New("network name has no qualified publisher proof")
+			}
 			if snapshot.GoogleNetworkProof != nil {
 				if err := googleDigest.Add(record); err != nil {
 					return err
@@ -558,6 +588,12 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 				}
 			}
 		}
+		if p := snapshot.RIPENetworkProof; p != nil && !ripeDigest.Matches(p) {
+			return plan, errors.New("normalized network names differ from both publisher exports")
+		}
+		if p := snapshot.MullvadProof; p != nil && !mullvadDigest.Matches(p) {
+			return plan, errors.New("relay geography differs from signed projection")
+		}
 		if p := snapshot.GoogleNetworkProof; p != nil && !googleDigest.Matches(p) {
 			return plan, errors.New("normalized network organizations differ from the complete publisher inventory")
 		}
@@ -588,7 +624,7 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 			Snapshot         SourceSnapshot
 			Records          []NormalizedRecord
 			RecordPartitions []RecordPartition `json:",omitempty"`
-		}{policy, SourceSnapshot{ID: id, PayloadHash: snapshot.PayloadHash, ProofPayloadHash: snapshot.ProofPayloadHash, NormalizationPolicyHash: snapshot.NormalizationPolicyHash, ParserVersion: snapshot.ParserVersion, SchemaVersion: snapshot.SchemaVersion, PublishedAt: snapshot.PublishedAt, ContentValidUntil: snapshot.ContentValidUntil, ProofKind: snapshot.ProofKind, PayloadVerified: true, SchemaVerified: true, ImmutableCommitBound: snapshot.ImmutableCommitBound, MRTProof: cloneMRTProof(snapshot.MRTProof), GeoProof: cloneGeoProof(snapshot.GeoProof), VRPProof: cloneVRPProof(snapshot.VRPProof), CAIDAProof: cloneCAIDAProof(snapshot.CAIDAProof), AzureProof: cloneAzureProof(snapshot.AzureProof), NROProof: cloneNROProof(snapshot.NROProof), GoogleNetworkProof: cloneGoogleNetworkProof(snapshot.GoogleNetworkProof)}, records, parts})
+		}{policy, SourceSnapshot{ID: id, PayloadHash: snapshot.PayloadHash, ProofPayloadHash: snapshot.ProofPayloadHash, NormalizationPolicyHash: snapshot.NormalizationPolicyHash, ParserVersion: snapshot.ParserVersion, SchemaVersion: snapshot.SchemaVersion, PublishedAt: snapshot.PublishedAt, ContentValidUntil: snapshot.ContentValidUntil, ProofKind: snapshot.ProofKind, PayloadVerified: true, SchemaVerified: true, ImmutableCommitBound: snapshot.ImmutableCommitBound, MRTProof: cloneMRTProof(snapshot.MRTProof), GeoProof: cloneGeoProof(snapshot.GeoProof), VRPProof: cloneVRPProof(snapshot.VRPProof), CAIDAProof: cloneCAIDAProof(snapshot.CAIDAProof), AzureProof: cloneAzureProof(snapshot.AzureProof), MullvadProof: cloneMullvadProof(snapshot.MullvadProof), NROProof: cloneNROProof(snapshot.NROProof), GoogleNetworkProof: cloneGoogleNetworkProof(snapshot.GoogleNetworkProof), RIPENetworkProof: cloneRIPENetworkProof(snapshot.RIPENetworkProof)}, records, parts})
 		if err != nil {
 			return plan, err
 		}

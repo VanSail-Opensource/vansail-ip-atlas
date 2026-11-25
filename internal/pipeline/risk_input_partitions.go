@@ -15,6 +15,33 @@ func exactRiskInput(record intelligence.NormalizedRecord) bool {
 	return record.Kind == intelligence.RecordOrigins || record.Kind == intelligence.RecordEvidence && record.Evidence != nil && record.Evidence.Scope == intelligence.Exact
 }
 
+// Every group comes from one completely walked original source partition.
+// A group with any relevant row retains all its derived records. The ordinary
+// public pass keeps the complete roots and independently enforces its limits.
+func (s *bulkSpool) routedRiskRoots(roots []*bulkBucket) ([]*bulkBucket, bool) {
+	if s.riskParts == nil {
+		return roots, false
+	}
+	var filtered []*bulkBucket
+	omitted := false
+	for _, root := range roots {
+		bucket := &bulkBucket{prefix: root.prefix, active: true, riskOnly: true}
+		for _, part := range root.parts {
+			if s.riskParts[part.SHA256] {
+				bucket.parts = append(bucket.parts, part)
+			} else {
+				omitted = true
+			}
+		}
+		filtered = append(filtered, bucket)
+	}
+	if !omitted {
+		return roots, false
+	}
+	s.all = append(s.all, filtered...)
+	return filtered, true
+}
+
 // The full policy is validated by the builder. These are the inputs to the
 // exact layer's risk and positive family set, including observation admission.
 func exactRiskDependencies(policy intelligence.Policy, clock time.Time) ([32]byte, error) {

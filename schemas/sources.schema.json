@@ -219,6 +219,7 @@
                 "asn_country",
                 "organization",
                 "network_organization",
+                "network_name",
                 "isp",
                 "origins",
                 "usage_type",
@@ -1756,8 +1757,20 @@
                 "creationTime",
                 "ipv4Prefix",
                 "ipv6Prefix",
+                "inet6num",
+                "country",
+                "descr",
+                "mnt-by",
+                "netname",
+                "source",
+                "last-modified",
                 "start",
-                "status"
+                "status",
+                "location",
+                "active",
+                "include_in_country",
+                "ipv4_addr_in",
+                "ipv6_addr_in"
               ]
             },
             "uniqueItems": true,
@@ -1780,6 +1793,7 @@
                 "asn_country",
                 "organization",
                 "network_organization",
+                "network_name",
                 "isp",
                 "origins",
                 "usage_type",
@@ -7186,6 +7200,18 @@
               "creationTime": {"type": "null"},
               "ipv4Prefix": {"const": "network_organization"},
               "ipv6Prefix": {"const": "network_organization"},
+              "inet6num": {"type": "null"},
+              "country": {"type": "null"},
+              "descr": {"const": "isp"},
+              "mnt-by": {"type": "null"},
+              "netname": {"const": "network_name"},
+              "location": {"const": "physical_country"},
+              "active": {"type": "null"},
+              "include_in_country": {"type": "null"},
+              "ipv4_addr_in": {"type": "null"},
+              "ipv6_addr_in": {"type": "null"},
+              "source": {"type": "null"},
+              "last-modified": {"type": "null"},
               "start": {"type": "null"},
               "status": {"type": "null"},
               "properties.addressPrefixes": {
@@ -7562,7 +7588,9 @@
                   "original",
                   "decoded-csv",
                   "rpki-client-excerpt",
-                  "nro-delegated-excerpt"
+                  "nro-delegated-excerpt",
+                  "ripe-inet6num-excerpt",
+                  "mullvad-relay-excerpt"
                 ]
               }
             },

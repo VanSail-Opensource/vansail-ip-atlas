@@ -43,7 +43,7 @@ func ownedPartitionFixture(t *testing.T, c *compiler) classifiedRun {
 	if err := w.Finish(); err != nil {
 		t.Fatal(err)
 	}
-	runs, err := c.classify(path)
+	runs, err := c.classify([]string{path})
 	if err != nil || len(runs) != 1 {
 		t.Fatal("classify", err)
 	}
@@ -170,7 +170,7 @@ func TestOwnedPartitionLeafVerifiesOriginalSegments(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		runs, err := c.classify(proofMergeOne(t, c, f))
+		runs, err := c.classify([]string{proofMergeOne(t, c, f)})
 		if err != nil || len(runs) != 1 {
 			t.Fatal("classify", err)
 		}

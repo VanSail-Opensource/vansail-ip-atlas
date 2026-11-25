@@ -16,10 +16,18 @@ func writerMRTRows() []NormalizedRecord {
 		mrt.PeerKey[i] = byte(255 - i)
 	}
 	prefix := netip.MustParsePrefix("2001:db8::/32")
-	return []NormalizedRecord{
+	rows := []NormalizedRecord{
 		{Version: 3, Kind: RecordOrigins, Origins: &OriginMapping{Prefix: prefix, Origins: []uint32{4294967295}}, MRTOriginatedAt: &when, MRT: mrt},
 		{Version: 3, Kind: RecordPath, Path: &ScopedPath{Prefix: prefix, Observation: PathObservation{Origin: 33445, Family: "example", Current: true, Segments: []PathSegment{{Type: ASSequence, ASNs: []uint32{1, 2, 33445}}}}}, MRTOriginatedAt: &when, MRT: mrt},
 	}
+	for _, original := range rows {
+		original.MRT, original.MRTOriginatedAt = nil, nil
+		rows = append(rows, original)
+	}
+	return append(rows,
+		NormalizedRecord{Version: 3, Kind: RecordVRP, VRP: &VRP{Prefix: prefix, MaxLength: 48, ASN: 13335, ValidUntil: when}},
+		NormalizedRecord{Version: 3, Kind: RecordVRP, VRP: &VRP{Prefix: prefix, MaxLength: 64, ASN: 13335}},
+	)
 }
 
 func TestWriterMRTRouteFramesMatchStrictDecoder(t *testing.T) {
@@ -29,7 +37,7 @@ func TestWriterMRTRouteFramesMatchStrictDecoder(t *testing.T) {
 			t.Fatal(err)
 		}
 		owned := bytes.Clone(data)
-		actual, ok := decodeWriterMRT(owned)
+		actual, ok := decodeWriterRouting(owned)
 		clear(owned)
 		if !ok || !reflect.DeepEqual(actual, expected) {
 			t.Fatalf("writer frame failed independent ownership or exact decoding: %v", ok)
@@ -52,6 +60,8 @@ func TestWriterMRTRouteFramesMatchStrictDecoder(t *testing.T) {
 			{`"Origins":[4294967295]`, `"Origins":[1,2]`}, {`"Type":1`, `"Type":2`},
 			{`"ASNs":[1,2,33445]`, `"ASNs":[]`}, {`"ASNs":[1,2,33445]`, `"ASNs":null`},
 			{"2001:db8::/32", ""}, {"}}", `,"unknown":true}}`},
+			{`"MaxLength":48`, `"MaxLength":256`}, {`"ASN":13335`, `"ASN":4294967296`},
+			{`"ASN":13335`, `"ASN":0e0`}, {`"ValidUntil":`, `"XUnknown":`},
 		} {
 			verifyRecordFrame(t, bytes.Replace(data, []byte(pair[0]), []byte(pair[1]), 1))
 		}

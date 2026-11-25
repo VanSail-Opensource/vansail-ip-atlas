@@ -1,5 +1,15 @@
 # Source Admission and Freshness Policy
 
+Release integration attempts and requires every active source. A protected
+production refresh also attempts the full catalog. If an upstream asset,
+index or publication record is unavailable, unbound or past its deadline,
+the refresh can checkpoint the surviving verified sources. Each omitted
+input must have an explicit acquisition decision and be absent from the
+new normalized state. The status artifact reports the counts and reasons.
+The compiler independently authenticates that state, rechecks all required
+capabilities and rebuilds the database and its credits. Every succeeding
+build, preview and promotion gate applies to the resulting candidate.
+
 ## Current release scope `release-scope-v6` - 2026-11-15
 
 The approved model is `via-observed-risk-v1`: positive-evidence observed risk
@@ -42,7 +52,12 @@ reports may overlap. Each publisher retains its own withdrawal identity.
 The IANA DNS root zone supplies exact anycast positives for its thirteen
 delegated root identities under the RSSAC operating description. Intake
 compares complete uncompressed text against a separately downloaded gzip
-edition and the publisher checksum. The SOA serial supplies the conservative
+edition and the publisher checksum. If the normal gzip is unavailable or is a
+complete but strictly older SOA edition, compare the alternate gzip from
+InterNIC's fixed `/zones/` directory with the original plain file. The
+uncompressed length and SHA-256 must match in full. Malformed gzip, different
+bytes under the same serial, a newer normal gzip or a future publisher
+modification time withhold the observation. The SOA serial supplies the conservative
 UTC publication day. Delegation and address TTLs and the apex NS signature
 expiration bound the lifetime of the observation. Address-family changes,
 missing identities and ambiguous glue fail verification. Other addresses
@@ -315,6 +330,40 @@ that source and its dependent output under the existing retention and garbage
 collection rules. Retained generations and no-change cache hits preserve original
 clocks, proofs and exact policy bindings; they never renew observation age. This
 amendment is RPKI-specific and changes no subscription or other item expiry.
+
+## Registered IPv6 network names and subscriber ISP
+
+The RIPE Database defines `netname` as a required, single identifier of the
+registered IPv6 allocation or assignment. Its value applies to that prefix.
+Use the most specific registered prefix. A child with an unusable name
+retains an unknown boundary. A name gives no separate evidence for network
+ownership, the subscriber's ISP, a service, location, or routing origin.
+[RIPE IPv6 object template](https://docs.db.ripe.net/RPSL-Object-Types/Descriptions-of-Primary-Objects/) ·
+[Registered network names](https://docs.db.ripe.net/FAQ/)
+
+Read the complete primary and UTF-8 IPv6 split files with a combined 3 GiB
+decoded limit. Verify the scope, names and generated UTC modification times
+across those originals. RIPE assigns the `last-modified` attribute during
+database updates. Use the latest eligible modification as a conservative
+observation clock. Retrieval time cannot renew a registration. Preserve the
+earlier clock for the same data under the ordinary source-freshness policy.
+
+Only the published network identifier is eligible for display. Discard contact
+handles, remarks, descriptions, email addresses and all other free-text fields.
+The global credit names the RIPE NCC and links the RIPE Database terms.
+Article 4.5 restricts compilation and reuse of substantial parts without
+permission. The catalog records the educational-use decision and the scope of
+the retrieved data. [RIPE Database terms](https://www.ripe.net/manage-ips-and-asns/db/support/documentation/terms/)
+
+A separate subscriber ISP value requires the registry authority, a valid
+network identifier and the reviewed combination of maintainer, country,
+status and explicit customer broadband descriptions in one IPv6 object.
+The parser matches the complete set of descriptions and rejects ambiguous
+attributes. A more-specific registration replaces the ISP claim at its
+own boundary. Registry objects supply no static or dynamic assignment
+classification. The complete daily exports establish current membership,
+and original modification dates remain available in private evidence.
+[Subscriber scope and observed counts](../SOURCES_AUDIT.md#november-25-subscriber-isp-review)
 
 ## Address-block ownership
 

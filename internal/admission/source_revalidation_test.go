@@ -164,7 +164,7 @@ func prepareCoreQualification(t *testing.T, withDNSRoot bool) (*Engine, []Source
 	}
 	geo := bulkSource("city-range-csv", "sapics-city-ten-columns-v1")
 	risk := Source{Category: "abuse", Scope: "exact_ip", Coverage: "positive_only", Format: "txt", Parser: Parser{"literal-prefix-text", "one-literal-ip-or-prefix-per-line-v1", 1}, Signals: []string{"abuse"}, Fields: []string{"abuse"}, PublicFields: []string{"reason_flags"}, FieldMappings: map[string][]string{"abuse": {"reason_flags"}}}
-	usage := Source{Category: "asn", Scope: "asn", Coverage: "mapping", Format: "json", Parser: Parser{"ipverse-asn-usage-json", "ipverse-as-category-json-v1", 1}, Fields: []string{"metadata.category"}, PublicFields: []string{"usage_type"}, FieldMappings: map[string][]string{"metadata.category": {"usage_type"}}}
+	usage := Source{Category: "asn", Scope: "asn", Coverage: "mapping", Format: "json", Parser: Parser{"ipverse-asn-usage-json", "ipverse-as-category-json-v1", 2}, Fields: []string{"metadata.category"}, PublicFields: []string{"usage_type"}, FieldMappings: map[string][]string{"metadata.category": {"usage_type"}}}
 	entries := []struct {
 		id, payload string
 		source      Source

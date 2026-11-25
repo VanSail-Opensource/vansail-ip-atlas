@@ -9,12 +9,17 @@ from __future__ import annotations
 
 import argparse
 import base64
+from email.utils import parsedate_to_datetime
 import hashlib
+import http.client
 import json
+import math
 import mimetypes
 import os
 from pathlib import Path
 import re
+import socket
+import ssl
 import sys
 import time
 import urllib.error
@@ -31,6 +36,37 @@ from tools.release_contract.prepare_static import inspect_binary, known_private_
 from tools.release_contract.promotion import approve, automatic, json_object
 
 API = "https://api.cloudflare.com/client/v4"
+# Cloudflare workers-sdk/packages/wrangler/src/pages/constants.ts sets both
+# limits on decoded assets. check_candidate enforces the project's stricter
+# per-file and whole-tree limits before uploading anything.
+UPLOAD_BUCKET_BYTES = 40 * 1024 * 1024
+UPLOAD_BUCKET_FILES = 1000 if os.name == "nt" else 2000
+ASSET_ROUTES = {"/pages/assets/check-missing", "/pages/assets/upload", "/pages/assets/upsert-hashes"}
+MAX_ASSET_ATTEMPTS = 5
+TRANSIENT_HTTP = {408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524}
+
+
+def _transient_network(error):
+    reason = error.reason if isinstance(error, urllib.error.URLError) else error
+    if isinstance(reason, socket.gaierror):
+        return reason.errno == socket.EAI_AGAIN
+    return isinstance(reason, (TimeoutError, ConnectionError, ssl.SSLEOFError, http.client.IncompleteRead))
+
+
+def _retry_delay(header, backoff):
+    if header is None:
+        return backoff
+    if re.fullmatch(r"[0-9]{1,2}", header):
+        wait = int(header)
+    else:
+        try:
+            date = parsedate_to_datetime(header)
+            if date.tzinfo is None:
+                return None
+            wait = math.ceil(date.timestamp() - time.time())
+        except (ValueError, TypeError, OverflowError, OSError):
+            return None
+    return max(backoff, wait) if wait <= 30 else None
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -51,8 +87,7 @@ class Pages:
         self._opener = urllib.request.build_opener(NoRedirect)
 
     def request(self, path: str, *, method="GET", value=None, body=None, content_type="application/json", asset_token=None):
-        if path != self.prefix and not path.startswith(self.prefix + "/") and path not in (
-                "/pages/assets/check-missing", "/pages/assets/upload", "/pages/assets/upsert-hashes"):
+        if path != self.prefix and not path.startswith(self.prefix + "/") and path not in ASSET_ROUTES:
             raise ContractError("unsupported Pages API route")
         if any(ch in path for ch in "?#\\") or ".." in path.split("/"):
             raise ContractError("unsafe Pages API route")
@@ -61,14 +96,33 @@ class Pages:
         request = urllib.request.Request(API + path, data=payload, method=method,
             headers={"Authorization": "Bearer " + token, "Content-Type": content_type,
                      "User-Agent": "VanSail-IP-Atlas-Release/1.0"})
-        try:
-            with self._opener.open(request, timeout=60) as response:
-                data = response.read(2 * 1024 * 1024 + 1)
-        except urllib.error.HTTPError as error:
-            # API bodies/locations can contain secret-bearing context. Never echo.
-            raise ContractError(f"Pages API request failed (HTTP {error.code})") from None
-        except OSError:
-            raise ContractError("Pages API request unavailable") from None
+        # A lost response to a deployment or rollback may follow a committed
+        # mutation. Only time-bounded retries of content-keyed asset calls are safe.
+        attempts = MAX_ASSET_ATTEMPTS if method == "POST" and path in ASSET_ROUTES else 1
+        for attempt in range(attempts):
+            delay = 2 ** attempt
+            try:
+                with self._opener.open(request, timeout=60) as response:
+                    data = response.read(2 * 1024 * 1024 + 1)
+                    # A bounded read may return a short body without raising
+                    # IncompleteRead even when Content-Length promised more.
+                    if len(data) <= 2 * 1024 * 1024 and response.length:
+                        raise http.client.IncompleteRead(b"")
+                break
+            except urllib.error.HTTPError as error:
+                # Keep server bodies and locations (which may contain credentials) private.
+                message = f"Pages API request failed (HTTP {error.code})"
+                retry = error.code in TRANSIENT_HTTP
+                header = error.headers.get("Retry-After") if error.headers else None
+                error.close()
+                delay = _retry_delay(header, delay)
+                retry = retry and delay is not None
+            except (OSError, http.client.HTTPException) as error:
+                message = "Pages API request unavailable"
+                retry = _transient_network(error)
+            if not retry or attempt + 1 == attempts:
+                raise ContractError(message) from None
+            time.sleep(delay)
         if len(data) > 2 * 1024 * 1024:
             raise ContractError("Pages API response exceeds bound")
         result = json_object(data)
@@ -107,8 +161,8 @@ class Pages:
         for index in range(0, len(keys), 1000):
             requested = keys[index:index + 1000]
             absent = self.request("/pages/assets/check-missing", method="POST", value={"hashes": requested}, asset_token=jwt)
-            if (not isinstance(absent, list) or len(absent) != len(set(absent))
-                    or any(key not in requested for key in absent)):
+            if (not isinstance(absent, list) or any(not isinstance(key, str) or key not in requested for key in absent)
+                    or len(absent) != len(set(absent))):
                 raise ContractError("invalid Pages missing-asset response")
             missing.extend(absent)
         batch, batch_size = [], 0
@@ -119,15 +173,15 @@ class Pages:
                 batch, batch_size = [], 0
         for key in missing:
             relative, size, digest = assets[key]
+            if len(batch) == UPLOAD_BUCKET_FILES or batch_size + size > UPLOAD_BUCKET_BYTES:
+                flush()
             data = (public / relative).read_bytes()
             if len(data) != size or sha256(data) != digest:
                 raise ContractError("frozen asset changed before upload")
             content = base64.b64encode(data).decode("ascii")
-            if batch and batch_size + len(content) > 34 * 1024 * 1024:
-                flush()
             mime = "application/javascript" if relative.endswith((".js", ".mjs")) else mimetypes.guess_type(relative)[0] or "application/octet-stream"
             batch.append({"key": key, "base64": True, "value": content, "metadata": {"contentType": mime}})
-            batch_size += len(content)
+            batch_size += size
         flush()
         for index in range(0, len(keys), 1000):
             self.request("/pages/assets/upsert-hashes", method="POST", value={"hashes": keys[index:index + 1000]}, asset_token=jwt)

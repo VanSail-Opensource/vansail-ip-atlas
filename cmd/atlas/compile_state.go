@@ -119,7 +119,7 @@ func compileState(ctx context.Context, args []string) (returnErr error) {
 	if !filepath.IsAbs(destination) {
 		destination = filepath.Join(root, destination)
 	}
-	options := pipeline.Options{Workspace: root, Output: destination, Mode: "synthetic", Clock: *clock, ValidUntil: deadline, Limits: pipeline.DefaultLimits(), InputGate: gate}
+	options := pipeline.Options{PrivateLabelValues: admission.PrivateLabelValues(sources), Workspace: root, Output: destination, Mode: "synthetic", Clock: *clock, ValidUntil: deadline, Limits: pipeline.DefaultLimits(), InputGate: gate}
 	var candidate pipeline.Candidate
 	if state.Version == 2 {
 		if *vrpComplete {

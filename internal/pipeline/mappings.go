@@ -66,11 +66,19 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 		if err := policy.Validate(); err != nil {
 			return err
 		}
-		geo := map[netip.Prefix][]intelligence.GeoEvidence{}
-		usage := map[netip.Prefix][]intelligence.UsageEvidence{}
+		type boundaryVotes struct {
+			geoCount int
+			geo      []intelligence.GeoEvidence
+			usage    []intelligence.UsageEvidence
+		}
+		boundaries := map[netip.Prefix]boundaryVotes{}
+		replayingLocations := locations != nil && locations.hit
 		origins := map[netip.Prefix][]uint32{}
-		organizations := map[netip.Prefix]string{}
-		boundaries := map[netip.Prefix]struct{}{}
+		type labels struct {
+			name, organization, isp  string
+			hasName, hasOrganization bool
+		}
+		networkLabels := map[netip.Prefix]labels{}
 		seen := map[string]struct{}{}
 		var bytes, count int
 		for _, source := range state.Sources {
@@ -94,7 +102,7 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 				if err := record.Validate(); err != nil {
 					return err
 				}
-				if record.Kind != intelligence.RecordGeo && record.Kind != intelligence.RecordUsage && record.Kind != intelligence.RecordOrigins && record.Kind != intelligence.RecordNetworkOrganization {
+				if record.Kind != intelligence.RecordGeo && record.Kind != intelligence.RecordUsage && record.Kind != intelligence.RecordOrigins && record.Kind != intelligence.RecordNetworkOrganization && record.Kind != intelligence.RecordNetworkName {
 					return errors.New("mapping-only materializer cannot discard risk, coverage, RPKI, path or relationship facts")
 				}
 				// Reject huge nested fields before allocating their JSON encoding.
@@ -126,6 +134,8 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 					prefix = record.Origins.Prefix
 				case intelligence.RecordNetworkOrganization:
 					prefix = record.NetworkOrganization.Prefix
+				case intelligence.RecordNetworkName:
+					prefix = record.NetworkName.Prefix
 				}
 				prefix, err = canonicalMappingPrefix(prefix)
 				if err != nil {
@@ -138,8 +148,12 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 					if !v.Current {
 						return errors.New("mapping state contains noncurrent geo record")
 					}
-					geo[prefix] = append(geo[prefix], v)
-					boundaries[prefix] = struct{}{}
+					votes := boundaries[prefix]
+					votes.geoCount++
+					if !replayingLocations {
+						votes.geo = append(votes.geo, v)
+					}
+					boundaries[prefix] = votes
 				case intelligence.RecordUsage:
 					v := record.Usage.Evidence
 					if !v.Current || v.Family == "" {
@@ -151,14 +165,20 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 					if _, ok := assignmentType(v.Assignment); !ok {
 						return errors.New("invalid normalized assignment")
 					}
-					usage[prefix] = append(usage[prefix], v)
-					boundaries[prefix] = struct{}{}
+					votes := boundaries[prefix]
+					votes.usage = append(votes.usage, v)
+					boundaries[prefix] = votes
 				case intelligence.RecordNetworkOrganization:
-					org := record.NetworkOrganization.Organization
-					if previous, ok := organizations[prefix]; ok && previous != org {
-						org = ""
-					}
-					organizations[prefix] = org
+					current := networkLabels[prefix]
+					current.organization = consistentNetworkLabel(current.hasOrganization, current.organization, record.NetworkOrganization.Organization)
+					current.hasOrganization = true
+					networkLabels[prefix] = current
+				case intelligence.RecordNetworkName:
+					current := networkLabels[prefix]
+					current.name = consistentNetworkLabel(current.hasName, current.name, record.NetworkName.Name)
+					current.isp = consistentNetworkLabel(current.hasName, current.isp, record.NetworkName.SubscriberISP.Label())
+					current.hasName = true
+					networkLabels[prefix] = current
 				case intelligence.RecordOrigins:
 					for _, asn := range record.Origins.Origins {
 						if !facts.PublicASN(asn) {
@@ -195,6 +215,7 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 		}
 		var ancestors []mappingAncestor
 		var applicableGeo []intelligence.GeoEvidence
+		var geoCount int
 		var applicableUsage []intelligence.UsageEvidence
 		for _, prefix := range keys {
 			if err := ctx.Err(); err != nil {
@@ -205,17 +226,21 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 				if last.prefix.Contains(prefix.Addr()) {
 					break
 				}
-				applicableGeo = applicableGeo[:last.geoStart]
+				geoCount = last.geoStart
+				if !replayingLocations {
+					applicableGeo = applicableGeo[:geoCount]
+				}
 				applicableUsage = applicableUsage[:last.usageStart]
 				ancestors = ancestors[:len(ancestors)-1]
 			}
-			localGeo, localUsage := geo[prefix], usage[prefix]
-			if len(applicableGeo)+len(localGeo) > 8192 || len(applicableUsage)+len(localUsage) > 8192 {
+			local := boundaries[prefix]
+			if geoCount+local.geoCount > 8192 || len(applicableUsage)+len(local.usage) > 8192 {
 				return errors.New("mapping boundary working set exceeded")
 			}
-			current := mappingAncestor{prefix: prefix, geoStart: len(applicableGeo), usageStart: len(applicableUsage)}
-			applicableGeo = append(applicableGeo, localGeo...)
-			applicableUsage = append(applicableUsage, localUsage...)
+			current := mappingAncestor{prefix: prefix, geoStart: geoCount, usageStart: len(applicableUsage)}
+			geoCount += local.geoCount
+			applicableGeo = append(applicableGeo, local.geo...)
+			applicableUsage = append(applicableUsage, local.usage...)
 			u := intelligence.FuseUsage(applicableUsage)
 			geoParent := locationValue{coordinates: via3.CoordinateData{Unknown: true}}
 			parentAnycast := false
@@ -225,7 +250,7 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 				parentAnycast = parent.anycast
 			}
 			current.anycast = u.Anycast != nil && *u.Anycast
-			changed := len(localGeo) != 0 || current.anycast != parentAnycast
+			changed := local.geoCount != 0 || current.anycast != parentAnycast
 			resolved, err := locations.resolve(prefix, policy, applicableGeo, current.anycast, changed, geoParent)
 			if err != nil {
 				return err
@@ -270,14 +295,14 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 		for prefix := range origins {
 			keys = append(keys, prefix)
 		}
-		for prefix := range organizations {
+		for prefix := range networkLabels {
 			if _, exists := origins[prefix]; !exists {
 				keys = append(keys, prefix)
 			}
 		}
 		sortPrefixes(keys)
-		// K4 combines the selected ownership and origins at their independent
-		// boundaries. K10 records only actual observed announcement prefixes.
+		// K4 combines the selected name, ownership and origins at their
+		// independent boundaries. K10 records only actual observed announcement prefixes.
 		type networkScope struct {
 			prefix netip.Prefix
 			data   via3.NetworkData
@@ -288,15 +313,22 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 				return err
 			}
 			var network via3.NetworkData
-			if len(organizations) > 0 {
+			if len(networkLabels) > 0 {
 				for len(networkAncestors) > 0 && !networkAncestors[len(networkAncestors)-1].prefix.Contains(prefix.Addr()) {
 					networkAncestors = networkAncestors[:len(networkAncestors)-1]
 				}
 				if len(networkAncestors) > 0 {
 					network = networkAncestors[len(networkAncestors)-1].data
 				}
-				if org, ok := organizations[prefix]; ok {
-					network.Organization = org
+				current := networkLabels[prefix]
+				if current.hasName {
+					network.Name = current.name
+					// Every IPv6 registry object is a boundary, including customer descriptions
+					// that are absent, unrecognized or inconsistent at this exact prefix.
+					network.ISP = current.isp
+				}
+				if current.hasOrganization {
+					network.Organization = current.organization
 				}
 			}
 			if asns, observed := origins[prefix]; observed {
@@ -313,12 +345,20 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 			if err := emit(via3.PublicRecord{Version: 3, Kind: 4, Prefix: prefix, Network: &network}); err != nil {
 				return err
 			}
-			if len(organizations) > 0 {
+			if len(networkLabels) > 0 {
 				networkAncestors = append(networkAncestors, networkScope{prefix, network})
 			}
 		}
 		return nil
 	}
+}
+
+// A disagreement leaves an explicit unknown at this exact prefix.
+func consistentNetworkLabel(seen bool, previous, next string) string {
+	if seen && previous != next {
+		return ""
+	}
+	return next
 }
 
 // The three possible values must stay distinct in lookup results.

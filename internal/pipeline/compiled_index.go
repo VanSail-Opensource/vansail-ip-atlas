@@ -83,11 +83,7 @@ func packCompiledIndex(entry *compiledPartitionEntry) *compiledIndexEntry {
 	for i, r := range entry.Routes {
 		out := &packed.Routes[i]
 		out.Prefix = r.Prefix
-		var last uint32
-		for _, asn := range r.ASNs {
-			out.ASNDeltas = binary.AppendUvarint(out.ASNDeltas, uint64(asn-last))
-			last = asn
-		}
+		out.ASNDeltas = packASNDeltas(r.ASNs)
 		out.Destinations = make([]uint16, len(r.Destinations))
 		for j, d := range r.Destinations {
 			id := ordinals[d.SHA256]
@@ -103,9 +99,19 @@ func packCompiledIndex(entry *compiledPartitionEntry) *compiledIndexEntry {
 	return packed
 }
 
+func packASNDeltas(asns []uint32) []byte {
+	var result []byte
+	var last uint32
+	for _, asn := range asns {
+		result = binary.AppendUvarint(result, uint64(asn-last))
+		last = asn
+	}
+	return result
+}
+
 // The ordinary route validator requires strictly increasing public ASNs. Bound
 // the exact decoded allocation before interpreting their positive deltas.
-func unpackCompiledASNs(encoded []byte, limit int) ([]uint32, error) {
+func unpackASNDeltas(encoded []byte, limit int) ([]uint32, error) {
 	if len(encoded) == 0 {
 		return nil, nil
 	}
@@ -161,7 +167,7 @@ func (packed *compiledIndexEntry) expand() (*compiledPartitionEntry, error) {
 			return nil, errSpatialCache
 		}
 		out := &entry.Routes[i]
-		asns, err := unpackCompiledASNs(r.ASNDeltas, min(limits.PartitionRecords, remainingASNs))
+		asns, err := unpackASNDeltas(r.ASNDeltas, min(limits.PartitionRecords, remainingASNs))
 		if err != nil {
 			return nil, err
 		}
@@ -221,6 +227,12 @@ func (e spatialCacheEntry) expanded() (spatialCacheEntry, error) {
 }
 
 func (e spatialCacheEntry) matchesIndexVersion(version int) bool {
+	if version < 5 && e.Leaf != nil && e.Leaf.OriginContexts != nil {
+		return false
+	}
+	if version < 4 && (e.Domain == seedSourceDomain || e.Domain == sortedPathsDomain || e.Domain == sortedPrefixesDomain) {
+		return false
+	}
 	if e.Domain != "compiled" {
 		return e.Packed == nil && e.Compiled == nil
 	}
@@ -229,7 +241,7 @@ func (e spatialCacheEntry) matchesIndexVersion(version int) bool {
 		return e.Compiled != nil && e.Packed == nil
 	case 2:
 		return e.Compiled == nil && e.Packed != nil && e.Packed.Objects != nil && e.Packed.Table == nil
-	case 3:
+	case 3, 4, 5:
 		return e.Compiled == nil && e.Packed != nil && e.Packed.Objects == nil && e.Packed.Table != nil
 	}
 	return false

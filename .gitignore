@@ -19,6 +19,8 @@ fixtures/source-certification/*
 !fixtures/source-certification/adapter-certifications.json
 !fixtures/source-certification/observed-azure-appservice.json
 !fixtures/source-certification/observed-google-owned-prefixes.json
+!fixtures/source-certification/observed-mullvad-relay-locations.json
+!fixtures/source-certification/observed-ripe-inet6num.txt
 !fixtures/source-certification/observed-user-country-ipv4.csv
 !fixtures/source-certification/observed-server-country-ipv4.csv
 !fixtures/source-certification/observed-user-country-ipv6.csv

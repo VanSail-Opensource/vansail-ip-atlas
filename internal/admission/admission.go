@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +24,7 @@ import (
 // Admission rechecks every control below; an active label alone authorizes no IO.
 type Source struct {
 	ID, Family, Category, Admission string
+	SourceGroup                     string `json:",omitempty"`
 	URL, Format                     string
 	MRTArchivePolicy                string `json:",omitempty"`
 	MaxCompressedBytes              int64
@@ -257,8 +257,17 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		assetURL = dbipPlan.AssetURL
 	}
 	var published, contentValidUntil time.Time
+	var mullvadProof *intelligence.MullvadRelayProof
 	var azureProof *intelligence.AzureServiceProof
-	if adapter == azureAppService {
+	if adapter == mullvadRelaysJSON {
+		mullvadProof, published, err = e.fetchMullvad(ctx, payload, source, now)
+		if err != nil {
+			if ctx.Err() != nil {
+				return result, ctx.Err()
+			}
+			return deny("quarantined", "publication_not_payload_bound")
+		}
+	} else if adapter == azureAppService {
 		azureProof, err = e.fetchAzureService(ctx, payload, source, now)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -272,22 +281,33 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		if err != nil {
 			return deny("quarantined", "publication_not_payload_bound")
 		}
-	} else if _, err := e.fetch.Fetch(ctx, assetURL, payload, source.MaxCompressedBytes); err != nil {
+	} else if original, err := e.fetch.Fetch(ctx, assetURL, payload, source.MaxCompressedBytes); err != nil {
 		if ctx.Err() != nil {
 			return result, ctx.Err()
 		}
 		return deny("missing", "asset_unavailable")
+	} else if adapter == rootServiceZone && original.LastModified.After(now) {
+		return deny("quarantined", "publication_not_payload_bound")
 	}
 	hash, size, err := hashFile(ctx, payload, source.MaxCompressedBytes)
 	if err != nil {
 		return deny("invalid", "payload_integrity_failed")
 	}
+	var ripeNames *intelligence.RIPEIPv6NetworkProof
 	var googleProof *intelligence.GoogleNetworkProof
 	var nroProof *intelligence.NRORegistrationProof
 	var geoProof *intelligence.GeoSourceProof
 	var vrpProof *intelligence.VRPSourceProof
 	var caidaProof *intelligence.CAIDASourceProof
-	if dbipProvider(source) || adapter == ipapiCityZIP {
+	if mullvadProof != nil {
+		err = mullvadProof.Validate(now, published, hash)
+		if err == nil {
+			published, err = e.retainClock(ctx, hash, published)
+		}
+		if err == nil {
+			published, err = e.retainClock(ctx, mullvadProof.Projection, published)
+		}
+	} else if dbipProvider(source) || adapter == ipapiCityZIP {
 		proofFile, openErr := os.Open(payload)
 		if openErr != nil {
 			return deny("invalid", "payload_read_failed")
@@ -308,6 +328,11 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		caidaProof, err = verifyCAIDAFile(ctx, payload, size, source, assetURL, caidaIndexHash, hash, now)
 		if err == nil {
 			published = caidaProof.FirstObservedAt
+		}
+	} else if adapter == ripeNetworkNames {
+		ripeNames, err = e.verifyRIPENames(ctx, payload, source, hash, now)
+		if err == nil {
+			published = ripeNames.PublishedAt
 		}
 	} else if adapter == googleNetwork {
 		googleProof, err = verifyGoogleNetwork(ctx, payload, source, hash, now)
@@ -376,14 +401,23 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 	var records []intelligence.NormalizedRecord
 	var partitions []intelligence.RecordPartition
 	parserClock := published
-	if adapter == rpkiClientJSON {
+	if adapter == rpkiClientJSON || adapter == ripeNetworkNames {
 		parserClock = now
 	}
-	var azureHosts map[netip.Addr]bool
+	var keepRecord func(intelligence.NormalizedRecord) bool
 	if azureProof != nil {
-		azureHosts, err = azureProof.Eligible(now, published, hash)
+		azureHosts, err := azureProof.Eligible(now, published, hash)
 		if err != nil {
 			return deny("invalid", "azure_service_selection_invalid")
+		}
+		keepRecord = func(r intelligence.NormalizedRecord) bool {
+			return r.Evidence != nil && azureHosts[r.Evidence.Address]
+		}
+	}
+	if adapter == ipverseUsageJSON {
+		cutoff := asnUsageObservedAfter(now, source.MaxAge)
+		keepRecord = func(r intelligence.NormalizedRecord) bool {
+			return r.Usage != nil && r.Usage.ObservedAt.After(cutoff)
 		}
 	}
 	if partitioned {
@@ -399,9 +433,9 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		writer := store.Writer(ctx)
 		defer writer.Abort()
 		appendRecord := writer.Append
-		if azureHosts != nil {
+		if keepRecord != nil {
 			appendRecord = func(record intelligence.NormalizedRecord) error {
-				if record.Evidence != nil && azureHosts[record.Evidence.Address] {
+				if keepRecord(record) {
 					return writer.Append(record)
 				}
 				return nil
@@ -411,20 +445,23 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		if err == nil {
 			partitions, err = writer.Finish()
 		}
-		if err == nil && len(partitions) == 0 {
-			err = errors.New("source contains no accepted records")
-		}
 	} else {
 		records, err = parsePayload(ctx, file, size, source, adapter, parserClock, &asnStats)
-		if azureHosts != nil && err == nil {
+		if keepRecord != nil && err == nil {
 			out := records[:0]
 			for _, r := range records {
-				if r.Evidence != nil && azureHosts[r.Evidence.Address] {
+				if keepRecord(r) {
 					out = append(out, r)
 				}
 			}
 			records = out
 		}
+	}
+	if err == nil && (partitioned || adapter == ipverseUsageJSON) && len(records) == 0 && len(partitions) == 0 {
+		if adapter == ipverseUsageJSON {
+			return deny("quarantined", "no_asn_role_survives_serving_window")
+		}
+		err = errors.New("source contains no accepted records")
 	}
 	if err != nil {
 		if ctx.Err() != nil {
@@ -436,9 +473,11 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		ProofPayloadHash: hash, NormalizationPolicyHash: normalizationPolicyHash,
 		ParserVersion: source.Parser.Version, SchemaVersion: 3, PublishedAt: published, ContentValidUntil: contentValidUntil,
 		ProofKind: source.Publication.Kind, PayloadVerified: true, SchemaVerified: true, ImmutableCommitBound: source.Publication.Kind == "github_commit", Records: records, RecordPartitions: partitions}
+	result.Snapshot.RIPENetworkProof = ripeNames
 	result.Snapshot.GoogleNetworkProof = googleProof
 	result.Snapshot.NROProof = nroProof
 	result.Snapshot.AzureProof = azureProof
+	result.Snapshot.MullvadProof = mullvadProof
 	result.Snapshot.GeoProof = geoProof
 	result.Snapshot.VRPProof = vrpProof
 	result.Snapshot.CAIDAProof = caidaProof

@@ -72,6 +72,7 @@ func openMaterializationCache(ctx context.Context, options Options, state intell
 	identity, err := json.Marshal(struct {
 		Version                                int
 		Implementation, Tier1                  [32]byte
+		PrivateLabels                          []string
 		State                                  intelligence.BuildState
 		Policy                                 intelligence.Policy
 		Clock, ValidUntil                      int64
@@ -79,7 +80,7 @@ func openMaterializationCache(ctx context.Context, options Options, state intell
 		Limits                                 Limits
 		VRPComplete                            bool
 		RPKIObservedAt, RPKICoverageValidUntil time.Time
-	}{materializationCacheVersion, implementation, tier1, state, policy, options.Clock, options.ValidUntil, options.Mode, options.Limits, completeVRP, observedAt, coverageValidUntil})
+	}{materializationCacheVersion, implementation, tier1, options.PrivateLabelValues, state, policy, options.Clock, options.ValidUntil, options.Mode, options.Limits, completeVRP, observedAt, coverageValidUntil})
 	if err != nil {
 		return nil, err
 	}

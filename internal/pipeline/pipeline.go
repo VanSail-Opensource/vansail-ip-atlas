@@ -54,6 +54,7 @@ func (l Limits) validate() error {
 }
 
 type Options struct {
+	PrivateLabelValues      []string
 	Workspace, Output, Mode string
 	Clock, ValidUntil       int64
 	Limits                  Limits
@@ -95,6 +96,7 @@ type Candidate struct {
 type Producer func(context.Context, func(via3.PublicRecord) error) error
 
 type compiler struct {
+	labelDecisions        map[string]bool
 	ctx                   context.Context
 	options               Options
 	root, scratch, output string
@@ -257,13 +259,13 @@ func Build(ctx context.Context, options Options, produce Producer) (Candidate, e
 			return result, c.cause(err)
 		}
 		finishMerge := c.observeBuildStage(StageMerge)
-		merged, err := c.merge(runs)
+		remaining, err := c.prepareMerge(runs)
 		finishMerge(err == nil)
 		if err != nil {
 			return result, c.cause(err)
 		}
 		finishClassify := c.observeBuildStage(StageClassify)
-		groups, err := c.classify(merged)
+		groups, err := c.classify(remaining)
 		finishClassify(err == nil)
 		if err != nil {
 			return result, c.cause(err)
@@ -602,7 +604,7 @@ type runReader struct {
 	record     via3.PublicRecord
 	verifyEOF  func() error
 	owner      *compiler     // set only for authenticated intermediate runs
-	leafBodies *leafPayloads // immutable scalar bodies within one public encoder call
+	leafBodies *leafPayloads // immutable scalar bodies within one leaf scan
 }
 
 func openRun(path string, limit int64) (*runReader, error) {
@@ -663,22 +665,38 @@ func openRunBound(path string, limit int64, binding *compiledRunBinding) (*runRe
 	}
 	return run, nil
 }
-func (r *runReader) next() error {
+func (r *runReader) readPayload() ([]byte, error) {
+	if r.file != nil && r.file.compressed != nil {
+		if frame := r.file.compressed.takeFrame(r.limit); frame != nil {
+			return frame, nil
+		}
+	}
 	var head [4]byte
 	if _, err := io.ReadFull(r.reader, head[:]); err != nil {
+		return nil, err
+	}
+	n := int64(binary.LittleEndian.Uint32(head[:]))
+	if n <= 0 || n > r.limit+int64(len(sparseRunMarker)) {
+		return nil, errors.New("private sort frame exceeds limit")
+	}
+	data := make([]byte, n)
+	if _, err := io.ReadFull(r.reader, data); err != nil {
+		if err == io.EOF {
+			err = io.ErrUnexpectedEOF
+		}
+		return nil, err
+	}
+	return data, nil
+}
+
+func (r *runReader) next() error {
+	data, err := r.readPayload()
+	if err != nil {
 		if err == io.EOF && r.verifyEOF != nil {
 			if verifyErr := r.verifyEOF(); verifyErr != nil {
 				return verifyErr
 			}
 		}
-		return err
-	}
-	n := int64(binary.LittleEndian.Uint32(head[:]))
-	if n <= 0 || n > r.limit+int64(len(sparseRunMarker)) {
-		return errors.New("private sort frame exceeds limit")
-	}
-	data := make([]byte, n)
-	if _, err := io.ReadFull(r.reader, data); err != nil {
 		return err
 	}
 	decode := decodeRunPayload
@@ -706,6 +724,52 @@ func (h mergeHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
 func (h *mergeHeap) Push(x any)   { *h = append(*h, x.(*runReader)) }
 func (h *mergeHeap) Pop() any     { old := *h; x := old[len(old)-1]; *h = old[:len(old)-1]; return x }
 
+// walkMerged calls emit once per unique identity, rejecting conflicting frames.
+// Its proof result covers every input, including empty and duplicate-only runs.
+func (c *compiler) walkMerged(paths []string, emit func(*runReader) error) (bool, error) {
+	var h mergeHeap
+	proved := true
+	for _, path := range paths {
+		r, err := c.openIntermediateRun(path)
+		if err != nil {
+			return false, err
+		}
+		defer r.file.Close()
+		if r.owner == nil {
+			proved = false
+		}
+		if err := r.next(); err == nil {
+			h = append(h, r)
+		} else if err != io.EOF {
+			return false, err
+		}
+	}
+	heap.Init(&h)
+	var previous encoded
+	for len(h) > 0 {
+		r := h[0]
+		if previous.key == r.row.key {
+			if !equalEncoded(previous, r.row) {
+				return false, errors.New("conflicting fused fact identity")
+			}
+		} else {
+			if err := emit(r); err != nil {
+				return false, err
+			}
+			previous = r.row
+		}
+		if err := r.next(); err == nil {
+			heap.Fix(&h, 0)
+		} else if err == io.EOF {
+			heap.Pop(&h)
+		} else {
+			return false, err
+		}
+	}
+	// An owned output can publish its proof only after all EOFs verified.
+	return proved, nil
+}
+
 func (c *compiler) mergeGroup(paths []string) (string, error) {
 	path := c.next()
 	w, err := c.newOwnedRunWriter(path)
@@ -713,92 +777,54 @@ func (c *compiler) mergeGroup(paths []string) (string, error) {
 		return "", err
 	}
 	defer w.Close()
-	var h mergeHeap
-	for _, path := range paths {
-		r, err := c.openIntermediateRun(path)
-		if err != nil {
-			return "", err
-		}
-		defer r.file.Close()
-		if r.owner == nil {
-			w.disableProof()
-		}
-		if err := r.next(); err == nil {
-			heap.Push(&h, r)
-		} else if err != io.EOF {
-			return "", err
-		}
+	proved, err := c.walkMerged(paths, func(r *runReader) error {
+		return w.appendFrame(r.frame())
+	})
+	if err != nil {
+		return "", err
 	}
-	var previous encoded
-	for h.Len() > 0 {
-		r := heap.Pop(&h).(*runReader)
-		if previous.key == r.row.key {
-			if !equalEncoded(previous, r.row) {
-				return "", errors.New("conflicting fused fact identity")
-			}
-		} else {
-			if err := w.appendFrame(r.frame()); err != nil {
-				return "", err
-			}
-			previous = r.row
-		}
-		if err := r.next(); err == nil {
-			heap.Push(&h, r)
-		} else if err != io.EOF {
-			return "", err
-		}
+	if !proved {
+		w.disableProof()
 	}
-	// Every input reader has reached verified EOF, including its terminator.
-	// A failed input therefore cannot publish an intermediate proof.
 	if err := w.Finish(); err != nil {
 		return "", err
 	}
 	return path, nil
 }
-func (c *compiler) merge(runs []string) (string, error) {
+
+// Reduce runs to one bounded fan-in. Classification consumes the last merge
+// directly so a complete global run never has to be written and read back.
+func (c *compiler) prepareMerge(runs []string) ([]string, error) {
 	if len(runs) == 0 {
-		return "", errors.New("no public facts")
+		return nil, errors.New("no public facts")
 	}
-	// Even a single initial run passes through the merge to deduplicate/reject.
-	for {
+	for len(runs) > c.options.Limits.MergeFanIn {
 		var next []string
 		for first := 0; first < len(runs); first += c.options.Limits.MergeFanIn {
 			end := min(first+c.options.Limits.MergeFanIn, len(runs))
 			path, err := c.mergeGroup(runs[first:end])
 			if err != nil {
-				return "", err
+				return nil, err
 			}
 			for _, old := range runs[first:end] {
 				if err := c.remove(old); err != nil {
-					return "", err
+					return nil, err
 				}
 			}
 			next = append(next, path)
 		}
-		if len(next) == 1 {
-			return next[0], nil
-		}
 		runs = next
 	}
+	return runs, nil
 }
 
-func (c *compiler) classify(path string) ([]classifiedRun, error) {
+func (c *compiler) classify(inputs []string) ([]classifiedRun, error) {
 	var paths [3 * factGroupCount]string
 	var sizes [3 * factGroupCount]partitionSize
 	var writers [3 * factGroupCount]*ownedRunWriter
 	completed := false
 	defer func() { c.closePartitionWriters(writers[:], paths[:], completed) }()
-	r, err := c.openIntermediateRun(path)
-	if err != nil {
-		return nil, err
-	}
-	defer r.file.Close()
-	for {
-		if err := r.next(); err == io.EOF {
-			break
-		} else if err != nil {
-			return nil, err
-		}
+	proved, err := c.walkMerged(inputs, func(r *runReader) error {
 		record := r.record
 		i := 0
 		if record.Kind == 8 || record.Kind >= 11 {
@@ -808,34 +834,43 @@ func (c *compiler) classify(path string) ([]classifiedRun, error) {
 		}
 		group := groupForKind(record.Kind)
 		if group == allFacts {
-			return nil, errFactGroup
+			return errFactGroup
 		}
 		i = i*factGroupCount + int(group) - 1
 		if writers[i] == nil {
 			paths[i] = c.next()
-			writers[i], err = c.newOwnedRunWriter(paths[i])
+			w, err := c.newOwnedRunWriter(paths[i])
 			if err != nil {
-				return nil, err
+				return err
 			}
+			writers[i] = w
 		}
 		if err := writers[i].appendFrame(r.frame()); err != nil {
-			return nil, err
+			return err
 		}
 		sizes[i].records++
 		sizes[i].bytes += r.row.logicalBytes + 512
 		c.stats.UniqueRecords++
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	for i, w := range writers {
 		if w != nil {
+			if !proved {
+				w.disableProof()
+			}
 			if err := w.Finish(); err != nil {
 				return nil, err
 			}
 			c.rememberPartitionSize(paths[i], sizes[i])
 		}
 	}
-	r.file.Close()
-	if err := c.remove(path); err != nil {
-		return nil, err
+	for _, path := range inputs {
+		if err := c.remove(path); err != nil {
+			return nil, err
+		}
 	}
 	var runs []classifiedRun
 	for i, path := range paths {
@@ -912,6 +947,8 @@ func (c *compiler) partitionFresh(path string, s scope) error {
 	total := c.partitionSizes[path]
 	overflow := total.records > int64(c.options.Limits.PartitionRecords) || total.bytes > c.options.Limits.PartitionBytes
 	if !overflow {
+		// Classified and split runs carry exact process-local counts.
+		records = make([]via3.PublicRecord, 0, total.records)
 		r, err := c.openCompiledRun(path)
 		if err != nil {
 			return err

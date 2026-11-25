@@ -113,7 +113,7 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 		edges := map[intelligence.ASNEdge]bool{}
 		relations := intelligence.NewRelationships(true)
 		profiles := map[netip.Prefix]struct{}{}
-		exacts := map[netip.Addr]struct{}{}
+		exacts := map[netip.Addr]*via3.QualityData{}
 		var regions qualityRegions
 		if len(inputs) == 1 && inputs[0].scope.IsValid() {
 			if err := regions.addBoundary(inputs[0].scope); err != nil {
@@ -158,7 +158,7 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 					return errors.New("bounded intelligence working input exceeded")
 				}
 				switch record.Kind {
-				case intelligence.RecordGeo, intelligence.RecordUsage, intelligence.RecordOrigins, intelligence.RecordNetworkOrganization:
+				case intelligence.RecordGeo, intelligence.RecordUsage, intelligence.RecordOrigins, intelligence.RecordNetworkOrganization, intelligence.RecordNetworkName:
 					mapping.Records = append(mapping.Records, record)
 					mappingLengths = append(mappingLengths, size)
 				}
@@ -175,7 +175,7 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 							return errors.New("invalid exact intelligence address")
 						}
 						addr := v.Address.Unmap()
-						exacts[addr] = struct{}{}
+						exacts[addr] = nil
 						if err := regions.add(netip.PrefixFrom(addr, addr.BitLen())); err != nil {
 							return err
 						}
@@ -357,28 +357,26 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 		if err := mappingProducer(mappings, policy, clock, mappingLengths, true, mappingScope, locations)(ctx, emit); err != nil {
 			return err
 		}
-		qualityWriter := qualityBlockWriter{emit: emit}
-		if len(inputs) == 1 {
-			qualityWriter.scope = inputs[0].scope
-		}
-		if err := regions.visit(ctx, func(p netip.Prefix) error {
-			q, err := engine.Lookup(p.Addr())
-			if err != nil {
-				return err
-			}
-			_, exact := exacts[p.Addr()]
-			return qualityWriter.write(p, exact && p.Bits() == p.Addr().BitLen(), qualityData(q))
-		}); err != nil {
-			return err
-		}
-		if err := qualityWriter.flush(); err != nil {
-			return err
-		}
 		profileKeys := make([]netip.Prefix, 0, len(profiles))
 		for p := range profiles {
+			if mappingScope.IsValid() && (p.Bits() < mappingScope.Bits() || !mappingScope.Contains(p.Addr())) {
+				continue
+			}
 			profileKeys = append(profileKeys, p)
 		}
 		sortPrefixes(profileKeys)
+		var usageDepths [33]bool
+		for prefix := range usage {
+			if prefix.Addr().Is4() {
+				usageDepths[prefix.Bits()] = true
+			}
+		}
+		var depths []int
+		for bits, used := range usageDepths {
+			if used {
+				depths = append(depths, bits)
+			}
+		}
 		for _, prefix := range profileKeys {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -392,8 +390,16 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 				out.DominantASN = *profile.DominantASN
 			}
 			for _, cell := range profile.Cells {
+				// The exact IPv4 row and its /24 cell describe the same engine at
+				// this evaluation clock. Keep one result per bounded exact input.
+				data := qualityData(cell.Quality)
+				if data.Score != nil {
+					score := *data.Score
+					data.Score = &score
+				}
+				exacts[cell.Address] = data
 				var applicable []intelligence.UsageEvidence
-				for bits := 0; bits <= 32; bits++ {
+				for _, bits := range depths {
 					applicable = append(applicable, usage[netip.PrefixFrom(cell.Address, bits).Masked()]...)
 					if len(applicable) > 8192 {
 						return errors.New("profile usage working set exceeded")
@@ -412,6 +418,26 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 			if err := emit(via3.PublicRecord{Version: 3, Kind: 7, Prefix: prefix, Profile: &out}); err != nil {
 				return err
 			}
+		}
+		qualityWriter := qualityBlockWriter{emit: emit}
+		if len(inputs) == 1 {
+			qualityWriter.scope = inputs[0].scope
+		}
+		if err := regions.visit(ctx, mappingScope, func(p netip.Prefix) error {
+			data, exact := exacts[p.Addr()]
+			if data == nil {
+				q, err := engine.Lookup(p.Addr())
+				if err != nil {
+					return err
+				}
+				data = qualityData(q)
+			}
+			return qualityWriter.write(p, exact && p.Bits() == p.Addr().BitLen(), data)
+		}); err != nil {
+			return err
+		}
+		if err := qualityWriter.flush(); err != nil {
+			return err
 		}
 		asnKeys := make([]uint32, 0, len(asns))
 		for asn := range asns {
@@ -629,21 +655,21 @@ func (r *qualityRegions) addPrefix(prefix netip.Prefix, covered bool) error {
 	node.covered = node.covered || covered
 	return nil
 }
-func (r *qualityRegions) visit(ctx context.Context, emit func(netip.Prefix) error) error {
+func (r *qualityRegions) visit(ctx context.Context, scope netip.Prefix, emit func(netip.Prefix) error) error {
 	var walk func(*qualityNode, netip.Prefix, bool) error
 	walk = func(node *qualityNode, prefix netip.Prefix, covered bool) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if node == nil {
-			if covered {
-				return emit(prefix)
-			}
+		if scope.IsValid() && !scope.Overlaps(prefix) {
 			return nil
 		}
-		covered = covered || node.covered
-		if node.children[0] == nil && node.children[1] == nil {
-			if covered {
+		if node != nil {
+			covered = covered || node.covered
+		}
+		if node == nil || node.children[0] == nil && node.children[1] == nil {
+			// The spatial sink only accepts complete rows inside this leaf.
+			if covered && (!scope.IsValid() || prefix.Bits() >= scope.Bits()) {
 				return emit(prefix)
 			}
 			return nil

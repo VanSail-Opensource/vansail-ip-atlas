@@ -2,7 +2,11 @@ package intelligence
 
 import (
 	"bytes"
+	"math"
 	"net/netip"
+	"strconv"
+	"strings"
+	"unicode/utf8"
 
 	"vansail-ip-atlas/internal/facts"
 )
@@ -142,4 +146,48 @@ func (r *writerFrameReader) number() float64 {
 		return -v
 	}
 	return v
+}
+
+// Compare the writer's exact spelling for ordinary geographic frames. Other
+// shapes, escaped labels and exponent-form numbers use the standard encoder.
+func canonicalWriterGeo(data []byte, v *GeoEvidence) bool {
+	r := writerFrameReader{remaining: data}
+	var scratch [64]byte
+	plain := func(value string) bool {
+		if !utf8.ValidString(value) || strings.IndexAny(value, "\"\\<>&\u2028\u2029") >= 0 {
+			return false
+		}
+		for i := range len(value) {
+			if value[i] < 0x20 {
+				return false
+			}
+		}
+		return r.take(`"`) && r.take(value) && r.take(`"`)
+	}
+	number := func(value float64) bool {
+		abs := math.Abs(value)
+		if math.IsNaN(value) || math.IsInf(value, 0) || abs != 0 && (abs < 1e-6 || abs >= 1e21) {
+			return false
+		}
+		return r.take(string(strconv.AppendFloat(scratch[:0], value, 'f', -1, 64)))
+	}
+	if !r.take(`{"Version":3,"Kind":4,"Geo":{"Family":`) || !plain(v.Family) ||
+		!r.take(`,"Weight":`) || !number(v.Weight) || !r.take(`,"Prefix":"`) ||
+		!r.take(string(v.Prefix.AppendTo(scratch[:0]))) || !r.take(`","PhysicalCountry":`) || !plain(v.PhysicalCountry) ||
+		!r.take(`,"RegistrationCountry":`) || !plain(v.RegistrationCountry) ||
+		!r.take(`,"Region":`) || !plain(v.Region) || !r.take(`,"City":`) || !plain(v.City) || !r.take(`,"Coordinates":`) {
+		return false
+	}
+	if c := v.Coordinates; c != nil {
+		if !r.take(`{"Latitude":`) || !number(c.Latitude) || !r.take(`,"Longitude":`) || !number(c.Longitude) ||
+			!r.take(`,"Precision":`) || !r.take(string(strconv.AppendUint(scratch[:0], uint64(c.Precision), 10))) || !r.take("}") {
+			return false
+		}
+	} else if !r.take("null") {
+		return false
+	}
+	if v.Current {
+		return string(r.remaining) == `,"Current":true}}`
+	}
+	return string(r.remaining) == `,"Current":false}}`
 }

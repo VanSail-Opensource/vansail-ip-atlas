@@ -26,6 +26,7 @@ FIELD_TARGETS = {
     "ip": {"reason_flags", "anycast"}, "category": {"reason_flags"}, "type": {"reason_flags"},
     "properties.addressPrefixes": {"reason_flags"},
     "ipv4Prefix": {"network_organization"}, "ipv6Prefix": {"network_organization"},
+    "netname": {"network_name"}, "descr": {"isp"},
     "value": {"reason_flags"}, "tags": {"reason_flags"},
     "as_path": {"bgp_paths"}, "as_relationship": {"as_relationships"},
     "roa": {"rpki_status"}, "roa_asn": {"rpki_status"}, "roa_max_length": {"rpki_status"},
@@ -178,7 +179,13 @@ def validate_sources(config):
             raise ContractError(f"{sid}: mapping references undeclared source field")
         for key, value in source["field_mappings"].items():
             values = value if isinstance(value, list) else [] if value is None else [value]
-            if any(target not in source["public_fields"] or target not in FIELD_TARGETS.get(key, set()) for target in values):
+            targets = FIELD_TARGETS.get(key, set())
+            if source["parser"]["id"] == "mullvad-relay-geolocation":
+                if key == "location":
+                    targets = {"physical_country"}
+                elif key == "city":
+                    targets = {"city", "region"}  # The US city label also contains its postal state code.
+            if any(target not in source["public_fields"] or target not in targets for target in values):
                 raise ContractError(f"{sid}: mapping bypasses field-specific normalization")
         if source["admission"] == "rights_approved":
             from .policy import reviewed_distribution_decision

@@ -41,6 +41,10 @@ func DeriveTier1(ctx context.Context, relations *RelationshipIndex, paths []Path
 // deriveTier1 accepts a bounded iterator so production can read immutable
 // private partitions without retaining every MRT path in process memory.
 func deriveTier1(ctx context.Context, relations *RelationshipIndex, walk func(func(PathObservation) error) error, publishedAt, now time.Time, policyHash string, previous *Tier1Snapshot, maxWork int) (Tier1Snapshot, error) {
+	return deriveTier1WithVisibility(ctx, relations, pathVisibilityReader(walk), publishedAt, now, policyHash, previous, maxWork)
+}
+
+func deriveTier1WithVisibility(ctx context.Context, relations *RelationshipIndex, read func(*RelationshipIndex) (tier1Visibility, error), publishedAt, now time.Time, policyHash string, previous *Tier1Snapshot, maxWork int) (Tier1Snapshot, error) {
 	out := Tier1Snapshot{PublishedAt: publishedAt, PolicyHash: policyHash, RawCandidates: map[uint32]bool{}}
 	if relations == nil {
 		return out, nil
@@ -63,47 +67,11 @@ func deriveTier1(ctx context.Context, relations *RelationshipIndex, walk func(fu
 	if maxWork <= 0 || len(nodes) > 200_000 {
 		return out, ErrGraphBudget
 	}
-	families := map[string]struct{}{}
-	visibility := map[uint32]map[string]struct{}{}
-	incidentUnknown := map[uint32]bool{}
-	visibilityPairs := 0
-	if err := walk(func(v PathObservation) error {
-		if !v.Current || v.Family == "" {
-			return nil
-		}
-		p, err := canonicalPath(v)
-		if err != nil {
-			return err
-		}
-		families[v.Family] = struct{}{}
-		if len(families) > 1000 {
-			return ErrGraphBudget
-		}
-		if !p.GraphEligible {
-			return nil
-		}
-		var prior uint32
-		for _, segment := range p.Segments {
-			for _, asn := range segment.ASNs {
-				if _, exists := visibility[asn][v.Family]; !exists {
-					visibilityPairs++
-					if visibilityPairs > 1_000_000 || len(visibility) >= 200_000 && visibility[asn] == nil {
-						return ErrGraphBudget
-					}
-				}
-				addFamily(visibility, asn, v.Family)
-				if prior != 0 && prior != asn && relations.Relation(prior, asn) == UnknownRelation {
-					incidentUnknown[prior] = true
-					incidentUnknown[asn] = true
-				}
-				prior = asn
-			}
-		}
-		return nil
-	}); err != nil {
+	seenPaths, err := read(relations)
+	if err != nil {
 		return out, err
 	}
-	if len(families) < 2 {
+	if len(seenPaths.families) < 2 {
 		return out, nil
 	}
 	customers := map[uint32][]uint32{}
@@ -179,7 +147,7 @@ func deriveTier1(ctx context.Context, relations *RelationshipIndex, walk func(fu
 	coneThreshold, degreeThreshold := p98(conePopulation), p98(degreePopulation)
 	pool := map[uint32]struct{}{}
 	for _, asn := range nodes {
-		if upstreams[asn] == 0 && cone[asn] > 0 && cone[asn] >= coneThreshold && degree[asn] >= degreeThreshold && len(visibility[asn]) >= 2 && !incidentUnknown[asn] {
+		if upstreams[asn] == 0 && cone[asn] > 0 && cone[asn] >= coneThreshold && degree[asn] >= degreeThreshold && len(seenPaths.byASN[asn]) >= 2 && !seenPaths.incidentUnknown[asn] {
 			pool[asn] = struct{}{}
 		}
 	}

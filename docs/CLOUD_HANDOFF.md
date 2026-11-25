@@ -1,11 +1,42 @@
-# Production CI cloud handoff — 2026-11-22
+# Production CI cloud handoff — 2026-11-25
 
-Continue the full production and website release in
-`VanSail-Opensource/vansail-ip-atlas`, branch `codex/production-release-v6`.
-PRs #1 and #2 are merged. The user explicitly approved releasing verified data
-with unavailable routing facts shown as unknown; all pages remain implemented.
-Read `AGENTS.md` and `IMPLEMENTATION_PLAN.md` first. This is a checkpoint, not
-a completed production release; the historical evidence below remains historical.
+PRs #1, #2 and #4 are merged. The twenty-source release entered protected
+production checks on main at `48c94e8162942cbbdfa70c7983ba001a297cc069`.
+The owner approved publishing verified data, displaying unknowns where
+observations are unavailable, and keeping historical RPKI results visible
+with their original dates. The native p95 launch limit is 25 µs.
+[Merged PR](https://github.com/VanSail-Opensource/vansail-ip-atlas/pull/4) ·
+[Production run](https://github.com/VanSail-Opensource/vansail-ip-atlas/actions/runs/45562423227)
+
+The follow-up on `codex/production-availability-v7` adds authenticated RIPE
+IPv6 network names and addresses two availability problems found in rehearsal.
+Pages uploads now respect the 2,000-asset batch limit. Dated ASN roles enter
+the serving database only when their original deadlines cover the next
+48 hours. The November 25 projection retained 1,645 of 1,732 current roles
+and moved the earliest verified deadline to November 28 at 00:00 UTC.
+[Source coverage and dates](../SOURCES_AUDIT.md)
+
+The integration run preceding the merge authenticated all 20 sources and
+compiled 36,817,747 normalized records in 20 minutes 34 seconds. It produced
+5,267 objects totaling 113,556,555 bytes. Across 100,000 full native lookups,
+p50 was 4.488 µs, p95 was 15.057 µs and p99 was 27.678 µs. Production release
+requires the fifteen build samples, the full frozen preview and canonical
+Pages promotion. The dated sections below record earlier checkpoints.
+[Twenty-source hosted measurements](https://github.com/VanSail-Opensource/vansail-ip-atlas/actions/runs/45557395254)
+
+The first protected twenty-source candidate completed compilation, current-time
+revalidation, query corpus generation and website generation. It stopped during
+static packaging. A full decoded-object replay reproduced two ASN labels that
+contained the private identifier of an unrelated input. PR integration now runs
+the same website packaging and public inventory checks on the actual compiled
+data before merge. Its runner retains only aggregate reports after the check.
+[Protected candidate](https://github.com/VanSail-Opensource/vansail-ip-atlas/actions/runs/45567549937)
+
+The initial 21-source integration included all 21 publishers and 38,400,332
+normalized observations. Compilation took 20 minutes 46.615 seconds and
+produced 5,622 objects totaling 127,464,879 bytes. Across 100,000 full native
+lookups, p50 was 4.809 µs, p95 was 13.462 µs and p99 was 25.124 µs.
+[21-source integration](https://github.com/VanSail-Opensource/vansail-ip-atlas/actions/runs/45563664177)
 
 ## Approved decisions
 
@@ -715,11 +746,11 @@ the canonical Pages hostname still returned HTTP 404.
    Current complete-payload/parser/publication proofs still govern inclusion;
    no publisher grant is implied. Do not contact publishers without instruction.
    Unavailable routing remains unknown; every product page remains available.
-5. The real compiler reuses authenticated materializations only when state,
-   clock, policy, limits, implementation and derived Tier-1 identity all match.
-   Changed inputs or clock still require full materialization. All five benchmark
-   scenarios use that same path. Actual real input must satisfy the original
-   runtime ceilings without weakening retraction, freshness or accounting.
+5. Verify all five build scenarios against their runtime ceilings. Whole-release
+   reuse requires identical state, clock, policy, limits, implementation and
+   derived Tier-1 identity. Changed inputs and clock advances re-evaluate
+   dependent facts. Unchanged spatial and routing inputs can reuse verified
+   intermediate results.
 6. Merge only after required checks pass. Then verify exact-main CI, encrypted
    intake, complete candidate, hosted preview and production. Do not claim the
    public website released until every real qualification and hosted gate passes.

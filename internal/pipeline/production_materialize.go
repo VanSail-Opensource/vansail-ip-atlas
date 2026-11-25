@@ -111,6 +111,7 @@ func BuildProductionIntelligence(ctx context.Context, options Options, state int
 			return Candidate{}, errors.New("production candidate outlives source receipt")
 		}
 	}
+	options.PrivateLabelValues = inputs.Qualification.PrivateLabelValues()
 	originalGate := options.ProductionGate
 	options.ProductionGate = func(gateCtx context.Context) error {
 		if err := inputs.Qualification.Validate(state, clock); err != nil {
@@ -177,10 +178,11 @@ func buildStreamedCandidate(ctx context.Context, options Options, state intellig
 	}
 	contract, err := spatialReuseKey("contract", struct {
 		Implementation [32]byte
+		PrivateLabels  []string
 		Limits         Limits
 		Mode           string
 		Schema         int
-	}{implementation, options.Limits, options.Mode, 5})
+	}{implementation, options.PrivateLabelValues, options.Limits, options.Mode, 5})
 	if err != nil {
 		return Candidate{}, err
 	}
@@ -364,24 +366,30 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 				}
 				return nil
 			}
+			riskRoots, separateRisk := spool.routedRiskRoots(spatial)
 			var reuse *bulkLeafReuse
 			if spool.reuse != nil {
 				scoreKey, err := exactRiskDependencies(policy, clock)
 				if err != nil {
 					return err
 				}
-				// Physical hits can skip collection together. Joined role rows affect
-				// the full leaf's bounded geometry, although they never enter risk.
+				// Separate risk roots exclude joined roles. A shared public root
+				// still sizes those rows when it chooses its fixed geometry.
+				roles := spool.usage
+				if separateRisk {
+					roles = nil
+				}
 				layoutKey, err := spatialReuseKey("exact-risk-layout", struct {
 					Score [32]byte
 					Usage asnUsageIndex
-				}{scoreKey, spool.usage})
+				}{scoreKey, roles})
 				if err != nil {
 					return err
 				}
 				reuse = &bulkLeafReuse{domain: "risk", dependencies: layoutKey, riskPolicy: scoreKey, spool: spool, risk: accumulate}
 			}
-			spatial, err = spool.leavesReusing(ctx, spatial, false, reuse, func(bucket *bulkBucket, part intelligence.BuildState) error {
+			var riskLeaves []*bulkBucket
+			riskLeaves, err = spool.leavesReusing(ctx, riskRoots, false, reuse, func(bucket *bulkBucket, part intelligence.BuildState) error {
 				if reuse != nil {
 					return reuse.visitRisk(ctx, bucket, part, policy, clock)
 				}
@@ -396,6 +404,13 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 				}
 				return IntelligenceProducer(part, policy, clock, MaterializationInputs{scope: bucket.prefix, prepare: prepare, prepareOnly: true, encodedLengths: bucket.recordBytes})(ctx, func(via3.PublicRecord) error { return nil })
 			})
+			if separateRisk {
+				for _, leaf := range riskLeaves {
+					leaf.active = false
+				}
+			} else {
+				spatial = riskLeaves
+			}
 		}
 		if err != nil {
 			riskPhase(false)
@@ -454,12 +469,11 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 			if err != nil {
 				return err
 			}
-			dependencies.Contexts = contexts
-			key, keyErr := spatialReuseKey("public-dependencies", dependencies)
+			key, keyErr := spatialReuseKey("public-origin-scoped-dependencies", dependencies)
 			if keyErr != nil {
 				return keyErr
 			}
-			publicReuse = &bulkLeafReuse{domain: "public", dependencies: key, locationPolicy: locationPolicy, spool: spool, public: emit}
+			publicReuse = &bulkLeafReuse{domain: "public", dependencies: key, contexts: contexts, locationPolicy: locationPolicy, spool: spool, public: emit}
 		}
 		spatial, err = spool.leavesReusing(ctx, spatial, true, publicReuse, func(bucket *bulkBucket, part intelligence.BuildState) (visitErr error) {
 			locations, err := spool.openLocations(ctx, bucket, locationPolicy)

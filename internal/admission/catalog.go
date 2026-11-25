@@ -37,12 +37,13 @@ func (targets *fieldTargets) UnmarshalYAML(node *yaml.Node) error {
 }
 
 type catalogSource struct {
-	ID       string `yaml:"id"`
-	Family   string `yaml:"evidence_family"`
-	Category string `yaml:"category"`
-	State    string `yaml:"admission"`
-	Scope    string `yaml:"scope"`
-	Download struct {
+	ID          string `yaml:"id"`
+	Family      string `yaml:"evidence_family"`
+	SourceGroup string `yaml:"source_group"`
+	Category    string `yaml:"category"`
+	State       string `yaml:"admission"`
+	Scope       string `yaml:"scope"`
+	Download    struct {
 		URL              string `yaml:"url"`
 		Format           string `yaml:"format"`
 		Maximum          int64  `yaml:"max_compressed_mib"`
@@ -144,7 +145,7 @@ func DecodeCatalog(reader io.Reader) ([]Source, error) {
 				mappings[input] = append([]string(nil), outputs...)
 			}
 		}
-		output = append(output, Source{ID: raw.ID, Family: raw.Family, Category: raw.Category, Admission: raw.State, URL: raw.Download.URL, Format: raw.Download.Format, MaxCompressedBytes: raw.Download.Maximum << 20, Signals: append([]string(nil), raw.Signals...),
+		output = append(output, Source{ID: raw.ID, Family: raw.Family, SourceGroup: raw.SourceGroup, Category: raw.Category, Admission: raw.State, URL: raw.Download.URL, Format: raw.Download.Format, MaxCompressedBytes: raw.Download.Maximum << 20, Signals: append([]string(nil), raw.Signals...),
 			MaxAge: age, Weight: raw.Trust.Weight, Dependencies: append([]string(nil), raw.Dependencies...),
 			Rights:      Rights{Status: raw.Rights.Status, Distribution: raw.Rights.Distribution, Identifier: raw.Rights.Identifier, EvidenceURL: raw.Rights.EvidenceURL, ReviewBasis: raw.Rights.ReviewBasis, AttributionRequired: raw.Rights.AttributionRequired, Attribution: raw.Rights.Attribution},
 			Parser:      Parser{raw.Parser.ID, raw.Parser.Schema, raw.Parser.Version},

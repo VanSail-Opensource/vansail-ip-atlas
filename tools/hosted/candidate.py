@@ -7,17 +7,18 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 import hashlib
 from itertools import groupby, islice
 import json
 from pathlib import Path
 import re
 import sys
-import threading
 import time
-import urllib.error
 import urllib.request
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
+
+import urllib3
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -119,15 +120,28 @@ INVENTORY_WORKERS = 8
 READ_CHUNK_BYTES = 64 * 1024
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, request, fp, code, msg, headers, newurl):
-        return None
+def _inventory_pool(origin):
+    options = {"num_pools": 1, "maxsize": INVENTORY_WORKERS, "block": True}
+    proxy = urllib.request.getproxies().get("https")
+    if proxy and not urllib.request.proxy_bypass(urlsplit(origin).hostname):
+        try:
+            parsed = urlsplit(proxy if "://" in proxy else "http://" + proxy)
+            proxy_headers = {}
+            if parsed.username is not None:
+                credentials = unquote(parsed.username) + ":" + unquote(parsed.password or "")
+                proxy_headers = urllib3.make_headers(proxy_basic_auth=credentials)
+            server = parsed._replace(netloc=parsed.netloc.rsplit("@", 1)[-1])
+            return urllib3.ProxyManager(server.geturl(), proxy_headers=proxy_headers, **options)
+        except (ValueError, urllib3.exceptions.HTTPError):
+            raise ContractError("invalid preview HTTPS proxy configuration") from None
+    return urllib3.PoolManager(**options)
 
 
+@contextmanager
 def _live_inventory_fetch(origin, deadline):
-    # Each worker keeps its own urllib state. Bound memory independently of
-    # asset size by hashing the response incrementally, including an overrun byte.
-    local = threading.local()
+    # The pool belongs to one verified origin and at most eight simultaneous
+    # requests. Explicitly close idle TLS connections, including after failures.
+    pool = _inventory_pool(origin)
 
     def remaining():
         seconds = deadline - time.monotonic()
@@ -136,28 +150,45 @@ def _live_inventory_fetch(origin, deadline):
         return seconds
 
     def fetch(path, size):
-        if not hasattr(local, "opener"):
-            local.opener = urllib.request.build_opener(_NoRedirect)
-        request = urllib.request.Request(origin + path, headers={
-            "Accept-Encoding": "identity", "User-Agent": QA_USER_AGENT})
-        try:
-            response = local.opener.open(request, timeout=min(30, remaining()))
-        except urllib.error.HTTPError as error:
-            response = error
-        with response:
-            digest = hashlib.sha256()
-            count = 0
-            while count <= size:
-                remaining()
-                # read1 permits a deadline check between network reads.
-                block = response.read1(min(READ_CHUNK_BYTES, size + 1 - count))
-                if not block:
-                    break
-                count += len(block)
-                digest.update(block)
-            remaining()
-            return response.status, {k.lower(): v for k, v in response.headers.items()}, count, digest.hexdigest()
-    return fetch
+        for attempt in range(2):
+            try:
+                timeout = min(30, remaining())
+                response = pool.request("GET", origin + path, headers={
+                    "Accept-Encoding": "identity", "User-Agent": QA_USER_AGENT},
+                    timeout=timeout, pool_timeout=timeout, preload_content=False, decode_content=False,
+                    redirect=False, retries=False)
+                try:
+                    digest = hashlib.sha256()
+                    count = 0
+                    while count <= size:
+                        read_timeout = min(30, remaining())
+                        connection = response.connection
+                        if connection is not None and connection.sock is not None:
+                            connection.sock.settimeout(read_timeout)
+                        block = response.read1(min(READ_CHUNK_BYTES, size + 1 - count))
+                        if not block:
+                            break
+                        count += len(block)
+                        digest.update(block)
+                    remaining()
+                    return response.status, {k.lower(): v for k, v in response.headers.items()}, count, digest.hexdigest()
+                finally:
+                    # A fully consumed response returns its healthy socket to
+                    # the pool. Discard interrupted or oversized responses.
+                    response.close()
+                    response.release_conn()
+            except (urllib3.exceptions.ProtocolError, urllib3.exceptions.TimeoutError):
+                # A server can close an idle socket between requests. Start
+                # this GET and its digest from byte zero on a fresh connection.
+                if attempt:
+                    raise ContractError("preview HTTPS transfer interrupted") from None
+            except urllib3.exceptions.HTTPError:
+                raise ContractError("preview HTTPS connection failed") from None
+
+    try:
+        yield fetch
+    finally:
+        pool.clear()
 
 
 def verify_preview(public: Path, report: dict, origin: str, now: int, fetch=None, *, production_alias=False) -> dict:
@@ -172,14 +203,18 @@ def verify_preview(public: Path, report: dict, origin: str, now: int, fetch=None
     candidate = check_candidate(public, report, now)
     expected_headers = _global_headers(public)
     deadline = time.monotonic() + 600
-    live = fetch is None
-    if live:
-        fetch_digest = _live_inventory_fetch(origin, deadline)
-    else:
-        def fetch_digest(path, size):
-            status, headers, data = fetch(path, size)
-            return status, headers, len(data), sha256(data)
+    if fetch is None:
+        with _live_inventory_fetch(origin, deadline) as fetch_digest:
+            return _verify_inventory(candidate, report, origin, expected_headers, fetch_digest, deadline, production_alias)
 
+    def fetch_digest(path, size):
+        status, headers, data = fetch(path, size)
+        return status, headers, len(data), sha256(data)
+    return _verify_inventory(candidate, report, origin, expected_headers, fetch_digest, None, production_alias)
+
+
+def _verify_inventory(candidate, report, origin, expected_headers, fetch_digest, deadline, production_alias):
+    live = deadline is not None
     status, headers, _, _ = fetch_digest("/", 64 * 1024)
     if status != 302 or headers.get("location") != "/ip":
         raise ContractError("deployed root is not the required HTTP 302")

@@ -1,0 +1,72 @@
+#
+# The contents of this file are subject to 
+# RIPE Database Terms and Conditions
+#
+# https://docs.db.ripe.net/terms-conditions.html
+#
+
+inet6num:       2001:67c:2e8::/48
+netname:        RIPE-NCC-NET
+last-modified:  2026-03-19T09:18:20Z
+source:         RIPE
+
+inet6num:       2001:7fd::/32
+netname:        RIPE-NCC-K-ROOT-V6
+last-modified:  2026-01-15T13:10:37Z
+source:         RIPE
+
+inet6num:       2a00:16f8:17::/48
+netname:        Amazon_EU_SARL__succursale_francaise
+last-modified:  2026-11-18T08:52:26Z
+source:         RIPE
+
+inet6num:       2a00:9f00::/34
+netname:        VECTRANET
+descr:          Broadband users of Vectra S.A
+descr:          -= VECTRA BROADBAND USERS =-
+country:        PL
+status:         ALLOCATED-BY-LIR
+mnt-by:         VECTRANET-MNT
+last-modified:  2024-11-12T12:41:55Z
+source:         RIPE
+
+inet6num:       2a00:9f00::/48
+netname:        VECTRANET
+descr:          IPv6 for Vectra's Bussines Clients
+country:        PL
+status:         ASSIGNED
+mnt-by:         VECTRANET-MNT
+last-modified:  2018-12-10T14:36:05Z
+source:         RIPE
+
+inet6num:       2a02:2028::/40
+netname:        PPPOE-IPV6-LNS1-NET
+descr:          PPPOE Private Customers
+descr:          wilhelm.tel GmbH
+descr:          Heidbergstr. 101-111
+descr:          D-22846 Norderstedt
+descr:          Germany
+country:        DE
+status:         AGGREGATED-BY-LIR
+mnt-by:         NORDERSTEDT-MNT
+last-modified:  2019-10-28T12:07:51Z
+source:         RIPE
+
+inet6num:       2a02:1808::/32
+netname:        TELENET
+descr:          Telenet N.V. Mobile Residential Broadband
+country:        BE
+status:         ALLOCATED-BY-LIR
+mnt-by:         TELENET-DBM
+last-modified:  2015-04-24T08:40:01Z
+source:         RIPE
+
+inet6num:       2001:16a2:200::/39
+netname:        Riyadh-Residential-Fixed-Broadband
+descr:          STC, Riyadh Residential Fixed-Broadband
+country:        SA
+status:         ALLOCATED-BY-LIR
+last-modified:  2026-09-23T11:54:17Z
+source:         RIPE
+mnt-by:         SAUDINET-STC
+

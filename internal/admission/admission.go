@@ -257,9 +257,20 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		assetURL = dbipPlan.AssetURL
 	}
 	var published, contentValidUntil time.Time
+	var appleProof *intelligence.AppleRelayProof
 	var mullvadProof *intelligence.MullvadRelayProof
 	var azureProof *intelligence.AzureServiceProof
-	if adapter == mullvadRelaysJSON {
+	if adapter == appleRelayCSV {
+		appleProof, err = e.fetchAppleRelay(ctx, payload, source, now)
+		if err != nil {
+			if ctx.Err() != nil {
+				return result, ctx.Err()
+			}
+			return deny("quarantined", "publication_not_payload_bound")
+		}
+		published = appleProof.Edition
+		contentValidUntil = appleProof.ContentDeadline(source.MaxAge)
+	} else if adapter == mullvadRelaysJSON {
 		mullvadProof, published, err = e.fetchMullvad(ctx, payload, source, now)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -297,7 +308,12 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 	var geoProof *intelligence.GeoSourceProof
 	var vrpProof *intelligence.VRPSourceProof
 	var caidaProof *intelligence.CAIDASourceProof
-	if mullvadProof != nil {
+	if appleProof != nil {
+		err = appleProof.Validate(now, published, hash)
+		if err == nil {
+			published, err = e.retainClock(ctx, appleProof.After.PrefixHash, published)
+		}
+	} else if mullvadProof != nil {
 		err = mullvadProof.Validate(now, published, hash)
 		if err == nil {
 			published, err = e.retainClock(ctx, hash, published)
@@ -475,6 +491,7 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 	result.Snapshot.GoogleNetworkProof = googleProof
 	result.Snapshot.NROProof = nroProof
 	result.Snapshot.AzureProof = azureProof
+	result.Snapshot.AppleRelayProof = appleProof
 	result.Snapshot.MullvadProof = mullvadProof
 	result.Snapshot.GeoProof = geoProof
 	result.Snapshot.VRPProof = vrpProof

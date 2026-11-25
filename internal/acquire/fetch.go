@@ -30,6 +30,8 @@ import (
 // Its one stable query is part of the resource identity.
 const AzureServiceTagsDetailsURL = "https://www.microsoft.com/en-us/download/details.aspx?id=56519"
 
+const fetchUserAgent = "VanSail-IP-Atlas/3 (+https://github.com/VanSail-Opensource/vansail-ip-atlas)"
+
 var ErrFetch = errors.New("bulk asset acquisition failed")
 
 // ErrNotFound identifies a header-only HTTP 404, without exposing a URL or
@@ -40,6 +42,7 @@ var ErrNotFound = errors.Join(ErrFetch, errors.New("bulk asset not found"))
 type Result struct {
 	LastModified time.Time
 	SHA256       string
+	ETag         string
 	Bytes        int64
 }
 type Fetcher struct {
@@ -274,11 +277,11 @@ func checkRedirect(request *http.Request, via []*http.Request) error {
 	// Authentication belongs only to the original, narrowly checked metadata URL.
 	request.Header.Del("Authorization")
 	for _, previous := range via {
-		if previous == nil || previous.URL == nil || previous.URL.String() == AzureServiceTagsDetailsURL || !validURL(previous.URL.String()) {
+		if previous == nil || previous.URL == nil || previous.URL.String() == AzureServiceTagsDetailsURL || previous.URL.String() == AppleRelayURL || !validURL(previous.URL.String()) {
 			return ErrFetch
 		}
 	}
-	if request.URL.String() == AzureServiceTagsDetailsURL {
+	if request.URL.String() == AzureServiceTagsDetailsURL || request.URL.String() == AppleRelayURL {
 		return ErrFetch
 	}
 	if validURL(request.URL.String()) {
@@ -351,7 +354,11 @@ func (f *Fetcher) Fetch(ctx context.Context, raw, destination string, maxBytes i
 		if err != nil {
 			return Result{}, ErrFetch
 		}
-		request.Header.Set("User-Agent", "VanSail-IP-Atlas/3 (+https://github.com/VanSail-Opensource/vansail-ip-atlas)")
+		request.Header.Set("User-Agent", fetchUserAgent)
+		if raw == AppleRelayURL {
+			request.Header.Set("Accept-Encoding", "identity")
+			request.Header.Set("Cache-Control", "no-cache")
+		}
 		metadata := githubMetadataURL(raw)
 		if metadata && f.githubMetadataToken != "" {
 			request.Header.Set("Authorization", "Bearer "+f.githubMetadataToken)
@@ -381,6 +388,14 @@ func (f *Fetcher) Fetch(ctx context.Context, raw, destination string, maxBytes i
 				continue
 			}
 			return Result{}, ErrFetch
+		}
+		var tag string
+		if raw == AppleRelayURL {
+			tag = response.Header.Get("ETag")
+			if _, ok := appleRelayTagCandidate(tag, response.ContentLength); !ok || !appleRelayRepresentation(response, tag) {
+				response.Body.Close()
+				return Result{}, ErrFetch
+			}
 		}
 		if response.ContentLength > maxBytes {
 			response.Body.Close()
@@ -417,7 +432,7 @@ func (f *Fetcher) Fetch(ctx context.Context, raw, destination string, maxBytes i
 			return Result{}, ErrFetch
 		}
 		modified, _ := http.ParseTime(response.Header.Get("Last-Modified"))
-		return Result{SHA256: hex.EncodeToString(hash.Sum(nil)), Bytes: n, LastModified: modified.UTC()}, nil
+		return Result{SHA256: hex.EncodeToString(hash.Sum(nil)), Bytes: n, ETag: tag, LastModified: modified.UTC()}, nil
 	}
 	return Result{}, ErrFetch
 }

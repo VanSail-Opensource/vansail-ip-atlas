@@ -126,6 +126,7 @@ type SourceSnapshot struct {
 	GeoProof                                              *GeoSourceProof       `json:",omitempty"`
 	VRPProof                                              *VRPSourceProof       `json:",omitempty"`
 	CAIDAProof                                            *CAIDASourceProof     `json:",omitempty"`
+	AppleRelayProof                                       *AppleRelayProof      `json:",omitempty"`
 	MullvadProof                                          *MullvadRelayProof    `json:",omitempty"`
 	AzureProof                                            *AzureServiceProof    `json:",omitempty"`
 	NROProof                                              *NRORegistrationProof `json:",omitempty"`
@@ -255,6 +256,9 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 			}
 			if (id == NRORegistrationID) != (snapshot.NROProof != nil) || snapshot.NROProof != nil && (snapshot.ProofKind != "embedded" || snapshot.NROProof.Validate(now, snapshot.PublishedAt, snapshot.PayloadHash) != nil) {
 				deny("invalid", "nro_registration_proof_invalid")
+			}
+			if (id == AppleRelaySourceID) != (snapshot.AppleRelayProof != nil) || snapshot.AppleRelayProof != nil && (snapshot.ProofKind != "snapshot_metadata" || !snapshot.ContentValidUntil.Equal(snapshot.AppleRelayProof.ContentDeadline(policy.MaxAge)) || snapshot.AppleRelayProof.Validate(now, snapshot.PublishedAt, snapshot.PayloadHash) != nil) {
+				deny("invalid", "apple_relay_edition_invalid")
 			}
 			if (id == MullvadRelaySourceID) != (snapshot.MullvadProof != nil) || snapshot.MullvadProof != nil && (snapshot.ProofKind != "snapshot_metadata" || snapshot.MullvadProof.Validate(now, snapshot.PublishedAt, snapshot.PayloadHash) != nil) {
 				deny("invalid", "invalid_relay_geography_proof")
@@ -394,10 +398,19 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 		}
 
 		var ripeDigest RIPENetworkNameDigest
+		var appleSet ApplePrefixSet
+		if snapshot.AppleRelayProof != nil {
+			appleSet = make(ApplePrefixSet)
+		}
 		var mullvadDigest MullvadRelayDigest
 		var googleDigest GoogleNetworkDigest
 		var nroDigest NRORegistrationDigest
 		process := func(record NormalizedRecord) error {
+			if appleSet != nil {
+				if err := appleSet.Add(record, snapshot.PublishedAt, policy.Weight); err != nil {
+					return err
+				}
+			}
 			if snapshot.MullvadProof != nil {
 				if err := mullvadDigest.Add(record); err != nil {
 					return err
@@ -591,6 +604,9 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 		if p := snapshot.RIPENetworkProof; p != nil && !ripeDigest.Matches(p) {
 			return plan, errors.New("normalized network names differ from both publisher exports")
 		}
+		if appleSet != nil && (len(appleSet) != snapshot.AppleRelayProof.After.Prefixes || appleSet.Hash() != snapshot.AppleRelayProof.After.PrefixHash) {
+			return plan, ErrAppleRelay
+		}
 		if p := snapshot.MullvadProof; p != nil && !mullvadDigest.Matches(p) {
 			return plan, errors.New("relay geography differs from signed projection")
 		}
@@ -624,7 +640,7 @@ func reconcile(ctx context.Context, previous BuildState, policies []SourcePolicy
 			Snapshot         SourceSnapshot
 			Records          []NormalizedRecord
 			RecordPartitions []RecordPartition `json:",omitempty"`
-		}{policy, SourceSnapshot{ID: id, PayloadHash: snapshot.PayloadHash, ProofPayloadHash: snapshot.ProofPayloadHash, NormalizationPolicyHash: snapshot.NormalizationPolicyHash, ParserVersion: snapshot.ParserVersion, SchemaVersion: snapshot.SchemaVersion, PublishedAt: snapshot.PublishedAt, ContentValidUntil: snapshot.ContentValidUntil, ProofKind: snapshot.ProofKind, PayloadVerified: true, SchemaVerified: true, ImmutableCommitBound: snapshot.ImmutableCommitBound, MRTProof: cloneMRTProof(snapshot.MRTProof), GeoProof: cloneGeoProof(snapshot.GeoProof), VRPProof: cloneVRPProof(snapshot.VRPProof), CAIDAProof: cloneCAIDAProof(snapshot.CAIDAProof), AzureProof: cloneAzureProof(snapshot.AzureProof), MullvadProof: cloneMullvadProof(snapshot.MullvadProof), NROProof: cloneNROProof(snapshot.NROProof), GoogleNetworkProof: cloneGoogleNetworkProof(snapshot.GoogleNetworkProof), RIPENetworkProof: cloneRIPENetworkProof(snapshot.RIPENetworkProof)}, records, parts})
+		}{policy, SourceSnapshot{ID: id, PayloadHash: snapshot.PayloadHash, ProofPayloadHash: snapshot.ProofPayloadHash, NormalizationPolicyHash: snapshot.NormalizationPolicyHash, ParserVersion: snapshot.ParserVersion, SchemaVersion: snapshot.SchemaVersion, PublishedAt: snapshot.PublishedAt, ContentValidUntil: snapshot.ContentValidUntil, ProofKind: snapshot.ProofKind, PayloadVerified: true, SchemaVerified: true, ImmutableCommitBound: snapshot.ImmutableCommitBound, MRTProof: cloneMRTProof(snapshot.MRTProof), GeoProof: cloneGeoProof(snapshot.GeoProof), VRPProof: cloneVRPProof(snapshot.VRPProof), CAIDAProof: cloneCAIDAProof(snapshot.CAIDAProof), AzureProof: cloneAzureProof(snapshot.AzureProof), AppleRelayProof: cloneAppleRelayProof(snapshot.AppleRelayProof), MullvadProof: cloneMullvadProof(snapshot.MullvadProof), NROProof: cloneNROProof(snapshot.NROProof), GoogleNetworkProof: cloneGoogleNetworkProof(snapshot.GoogleNetworkProof), RIPENetworkProof: cloneRIPENetworkProof(snapshot.RIPENetworkProof)}, records, parts})
 		if err != nil {
 			return plan, err
 		}

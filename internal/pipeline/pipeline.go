@@ -929,6 +929,8 @@ func (c *compiler) partitionFresh(path string, s scope) error {
 	total := c.partitionSizes[path]
 	overflow := total.records > int64(c.options.Limits.PartitionRecords) || total.bytes > c.options.Limits.PartitionBytes
 	if !overflow {
+		// Classified and split runs carry exact process-local counts.
+		records = make([]via3.PublicRecord, 0, total.records)
 		r, err := c.openCompiledRun(path)
 		if err != nil {
 			return err

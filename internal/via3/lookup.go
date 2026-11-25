@@ -400,35 +400,47 @@ func validHash(value string) bool {
 	b, err := hex.DecodeString(value)
 	return err == nil && len(b) == 32 && value == strings.ToLower(value)
 }
+
+type partitionBounds struct {
+	prefix      netip.Prefix
+	first, last uint32
+	all         bool
+}
+
 func validPartition(value string) bool {
+	_, ok := parsePartition(value)
+	return ok
+}
+
+func parsePartition(value string) (partitionBounds, bool) {
 	if value == "all" {
-		return true
+		return partitionBounds{all: true}, true
 	}
 	if strings.HasPrefix(value, "asn:") {
 		p := strings.Split(value, ":")
 		if len(p) != 3 {
-			return false
+			return partitionBounds{}, false
 		}
 		a, e1 := strconv.ParseUint(p[1], 10, 32)
 		b, e2 := strconv.ParseUint(p[2], 10, 32)
 		if e1 != nil || e2 != nil || a > b || strconv.FormatUint(a, 10) != p[1] || strconv.FormatUint(b, 10) != p[2] {
-			return false
+			return partitionBounds{}, false
 		}
 		_, e1 = querycontract.ParseInput("AS" + p[1])
 		_, e2 = querycontract.ParseInput("AS" + p[2])
-		return e1 == nil && e2 == nil && !(a <= 23456 && b >= 23456) && !(a <= 131071 && b >= 64496)
+		return partitionBounds{first: uint32(a), last: uint32(b)}, e1 == nil && e2 == nil && !(a <= 23456 && b >= 23456) && !(a <= 131071 && b >= 64496)
 	}
 	if len(value) < 4 || (value[:2] != "4:" && value[:2] != "6:") {
-		return false
+		return partitionBounds{}, false
 	}
 	p := strings.Split(value[2:], "/")
 	if len(p) != 2 || len(p[0]) != 32 || p[0] != strings.ToLower(p[0]) {
-		return false
+		return partitionBounds{}, false
 	}
 	a, e1 := hex.DecodeString(p[0])
 	n, e2 := strconv.Atoi(p[1])
 	if e1 != nil || e2 != nil || n < 0 || n > 128 || strconv.Itoa(n) != p[1] {
-		return false
+		return partitionBounds{}, false
 	}
 	row := make([]byte, 32)
 	if value[0] == '4' {
@@ -438,7 +450,11 @@ func validPartition(value string) bool {
 	}
 	row[1] = byte(n)
 	copy(row[4:], a)
-	return validKey(row)
+	if !validKey(row) {
+		return partitionBounds{}, false
+	}
+	addr, _ := keyAddr(row)
+	return partitionBounds{prefix: netip.PrefixFrom(addr, n)}, true
 }
 func NewRelease(pointerBytes, manifestBytes []byte, load func(string) ([]byte, error), clock func() int64) (*Release, error) {
 	var pointer Pointer

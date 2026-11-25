@@ -238,7 +238,7 @@ func (r *Release) Prefixes(ctx context.Context, q string, cursor uint32) (result
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	defer recoverNativeRead(&resultErr)
-	input, err := querycontract.ParseInput(q)
+	input, err := querycontract.ParseValue(q)
 	if err != nil || input.Kind != "asn" {
 		return ASNPrefixPage{}, fail("invalid_input")
 	}
@@ -250,7 +250,7 @@ func (r *Release) Prefixes(ctx context.Context, q string, cursor uint32) (result
 	if err = r.current(); err != nil {
 		return ASNPrefixPage{}, err
 	}
-	answer, err := r.prefixes(ctx, q, cursor)
+	answer, err := r.prefixes(ctx, input.ASN, cursor)
 	if err == nil {
 		err = ctx.Err()
 	}
@@ -259,13 +259,7 @@ func (r *Release) Prefixes(ctx context.Context, q string, cursor uint32) (result
 	}
 	return answer, err
 }
-func (r *Release) prefixes(ctx context.Context, q string, cursor uint32) (ASNPrefixPage, error) {
-	input, err := querycontract.ParseInput(q)
-	if err != nil || input.Kind != "asn" {
-		return ASNPrefixPage{}, fail("invalid_input")
-	}
-	asn64, _ := strconv.ParseUint(input.Canonical[2:], 10, 32)
-	asn := uint32(asn64)
+func (r *Release) prefixes(ctx context.Context, asn, cursor uint32) (ASNPrefixPage, error) {
 	s, err := r.asnDestination(ctx, asn, 8)
 	if err != nil {
 		return ASNPrefixPage{}, err
@@ -998,7 +992,7 @@ func origins(s *Shard, row []byte) []uint32 {
 
 func (r *Release) lookupOnce(ctx context.Context, q string) (result LookupAnswer, resultErr error) {
 	defer recoverNativeRead(&resultErr)
-	input, err := querycontract.ParseInput(q)
+	input, err := querycontract.ParseValue(q)
 	if err != nil {
 		return LookupAnswer{}, err
 	}
@@ -1011,10 +1005,9 @@ func (r *Release) lookupOnce(ctx context.Context, q string) (result LookupAnswer
 		return LookupAnswer{}, err
 	}
 	answer := LookupAnswer{Q: input.Canonical, Kind: input.Kind, ReleaseID: r.Manifest.ReleaseID, Synthetic: r.Manifest.Mode == "synthetic", ValidUntil: r.Manifest.ValidUntil, ASNs: []ASNAnswer{}, BGP: BGPAnswer{Origins: []uint32{}, Paths: []PathAnswer{}, Relationships: []RelationshipAnswer{}, Tier1: []TierAnswer{}, RPKI: []RPKIAnswer{}}}
-	var addr netip.Addr
+	addr := input.Address
 	var dest destinationSet
 	if input.Kind == "ip" {
-		addr = netip.MustParseAddr(input.Canonical)
 		row, _, ok := r.router.findPrefix(addr)
 		dest, err = r.rowDestinations(ctx, row, ok)
 		if err != nil {
@@ -1150,8 +1143,7 @@ func (r *Release) lookupOnce(ctx context.Context, q string) (result LookupAnswer
 			}
 		}
 	} else {
-		n, _ := strconv.ParseUint(input.Canonical[2:], 10, 32)
-		answer.BGP.Origins = []uint32{uint32(n)}
+		answer.BGP.Origins = []uint32{input.ASN}
 	}
 	var asnValues []asnLookupValues
 	var pairStorage [64]uint64
@@ -1293,7 +1285,8 @@ func (r *Release) ClassC(ctx context.Context, q string) (result *ClassCAnswer, r
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	defer recoverNativeRead(&resultErr)
-	if _, err := querycontract.ParseInput(q); err != nil {
+	input, err := querycontract.ParseValue(q)
+	if err != nil {
 		return nil, err
 	}
 	r.beginQuery()
@@ -1304,7 +1297,7 @@ func (r *Release) ClassC(ctx context.Context, q string) (result *ClassCAnswer, r
 	if err := r.current(); err != nil {
 		return nil, err
 	}
-	answer, err := r.classC(ctx, q)
+	answer, err := r.classC(ctx, input.Address)
 	if err == nil {
 		err = answerFits(answer)
 	}
@@ -1316,19 +1309,11 @@ func (r *Release) ClassC(ctx context.Context, q string) (result *ClassCAnswer, r
 	}
 	return answer, err
 }
-func (r *Release) classC(ctx context.Context, q string) (*ClassCAnswer, error) {
+func (r *Release) classC(ctx context.Context, addr netip.Addr) (*ClassCAnswer, error) {
 	budget := newAnswerBudget()
 	if err := budget.charge(256 * 512); err != nil {
 		return nil, err
 	}
-	input, err := querycontract.ParseInput(q)
-	if err != nil {
-		return nil, err
-	}
-	if input.Kind != "ip" {
-		return nil, nil
-	}
-	addr := netip.MustParseAddr(input.Canonical)
 	if !addr.Is4() {
 		return nil, nil
 	}

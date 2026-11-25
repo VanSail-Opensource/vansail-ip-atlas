@@ -26,48 +26,81 @@ type Result struct {
 	Error  string `json:"error,omitempty"`
 }
 
+// Value includes the numeric representation of a canonical IP or ASN query.
+// Only Address is set for an IP query, and only ASN is set for an ASN query.
+type Value struct {
+	Input
+	Address netip.Addr
+	ASN     uint32
+}
+
 func ParseInput(raw string) (Input, error) {
+	v, err := ParseValue(raw)
+	return v.Input, err
+}
+
+// ParseValue validates the query once and preserves its numeric lookup key.
+func ParseValue(raw string) (Value, error) {
 	if len(raw) > 128 || !utf8.ValidString(raw) {
-		return Input{}, fmt.Errorf("invalid_input")
+		return Value{}, fmt.Errorf("invalid_input")
 	}
 	s := strings.Trim(raw, " \t\r\n\f\v")
 	if s == "" {
-		return Input{}, fmt.Errorf("invalid_input")
+		return Value{}, fmt.Errorf("invalid_input")
 	}
 	for _, r := range s {
 		if r <= 32 || r == 127 {
-			return Input{}, fmt.Errorf("invalid_input")
+			return Value{}, fmt.Errorf("invalid_input")
 		}
 	}
 	if strings.Contains(s, "%") {
-		return Input{}, fmt.Errorf("invalid_input")
+		return Value{}, fmt.Errorf("invalid_input")
 	}
-	if addr, err := netip.ParseAddr(s); err == nil {
-		return Input{Kind: "ip", Canonical: addr.Unmap().String()}, nil
+	if strings.ContainsAny(s, ".:") {
+		addr, err := netip.ParseAddr(s)
+		if err != nil {
+			return Value{}, fmt.Errorf("invalid_input")
+		}
+		canonical := s
+		// ParseAddr requires canonical decimal octets for plain IPv4.
+		// IPv6 may contain upper-case, expanded or IPv4-mapped forms.
+		if !addr.Is4() {
+			addr = addr.Unmap()
+			var buf [64]byte
+			encoded := addr.AppendTo(buf[:0])
+			if s != string(encoded) {
+				canonical = string(encoded)
+			}
+		}
+		return Value{Input: Input{Kind: "ip", Canonical: canonical}, Address: addr}, nil
 	}
 	digits := s
 	if len(digits) >= 2 && strings.EqualFold(digits[:2], "AS") {
 		digits = digits[2:]
 	}
 	if digits == "" {
-		return Input{}, fmt.Errorf("invalid_input")
+		return Value{}, fmt.Errorf("invalid_input")
 	}
 	for _, b := range []byte(digits) {
 		if b < '0' || b > '9' {
-			return Input{}, fmt.Errorf("invalid_input")
+			return Value{}, fmt.Errorf("invalid_input")
 		}
 	}
 	// Leading zeroes are accepted without turning an arbitrarily long zero
 	// prefix into an integer overflow. The total original input is bounded.
 	digits = strings.TrimLeft(digits, "0")
 	if digits == "" {
-		return Input{}, fmt.Errorf("invalid_input")
+		return Value{}, fmt.Errorf("invalid_input")
 	}
 	asn, err := strconv.ParseUint(digits, 10, 32)
 	if err != nil || !publicASN(asn) {
-		return Input{}, fmt.Errorf("invalid_input")
+		return Value{}, fmt.Errorf("invalid_input")
 	}
-	return Input{Kind: "asn", Canonical: "AS" + strconv.FormatUint(asn, 10)}, nil
+	canonical := s
+	if len(s) != 2+len(digits) || !strings.HasPrefix(s, "AS") {
+		canonical = "AS" + digits
+	}
+	return Value{Input: Input{Kind: "asn", Canonical: canonical}, ASN: uint32(asn)}, nil
 }
 
 func publicASN(asn uint64) bool {

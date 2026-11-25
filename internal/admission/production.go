@@ -33,6 +33,7 @@ type Capability struct {
 }
 type SourceStatistics struct {
 	ripeNameDigest                              *intelligence.RIPENetworkNameDigest
+	applePrefixHash                             [32]byte
 	mullvadProjection                           [32]byte
 	googleProjection                            [32]byte
 	googleIPv4                                  uint64
@@ -410,6 +411,9 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 		if ripeNamesSource(s) != (r.RIPENetworkProof != nil) || r.RIPENetworkProof != nil && (r.ProofKind != "embedded" || r.RIPENetworkProof.Validate(state.EvaluatedAt, r.PublishedAt, r.PayloadHash) != nil) {
 			return report, nil, errors.New("production RIPE inet6num proof invalid")
 		}
+		if appleRelaySource(s) != (r.AppleRelayProof != nil) || r.AppleRelayProof != nil && (r.ProofKind != "snapshot_metadata" || !r.ContentValidUntil.Equal(r.AppleRelayProof.ContentDeadline(s.MaxAge)) || r.AppleRelayProof.Validate(state.EvaluatedAt, r.PublishedAt, r.PayloadHash) != nil) {
+			return report, nil, intelligence.ErrAppleRelay
+		}
 		if mullvadSource(s) != (r.MullvadProof != nil) || r.MullvadProof != nil && (r.ProofKind != "snapshot_metadata" || r.MullvadProof.Validate(state.EvaluatedAt, r.PublishedAt, r.PayloadHash) != nil) {
 			return report, nil, errMullvad
 		}
@@ -513,6 +517,9 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 				return report, nil, errors.New("production evidence independence changed")
 			}
 			scan.stat.ripeNameDigest = scan.ripeNameDigest
+			if scan.appleSet != nil {
+				scan.stat.applePrefixHash = scan.appleSet.Hash()
+			}
 			if scan.mullvadDigest != nil {
 				_, scan.stat.mullvadProjection = scan.mullvadDigest.Sum()
 			}
@@ -534,6 +541,9 @@ func revalidateStoredSources(ctx context.Context, root string, catalog []Source,
 		if s.Parser.ID == "ipverse-asn-usage-json" && (stat.Kinds[intelligence.RecordUsage-1] != stat.Records ||
 			!stat.oldestASNRole.After(asnUsageObservedAfter(state.EvaluatedAt, s.MaxAge))) {
 			return report, nil, errors.New("ASN role projection differs from the intake serving window")
+		}
+		if p := v.Receipt.AppleRelayProof; p != nil && (uint64(p.After.Prefixes) != stat.Records || p.After.PrefixHash != stat.applePrefixHash) {
+			return report, nil, intelligence.ErrAppleRelay
 		}
 		if p := v.Receipt.MullvadProof; p != nil && (p.Hosts != stat.Records || p.Projection != stat.mullvadProjection) {
 			return report, nil, errMullvad

@@ -19,10 +19,10 @@ given IP has any observation depends on the included edition.
 | Anycast | Exact addresses of the IANA root DNS service identities |
 | Malware, botnet, command and control, abuse, scanning and spam | FFraud observations with individually mapped categories |
 | Fraud | Explicit phishing reports from TweetFeed, in the same community evidence family as FFraud |
-| Proxy, datacenter, Tor and VPN | FFraud typed records, Tor exit observations and X4B VPN prefixes where applicable |
+| Proxy, datacenter, Tor and VPN | FFraud typed records, Apple Private Relay egress prefixes, Tor exit observations and X4B VPN prefixes where applicable |
 | Hosting | Individual addresses in mature Microsoft Azure App Service allocations |
 
-The twenty-two-source catalog provides observed network prefixes, registration
+The twenty-three-source catalog provides observed network prefixes, registration
 countries, Google address-block ownership, RIPE IPv6 network names, selected
 subscriber ISP observations and origin ASNs. ISP outside the supported ranges, assignment
 mode and IPv4 directed-broadcast status display as unknown without an explicit
@@ -66,7 +66,9 @@ Conditional requests against Apple's identified representation agreed on its
 modification time, November 19 at 15:46:45 UTC. Immutable independent captures
 bracket the edition change. Seven prefixes appeared between the November 19
 and 20 captures. The November 20 witness matches the complete set in the
-original. The witnesses describe the address scope only. The publisher CSV
+original. The preceding distinct capture bounds the lifetime of its successor.
+The intake deadline for this edition is December 19 at 05:54:47 UTC.
+The witnesses describe the address scope only. The publisher CSV
 supplies the input. The project records its educational-use decision under
 Apple's terms and includes a global Apple credit.
 [November 19 witness](https://github.com/disposable/cloud-ip-ranges/commit/847236eaf3ec188ca51b06a5a77895a0c936bcc3) ·

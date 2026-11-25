@@ -13,6 +13,7 @@ import (
 // typed records. One family can be observed per source. Its final canonical
 // family is checked once all receipt payload aliases are known.
 type sourceRecordScan struct {
+	appleSet       intelligence.ApplePrefixSet
 	ripeNameDigest *intelligence.RIPENetworkNameDigest
 	mullvadDigest  *intelligence.MullvadRelayDigest
 	googleDigest   *intelligence.GoogleNetworkDigest
@@ -32,6 +33,9 @@ func newSourceRecordScan(s Source, clocks intelligence.SourceRecordClocks, now t
 	scan := &sourceRecordScan{source: s, clocks: clocks, now: now, stat: SourceStatistics{ID: clocks.ID, Signals: map[intelligence.Signal]bool{}}}
 	if ripeNamesSource(s) {
 		scan.ripeNameDigest = new(intelligence.RIPENetworkNameDigest)
+	}
+	if appleRelaySource(s) {
+		scan.appleSet = make(intelligence.ApplePrefixSet)
 	}
 	if mullvadSource(s) {
 		scan.mullvadDigest = new(intelligence.MullvadRelayDigest)
@@ -58,6 +62,11 @@ func (scan *sourceRecordScan) accept(record intelligence.NormalizedRecord) error
 	}
 	if scan.ripeNameDigest != nil {
 		if err := scan.ripeNameDigest.Add(record); err != nil {
+			return err
+		}
+	}
+	if scan.appleSet != nil {
+		if err := scan.appleSet.Add(record, v.PublishedAt, s.Weight); err != nil {
 			return err
 		}
 	}

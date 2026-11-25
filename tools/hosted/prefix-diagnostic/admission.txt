@@ -1,0 +1,77 @@
+package admission
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+	"vansail-ip-atlas/internal/acquire"
+	"vansail-ip-atlas/internal/intelligence"
+)
+
+func TestOriginalEditionAdmission(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	now := time.Now().UTC().Truncate(time.Second)
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal("workspace")
+	}
+	file, err := os.Open(filepath.Join(root, "configs/sources.yaml"))
+	if err != nil {
+		t.Fatal("catalog")
+	}
+	all, err := DecodeCatalog(file)
+	file.Close()
+	if err != nil {
+		t.Fatal("catalog")
+	}
+	var source Source
+	for _, s := range all {
+		if s.ID == intelligence.AppleRelaySourceID {
+			source = s
+		}
+	}
+	engine, err := New(root)
+	if err != nil {
+		t.Fatal("source engine")
+	}
+	defer engine.Close()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "original")
+	current, parent, currentErr := engine.appleWitness(ctx, dir, "current", "master")
+	t.Logf("current_evidence: passed=%t prefixes=%d", currentErr == nil, current.Prefixes)
+	if currentErr == nil {
+		earlier, _, er := engine.appleWitness(ctx, dir, "previous", parent)
+		t.Logf("preceding_evidence: passed=%t prefixes=%d changed=%t", er == nil, earlier.Prefixes, er == nil && earlier.PrefixHash != current.PrefixHash)
+	}
+	v, err := engine.fetch.Fetch(ctx, acquire.AppleRelayURL, path, source.MaxCompressedBytes)
+	t.Logf("original_download: passed=%t bytes=%d", err == nil, v.Bytes)
+	if err == nil {
+		original, err := os.Open(path)
+		if err != nil {
+			t.Fatal("local original")
+		}
+		prefixes, _, err := readApplePrefixes(ctx, original, false, intelligence.AppleRelayMaxPrefixes, nil)
+		original.Close()
+		t.Logf("original_projection: passed=%t prefix_count=%d witness_equal=%t", err == nil, len(prefixes), err == nil && currentErr == nil && prefixes.Hash() == current.PrefixHash)
+		verifier := engine.fetch.(*acquire.Fetcher)
+		_, clockErr := verifier.VerifyAppleRelayClock(ctx, v.ETag, v.Bytes)
+		t.Logf("operator_clock: passed=%t", clockErr == nil)
+	}
+	binding := [32]byte{1}
+	res, err := engine.IngestPartitioned(ctx, source, now, binding)
+	if err != nil || res.Snapshot == nil {
+		t.Fatal("original_admission: failed")
+	}
+	plan, err := intelligence.ReconcilePartitioned(ctx, root, intelligence.BuildState{}, []intelligence.SourcePolicy{res.Policy}, []intelligence.SourceSnapshot{*res.Snapshot}, now, binding)
+	if err != nil {
+		t.Fatal("original_reconciliation: failed")
+	}
+	_, stats, err := RevalidateStoredSources(ctx, root, []Source{source}, plan.State, now, binding)
+	if err != nil || len(stats) != 1 {
+		t.Fatal("original_revalidation: failed")
+	}
+	t.Logf("original_admission: passed; revalidated_prefixes=%d", stats[0].Records)
+}

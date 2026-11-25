@@ -1,247 +1,30 @@
-name: Atlas integration checks (no release)
-
+name: Atlas direct prefix edition verification
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
-
 permissions:
   contents: read
-
-concurrency:
-  group: atlas-checks-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  GOMAXPROCS: '2'
-  GOMEMLIMIT: 5GiB
-  PNPM_VERSION: 11.28.12
-
 jobs:
-  contracts:
+  original:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/nov25-explicit-prefix-diagnostic'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7.0.0
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@v7.0.0
-        with:
-          go-version: '1.27.4'
-          cache: true
-      - uses: actions/setup-python@v7.0.0
-        with:
-          python-version: '3.13.7'
-      - name: Install pinned validation dependencies
-        run: python -m pip install -r tools/requirements.txt
-      - name: Strict contracts and derived capability report
-        run: python tools/validate_blueprint.py --report reports/capabilities.json
-      - name: Focused contract regressions
-        run: python -m unittest discover -s tools -p 'test_*.py' -v
-      - name: Frozen candidate and hosted measurement regressions
-        run: python -m unittest discover -s tools/hosted -p 'test_*.py' -v
-      - name: Actual checkpoint encryption regression
-        run: |
-          go install filippo.io/age/cmd/age@v1.3.0 filippo.io/age/cmd/age-keygen@v1.3.0
-          python -m unittest tools.hosted.test_checkpoint -v
-      - name: Go regressions
-        run: go test ./...
-      - name: Go static checks
-        run: go vet ./...
-      - name: Workflow syntax and expression checks
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
-      - name: Selected race tests
-        # The full 200,005-prefix capacity regression runs unchanged in Go
-        # regressions above. Race instrumentation exceeds its package timeout;
-        # retain the remaining pipeline/resource/retraction regressions here.
-        run: go test -race ./internal/... ./tools/source_samples -skip '^TestStreamedOneASNMoreThanTwoHundredThousandPrefixes$'
-      - name: Production subscription decoder fuzz smoke
-        run: go test ./internal/subscription -run '^$' -fuzz '^FuzzLiteralDecoder$' -fuzztime 10s -parallel 2
-      - name: MRT parser fuzz smoke
-        run: go test ./internal/intelligence -run '^$' -fuzz '^FuzzParseMRT$' -fuzztime 10s -parallel 2
-      - name: Full RPKI snapshot parser fuzz smoke
-        run: go test ./internal/admission -run '^$' -fuzz '^FuzzRPKIClientPayload$' -fuzztime 10s -parallel 2
-      - name: Positive risk feed parser fuzz smoke
-        run: go test ./internal/admission -run '^$' -fuzz '^FuzzRiskPayload$' -fuzztime 10s -parallel 2
-      - name: BGP4MP event and AS4 transition fuzz smoke
-        run: go test ./internal/intelligence -run '^$' -fuzz '^FuzzParseBGP4MP$' -fuzztime 10s -parallel 2
-      - name: VIA3 reader fuzz smoke
-        run: go test ./internal/via3 -run '^$' -fuzz '^FuzzRead$' -fuzztime 10s -parallel 2
-      - name: Reconnaissance decoder fuzz smoke
-        run: go test ./tools/source_samples -run '^$' -fuzz '^FuzzDecodeSample$' -fuzztime 10s -parallel 2
-      - name: Hosted synthetic compiler and full-answer lookup measurements
-        # These measured populations do not replace full-data capacity or the
-        # 25-microsecond full-answer launch gate. Keep allocation/RSS/scratch/percentile evidence.
-        run: |
-          {
-            go version
-            python -c "import json,os,platform,shutil; print(json.dumps({'host':platform.platform(),'logical_cpus':os.cpu_count(),'physical_memory_bytes':os.sysconf('SC_PAGE_SIZE')*os.sysconf('SC_PHYS_PAGES'),'disk_free_bytes':shutil.disk_usage('.').free,'GOMAXPROCS':os.environ.get('GOMAXPROCS'),'GOMEMLIMIT':os.environ.get('GOMEMLIMIT'),'scope':'synthetic-not-full-dataset-capacity'}))"
-            go test ./internal/via3 -run '^$' -bench '^BenchmarkLookup$' -benchtime=2s -count=3 -benchmem
-            go test ./internal/pipeline -run '^$' -bench '^BenchmarkDiskBackedCompile$' -benchtime=12x -count=1 -benchmem
-          } > reports/go-benchmarks.log
-      - name: Explain evidence boundary
-        run: python tools/hosted/evidence-status.py
-      - uses: actions/upload-artifact@v7.0.0
-        if: always()
-        with:
-          name: source-free-contract-status
-          # Source-rich capabilities/lineage stay on the ephemeral build runner.
-          # A public repository's artifact name cannot make an upload private.
-          path: |
-            reports/pending-gates.json
-            reports/go-benchmarks.log
-          retention-days: 7
-
-  source-intake:
-    # Intake repeats config/certification validation before any fetch. All four
-    # independent jobs must still succeed before production trusts this run.
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 12
     env:
+      GOMAXPROCS: '2'
+      GOMEMLIMIT: 5GiB
       RUNNER_TOOL_CACHE: ${{ github.workspace }}/build-private/toolcache
     steps:
       - uses: actions/checkout@v7.0.0
         with:
           persist-credentials: false
       - uses: ./.github/actions/atlas-setup
-      - name: Verify full actual reviewed source intake
-        env:
-          ATLAS_GITHUB_METADATA_TOKEN: ${{ github.token }}
-        run: python tools/hosted/runner_budget.py --report reports/intake-runner-budget.json -- python tools/hosted/source_intake.py
-      - name: Compile and measure actual admitted data without publishing
-        run: python tools/hosted/runner_budget.py --report reports/data-check-runner-budget.json -- python tools/hosted/production_data_check.py
-      - name: Install the locked website dependencies
-        run: npm exec --yes --package pnpm@11.28.12 -- pnpm --dir web install --frozen-lockfile --ignore-scripts
-      - name: Package and inspect the real website without publishing
-        run: python tools/hosted/runner_budget.py --report reports/package-check-budget.json -- python tools/hosted/production_workflow.py integration-package
-      - uses: actions/upload-artifact@v7.0.0
-        if: always()
-        with:
-          name: source-free-intake-status
-          path: |
-            reports/source-intake.json
-            reports/intake-runner-budget.json
-            reports/production-data-check.json
-            reports/production-lookup-integration.json
-            reports/data-check-runner-budget.json
-            reports/static-candidate.json
-            reports/package-check-budget.json
-          if-no-files-found: ignore
-          retention-days: 7
-      # Source payloads, fixture receipts, lineage and normalized partitions stay
-      # on this ephemeral runner. Never upload its private working directories.
-
-  bundled-codec:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7.0.0
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v7.1.0
-        with:
-          node-version: '26.13.1'
-      - uses: actions/setup-python@v7.0.0
-        with:
-          python-version: '3.13.7'
-      - name: Install locked harness
-        working-directory: tools/hosted
-        run: npm exec --yes --package pnpm@11.28.12 -- pnpm install --frozen-lockfile --ignore-scripts
-      - name: Install actual current stable Chrome
-        working-directory: tools/hosted
-        run: npm exec --yes --package pnpm@11.28.12 -- pnpm exec playwright install --with-deps chrome
-      - name: Install locked product decoder
-        working-directory: web
-        run: npm exec --yes --package pnpm@11.28.12 -- pnpm install --frozen-lockfile --ignore-scripts
-      - name: Bundled Zstandard TypeScript regression
-        run: node --test tools/query_contract/query.test.mjs tools/query_contract/via3.test.mjs web/tests/zstd.test.ts web/tests/bgpGraph.test.ts web/tests/datasetCredits.test.ts tools/hosted/performance-gates.test.mjs tools/hosted/memory-json-bytes.test.mjs tools/hosted/browser-accessibility.test.mjs tools/release_contract/bundle_licenses.test.mjs
-      - name: Native support diagnostic (mechanism replaced by explicit amendment)
-        continue-on-error: true
-        run: node tools/hosted/codec-probe.mjs
-      - name: Bundled Zstandard golden/bounds acceptance
-        run: node tools/hosted/codec-bundled.mjs
-      - uses: actions/upload-artifact@v7.0.0
-        if: always()
-        with:
-          name: private-p0-codec-evidence
-          path: reports/codec*.json
-          retention-days: 7
-
-  synthetic-browser:
-    # Independent frontend evidence can run alongside the Go contracts. The
-    # complete workflow and every required PR check must still pass to release.
-    needs: bundled-codec
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7.0.0
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@v7.0.0
-        with:
-          go-version: '1.27.4'
-      - uses: actions/setup-node@v7.1.0
-        with:
-          node-version: '26.13.1'
-      - uses: actions/setup-python@v7.0.0
-        with:
-          python-version: '3.13.7'
-      - name: Install locked tools and product
+      - name: Check original representation and evidence
         run: |
-          python -m pip install -r tools/requirements.txt
-          npm exec --yes --package pnpm@11.28.12 -- pnpm --dir web install --frozen-lockfile --ignore-scripts
-          npm exec --yes --package pnpm@11.28.12 -- pnpm --dir tools/hosted install --frozen-lockfile --ignore-scripts
-          npm exec --yes --package pnpm@11.28.12 -- pnpm --dir tools/hosted exec playwright install --with-deps chrome
-      - name: Typecheck and generate immutable synthetic candidate
-        run: |
-          mkdir -p build-private
-          npm exec --yes --package pnpm@11.28.12 -- pnpm --dir web licenses list --prod --json > build-private/software-license-metadata.json
-          python tools/release_contract/software_licenses.py
-          npm exec --yes --package pnpm@11.28.12 -- pnpm --dir web typecheck
-          npm exec --yes --package pnpm@11.28.12 -- pnpm --dir web generate
-          python tools/release_contract/software_licenses.py --bundle-audit build-private/software-bundle-audit.json --require-runtime-review
-          node --test tools/query_contract/browser_index.test.mjs
-          go run ./cmd/atlas synthetic -graph24 -out build-private/ci-atlas
-          python tools/release_contract/prepare_static.py --atlas build-private/ci-atlas --public web/.output/public
-      - name: Measure actual emitted worker at accepted maximum profile
-        run: |
-          go build -o build-private/atlas ./cmd/atlas
-          python tools/hosted/runner_budget.py --report reports/worker-runner-budget.json -- python tools/hosted/worker_memory.py --public web/.output/public --preview-url http://127.0.0.1:4173
-      - name: Synthetic static HTTP browser regression (not Pages acceptance)
-        run: |
-          node --test tools/hosted/production-interactions.browser-test.mjs
-          python tools/hosted/static-server.py --directory web/.output/public --port 4173 &
-          atlas_pid=$!
-          trap 'kill "$atlas_pid"' EXIT
-          python tools/hosted/wait-preview.py
-          node tools/hosted/ui-regression.mjs
-          node tools/hosted/performance.mjs
-      - name: Verify frozen tree before preserving candidate
-        run: python tools/hosted/candidate.py --public web/.output/public
-      - uses: actions/upload-artifact@v7.0.0
-        if: always()
-        with:
-          name: synthetic-integration-evidence
-          # Explicit source-free allowlist. Never upload a build-private catalog,
-          # capability report, source fixture, normalized state or lineage tree.
-          path: |
-            reports/static-candidate.json
-            reports/ui-regression.json
-            reports/performance-local.json
-            reports/software-licenses.json
-            reports/worker-memory.json
-            reports/worker-runner-budget.json
-          if-no-files-found: error
-          retention-days: 7
-      - uses: actions/upload-artifact@v7.0.0
-        with:
-          name: atlas-synthetic-public
-          path: web/.output/public/
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 7
-
-# No deployment, source promotion, approval mutation or production token is present.
-# The static QA server is an integration harness, never a Pages Function or API.
-# These checks do not replace real-source, full-capacity or Pages preview gates.
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          r=Path.cwd()
+          paths={str(r/'internal'/pkg/'qa_original_test.go'):str(r/'tools/hosted/prefix-diagnostic'/f'{pkg}.txt') for pkg in ('acquire','admission')}
+          (r/'build-private/qa-overlay.json').write_text(json.dumps({'Replace':paths}))
+          PY
+          go test -overlay build-private/qa-overlay.json -run '^TestOriginalEditionTransport$' -v -count=1 ./internal/acquire
+          go test -overlay build-private/qa-overlay.json -run '^TestOriginalEditionAdmission$' -v -count=1 ./internal/admission

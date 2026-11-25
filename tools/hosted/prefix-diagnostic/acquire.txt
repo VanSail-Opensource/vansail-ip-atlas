@@ -1,0 +1,59 @@
+package acquire
+
+import (
+	"context"
+	"crypto/sha256"
+	"fmt"
+	"io"
+	"net/http"
+	"testing"
+	"time"
+)
+
+func TestOriginalEditionTransport(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	f := New()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, AppleRelayURL, nil)
+	if err != nil {
+		t.Fatal("request construction")
+	}
+	request.Header.Set("Accept-Encoding", "identity")
+	request.Header.Set("Cache-Control", "no-cache")
+	request.Header.Set("User-Agent", fetchUserAgent)
+	response, err := f.client.Do(request)
+	if err != nil {
+		t.Log("original_action: connection_unavailable")
+		return
+	}
+	tag := response.Header.Get("ETag")
+	n, bodyErr := io.Copy(sha256.New(), io.LimitReader(response.Body, (32<<20)+1))
+	response.Body.Close()
+	clock, ok := appleRelayTagCandidate(tag, n)
+	t.Logf("original_action: status=%d complete=%t bytes=%d declared_bytes=%d tag_matches_body_length=%t clean_representation=%t", response.StatusCode, bodyErr == nil, n, response.ContentLength, ok, appleRelayRepresentation(response, tag))
+	if !ok {
+		return
+	}
+	checks := []struct {
+		field string
+		date  time.Time
+		code  int
+	}{{"If-Modified-Since", clock, 304}, {"If-Unmodified-Since", clock.Add(-time.Second), 412}, {"If-Unmodified-Since", clock, 200}}
+	for i, c := range checks {
+		for _, method := range []string{"HEAD", "GET"} {
+			id := fmt.Sprintf("condition_%d_%s", i, method)
+			q, _ := http.NewRequestWithContext(ctx, method, AppleRelayURL, nil)
+			q.Header.Set(c.field, c.date.Format(http.TimeFormat))
+			q.Header.Set("User-Agent", fetchUserAgent)
+			q.Header.Set("Cache-Control", "no-cache")
+			q.Header.Set("Accept-Encoding", "identity")
+			r, e := f.client.Do(q)
+			if e != nil {
+				t.Logf("%s: connection_unavailable", id)
+				continue
+			}
+			r.Body.Close()
+			t.Logf("%s: status=%d expected_status=%t tag_matches=%t tag_absent=%t declared_bytes=%d", id, r.StatusCode, r.StatusCode == c.code, appleRelayRepresentation(r, tag), len(r.Header.Values("ETag")) == 0, r.ContentLength)
+		}
+	}
+}

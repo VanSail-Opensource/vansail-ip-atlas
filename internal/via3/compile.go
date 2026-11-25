@@ -2,12 +2,10 @@ package via3
 
 import (
 	"context"
-	"encoding/hex"
 	"golang.org/x/text/unicode/norm"
 	"math"
 	"net/netip"
 	"sort"
-	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -127,41 +125,21 @@ type CompileInput struct {
 	ProductionGate    func(context.Context) error
 }
 
-func recordPartitionValid(partition string, r PublicRecord) bool {
-	if partition == "all" {
+func (p partitionBounds) contains(r PublicRecord) bool {
+	if p.all {
 		return true
 	}
 	isASN := r.Kind == 8 || r.Kind >= 11
-	if strings.HasPrefix(partition, "asn:") {
-		if !isASN {
-			return false
-		}
-		p := strings.Split(partition, ":")
-		first, _ := strconv.ParseUint(p[1], 10, 32)
-		last, _ := strconv.ParseUint(p[2], 10, 32)
-		return uint64(r.ASN) >= first && uint64(r.ASN) <= last
+	if !p.prefix.IsValid() {
+		return isASN && r.ASN >= p.first && r.ASN <= p.last
 	}
-	if isASN {
+	if isASN || r.Prefix.Addr().BitLen() != p.prefix.Addr().BitLen() {
 		return false
 	}
-	p := strings.Split(partition[2:], "/")
-	raw, _ := hex.DecodeString(p[0])
-	length, _ := strconv.Atoi(p[1])
-	var address netip.Addr
-	if partition[0] == '4' {
-		var b [4]byte
-		copy(b[:], raw[12:])
-		address = netip.AddrFrom4(b)
-	} else {
-		var b [16]byte
-		copy(b[:], raw)
-		address = netip.AddrFrom16(b)
-	}
-	scope := netip.PrefixFrom(address, length)
 	if r.Inherited {
-		return r.Prefix.Addr().BitLen() == address.BitLen() && r.Prefix.Bits() <= length && r.Prefix.Contains(address)
+		return r.Prefix.Bits() <= p.prefix.Bits() && r.Prefix.Contains(p.prefix.Addr())
 	}
-	return r.Prefix.Addr().BitLen() == address.BitLen() && r.Prefix.Bits() >= length && scope.Contains(r.Prefix.Addr())
+	return r.Prefix.Bits() >= p.prefix.Bits() && p.prefix.Contains(r.Prefix.Addr())
 }
 
 func SanitizeLabel(input string) string {
@@ -256,10 +234,24 @@ func (encoder *PublicEncoder) CompilePartition(ctx context.Context, input Partit
 	if err := encoder.checkOpen(); err != nil {
 		return out, err
 	}
-	if !validPartition(input.Partition) || len(input.Records) > 32768 {
+	bounds, valid := parsePartition(input.Partition)
+	if !valid || len(input.Records) > 32768 {
 		return out, fail("partition_budget")
 	}
-	groups := make(map[uint16][]PublicRecord)
+	// Each record is copied into one sortable group. Reserve the exact
+	// number of slots so growing slices cannot repeatedly copy full records.
+	var groups [14][]PublicRecord
+	var counts [len(groups)]int
+	for i := range input.Records {
+		if kind := input.Records[i].Kind; kind < uint16(len(groups)) {
+			counts[kind]++
+		}
+	}
+	for kind, n := range counts {
+		if n > 0 {
+			groups[kind] = make([]PublicRecord, 0, n)
+		}
+	}
 	labels := make(map[string]bool)
 	estimated := 0
 	label := func(text string) {
@@ -299,7 +291,7 @@ func (encoder *PublicEncoder) CompilePartition(ctx context.Context, input Partit
 				return out, fail("record")
 			}
 		}
-		if !recordPartitionValid(input.Partition, r) {
+		if !bounds.contains(r) {
 			return out, fail("record")
 		}
 		switch r.Kind {

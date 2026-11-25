@@ -69,6 +69,16 @@ time observations. Their combined decoded size was 2,927,510,159 bytes.
 [Primary export](https://ftp.ripe.net/ripe/dbase/split/ripe.db.inet6num.gz) ·
 [UTF-8 export](https://ftp.ripe.net/ripe/dbase/split/ripe.db.inet6num.utf8.gz)
 
+The later RIPE NRTMv4 snapshot at version 946427 provided an independent
+cross-check. Its compressed bytes matched the signed SHA-256
+`fec4f2515c71514b47457f1040ca95468ece2ab45c48d1d2e1d12989445c6079`.
+Applying the same adapter to its IPv6 objects reproduced 1,584,250
+prefixes with identical names or unknowns and modification times. Three
+names and their timestamps changed. Another 68 prefixes from the earlier
+split export were absent in the later snapshot.
+[RIPE NRTMv4 documentation and public-key source](https://docs.db.ripe.net/RIPE-Database-Mirror/Near-Real-Time-Mirroring-v4/) ·
+[Snapshot verification](https://www.rfc-editor.org/rfc/rfc10063.html#section-7)
+
 The publisher permits substantial reuse with its permission and limits
 unpermitted reuse to an insubstantial part. The catalog records the project
 owner's educational-use decision. No separate permission for substantial

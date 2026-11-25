@@ -27,10 +27,16 @@ already represent these facts. No source metadata is added to those records.
 Internal normalized kind 10 `NetworkOrganization` carries an address prefix and
 its verified owner. The Google-owned address inventory supplies one such
 mapping. The public network row uses the existing organization slot. Its
-matched prefix can come from either an ownership boundary or an observed route.
-Routing and RPKI use the original announced prefix, including when the ownership
-record covers a more specific range. Equal-scope conflicting owners yield an
-unknown organization. The ASN identity and subscriber ISP are separate fields.
+matched prefix follows the most specific registered name, ownership or observed
+route boundary. Routing and RPKI use the original announced prefix. Equal-scope
+conflicting owners yield an unknown organization.
+
+Internal normalized kind 11 `NetworkName` carries a registered IPv6 prefix,
+its published block name and its private registry modification time. An explicit
+unknown at a child registration masks the enclosing name. Each name and owner
+follows its own prefix boundaries, including where a routed origin crosses
+both. The public network row already has separate name, organization and ISP
+fields. The ASN has its own independently observed identity.
 
 CSV normalization maps `handle` to `as_name`, `description` to `organization`,
 and `country-code` to `asn_country`. The latter identifies the ASN registration

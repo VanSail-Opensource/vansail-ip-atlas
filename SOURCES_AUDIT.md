@@ -200,6 +200,14 @@ archive URLs and clocks remain sealed privately and are preserved by replay.
 
 ## November 22 phishing observations
 
+On November 25 the publisher's CDN and origin served different weekly editions
+during updates. Intake can recover the complete CSV and its manifest from the
+same immutable publisher commit. Replays at 07:28:37, 07:55:47 and 08:05:00 UTC
+selected editions published at 07:00:40, 07:30:44 and 08:00:43 respectively.
+The three manifests accounted for 1,816, 1,822 and 1,829 complete input rows.
+Each eligible report keeps its original observation time.
+[Publisher's weekly history](https://github.com/0xDanielLopez/TweetFeed/commits/master/week.csv)
+
 TweetFeed's November 22 weekly CSV contained 2,406 community reports. Of the
 254 IP rows, 40 explicitly tagged phishing and identified 37 distinct public
 addresses. Their UTC report times ranged from November 16 at 02:27:39 to

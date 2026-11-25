@@ -27,6 +27,21 @@ def browser_report():
 
 
 class AcceptanceTests(unittest.TestCase):
+    def test_cold_payload_recomputes_complete_response_population(self):
+        report = browser_report()
+        responses = [{"path": path, "body_bytes": 10} for path in
+                     ("/_atlas/current.json", "/dataset-credits.json", "/_atlas/credits/" + "a" * 64 + ".json")]
+        report["cold_queries"] = [{"responses": copy.deepcopy(responses), "atlas_body_bytes": 30} for _ in range(100)]
+        self.assertEqual(browser_gates(report)["cold_payload"], "passed")
+        report["cold_queries"][0]["responses"][0]["body_bytes"] += 1
+        self.assertEqual(browser_gates(report)["cold_payload"], "unmeasured")
+        report["cold_queries"][0] = {"responses": responses[:-1], "atlas_body_bytes": 20}
+        self.assertEqual(browser_gates(report)["cold_payload"], "unmeasured")
+        for row in report["cold_queries"]:
+            row["responses"] = [*responses, {"path": "/_atlas/objects/" + "b" * 64 + ".via3", "body_bytes": 400 * 1024 - 30}]
+            row["atlas_body_bytes"] = 400 * 1024
+        self.assertEqual(browser_gates(report)["cold_payload"], "failed")
+
     def test_go_allocation_gate_requires_actual_complete_process_population(self):
         row={'compile_exit_code':0,'allocation_scope':'all-atlas-Go-processes-in-scenario',
             'go_processes':[],'go_invocations':[],'allocation_count':0,'allocated_bytes':0,'allocation_process_count':0}

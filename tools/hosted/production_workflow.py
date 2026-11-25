@@ -448,7 +448,7 @@ def main():
     try:
         if args.operation=='context': context(args.kind,args.upstream_run_id)
         elif args.operation=='intake':
-            update_context('intake');run(['python','tools/hosted/source_intake.py'])
+            update_context('intake');run(['python','tools/hosted/source_intake.py','--refresh'])
         elif args.operation=='benchmark-case':
             if args.scenario is None or args.sample is None: raise ContractError('benchmark case identity required')
             benchmark_case(args.scenario,args.sample)

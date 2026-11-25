@@ -1,5 +1,15 @@
 # Source Admission and Freshness Policy
 
+Release integration attempts and requires every active source. A protected
+production refresh also attempts the full catalog. If an upstream asset,
+index or publication record is unavailable, unbound or past its deadline,
+the refresh can checkpoint the surviving verified sources. Each omitted
+input must have an explicit acquisition decision and be absent from the
+new normalized state. The status artifact reports the counts and reasons.
+The compiler independently authenticates that state, rechecks all required
+capabilities and rebuilds the database and its credits. Every succeeding
+build, preview and promotion gate applies to the resulting candidate.
+
 ## Current release scope `release-scope-v6` - 2026-11-15
 
 The approved model is `via-observed-risk-v1`: positive-evidence observed risk

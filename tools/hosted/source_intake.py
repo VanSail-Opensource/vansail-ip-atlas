@@ -13,8 +13,34 @@ sys.path.insert(0,str(ROOT))
 from tools.atlas_contracts.config import load_configs
 from tools.release_contract.contracts import canonical_bytes, ContractError
 
-SAFE_REASONS=frozenset({'asset_unavailable','schema_or_parser_failed','publication_not_payload_bound',
+SAFE_REASONS=frozenset({'asset_unavailable','discovery_index_unavailable','schema_or_parser_failed','publication_not_payload_bound',
     'reviewed_fixture_certification_required','publication_metadata_unavailable','publication_expired','content_expired'})
+
+REFRESH_OMISSIONS = frozenset({'asset_unavailable', 'discovery_index_unavailable', 'publication_metadata_unavailable',
+                              'publication_expired', 'content_expired', 'publication_not_payload_bound'})
+
+
+def verified_refresh_population(private, state, expected):
+    """Check every omitted active input was attempted and has no surviving rows."""
+    if not isinstance(state, dict) or not isinstance(state.get('Sources'), list):
+        return False
+    decisions = {row['ID']: row for row in private['IntakeDecisions']}
+    reconciled = {row['ID']: row for row in private['Reconciliation']}
+    if (len(decisions) != len(private['IntakeDecisions']) or len(reconciled) != len(private['Reconciliation'])
+            or not expected.issubset(decisions) or not expected.issubset(reconciled)
+            or state.get('Version') != 2 or state.get('EvaluatedAt') != private['EvaluatedAt']):
+        return False
+    surviving = {row['ID'] for row in state['Sources']}
+    current = {key for key, row in reconciled.items() if row['State'] == 'current'}
+    if (not surviving or surviving != current or not surviving.issubset(expected)
+            or type(private['CurrentCount']) is not int or len(surviving) != len(state['Sources'])
+            or len(surviving) != private['CurrentCount']):
+        return False
+    return (all(decisions[key]['State'] == 'current' for key in surviving)
+            and all(decisions[key]['State'] != 'current' and decisions[key]['Reason'] in REFRESH_OMISSIONS
+                    and reconciled[key]['State'] == 'missing' and reconciled[key]['Reason'] == 'payload_missing'
+                    for key in expected - surviving))
+
 
 def aggregate(private, expected, clock, catalog_count):
     # Emit controlled aggregate categories only. Never copy a source identity,
@@ -35,6 +61,7 @@ def aggregate(private, expected, clock, catalog_count):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--report',type=Path,default=ROOT/'reports/source-intake.json')
+    parser.add_argument('--refresh', action='store_true', help='Checkpoint verified surviving sources for production qualification')
     args=parser.parse_args()
     configs=load_configs()
     expected={source['id'] for source in configs['sources']['sources'] if source['admission']=='active'}
@@ -48,13 +75,20 @@ def main():
     private=json.loads((ROOT/'.atlas-private/intake-report-v1.json').read_text())
     # A successful process and admission labels do not prove current intake.
     document=aggregate(private,expected,clock,len(configs['sources']['sources']))
-    document.update(normalized_state_sha256=sha256((ROOT/'.atlas-private/state-v1.json').read_bytes()).hexdigest(),
+    state_bytes = (ROOT/'.atlas-private/state-v1.json').read_bytes()
+    document.update(normalized_state_sha256=sha256(state_bytes).hexdigest(),
         source_catalog_sha256=sha256((ROOT/'configs/sources.yaml').read_bytes()).hexdigest())
     args.report.parent.mkdir(parents=True,exist_ok=True)
     args.report.write_bytes(canonical_bytes(document))
     if not document['all_active_current']:
         print('Actual intake aggregate: '+json.dumps(document['blocked_reason_counts'],sort_keys=True),file=sys.stderr)
-        raise ContractError('actual intake did not retain every reviewed active source')
+        if not args.refresh:
+            raise ContractError('actual intake did not retain the required source population')
+    if args.refresh:
+        if not verified_refresh_population(private, json.loads(state_bytes), expected):
+            raise ContractError('refresh state does not match the verified source population')
+        print(f"Verified refresh retained {document['current_sources']} of {len(expected)} reviewed inputs")
+        return
     print(f"Actual full-payload intake passed: {document['current_sources']} reviewed inputs; production acceptance remains separate")
 
 if __name__=='__main__':

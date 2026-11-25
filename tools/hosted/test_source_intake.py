@@ -1,6 +1,6 @@
 import json
 import unittest
-from tools.hosted.source_intake import aggregate
+from tools.hosted.source_intake import aggregate, verified_refresh_population
 from tools.release_contract.contracts import ContractError
 
 class SourceIntakeAggregateTests(unittest.TestCase):
@@ -23,3 +23,20 @@ class SourceIntakeAggregateTests(unittest.TestCase):
         self.assertFalse(aggregate(private,{'private-source-a','private-source-b'},1794700800,2)['all_active_current'])
         for clock,count in ((1794700801,2),(1794700800,3)):
             with self.assertRaises(ContractError):aggregate(private,{'private-source-a','private-source-b'},clock,count)
+
+    def test_refresh_can_checkpoint_only_reconciled_current_sources_after_a_publisher_outage(self):
+        expected = {'private-source-a', 'private-source-b'}
+        private = self.fixture()
+        private['IntakeDecisions'][1].update(State='stale', Reason='publication_expired')
+        private['Reconciliation'][1].update(State='missing', Reason='payload_missing')
+        state = {'Version': 2, 'EvaluatedAt': private['EvaluatedAt'], 'Sources': [{'ID': 'private-source-a'}]}
+        self.assertTrue(verified_refresh_population(private, state, expected))
+        self.assertFalse(aggregate(private, expected, 1794700800, 2)['all_active_current'])
+        self.assertFalse(verified_refresh_population(private, dict(state, EvaluatedAt='changed'), expected))
+        for sources in ([], state['Sources'] * 2, [{'ID': 'private-source-b'}], [{'ID': 'outside'}]):
+            self.assertFalse(verified_refresh_population(private, dict(state, Sources=sources), expected))
+        for key in ('IntakeDecisions', 'Reconciliation'):
+            for rows in (private[key][:1], private[key] + private[key][:1]):
+                self.assertFalse(verified_refresh_population(dict(private, **{key: rows}), state, expected))
+        private['IntakeDecisions'][1].update(Reason='reviewed_fixture_certification_required')
+        self.assertFalse(verified_refresh_population(private, state, expected))

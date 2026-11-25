@@ -663,22 +663,38 @@ func openRunBound(path string, limit int64, binding *compiledRunBinding) (*runRe
 	}
 	return run, nil
 }
-func (r *runReader) next() error {
+func (r *runReader) readPayload() ([]byte, error) {
+	if r.file != nil && r.file.compressed != nil {
+		if frame := r.file.compressed.takeFrame(r.limit); frame != nil {
+			return frame, nil
+		}
+	}
 	var head [4]byte
 	if _, err := io.ReadFull(r.reader, head[:]); err != nil {
+		return nil, err
+	}
+	n := int64(binary.LittleEndian.Uint32(head[:]))
+	if n <= 0 || n > r.limit+int64(len(sparseRunMarker)) {
+		return nil, errors.New("private sort frame exceeds limit")
+	}
+	data := make([]byte, n)
+	if _, err := io.ReadFull(r.reader, data); err != nil {
+		if err == io.EOF {
+			err = io.ErrUnexpectedEOF
+		}
+		return nil, err
+	}
+	return data, nil
+}
+
+func (r *runReader) next() error {
+	data, err := r.readPayload()
+	if err != nil {
 		if err == io.EOF && r.verifyEOF != nil {
 			if verifyErr := r.verifyEOF(); verifyErr != nil {
 				return verifyErr
 			}
 		}
-		return err
-	}
-	n := int64(binary.LittleEndian.Uint32(head[:]))
-	if n <= 0 || n > r.limit+int64(len(sparseRunMarker)) {
-		return errors.New("private sort frame exceeds limit")
-	}
-	data := make([]byte, n)
-	if _, err := io.ReadFull(r.reader, data); err != nil {
 		return err
 	}
 	decode := decodeRunPayload

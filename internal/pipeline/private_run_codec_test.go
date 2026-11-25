@@ -34,6 +34,68 @@ func compressedRunFixture(t *testing.T, data []byte) ([]byte, uint64) {
 	return out.Bytes(), c.used
 }
 
+func TestPrivateRunFramesStayImmutableAcrossSegments(t *testing.T) {
+	payloads := [][]byte{
+		[]byte("first"),
+		[]byte("second"),
+		bytes.Repeat([]byte("x"), privateRunBlockBytes-32),
+		bytes.Repeat([]byte("y"), privateRunBlockBytes),
+		[]byte("last"),
+	}
+	var wire bytes.Buffer
+	for _, data := range payloads {
+		if err := binary.Write(&wire, binary.LittleEndian, uint32(len(data))); err != nil {
+			t.Fatal(err)
+		}
+		wire.Write(data)
+	}
+	compressed, _ := compressedRunFixture(t, wire.Bytes())
+	path := filepath.Join(t.TempDir(), "run")
+	if err := os.WriteFile(path, compressed, 0600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := openRun(path, privateRunBlockBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.file.Close()
+	var read [][]byte
+	for range payloads {
+		frame, err := r.readPayload()
+		if err != nil {
+			t.Fatal(err)
+		}
+		read = append(read, frame)
+	}
+	if _, err = r.readPayload(); err != io.EOF {
+		t.Fatal("missing verified EOF", err)
+	}
+	for i := range payloads {
+		if !bytes.Equal(read[i], payloads[i]) || cap(read[i]) != len(read[i]) {
+			t.Fatal("later segment overwrote an earlier frame or left its capacity open", i)
+		}
+	}
+}
+
+func TestRunRejectsMissingDeclaredFrameBody(t *testing.T) {
+	wire := []byte{5, 0, 0, 0}
+	compressed, _ := compressedRunFixture(t, wire)
+	for _, data := range [][]byte{wire, compressed} {
+		path := filepath.Join(t.TempDir(), "run")
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		r, err := openRun(path, 16)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := r.next(); err != io.ErrUnexpectedEOF {
+			t.Fatal("missing frame body passed as a complete input", err)
+		}
+		r.file.Close()
+	}
+}
+
 func TestPrivateRunCompressionRoundTripAndBounds(t *testing.T) {
 	for _, n := range []int{0, 1, privateRunBlockBytes - 1, privateRunBlockBytes, privateRunBlockBytes + 1, 3*privateRunBlockBytes + 91} {
 		data := bytes.Repeat([]byte("bounded framed public records\n"), n/len("bounded framed public records\n")+1)[:n]

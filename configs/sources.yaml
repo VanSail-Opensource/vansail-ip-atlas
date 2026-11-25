@@ -52,6 +52,7 @@ build:
     - as_name
     - asn_country
     - organization
+    - network_organization
     - isp
     - origins
     - usage_type
@@ -1159,6 +1160,71 @@ sources:
   - spam
   - tor
   - vpn
+- id: google-network-organization
+  evidence_family: google-network-owner
+  source_group: google-network-owner
+  category: network_identity
+  admission: active
+  discovery: https://docs.cloud.google.com/vpc/docs/access-apis-external-ip
+  download:
+    url: https://www.gstatic.com/ipranges/goog.json
+    format: json
+    max_compressed_mib: 1
+  refresh:
+    interval: 6h
+    max_stale: 720h
+  fields: [syncToken, creationTime, ipv4Prefix, ipv6Prefix]
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: Google-published-IP-ranges-source-terms
+    distribution: user_authorized_educational_use
+    evidence_url: https://policies.google.com/terms
+    review_basis: Google documents these prefixes as Google-owned IP addresses and publishes
+      them for administrators. The range file contains no separate data license. The project
+      records educational use of the address ownership facts under Google's published terms.
+    attribution_required: true
+    attribution:
+      name: Google
+      text: Google publishes the Google-owned IP address ranges used by VanSail IP Atlas
+        to identify the network organization for matching prefixes.
+      url: https://docs.cloud.google.com/vpc/docs/access-apis-external-ip
+      license_url: https://policies.google.com/terms
+  trust:
+    source_weight: 100
+    correlation_group: google-network-owner
+  scope: prefix
+  notes: Google's own published range list identifies the owner of the listed address
+    space. It supplies the organization Google only for covered prefixes. It supplies no
+    evidence of subscriber ISP, service type, threat activity or BGP origin.
+  publication_proof:
+    kind: embedded
+    locator: https://www.gstatic.com/ipranges/goog.json
+    field: syncToken
+  coverage:
+    kind: positive_only
+    scope: prefix
+  fixture:
+    status: passed
+    path: fixtures/source-certification/observed-google-owned-prefixes.json
+    sha256: f6e65c75c8c85183574926d026ea42b5af553008550ad4a6613f74cb5d690eb5
+    parser: google-network-organization
+    schema: google-owned-ip-ranges-v1
+    schema_observed: true
+    tested_at: '2026-11-25T05:44:22Z'
+    synthetic: false
+    payload_format: original
+  parser:
+    id: google-network-organization
+    schema: google-owned-ip-ranges-v1
+    version: 1
+  public_fields: [network_organization]
+  field_mappings:
+    syncToken: null
+    creationTime: null
+    ipv4Prefix: network_organization
+    ipv6Prefix: network_organization
+  signals: []
 - id: nro-delegated-registration
   evidence_family: nro-rir-delegation
   source_group: nro-rir-delegation

@@ -146,3 +146,11 @@ respectively. The 447-byte excerpt certifies the observed schema. Live intake
 verifies every row of the original report against the header, all three
 summaries and the publisher's SHA-256. [NRO report and scope](https://www.nro.net/about/rirs/statistics/) ·
 [Attribution and source terms](notices/nro-delegated-registration.txt)
+
+`observed-google-owned-prefixes.json` retains the original November 25, 2026
+Google range-file header and the first two prefixes of each address family.
+The 259-byte excerpt preserves the exact field values and record order. The
+complete reviewed original contained 148 prefixes. Current intake uses the
+original publisher URL and its embedded edition clocks.
+[Publisher range definitions](https://docs.cloud.google.com/vpc/docs/access-apis-external-ip#ip-addr-defaults) ·
+[Attribution and source terms](notices/google-network-organization.txt)

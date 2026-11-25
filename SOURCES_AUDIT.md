@@ -1,6 +1,6 @@
 # VanSail IP Atlas - Production Source Audit
 
-## November 22 source coverage
+## November 25 source coverage
 
 The reviewed catalog covers all twelve configured detection signals. Each
 source supplies positive observations within its verified scope. Whether a
@@ -10,6 +10,7 @@ given IP has any observation depends on the included edition.
 |---|---|
 | Physical country, region, city and coordinates | Sapics supplies physical country. DB-IP and ipapi.is supply physical country and finer geographic observations. |
 | IP registration country | NRO extended delegation statistics report the recipient’s country for assigned and allocated IPv4 and IPv6 ranges. |
+| Address-level network organization | Google documents the IPv4 and IPv6 prefixes in its published list as Google-owned address space. |
 | ASN identity and contextual usage | Ipverse supplies ASN names, organizations and ASN registration countries. Dated ASN roles join to observed origins. |
 | Network prefixes, origin ASNs, observed AS paths | RouteViews and RIPE RIS RIB snapshots |
 | AS relationships and Tier-1 candidates | CAIDA directional relationships with observed paths and current snapshot evidence |
@@ -20,8 +21,8 @@ given IP has any observation depends on the included edition.
 | Proxy, datacenter, Tor and VPN | FFraud typed records, Tor exit observations and X4B VPN prefixes where applicable |
 | Hosting | Individual addresses in mature Microsoft Azure App Service allocations |
 
-The nineteen-source catalog provides observed network prefixes, registration
-countries and origin ASNs. Network name, network organization, ISP, assignment
+The twenty-source catalog provides observed network prefixes, registration
+countries, network organization for Google-owned ranges and origin ASNs. Network name, ISP, assignment
 mode and IPv4 directed-broadcast status display as unknown without an explicit
 address-level mapping. The ASN identity fields belong to the autonomous system. A
 routed prefix supplies no per-address assignment or broadcast classification.
@@ -45,6 +46,19 @@ with each publisher update.
 The public /24 view derives its cells from the admitted address and network
 facts. An unobserved cell carries unknown values. Source qualification,
 runtime coverage and hosted availability are measured for each build.
+
+## November 25 Google-owned address space
+
+Google's published list contained 132 IPv4 and 16 IPv6 prefixes, including
+`8.8.8.0/24` and `2001:4860::/32`. The complete 6,315-byte original had
+SHA-256 `685ae78c247ffb90198ef42303f561795b92bd38e5bc528a21ae7933da80bf82`.
+Its sync token gives the UTC edition time of November 25 at 02:08:41.387,
+which agrees with its Pacific creation time to the millisecond. Google's VPC
+guide identifies these ranges as Google-owned IP addresses. The field describes
+ownership of the address block. A separate publisher list identifies ranges
+that customers can use for Google Cloud resources.
+[Google's range definitions](https://docs.cloud.google.com/vpc/docs/access-apis-external-ip#ip-addr-defaults) ·
+[Google-owned IP addresses](https://www.gstatic.com/ipranges/goog.json)
 
 ## November 22 IP registration countries
 

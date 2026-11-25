@@ -316,6 +316,24 @@ collection rules. Retained generations and no-change cache hits preserve origina
 clocks, proofs and exact policy bindings; they never renew observation age. This
 amendment is RPKI-specific and changes no subscription or other item expiry.
 
+## Address-block ownership
+
+Google's `goog.json` documents the address space that Google owns. For a
+published prefix, its ownership supports the network organization value
+`Google`. Identifying a network name, subscriber ISP, service, physical
+location or routed origin requires evidence for that specific field.
+Uncovered addresses keep their independently evidenced facts.
+[Google's range definitions](https://docs.cloud.google.com/vpc/docs/access-apis-external-ip#ip-addr-defaults)
+
+The original file publishes its edition as a Unix-millisecond sync token
+alongside a Pacific local creation time. The adapter cross-checks those
+values and validates both address families. The global credit names Google
+and links to its range documentation and terms. The separate documentation
+license applies to the text of the guide. The catalog records the project's
+educational-use decision for the separately published address ranges.
+[Google-owned IP ranges](https://www.gstatic.com/ipranges/goog.json) ·
+[Google terms](https://policies.google.com/terms)
+
 ## Administrative IP registration countries
 
 The NRO Extended Statistics Report combines delegated resource records from

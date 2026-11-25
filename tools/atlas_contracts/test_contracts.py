@@ -20,11 +20,11 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_actual_catalog_is_blocked_and_has_shared_family(self):
         report = capability_report(self.configs["sources"], utc("2026-11-08T00:00:00Z"), ROOT)
-        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (19, 19, 0))
+        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (20, 20, 0))
         self.assertEqual({s["id"] for s in self.configs["sources"]["sources"] if s["admission"] == "active"}, {
             "sapics-user-country-v4", "sapics-user-country-v6", "sapics-server-country-v4", "ipverse-as-metadata",
             "dbip-lite-direct", "ipapi-free-geo-v4", "ipapi-free-geo-v6", "x4b-vpn-v4", "tor-exits", "ipverse-asn-usage",
-            "nro-delegated-registration", "ffraud-ip", "iana-root-anycast", "tweetfeed-week", "azure-appservice-public", "routeviews-wide-rib", "ripe-mrt-rrc18", "caida-asrel2", "rpki-client-vrps"})
+            "google-network-organization", "nro-delegated-registration", "ffraud-ip", "iana-root-anycast", "tweetfeed-week", "azure-appservice-public", "routeviews-wide-rib", "ripe-mrt-rrc18", "caida-asrel2", "rpki-client-vrps"})
         self.assertFalse(report["production_eligible"])
         self.assertEqual(report["schema_version"], 3)
         self.assertEqual(report["release_scope"], "release-scope-v6")
@@ -40,6 +40,28 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(report["blocked_required_capability_count"], 7)
         subscriptions = [s for s in self.configs["sources"]["sources"] if s["category"] == "proxy_subscription_ip"]
         self.assertEqual(subscriptions, [])
+
+    def test_google_owned_ranges_only_map_prefixes_to_network_organization(self):
+        catalog = self.configs["sources"]
+        source = next(row for row in catalog["sources"] if row["id"] == "google-network-organization")
+        self.assertEqual(source["public_fields"], ["network_organization"])
+        self.assertEqual(source["coverage"], {"kind": "positive_only", "scope": "prefix"})
+        self.assertEqual(source["signals"], [])
+        self.assertEqual(source["field_mappings"], {
+            "ipv4Prefix": "network_organization", "ipv6Prefix": "network_organization",
+            "syncToken": None, "creationTime": None,
+        })
+        self.assertEqual(source["publication_proof"], {
+            "kind": "embedded", "locator": "https://www.gstatic.com/ipranges/goog.json", "field": "syncToken",
+        })
+        self.assertEqual(source["license"]["distribution"], "user_authorized_educational_use")
+        self.assertEqual(source["license"]["attribution"]["name"], "Google")
+        for raw, public in [("syncToken", "network_organization"), ("creationTime", "network_organization"),
+                            ("ipv4Prefix", "isp"), ("ipv6Prefix", "organization"), ("ipv6Prefix", "origins")]:
+            changed = copy.deepcopy(source)
+            changed["field_mappings"][raw] = public
+            with self.subTest(raw=raw, public=public), self.assertRaises(ContractError):
+                validate_schema("sources", {**catalog, "sources": [changed]})
 
     def test_community_phishing_reports_share_a_family_and_keep_reporter_data_private(self):
         catalog = self.configs["sources"]

@@ -170,7 +170,7 @@ func (s *bulkSpool) reducePaths(ctx context.Context, relations intelligence.Rela
 	if len(s.pathParts) == 0 {
 		return nil
 	}
-	path, err := s.sortKeyedRows(ctx, func(emit func(bulkPathRow) error) error {
+	path, err := s.sortRoutingRows(ctx, sortedPathsDomain, s.pathParts, func(emit func(bulkPathRow) error) error {
 		return s.walk(ctx, s.pathParts, func(record intelligence.NormalizedRecord) error {
 			if record.Path == nil || !record.Path.Observation.Current || record.Path.Observation.Family == "" {
 				return errors.New("current private path required")

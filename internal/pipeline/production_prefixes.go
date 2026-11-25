@@ -31,7 +31,7 @@ func (s *bulkSpool) preparePrefixes(ctx context.Context) error {
 	if len(s.prefixParts) == 0 {
 		return nil
 	}
-	path, err := s.sortKeyedRows(ctx, func(emit func(bulkPathRow) error) error {
+	path, err := s.sortRoutingRows(ctx, sortedPrefixesDomain, s.prefixParts, func(emit func(bulkPathRow) error) error {
 		return s.walk(ctx, s.prefixParts, func(record intelligence.NormalizedRecord) error {
 			if record.Origins == nil {
 				return errors.New("invalid ASN-prefix source spool")

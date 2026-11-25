@@ -221,7 +221,7 @@ func (e spatialCacheEntry) expanded() (spatialCacheEntry, error) {
 }
 
 func (e spatialCacheEntry) matchesIndexVersion(version int) bool {
-	if e.Domain == seedSourceDomain && version < 4 {
+	if version < 4 && (e.Domain == seedSourceDomain || e.Domain == sortedPathsDomain || e.Domain == sortedPrefixesDomain) {
 		return false
 	}
 	if e.Domain != "compiled" {

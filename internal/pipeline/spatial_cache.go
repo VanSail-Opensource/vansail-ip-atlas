@@ -181,6 +181,17 @@ func spatialCacheFiles(e spatialCacheEntry) (map[[32]byte]uint64, error) {
 				return nil, err
 			}
 		}
+	case sortedPathsDomain, sortedPrefixesDomain:
+		if e.Seed != nil || e.Scatter != nil || e.Leaf == nil || e.Leaf.Split || e.Leaf.RiskInput != ([32]byte{}) {
+			return nil, errSpatialCache
+		}
+		s := e.Leaf.Stream
+		if s.Records != 1 || s.DecodedBytes == 0 || s.DecodedBytes > sortedRoutingBytes || s.Bytes > sortedRoutingBytes+sortedRoutingBytes/8 {
+			return nil, errSpatialCache
+		}
+		if err := add(s.SHA256, s.Bytes); err != nil {
+			return nil, err
+		}
 	case rawSplitDomain:
 		if e.Seed != nil || e.Scatter != nil || e.Leaf == nil || *e.Leaf != (spatialCacheLeaf{Split: true}) {
 			return nil, errSpatialCache
@@ -498,7 +509,12 @@ func (c *spatialCache) Lookup(ctx context.Context, domain string, key [32]byte) 
 	if err := c.checkRoot(); err != nil {
 		return spatialCacheEntry{}, false, err
 	}
-	if key == ([32]byte{}) || domain != "seed" && domain != seedSourceDomain && domain != "scatter" && domain != "risk" && domain != "risk-input" && domain != "public" && domain != "compiled" && domain != "location" && domain != rawSplitDomain {
+	if key == ([32]byte{}) {
+		return spatialCacheEntry{}, false, errSpatialCache
+	}
+	switch domain {
+	case "seed", seedSourceDomain, "scatter", "risk", "risk-input", "public", "compiled", "location", rawSplitDomain, sortedPathsDomain, sortedPrefixesDomain:
+	default:
 		return spatialCacheEntry{}, false, errSpatialCache
 	}
 	id := spatialCacheEntryKey{domain, key}

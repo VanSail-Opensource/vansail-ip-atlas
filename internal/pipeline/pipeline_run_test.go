@@ -231,7 +231,7 @@ func TestClassifyTotalsMatchCompletedFrames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	merged, err := c.merge(runs)
+	merged, err := c.prepareMerge(runs)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -142,13 +142,26 @@ func intakeSources(ctx context.Context, args []string) (returnErr error) {
 			intakeResults[result.Decision.ID] = result
 		}
 	}
+	clockTrace, err := os.OpenFile(filepath.Join(private, "engineering-clock-trace.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	defer clockTrace.Close()
 	for _, source := range sources {
+		started := time.Now().UTC()
 		result, ok := intakeResults[source.ID]
 		var err error
 		if !ok {
 			result, err = engine.IngestPartitioned(ctx, source, time.Unix(*clock, 0).UTC(), policyHash)
 		}
 		if err != nil {
+			return err
+		}
+		var actualClock int64
+		if result.Snapshot != nil {
+			actualClock = result.Snapshot.PublishedAt.Unix()
+		}
+		if err := json.NewEncoder(clockTrace).Encode([]any{source.ID, started.Unix(), time.Now().UTC().Unix(), result.Decision.State, result.Decision.Reason, actualClock}); err != nil {
 			return err
 		}
 		policies = append(policies, result.Policy)

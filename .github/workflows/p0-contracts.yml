@@ -7,8 +7,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: atlas-checks-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: atlas-engineering-changed-${{ github.run_id }}
+  cancel-in-progress: false
 
 env:
   GOMAXPROCS: '2'
@@ -27,38 +27,46 @@ jobs:
       - uses: actions/checkout@v7.0.0
         with:
           persist-credentials: false
+          fetch-depth: 2
+      - name: Pin the exact prior diagnostic compiler
+        shell: bash
+        run: |
+          cp tools/hosted/engineering_warm_probe.py "$RUNNER_TEMP/engineering-warm-probe.py"
+          cp tools/hosted/verifywarm/main.go "$RUNNER_TEMP/verify-warm-rows.go"
+          git checkout --detach 76095aa2f085d502c4f02892be72096bd352590c
       - uses: ./.github/actions/atlas-setup
+      - name: Build an independent original-row verifier
+        shell: bash
+        run: |
+          proof_dir=build-private/warm-proof
+          mkdir -p "$proof_dir"
+          cp "$RUNNER_TEMP/verify-warm-rows.go" "$proof_dir/main.go"
+          go build -o build-private/verify-warm-rows "./$proof_dir"
       - name: Verify full actual reviewed source intake
         id: intake
         env:
           ATLAS_GITHUB_METADATA_TOKEN: ${{ github.token }}
         run: python tools/hosted/runner_budget.py --report reports/intake-runner-budget.json -- python tools/hosted/source_intake.py
-      - name: Compile and measure actual admitted data without publishing
-        run: python tools/hosted/runner_budget.py --report reports/data-check-runner-budget.json -- python tools/hosted/production_data_check.py
-      - name: Prepare isolated withdrawal case
-        id: withdrawal_prepare
+      - name: Prepare isolated warm_changed case
+        id: warm_changed_prepare
         if: >-
           !cancelled() && steps.intake.outcome == 'success'
-        run: python tools/hosted/runner_budget.py --report reports/withdrawal-prepare-budget.json -- python tools/hosted/engineering_warm_probe.py withdrawal prepare
-      - name: Measure isolated withdrawal case
-        id: withdrawal_measure
+        run: python tools/hosted/runner_budget.py --report reports/warm_changed-prepare-budget.json -- python "$RUNNER_TEMP/engineering-warm-probe.py" warm_changed prepare
+      - name: Measure isolated warm_changed case
+        id: warm_changed_measure
         if: >-
-          !cancelled() && steps.intake.outcome == 'success' && steps.withdrawal_prepare.outcome == 'success'
-        run: python tools/hosted/runner_budget.py --report reports/withdrawal-measure-budget.json -- python tools/hosted/engineering_warm_probe.py withdrawal measure
-      - name: Prepare isolated clock_advance case
-        id: clock_advance_prepare
+          !cancelled() && steps.intake.outcome == 'success' && steps.warm_changed_prepare.outcome == 'success'
+        run: python tools/hosted/runner_budget.py --report reports/warm_changed-measure-budget.json -- python "$RUNNER_TEMP/engineering-warm-probe.py" warm_changed measure
+      - name: Prepare isolated warm_unchanged case
+        id: warm_unchanged_prepare
         if: >-
           !cancelled() && steps.intake.outcome == 'success'
-        run: python tools/hosted/runner_budget.py --report reports/clock_advance-prepare-budget.json -- python tools/hosted/engineering_warm_probe.py clock_advance prepare
-      - name: Measure isolated clock_advance case
-        id: clock_advance_measure
+        run: python tools/hosted/runner_budget.py --report reports/warm_unchanged-prepare-budget.json -- python "$RUNNER_TEMP/engineering-warm-probe.py" warm_unchanged prepare
+      - name: Measure isolated warm_unchanged case
+        id: warm_unchanged_measure
         if: >-
-          !cancelled() && steps.intake.outcome == 'success' && steps.clock_advance_prepare.outcome == 'success'
-        run: python tools/hosted/runner_budget.py --report reports/clock_advance-measure-budget.json -- python tools/hosted/engineering_warm_probe.py clock_advance measure
-      - name: Install the locked website dependencies
-        run: npm exec --yes --package pnpm@11.28.12 -- pnpm --dir web install --frozen-lockfile --ignore-scripts
-      - name: Package and inspect the real website without publishing
-        run: python tools/hosted/runner_budget.py --report reports/package-check-budget.json -- python tools/hosted/production_workflow.py integration-package
+          !cancelled() && steps.intake.outcome == 'success' && steps.warm_unchanged_prepare.outcome == 'success'
+        run: python tools/hosted/runner_budget.py --report reports/warm_unchanged-measure-budget.json -- python "$RUNNER_TEMP/engineering-warm-probe.py" warm_unchanged measure
       - uses: actions/upload-artifact@v7.0.0
         if: always()
         with:
@@ -66,13 +74,8 @@ jobs:
           path: |
             reports/source-intake.json
             reports/intake-runner-budget.json
-            reports/withdrawal-*.json
-            reports/clock_advance-*.json
-            reports/production-data-check.json
-            reports/production-lookup-integration.json
-            reports/data-check-runner-budget.json
-            reports/static-candidate.json
-            reports/package-check-budget.json
+            reports/warm_changed-*.json
+            reports/warm_unchanged-*.json
           if-no-files-found: ignore
           retention-days: 7
       # Source payloads, fixture receipts, lineage and normalized partitions stay

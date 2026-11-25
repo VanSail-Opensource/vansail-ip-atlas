@@ -14,7 +14,7 @@ import tempfile
 import time
 import uuid
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(os.environ["GITHUB_WORKSPACE"]).resolve() if os.environ.get("GITHUB_WORKSPACE") else Path.cwd().resolve()
 sys.path.insert(0, str(ROOT))
 from tools.hosted.production_benchmarks import ENVELOPE, LIMIT_CONTRACT, MEASUREMENT_SCOPE, TRANSITION_KEYS, digest, integer, json_report, keys
 from tools.hosted.production_workflow import compile_counter_diagnostics, compile_phase_diagnostics, intake_clock
@@ -23,7 +23,8 @@ from tools.release_contract.production import read_private
 
 BASE = "f0cff9f0616222c839adbbd7bd174f9da06e7098"
 PHASES = ("prepare", "measure")
-SCENARIOS = ("withdrawal", "clock_advance")
+SCENARIOS = ("warm_changed", "warm_unchanged")
+COMPILER_HEAD = "76095aa2f085d502c4f02892be72096bd352590c"
 
 
 def sha(data):
@@ -45,13 +46,12 @@ def checked_native(data, clock, baseline, scenario):
         integer(value)
     before = integer(native["input_records"], 1)
     integer(native["normalized_input_bytes"], 1)
-    if (native["before_state_sha256"] != baseline or native["after_state_sha256"] == baseline
-            or before != transition["before_records"] or transition["removed_records"] <= 0
-            or transition["after_records"] != before - transition["removed_records"]
-            or transition["added_records"] or transition["changed_records"]
-            or (transition["expired_sources_retracted"] > 0) != (scenario == "clock_advance")
-            or (transition["withdrawn_sources_retracted"] > 0) != (scenario == "withdrawal")):
-        raise ContractError("original authenticated rows were not retracted")
+    changed = (before + 99) // 100 if scenario == "warm_changed" else 0
+    if (native["before_state_sha256"] != baseline or (native["after_state_sha256"] != baseline) != bool(changed)
+            or transition != {"before_records": before, "after_records": before, "removed_records": changed,
+                "added_records": changed, "changed_records": changed, "expired_sources_retracted": 0,
+                "withdrawn_sources_retracted": 0}):
+        raise ContractError("native update population differs")
     return native
 
 
@@ -67,6 +67,8 @@ def run_case(scenario, phase):
             or intake.get("blocked_reason_counts") != {} or intake.get("active_sources") != 23
             or intake.get("current_sources") != 23 or intake.get("evaluated_at") != clock):
         raise ContractError("complete authenticated intake and standard envelope required")
+    if subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT).decode().strip() != COMPILER_HEAD:
+        raise ContractError("compiler checkout differs")
     baseline = digest(intake["normalized_state_sha256"])
     binary = ROOT / "build-private/atlas"
     with binary.open("rb") as source:
@@ -79,7 +81,7 @@ def run_case(scenario, phase):
     prepare_report = ROOT / "reports" / (scenario + "-prepare-preflight.json")
     report_path = ROOT / "reports" / (scenario + "-" + phase + "-preflight.json")
     report = {"scope": "engineering-preflight", "scenario": scenario, "phase": phase, "intake_clock": clock,
-              "source_count": 23, "base_head_sha": BASE, "diagnostic_head_sha": revision,
+              "source_count": 23, "base_head_sha": BASE, "diagnostic_head_sha": revision, "compiler_head_sha": COMPILER_HEAD,
               "run_id": integer(int(os.environ["GITHUB_RUN_ID"]), 1),
               "run_attempt": integer(int(os.environ["GITHUB_RUN_ATTEMPT"]), 1),
               "intake_sha256": sha(intake_bytes), "normalized_state_sha256": baseline,
@@ -126,13 +128,22 @@ def run_case(scenario, phase):
             sources = json.loads(raw)["Sources"]
             return {row["ID"]: sum(integer(p["Records"], 1) for p in row["RecordPartitions"]) for row in sources}
         old, new = populations(before), populations(after)
-        if (len(old) != 23 or not new.keys() < old.keys() or any(old[key] != value for key, value in new.items())
-                or sum(old.values()) != native["transition"]["before_records"]
-                or sum(new.values()) != native["transition"]["after_records"]
-                or sum(old[key] for key in old.keys() - new.keys()) != native["transition"]["removed_records"]):
-            raise ContractError("original partition counts differ from the native transition")
+        if len(old) != 23 or old != new or sum(old.values()) != native["input_records"]:
+            raise ContractError("original population changed unexpectedly")
+        if scenario == "warm_changed":
+            verified = subprocess.run([str(ROOT / "build-private/verify-warm-rows"), str(ROOT), str(out)],
+                                      capture_output=True, timeout=30 * 60, check=False)
+            if verified.returncode:
+                raise ContractError("independent row verification failed")
+            comparison = keys(json_report(verified.stdout, 4096), {"records", "changed", "compared"})
+            if (integer(comparison["records"]) != native["input_records"]
+                    or integer(comparison["changed"]) != native["transition"]["changed_records"]
+                    or integer(comparison["compared"]) < comparison["changed"]):
+                raise ContractError("actual row differences disagree with native metrics")
+            report["independent_row_comparison"] = comparison
         report.update(native=native, native_report_sha256=sha(data),
-                      inside_480000_ms=elapsed < LIMIT_CONTRACT["runtime_ms"][scenario])
+                      limit_ms=LIMIT_CONTRACT["runtime_ms"][scenario],
+                      inside_limit=elapsed < LIMIT_CONTRACT["runtime_ms"][scenario])
     report_path.write_bytes(canonical_bytes(report))
     if phase == "measure":
         # The two scenarios have separate baseline copies. Retire only this completed

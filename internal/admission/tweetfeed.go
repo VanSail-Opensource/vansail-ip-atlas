@@ -186,41 +186,37 @@ func (proof tweetFeedArtifact) verify(ctx context.Context, payloadPath string) e
 	return nil
 }
 
-// The publisher's static CDN may still serve the previous edition. Determine
-// freshness only from the official manifest, then allow one retrieval of the
-// exact week.csv origin it explicitly names. No repository discovery or links
-// inside a CSV record control a request.
+// The publisher's CDN and mutable origin can advance at different times. Match
+// both to the live manifest before consulting the same publisher's immutable history.
 func (e *Engine) fetchTweetFeed(ctx context.Context, payload string, s Source, now time.Time) (time.Time, error) {
 	metadata := filepath.Join(filepath.Dir(payload), "publication")
 	if _, err := e.fetch.Fetch(ctx, tweetFeedManifest, metadata, 1<<20); err != nil {
 		return time.Time{}, err
 	}
-	proof, err := readTweetFeedManifest(ctx, metadata, now)
+	live, err := readTweetFeedManifest(ctx, metadata, now)
 	if err != nil {
 		return time.Time{}, err
 	}
-	if !now.Before(proof.published.Add(s.MaxAge)) {
+	if !now.Before(live.published.Add(s.MaxAge)) {
 		return time.Time{}, errors.New("weekly IOC publisher edition expired")
 	}
-	_, err = e.fetch.Fetch(ctx, tweetFeedCSV, payload, min(s.MaxCompressedBytes, int64(tweetFeedByteLimit)))
-	if err == nil {
-		err = proof.verify(ctx, payload)
-		if !errors.Is(err, errTweetFeedEdition) {
-			return proof.published, err
+	if !live.published.After(now) {
+		mismatch := false
+		for _, url := range []string{tweetFeedCSV, tweetFeedOrigin} {
+			if _, err = e.fetch.Fetch(ctx, url, payload, min(s.MaxCompressedBytes, int64(tweetFeedByteLimit))); err == nil {
+				err = live.verify(ctx, payload)
+				if !errors.Is(err, errTweetFeedEdition) {
+					return live.published, err
+				}
+				mismatch = true
+			}
+			if ctx.Err() != nil {
+				return time.Time{}, ctx.Err()
+			}
+		}
+		if !mismatch {
+			return time.Time{}, err
 		}
 	}
-	if err := ctx.Err(); err != nil {
-		return time.Time{}, err
-	}
-	alternate := filepath.Join(filepath.Dir(payload), "current-week")
-	if _, err = e.fetch.Fetch(ctx, tweetFeedOrigin, alternate, min(s.MaxCompressedBytes, proof.size)); err != nil {
-		return time.Time{}, err
-	}
-	if err = proof.verify(ctx, alternate); err != nil {
-		return time.Time{}, err
-	}
-	if err = os.Rename(alternate, payload); err != nil {
-		return time.Time{}, err
-	}
-	return proof.published, nil
+	return e.fetchImmutableTweetFeed(ctx, payload, s, live, now)
 }

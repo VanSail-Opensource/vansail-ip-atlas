@@ -24,6 +24,7 @@ import (
 // Admission rechecks every control below; an active label alone authorizes no IO.
 type Source struct {
 	ID, Family, Category, Admission string
+	SourceGroup                     string `json:",omitempty"`
 	URL, Format                     string
 	MRTArchivePolicy                string `json:",omitempty"`
 	MaxCompressedBytes              int64

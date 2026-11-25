@@ -111,6 +111,7 @@ func BuildProductionIntelligence(ctx context.Context, options Options, state int
 			return Candidate{}, errors.New("production candidate outlives source receipt")
 		}
 	}
+	options.PrivateLabelValues = inputs.Qualification.PrivateLabelValues()
 	originalGate := options.ProductionGate
 	options.ProductionGate = func(gateCtx context.Context) error {
 		if err := inputs.Qualification.Validate(state, clock); err != nil {
@@ -177,10 +178,11 @@ func buildStreamedCandidate(ctx context.Context, options Options, state intellig
 	}
 	contract, err := spatialReuseKey("contract", struct {
 		Implementation [32]byte
+		PrivateLabels  []string
 		Limits         Limits
 		Mode           string
 		Schema         int
-	}{implementation, options.Limits, options.Mode, 5})
+	}{implementation, options.PrivateLabelValues, options.Limits, options.Mode, 5})
 	if err != nil {
 		return Candidate{}, err
 	}

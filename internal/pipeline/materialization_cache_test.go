@@ -102,7 +102,7 @@ func TestMaterializationCacheSchema4MigrationRequiresAuthenticatedClosedMiss(t *
 }
 
 func TestMaterializationCacheSemanticChangesMiss(t *testing.T) {
-	for _, change := range []string{"state", "record", "withdrawal", "policy", "clock", "deadline", "limits", "mode"} {
+	for _, change := range []string{"state", "record", "withdrawal", "policy", "clock", "deadline", "limits", "mode", "private_labels"} {
 		t.Run(change, func(t *testing.T) {
 			state, policy, _, _, _ := intelligenceFixture(t)
 			options := testOptions(t)
@@ -128,6 +128,8 @@ func TestMaterializationCacheSemanticChangesMiss(t *testing.T) {
 				options.ValidUntil--
 			case "limits":
 				options.Limits.SortBytes /= 2
+			case "private_labels":
+				options.PrivateLabelValues = []string{"synthetic"}
 			case "mode":
 				options.Mode = "engineering"
 			}

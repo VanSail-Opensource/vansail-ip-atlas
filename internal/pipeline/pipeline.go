@@ -54,6 +54,7 @@ func (l Limits) validate() error {
 }
 
 type Options struct {
+	PrivateLabelValues      []string
 	Workspace, Output, Mode string
 	Clock, ValidUntil       int64
 	Limits                  Limits
@@ -95,6 +96,7 @@ type Candidate struct {
 type Producer func(context.Context, func(via3.PublicRecord) error) error
 
 type compiler struct {
+	labelDecisions        map[string]bool
 	ctx                   context.Context
 	options               Options
 	root, scratch, output string

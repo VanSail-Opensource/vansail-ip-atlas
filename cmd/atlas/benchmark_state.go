@@ -226,7 +226,7 @@ func benchmarkState(ctx context.Context, args []string) (returnErr error) {
 	if err = writeJSON(filepath.Join(destination, "benchmark-state.json"), state); err != nil {
 		return err
 	}
-	options := pipeline.Options{Workspace: destination, Output: filepath.Join(destination, "build-private", "result"), Mode: "engineering", Clock: report.Clock, ValidUntil: validUntil.Unix(), Limits: pipeline.DefaultLimits()}
+	options := pipeline.Options{PrivateLabelValues: admission.PrivateLabelValues(binding.catalog), Workspace: destination, Output: filepath.Join(destination, "build-private", "result"), Mode: "engineering", Clock: report.Clock, ValidUntil: validUntil.Unix(), Limits: pipeline.DefaultLimits()}
 	options.InputGate = func(checkCtx context.Context) error {
 		current, e := privateStateHash(checkCtx, root)
 		if e != nil || current != binding.stateHash {

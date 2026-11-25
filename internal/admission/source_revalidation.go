@@ -24,6 +24,7 @@ type sourceValidation struct {
 	certification [32]byte
 	verified      *intelligence.VerifiedPrivateState
 	statistics    map[string]SourceStatistics
+	privateLabels []string
 }
 
 func sourceValidationIdentity(root string, catalog []Source) (string, [32]byte, error) {
@@ -93,7 +94,7 @@ func validateAuthenticatedSourceSet(ctx context.Context, canonical string, catal
 	if err != nil {
 		return state, report, nil, err
 	}
-	v := &sourceValidation{root: canonical, clock: now, binding: binding, catalogHash: catalogHash, certification: certification, verified: verified, statistics: make(map[string]SourceStatistics, len(stats))}
+	v := &sourceValidation{root: canonical, clock: now, binding: binding, catalogHash: catalogHash, certification: certification, verified: verified, privateLabels: PrivateLabelValues(catalog), statistics: make(map[string]SourceStatistics, len(stats))}
 	for _, stat := range stats {
 		// No statistics or their maps escape this handle. Capability reports
 		// contain newly derived slices and cannot alter the retained predicates.

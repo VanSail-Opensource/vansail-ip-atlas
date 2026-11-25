@@ -68,6 +68,7 @@ func requiredProductionCapability(name string) (required, known bool) {
 // intake. Its fields are private so materializers cannot turn a boolean into
 // complete VRP or source coverage. Validate binds the exact normalized roots.
 type ProductionQualification struct {
+	privateLabels                          []string
 	state                                  intelligence.BuildState
 	stateHash                              [32]byte
 	report                                 CapabilityReport
@@ -98,6 +99,7 @@ func qualifyValidatedSourceSet(state intelligence.BuildState, report CapabilityR
 		return nil, err
 	}
 	q.validation = validation
+	q.privateLabels = validation.privateLabels
 	return q, nil
 }
 
@@ -144,7 +146,11 @@ func productionFromAuthenticatedState(ctx context.Context, root string, catalog 
 	if err != nil {
 		return nil, err
 	}
-	return qualificationFromReport(state, report)
+	q, err := qualificationFromReport(state, report)
+	if err == nil {
+		q.privateLabels = PrivateLabelValues(catalog)
+	}
+	return q, err
 }
 func qualificationFromReport(state intelligence.BuildState, report CapabilityReport) (*ProductionQualification, error) {
 	if err := report.RequireProduction(); err != nil {

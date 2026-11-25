@@ -25,6 +25,7 @@ func (c *compiler) newCanonicalRunFrame(input via3.PublicRecord) (ownedRunFrame,
 	if err != nil {
 		return ownedRunFrame{}, err
 	}
+	c.redactPrivateLabels(&record)
 	row, err := encodeCompactRunRecord(record)
 	if err != nil {
 		return ownedRunFrame{}, err

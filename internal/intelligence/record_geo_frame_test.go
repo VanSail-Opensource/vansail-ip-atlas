@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	jsonv2 "encoding/json/v2"
+	"math"
 	"net/netip"
 	"reflect"
+	"strconv"
 	"testing"
 	"unicode/utf8"
 )
@@ -21,6 +23,17 @@ func verifyRecordFrame(t testing.TB, data []byte) {
 	wantOK := wantErr == nil && utf8.Valid(data)
 	if (gotErr == nil) != wantOK || wantOK && !reflect.DeepEqual(got, want) {
 		t.Fatalf("record decode mismatch for %q: %#v/%v, %#v/%v", data, got, gotErr, want, wantErr)
+	}
+}
+
+func TestWriterFixedDecimalsRoundIdentically(t *testing.T) {
+	for _, input := range []string{"-0", "-0.0", "999999999999999", "-0.000000000001", "0.1234567890123", "107.035", "-27.983921"} {
+		reader := writerFrameReader{remaining: []byte(input + ",")}
+		got := reader.number()
+		want, err := strconv.ParseFloat(input, 64)
+		if err != nil || string(reader.remaining) != "," || math.Float64bits(got) != math.Float64bits(want) {
+			t.Fatalf("fixed decimal %q: got %v, want %v", input, got, want)
+		}
 	}
 }
 

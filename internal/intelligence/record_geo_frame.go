@@ -2,9 +2,9 @@ package intelligence
 
 import (
 	"bytes"
-	"encoding/json"
 	"net/netip"
-	"strconv"
+
+	"vansail-ip-atlas/internal/facts"
 )
 
 // decodeWriterGeo recognizes the common fixed field order emitted by RecordWriter.
@@ -27,9 +27,9 @@ func decodeWriterGeo(data []byte) (*GeoEvidence, bool) {
 	}
 	v.Prefix = p
 	r.take(`,"PhysicalCountry":`)
-	v.PhysicalCountry = r.plainString()
+	v.PhysicalCountry = r.country()
 	r.take(`,"RegistrationCountry":`)
-	v.RegistrationCountry = r.plainString()
+	v.RegistrationCountry = r.country()
 	r.take(`,"Region":`)
 	v.Region = r.plainString()
 	r.take(`,"City":`)
@@ -44,11 +44,7 @@ func decodeWriterGeo(data []byte) (*GeoEvidence, bool) {
 		r.take(`,"Longitude":`)
 		coords.Longitude = r.number()
 		r.take(`,"Precision":`)
-		precision, err := strconv.ParseUint(string(r.numericToken('}')), 10, 8)
-		if err != nil {
-			return nil, false
-		}
-		coords.Precision = uint8(precision)
+		coords.Precision = uint8(r.unsigned(8))
 		r.take("}")
 		v.Coordinates = &coords
 	}
@@ -75,6 +71,16 @@ func (r *writerFrameReader) take(literal string) bool {
 	return true
 }
 
+func (r *writerFrameReader) country() string {
+	if len(r.remaining) >= 4 && r.remaining[0] == '"' && r.remaining[3] == '"' {
+		if code := facts.CountryCode(string(r.remaining[1:3])); code != "" {
+			r.remaining = r.remaining[4:]
+			return code
+		}
+	}
+	return r.plainString()
+}
+
 func (r *writerFrameReader) plainString() string {
 	if !r.take(`"`) {
 		return ""
@@ -94,23 +100,46 @@ func (r *writerFrameReader) plainString() string {
 	return ""
 }
 
-// A token must pass both JSON syntax and the destination Go type. The strict
-// fallback handles unusual numeric spellings beyond the common length bound.
-func (r *writerFrameReader) numericToken(delimiter byte) []byte {
-	end := bytes.IndexByte(r.remaining, delimiter)
-	if end <= 0 || end > 32 || !json.Valid(r.remaining[:end]) {
+// The usual writer spelling is a short decimal. Its numerator and power-of-ten
+// denominator both fit exactly in a float64, so IEEE division produces the
+// same rounded result as the general JSON number decoder. Longer decimals and
+// exponents fall back to that decoder for the complete frame.
+func (r *writerFrameReader) number() float64 {
+	end := bytes.IndexByte(r.remaining, ',')
+	if end <= 0 || end > 15 {
 		r.remaining = nil
-		return nil
+		return 0
 	}
 	token := r.remaining[:end]
-	r.remaining = r.remaining[end:]
-	return token
-}
-
-func (r *writerFrameReader) number() float64 {
-	value, err := strconv.ParseFloat(string(r.numericToken(',')), 64)
-	if err != nil {
-		r.remaining = nil
+	negative := token[0] == '-'
+	if negative {
+		token = token[1:]
 	}
-	return value
+	if len(token) == 0 || len(token) > 1 && token[0] == '0' && token[1] != '.' {
+		r.remaining = nil
+		return 0
+	}
+	var coefficient uint64
+	scale := uint64(1)
+	fraction := false
+	for i, b := range token {
+		if b == '.' && !fraction && i > 0 && i+1 < len(token) {
+			fraction = true
+			continue
+		}
+		if b < '0' || b > '9' {
+			r.remaining = nil
+			return 0
+		}
+		coefficient = 10*coefficient + uint64(b-'0')
+		if fraction {
+			scale *= 10
+		}
+	}
+	r.remaining = r.remaining[end:]
+	v := float64(coefficient) / float64(scale)
+	if negative {
+		return -v
+	}
+	return v
 }

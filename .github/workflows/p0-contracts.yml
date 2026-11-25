@@ -97,7 +97,7 @@ jobs:
     # Intake repeats config/certification validation before any fetch. All four
     # independent jobs must still succeed before production trusts this run.
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 240
     env:
       RUNNER_TOOL_CACHE: ${{ github.workspace }}/build-private/toolcache
     steps:
@@ -106,11 +106,17 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/atlas-setup
       - name: Verify full actual reviewed source intake
+        id: intake
         env:
           ATLAS_GITHUB_METADATA_TOKEN: ${{ github.token }}
         run: python tools/hosted/runner_budget.py --report reports/intake-runner-budget.json -- python tools/hosted/source_intake.py
       - name: Compile and measure actual admitted data without publishing
         run: python tools/hosted/runner_budget.py --report reports/data-check-runner-budget.json -- python tools/hosted/production_data_check.py
+      - name: Measure one isolated genuine source withdrawal
+        if: >-
+          !cancelled() && steps.intake.outcome == 'success' &&
+          github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/production-withdrawal-diagnostic'
+        run: python tools/hosted/runner_budget.py --report reports/engineering-withdrawal-budget.json -- python tools/hosted/engineering_withdrawal_probe.py
       - uses: actions/upload-artifact@v7.0.0
         if: always()
         with:
@@ -121,6 +127,8 @@ jobs:
             reports/production-data-check.json
             reports/production-lookup-integration.json
             reports/data-check-runner-budget.json
+            reports/engineering-withdrawal-preflight.json
+            reports/engineering-withdrawal-budget.json
           if-no-files-found: ignore
           retention-days: 7
       # Source payloads, fixture receipts, lineage and normalized partitions stay

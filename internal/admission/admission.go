@@ -392,7 +392,16 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 	if err != nil {
 		return deny("quarantined", "publication_not_payload_bound")
 	}
-	published, err = e.retainClock(ctx, hash, published)
+	clockKey := hash
+	if source.Parser.ID == "tweetfeed-week-csv" {
+		// Honor earlier live-manifest receipts on upgrade, but only future
+		// acquisitions can reuse the proof from verified immutable history.
+		if earlier := e.knownClock(hash); !earlier.IsZero() && earlier.Before(published) {
+			published = earlier
+		}
+		clockKey = tweetFeedClockKey(hash)
+	}
+	published, err = e.retainClock(ctx, clockKey, published)
 	if err != nil {
 		return result, err
 	}

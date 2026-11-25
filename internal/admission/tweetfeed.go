@@ -167,7 +167,7 @@ func readTweetFeedManifest(ctx context.Context, manifestPath string, now time.Ti
 
 var errTweetFeedEdition = errors.New("weekly IOC feed bytes differ from publisher edition")
 
-func (proof tweetFeedArtifact) verify(ctx context.Context, payloadPath string) error {
+func (proof tweetFeedArtifact) verifyBytes(ctx context.Context, payloadPath string) error {
 	checksum, size, err := hashFile(ctx, payloadPath, tweetFeedByteLimit)
 	if err != nil {
 		return err
@@ -175,6 +175,10 @@ func (proof tweetFeedArtifact) verify(ctx context.Context, payloadPath string) e
 	if proof.size != size || proof.digest != checksum {
 		return errTweetFeedEdition
 	}
+	return nil
+}
+
+func (proof tweetFeedArtifact) verifyRows(ctx context.Context, payloadPath string) error {
 	file, err := os.Open(payloadPath)
 	if err != nil {
 		return err
@@ -204,9 +208,12 @@ func (e *Engine) fetchTweetFeed(ctx context.Context, payload string, s Source, n
 		mismatch := false
 		for _, url := range []string{tweetFeedCSV, tweetFeedOrigin} {
 			if _, err = e.fetch.Fetch(ctx, url, payload, min(s.MaxCompressedBytes, int64(tweetFeedByteLimit))); err == nil {
-				err = live.verify(ctx, payload)
+				err = live.verifyBytes(ctx, payload)
+				if err == nil {
+					return e.resolveTweetFeedEdition(ctx, payload, s, live, now, true)
+				}
 				if !errors.Is(err, errTweetFeedEdition) {
-					return live.published, err
+					return time.Time{}, err
 				}
 				mismatch = true
 			}
@@ -218,5 +225,5 @@ func (e *Engine) fetchTweetFeed(ctx context.Context, payload string, s Source, n
 			return time.Time{}, err
 		}
 	}
-	return e.fetchImmutableTweetFeed(ctx, payload, s, live, now)
+	return e.resolveTweetFeedEdition(ctx, payload, s, live, now, false)
 }

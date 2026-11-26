@@ -2,6 +2,7 @@ package intelligence
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -186,4 +187,76 @@ func TestTier1VisibilityBeyondRetainedAdjacencyLimit(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatal("direct visibility differed from complete replay", err)
 	}
+}
+
+func FuzzTier1ShortSequenceMatchesCanonicalVisibility(f *testing.F) {
+	f.Add(byte(0), []byte{8, 9, 10})
+	f.Add(byte(1), []byte{8, 8, 10})
+	f.Add(byte(1), []byte{8, 10, 8})
+	f.Add(byte(5), []byte{8, 9, 15})
+	f.Add(byte(9), []byte{8, 1, 15})
+	f.Add(byte(33), []byte{8, 9, 10, 11, 12, 13, 14, 15})
+	f.Add(byte(128), []byte{9, 10, 11, 22})
+	f.Fuzz(func(t *testing.T, flags byte, data []byte) {
+		if len(data) > 64 {
+			t.Skip()
+		}
+		asns := make([]uint32, len(data))
+		for i, b := range data {
+			switch b {
+			case 0:
+				asns[i] = 0
+			case 1:
+				asns[i] = 64512
+			default:
+				asns[i] = 300000 + uint32(b)
+			}
+		}
+		observation := PathObservation{
+			Current: flags&128 == 0, Family: "one", OriginOutward: flags&1 != 0,
+			Segments: []PathSegment{{Type: SegmentType(1 + flags>>1&3), ASNs: asns}},
+		}
+		if flags&16 != 0 {
+			observation.Family = ""
+		}
+		if flags&32 != 0 && len(asns) > 2 {
+			observation.Segments[0].ASNs = asns[:2]
+			observation.Segments = append(observation.Segments, PathSegment{Type: ASSequence, ASNs: asns[2:]})
+		}
+		if flags&64 == 0 && len(asns) != 0 {
+			observation.Origin = asns[len(asns)-1]
+			if observation.OriginOutward {
+				observation.Origin = asns[0]
+			}
+		}
+
+		got, want := newTier1Visibility(), newTier1Visibility()
+		var gotEdges, wantEdges []ASNEdge
+		gotErr := got.add(observation, func(edge ASNEdge) { gotEdges = append(gotEdges, edge) })
+		var wantErr error
+		if observation.Current && observation.Family != "" {
+			var path Path
+			path, wantErr = canonicalPath(observation)
+			if wantErr == nil {
+				want.families[observation.Family] = struct{}{}
+				if path.GraphEligible {
+					var prior uint32
+					for _, segment := range path.Segments {
+						for _, asn := range segment.ASNs {
+							want.byASN[asn] = map[string]struct{}{observation.Family: {}}
+							if prior != 0 && prior != asn {
+								wantEdges = append(wantEdges, ASNEdge{From: prior, To: asn})
+							}
+							prior = asn
+						}
+					}
+					want.pairs = len(want.byASN)
+				}
+			}
+		}
+		if fmt.Sprint(gotErr) != fmt.Sprint(wantErr) || !reflect.DeepEqual(got, want) || !reflect.DeepEqual(gotEdges, wantEdges) {
+			t.Fatalf("fast visibility differs from canonical for %+v: got %+v %v %v, want %+v %v %v",
+				observation, got, gotEdges, gotErr, want, wantEdges, wantErr)
+		}
+	})
 }

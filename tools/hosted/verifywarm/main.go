@@ -113,6 +113,22 @@ func differing(ctx context.Context, root, out string, a, b intelligence.StoredSo
 	}
 	return <-done
 }
+
+func verifyPartitionedSourceMetadata(a, b intelligence.StoredSource) error {
+	if len(a.Records) != 0 || len(b.Records) != 0 {
+		return rowPopulation
+	}
+	// Streamed intake writes an empty inline slice. The isolated mutation
+	// may serialize that empty slice as null after replacing its partitions.
+	// Neither representation contains a row; compare the real metadata.
+	a.Records, b.Records = nil, nil
+	a.RecordPartitions, b.RecordPartitions = nil, nil
+	if !reflect.DeepEqual(a, b) {
+		return sourceIdentity
+	}
+	return nil
+}
+
 func inspect(root, out string) (counts, error) {
 	var c counts
 	ctx := context.Background()
@@ -130,14 +146,9 @@ func inspect(root, out string) (counts, error) {
 	for i, x := range a.Sources {
 		y := b.Sources[i]
 		p, q := x.RecordPartitions, y.RecordPartitions
-		if len(x.Records) != 0 || len(y.Records) != 0 {
-			return c, rowPopulation
+		if e = verifyPartitionedSourceMetadata(x, y); e != nil {
+			return c, e
 		}
-		x.RecordPartitions, y.RecordPartitions = nil, nil
-		if !reflect.DeepEqual(x, y) {
-			return c, sourceIdentity
-		}
-		x.RecordPartitions, y.RecordPartitions = p, q
 		var before, after uint64
 		for _, v := range p {
 			before += v.Records

@@ -20,12 +20,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        scenario: [clock_advance]
+        scenario: [clock_advance, withdrawal]
     env:
       GOMAXPROCS: '2'
       GOMEMLIMIT: 5GiB
       RUNNER_TOOL_CACHE: ${{ github.workspace }}/build-private/toolcache
-      ATLAS_REPLAY_COMPILER: e06d17aa6775e11c2529b002c0353f0d46c22a84
+      ATLAS_REPLAY_COMPILER: 44a1fcdfb243bbf92227d21abb325d6c17603ae1
     steps:
       - uses: actions/checkout@v7.0.0
         with:

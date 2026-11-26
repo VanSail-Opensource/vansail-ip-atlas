@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"runtime/pprof"
 	"sort"
 	"time"
 
@@ -28,6 +29,18 @@ func main() {
 		if _, configured := os.LookupEnv("GOGC"); !configured {
 			debug.SetGCPercent(250)
 		}
+	}
+	// Engineering-only probe. This branch is not eligible to release.
+	if path := os.Getenv("ATLAS_DIAGNOSTIC_CPU_PROFILE"); path != "" && len(os.Args) > 1 && os.Args[1] == "benchmark-state" {
+		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if err != nil || pprof.StartCPUProfile(file) != nil {
+			fmt.Fprintln(os.Stderr, "private CPU diagnostic could not start")
+			os.Exit(1)
+		}
+		defer func() {
+			pprof.StopCPUProfile()
+			_ = file.Close()
+		}()
 	}
 	signals, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()

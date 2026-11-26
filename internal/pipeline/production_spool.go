@@ -278,7 +278,7 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 		sortPrefixes(keys)
 		for _, p := range keys {
 			v := origins[p]
-			sort.Slice(v, func(i, j int) bool { return v[i] < v[j] })
+			slices.Sort(v)
 			if err := add(s.usage.joined(p, compact(v)), intelligence.CanonicalRecordFrame{}); err != nil {
 				return intelligence.BuildState{}, err
 			}

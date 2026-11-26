@@ -230,6 +230,20 @@ func CompilePartition(ctx context.Context, input PartitionInput) (CompiledPartit
 // CompilePartition retains every original validation and output bound while
 // sharing only the encoder workspace owned by this build.
 func (encoder *PublicEncoder) CompilePartition(ctx context.Context, input PartitionInput) (CompiledPartition, error) {
+	return encoder.compilePartition(ctx, input, nil)
+}
+
+// VerifiedStaticKindLookup is private compiler plumbing. The caller must bind
+// a returned object to the exact checked kind rows, the leaf scope, dictionary
+// and compiler contract. A hit supplies reauthenticated binary bytes and their
+// validated shard. The encoder still combines and checks every final kind.
+type VerifiedStaticKindLookup func(context.Context, uint16, BuiltObject) (BuiltObject, bool, error)
+
+func (encoder *PublicEncoder) CompilePartitionWithStaticReuse(ctx context.Context, input PartitionInput, lookup VerifiedStaticKindLookup) (CompiledPartition, error) {
+	return encoder.compilePartition(ctx, input, lookup)
+}
+
+func (encoder *PublicEncoder) compilePartition(ctx context.Context, input PartitionInput, lookup VerifiedStaticKindLookup) (CompiledPartition, error) {
 	out := CompiledPartition{Objects: []BuiltObject{}, Destinations: make(map[uint16]BuiltObject)}
 	if err := encoder.checkOpen(); err != nil {
 		return out, err
@@ -373,6 +387,24 @@ func (encoder *PublicEncoder) CompilePartition(ctx context.Context, input Partit
 		records := groups[kind]
 		if len(records) == 0 {
 			continue
+		}
+		if lookup != nil && kind >= 2 && kind <= 4 {
+			var expectedDictionary BuiltObject
+			if kind == 2 || kind == 4 {
+				expectedDictionary = dict
+			}
+			cached, hit, err := lookup(ctx, kind, expectedDictionary)
+			if err != nil {
+				return out, err
+			}
+			if hit {
+				if cached.Info.Kind != kind || cached.Info.Partition != input.Partition || cached.Shard.Kind != kind || len(cached.Bytes) != cached.Info.Bytes {
+					return out, fail("record")
+				}
+				out.Objects = append(out.Objects, cached)
+				out.Destinations[kind] = cached
+				continue
+			}
 		}
 		sort.SliceStable(records, func(i, j int) bool {
 			a, b := records[i], records[j]

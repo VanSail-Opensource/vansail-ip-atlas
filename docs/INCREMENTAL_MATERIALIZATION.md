@@ -21,6 +21,7 @@ The private `spatial-cache-v1` inventory records separate dependencies for each 
 | Public | A fitting leaf's public records, or its split decision | Risk dependencies, final global ASN contexts, RPKI completeness, publisher observation time and coverage deadline |
 | Geo layout | A fitting geo-heavy leaf's unique geographic boundary counts and remaining raw rows | Exact ordered input descriptors, scope, location policy, raw fit counts and charges. Reuse requires the corresponding validated location values. |
 | Compiled | Final public objects and routes for a public partition subtree | Actual complete public-run bytes, scope and actual ASN prefix-provider bytes and index |
+| Compiled static kind | Geography, coordinates or network object within an existing bounded compiled leaf | Exact ordered consumed kind frames, current dictionary identity, fact group and exact leaf scope |
 
 All domains additionally bind the executable's actual bytes, compiler limits,
 public schema and build mode. No key relies on `Source.Fingerprint` alone.
@@ -89,6 +90,14 @@ public profile, reference closure and route scope. Object and route registration
 normal compiler paths. Shared objects are deduplicated against the current output
 inventory, including verification of any existing destination. Historical byte,
 file and scratch counters are never copied. The final router is rebuilt.
+
+If a whole grouped leaf misses, the compiler can reuse a matching kind-2, kind-3
+or kind-4 binary object. This does not alter grouped partition fit or the final
+router geometry. Existing typed validation and dictionary encoding still run.
+A hit verifies the actual object bytes, exact scope and dictionary reference.
+The encoder then checks anycast against the current usage rows and binds current
+profile cells to the verified network object's actual record ordinals. Only a
+fully accepted grouped leaf can retain its individual static kinds.
 
 ## Storage and failure behavior
 

@@ -36,13 +36,17 @@ func (c *compiler) partitionFits(size partitionSize) bool {
 }
 
 func scatterTree(s scope, depth int) *scatterNode {
+	return scatterTreeDepth(s, depth, 4)
+}
+
+func scatterTreeDepth(s scope, depth, maximum int) *scatterNode {
 	node := &scatterNode{scope: s, target: -1}
-	if depth == 4 {
+	if depth == maximum {
 		return node
 	}
 	left, right, err := s.children()
 	if err == nil {
-		node.children = [2]*scatterNode{scatterTree(left, depth+1), scatterTree(right, depth+1)}
+		node.children = [2]*scatterNode{scatterTreeDepth(left, depth+1, maximum), scatterTreeDepth(right, depth+1, maximum)}
 	}
 	return node
 }
@@ -78,25 +82,35 @@ func scatterRow(record via3.PublicRecord, row ownedRunFrame, target scope, inher
 type scatterPrefixes struct {
 	root    *scatterNode
 	bits    int
-	totals  [16]scatterTotals
-	targets [16]int
+	depth   int
+	totals  []scatterTotals
+	targets []int
 }
 
 // At most 31 tree nodes and 16 prefix bins, charged to the existing private
 // run-proof memory ceiling. The plan does not retain any frame or fact body.
 const ownedScatterPlanCost = 8192
 
+// At most 511 nodes and 256 bounded bins, with no additional record buffers.
+const ownedQualityScatterPlanCost = 96 << 10
+const qualityScatterDepth = 8
+
 type ownedScatterPlan struct {
 	tree *scatterNode
 	bins *scatterPrefixes
+	deep *ownedScatterPlan
 }
 
 func newOwnedScatterPlan(s scope) *ownedScatterPlan {
-	tree := scatterTree(s, 0)
+	return newOwnedScatterPlanDepth(s, 4)
+}
+
+func newOwnedScatterPlanDepth(s scope, depth int) *ownedScatterPlan {
+	tree := scatterTreeDepth(s, 0, depth)
 	if tree.children[0] == nil {
 		return nil
 	}
-	return &ownedScatterPlan{tree: tree, bins: newScatterPrefixes(tree)}
+	return &ownedScatterPlan{tree: tree, bins: newScatterPrefixesDepth(tree, depth)}
 }
 
 func (p *ownedScatterPlan) count(record via3.PublicRecord, frame ownedRunFrame) error {
@@ -121,18 +135,22 @@ func scatterEligible(s scope, total partitionSize, limits Limits) bool {
 }
 
 func newScatterPrefixes(root *scatterNode) *scatterPrefixes {
+	return newScatterPrefixesDepth(root, 4)
+}
+
+func newScatterPrefixesDepth(root *scatterNode, depth int) *scatterPrefixes {
 	if root.asn {
 		return nil
 	}
 	bits := root.prefix.Bits()
-	if bits+4 > root.ipCeiling() {
+	if bits+depth > root.ipCeiling() {
 		return nil
 	}
-	return &scatterPrefixes{root: root, bits: bits}
+	return &scatterPrefixes{root: root, bits: bits, depth: depth, totals: make([]scatterTotals, 1<<depth), targets: make([]int, 1<<depth)}
 }
 
 func (s *scatterPrefixes) slot(p netip.Prefix) (int, bool) {
-	if s == nil || p.Bits() < s.bits+4 || !s.root.prefix.Contains(p.Addr()) {
+	if s == nil || p.Bits() < s.bits+s.depth || !s.root.prefix.Contains(p.Addr()) {
 		return 0, false
 	}
 	bits := s.bits
@@ -141,11 +159,19 @@ func (s *scatterPrefixes) slot(p netip.Prefix) (int, bool) {
 	}
 	addr := p.Addr().As16()
 	index, offset := bits/8, uint(bits%8)
-	if offset <= 4 {
-		return int(addr[index] >> (4 - offset) & 15), true
+	if s.depth == 4 {
+		if offset <= 4 {
+			return int(addr[index] >> (4 - offset) & 15), true
+		}
+		word := uint16(addr[index])<<8 | uint16(addr[index+1])
+		return int(word >> (12 - offset) & 15), true
+	}
+	mask := 1<<s.depth - 1
+	if int(offset)+s.depth <= 8 {
+		return int(addr[index]>>uint(8-int(offset)-s.depth)) & mask, true
 	}
 	word := uint16(addr[index])<<8 | uint16(addr[index+1])
-	return int(word >> (12 - offset) & 15), true
+	return int(word>>uint(16-int(offset)-s.depth)) & mask, true
 }
 
 func (s *scatterPrefixes) addTotals() {
@@ -157,7 +183,7 @@ func (s *scatterPrefixes) addTotals() {
 			continue
 		}
 		node := s.root
-		for bit := 3; ; bit-- {
+		for bit := s.depth - 1; ; bit-- {
 			node.size.records += sum.size.records
 			node.size.bytes += sum.size.bytes
 			node.wireBytes += sum.wireBytes
@@ -176,7 +202,7 @@ func (s *scatterPrefixes) selectTargets() {
 	}
 	for slot := range s.targets {
 		node := s.root
-		for bit := 3; bit >= 0 && node.target < 0; bit-- {
+		for bit := s.depth - 1; bit >= 0 && node.target < 0; bit-- {
 			node = node.children[slot>>bit&1]
 		}
 		s.targets[slot] = node.target
@@ -288,6 +314,18 @@ func (c *compiler) scatterPartition(path string, s scope) (runs []scatteredRun, 
 	var plan *ownedScatterPlan
 	if proof != nil && proof.scatter != nil && proof.scatter.tree.scope == s {
 		plan, proof.scatter = proof.scatter, nil
+		if deep := plan.deep; deep != nil {
+			deep.bins.addTotals()
+			// The depth-eight path keeps one writer alive. It is safe only
+			// for one ordered fact kind with no inherited target rows.
+			if selected := c.deepQualityTargets(deep.tree, total); len(selected) > 0 && c.fitsScatterScratch(selected) {
+				if err := r.file.Close(); err != nil {
+					return nil, false, err
+				}
+				deep.bins.selectTargets()
+				return c.writeScatter(path, deep.tree, selected, proof, nil, deep.bins, true)
+			}
+		}
 		plan.bins.addTotals()
 		if plan.tree.size != total {
 			return nil, false, errOwnedRunProof
@@ -349,6 +387,20 @@ func (c *compiler) scatterPartition(path string, s scope) (runs []scatteredRun, 
 		}
 		return []scatteredRun{{path, child.scope}}, true, nil
 	}
+	selected := c.selectScatterNodes(tree)
+	if len(selected) == 0 || len(selected) > 16 {
+		return nil, false, errors.New("public scatter fanout invalid")
+	}
+	if !c.fitsScatterScratch(selected) {
+		// The ordinary depth-first split may fit with fewer simultaneous rows.
+		// No file or accounting mutation has occurred at this fallback point.
+		return nil, false, nil
+	}
+	bins.selectTargets()
+	return c.writeScatter(path, tree, selected, proof, firstDigest, bins, false)
+}
+
+func (c *compiler) selectScatterNodes(tree *scatterNode) []*scatterNode {
 	var selected []*scatterNode
 	var selectNodes func(*scatterNode)
 	selectNodes = func(node *scatterNode) {
@@ -368,9 +420,26 @@ func (c *compiler) scatterPartition(path string, s scope) (runs []scatteredRun, 
 	}
 	selectNodes(tree.children[0])
 	selectNodes(tree.children[1])
-	if len(selected) == 0 || len(selected) > 16 {
-		return nil, false, errors.New("public scatter fanout invalid")
+	return selected
+}
+
+func (c *compiler) deepQualityTargets(tree *scatterNode, total partitionSize) []*scatterNode {
+	if tree.size != total || tree.children[0].size.records == 0 || tree.children[1].size.records == 0 {
+		return nil
 	}
+	selected := c.selectScatterNodes(tree)
+	if len(selected) <= 16 || len(selected) > 1<<qualityScatterDepth {
+		return nil
+	}
+	for _, node := range selected {
+		if !node.cover.IsValid() || node.cover.Bits() < node.prefix.Bits() || !node.prefix.Contains(node.cover.Addr()) {
+			return nil
+		}
+	}
+	return selected
+}
+
+func (c *compiler) fitsScatterScratch(selected []*scatterNode) bool {
 	var planned uint64
 	for _, node := range selected {
 		planned += privateRunStoredBound(uint64(node.wireBytes))
@@ -379,16 +448,10 @@ func (c *compiler) scatterPartition(path string, s scope) (runs []scatteredRun, 
 	if c.options.externalScratch != nil {
 		extra = c.options.externalScratch()
 	}
-	if extra > c.options.Limits.ScratchBytes || c.used > c.options.Limits.ScratchBytes-extra || planned > c.options.Limits.ScratchBytes-extra-c.used {
-		// The ordinary depth-first split may fit with fewer simultaneous rows.
-		// No file or accounting mutation has occurred at this fallback point.
-		return nil, false, nil
-	}
-	bins.selectTargets()
-	return c.writeScatter(path, tree, selected, proof, firstDigest, bins)
+	return extra <= c.options.Limits.ScratchBytes && c.used <= c.options.Limits.ScratchBytes-extra && planned <= c.options.Limits.ScratchBytes-extra-c.used
 }
 
-func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scatterNode, proof *ownedRunProof, digest []byte, bins *scatterPrefixes) (runs []scatteredRun, applied bool, failure error) {
+func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scatterNode, proof *ownedRunProof, digest []byte, bins *scatterPrefixes, ordered bool) (runs []scatteredRun, applied bool, failure error) {
 	before := c.used
 	writers := make([]*ownedRunWriter, len(selected))
 	sizes := make([]partitionSize, len(selected))
@@ -424,6 +487,18 @@ func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scat
 	if proof != nil && (r.owner == nil || r.file.compressed.proof != proof) {
 		return runs, false, errOwnedRunProof
 	}
+	finish := func(i int) error {
+		node := selected[i]
+		if writers[i] == nil || sizes[i] != node.size || wireBytes[i] != node.wireBytes {
+			return errors.New("public scatter totals changed")
+		}
+		if err := writers[i].Finish(); err != nil {
+			return err
+		}
+		c.rememberPartitionSize(runs[i].path, sizes[i])
+		return nil
+	}
+	active := -1
 	secondHash := sha256.New()
 	for {
 		if err := c.ctx.Err(); err != nil {
@@ -440,12 +515,26 @@ func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scat
 		var inherited ownedRunFrame
 		write := func(i int) error {
 			node := selected[i]
+			if ordered && (r.record.Kind != 6 || r.record.Inherited || r.record.Prefix.Bits() < node.prefix.Bits()) {
+				return errOwnedRunProof
+			}
 			frame, keep, err := scatterRow(r.record, r.frame(), node.scope, &inherited)
 			if err != nil {
 				return err
 			}
 			if !keep {
 				return nil
+			}
+			if ordered && i != active {
+				if i != active+1 {
+					return errOwnedRunProof
+				}
+				if active >= 0 {
+					if err := finish(active); err != nil {
+						return err
+					}
+				}
+				active = i
 			}
 			if writers[i] == nil {
 				target := c.next()
@@ -482,14 +571,17 @@ func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scat
 	if proof == nil && !bytes.Equal(secondHash.Sum(nil), digest) {
 		return runs, false, errors.New("private run changed during scatter")
 	}
-	for i, node := range selected {
-		if writers[i] == nil || sizes[i] != node.size || wireBytes[i] != node.wireBytes {
-			return runs, false, errors.New("public scatter totals changed")
+	first := 0
+	if ordered {
+		if active != len(selected)-1 {
+			return runs, false, errOwnedRunProof
 		}
-		if err := writers[i].Finish(); err != nil {
+		first = active
+	}
+	for i := first; i < len(selected); i++ {
+		if err := finish(i); err != nil {
 			return runs, false, err
 		}
-		c.rememberPartitionSize(runs[i].path, sizes[i])
 	}
 	if err := r.file.Close(); err != nil {
 		return runs, false, err

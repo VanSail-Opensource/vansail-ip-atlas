@@ -965,7 +965,22 @@ func validateAnycastFacts(partition CompiledPartition) error {
 	if !ok {
 		return nil
 	}
-	boundaries := make(map[string]netip.Prefix)
+	// Without any affirmative usage row there is no scope where a lookup
+	// can select true. This is common in geo-heavy leaves. A mixed leaf still
+	// walks every old boundary, including inherited false overrides.
+	rows, _ := usage.Shard.Rows(3)
+	hasAnycast := false
+	for p := 0; p < len(rows); p += 8 {
+		row := rows[p : p+8]
+		if present(row, 7) && row[6]&1 != 0 {
+			hasAnycast = true
+			break
+		}
+	}
+	if !hasAnycast {
+		return nil
+	}
+	boundaries := make(map[netip.Prefix]struct{})
 	for _, kind := range []uint16{2, 3, 5} {
 		object, ok := partition.Destinations[kind]
 		if !ok {
@@ -977,11 +992,11 @@ func validateAnycastFacts(partition CompiledPartition) error {
 				row := rows[p : p+32]
 				addr, _ := keyAddr(row)
 				prefix := netip.PrefixFrom(addr, int(row[1]))
-				boundaries[prefix.String()] = prefix
+				boundaries[prefix] = struct{}{}
 			}
 		}
 	}
-	for _, scope := range boundaries {
+	for scope := range boundaries {
 		use, _, known := usage.Shard.findPrefixWithin(scope.Addr(), scope.Bits())
 		if !known || !present(use, 7) || use[6]&1 == 0 {
 			continue

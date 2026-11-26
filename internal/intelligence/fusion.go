@@ -357,8 +357,13 @@ type UsageResult struct {
 }
 
 func FuseUsage(records []UsageEvidence) UsageResult {
-	types, assignments := map[string]struct{}{}, map[string]struct{}{}
-	anycasts, broadcasts := map[bool]struct{}{}, map[bool]struct{}{}
+	result := UsageResult{Type: "unknown", Assignment: "unknown"}
+	if len(records) == 0 {
+		return result
+	}
+	var usageType, assignment string
+	var typeConflict, assignmentConflict bool
+	var anycasts, broadcasts uint8
 	directType, contextualBits := false, -1
 	for _, v := range records {
 		if !v.Current || v.Family == "" {
@@ -381,43 +386,46 @@ func FuseUsage(records []UsageEvidence) UsageResult {
 		}
 		switch typeValue {
 		case "residential", "business", "mobile", "datacenter", "hosting", "education", "government":
-			types[typeValue] = struct{}{}
+			if usageType != "" && usageType != typeValue {
+				typeConflict = true
+			}
+			usageType = typeValue
 		}
 		switch v.Assignment {
 		case "native", "broadcast_or_routed":
-			assignments[v.Assignment] = struct{}{}
+			if assignment != "" && assignment != v.Assignment {
+				assignmentConflict = true
+			}
+			assignment = v.Assignment
 		}
-		if v.Anycast != nil {
-			anycasts[*v.Anycast] = struct{}{}
-		}
-		if v.DirectedBroadcast != nil {
-			broadcasts[*v.DirectedBroadcast] = struct{}{}
-		}
+		anycasts |= usageBoolVote(v.Anycast)
+		broadcasts |= usageBoolVote(v.DirectedBroadcast)
 	}
-	result := UsageResult{Type: "unknown", Assignment: "unknown"}
-	if len(types) == 1 {
-		for value := range types {
-			result.Type = value
-		}
+	if !typeConflict && usageType != "" {
+		result.Type = usageType
 	}
-	if len(assignments) == 1 {
-		for value := range assignments {
-			result.Assignment = value
-		}
+	if !assignmentConflict && assignment != "" {
+		result.Assignment = assignment
 	}
-	if len(anycasts) == 1 {
-		for value := range anycasts {
-			copy := value
-			result.Anycast = &copy
-		}
+	if anycasts == 1 || anycasts == 2 {
+		value := anycasts == 2
+		result.Anycast = &value
 	}
-	if len(broadcasts) == 1 {
-		for value := range broadcasts {
-			copy := value
-			result.DirectedBroadcast = &copy
-		}
+	if broadcasts == 1 || broadcasts == 2 {
+		value := broadcasts == 2
+		result.DirectedBroadcast = &value
 	}
 	return result
+}
+
+func usageBoolVote(value *bool) uint8 {
+	if value == nil {
+		return 0
+	}
+	if *value {
+		return 2
+	}
+	return 1
 }
 
 type Cell struct {

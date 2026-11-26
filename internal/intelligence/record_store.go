@@ -639,6 +639,8 @@ const recordDecodeBatchBytes = 1 << 20
 
 type recordDecodeBatch struct {
 	frames                [recordDecodeBatchFrames][]byte
+	buffer                []byte
+	ends                  [recordDecodeBatchFrames]int
 	records               [recordDecodeBatchFrames]NormalizedRecord
 	count, bytes, decoded int
 	readErr, decodeErr    error
@@ -656,6 +658,16 @@ type recordBatchReader struct {
 }
 
 func (r *recordBatchReader) fill(b *recordDecodeBatch) {
+	// The backing memory is immutable once this batch is queued. Give every
+	// frame its own extent so a retained frame cannot extend into another.
+	defer func() {
+		start := 0
+		for i := 0; i < b.count; i++ {
+			end := b.ends[i]
+			b.frames[i] = b.buffer[start:end:end]
+			start = end
+		}
+	}()
 	for b.count < recordDecodeBatchFrames && r.remaining > 0 {
 		if err := r.ctx.Err(); err != nil {
 			b.readErr = err
@@ -682,7 +694,17 @@ func (r *recordBatchReader) fill(b *recordDecodeBatch) {
 		if int(r.pending) > recordDecodeBatchBytes-b.bytes {
 			return
 		}
-		data := make([]byte, int(r.pending))
+		end := b.bytes + int(r.pending)
+		if end > cap(b.buffer) {
+			capacity := max(end, 2*cap(b.buffer))
+			if cap(b.buffer) == 0 {
+				capacity = max(end, min(64<<10, end*recordDecodeBatchFrames))
+			}
+			expanded := make([]byte, b.bytes, min(recordDecodeBatchBytes, capacity))
+			copy(expanded, b.buffer)
+			b.buffer = expanded
+		}
+		data := b.buffer[b.bytes:end]
 		if _, err := io.ReadFull(r.reader, data); err != nil {
 			b.readErr = err
 			return
@@ -690,9 +712,10 @@ func (r *recordBatchReader) fill(b *recordDecodeBatch) {
 		r.remaining -= int64(r.pending)
 		r.pending = 0
 		r.count++
-		b.frames[b.count] = data
+		b.buffer = b.buffer[:end]
+		b.ends[b.count] = end
 		b.count++
-		b.bytes += len(data)
+		b.bytes = end
 	}
 }
 

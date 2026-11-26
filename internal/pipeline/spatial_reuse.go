@@ -131,10 +131,55 @@ func scatterGroupSize(parent *bulkBucket, terminals, freeSlots int, reuse bool) 
 	return max(1, (n+groups-1)/groups)
 }
 
+func appendSourceEnd(ends []int, count int) []int {
+	if count != 0 && (len(ends) == 0 || ends[len(ends)-1] != count) {
+		return append(ends, count)
+	}
+	return ends
+}
+
+// At a family root, keep contiguous runs from unrelated sources together.
+// Removing or replacing another source must not change their cache identity.
+// Keep both the ordered input and the existing limit on scatter destinations.
+func scatterInputGroups(parent *bulkBucket, terminals, freeSlots int, reuse bool) [][]intelligence.RecordPartition {
+	n := len(parent.parts)
+	if reuse && parent.prefix.Bits() == 0 && len(parent.sourceEnds) != 0 && parent.sourceEnds[len(parent.sourceEnds)-1] == n {
+		const stableGroupSize = 32
+		maxGroups := max(1, freeSlots/(32*terminals))
+		groups := make([][]intelligence.RecordPartition, 0, min(maxGroups, len(parent.sourceEnds)))
+		start := 0
+		for _, end := range parent.sourceEnds {
+			if end <= start || end > n {
+				break
+			}
+			for start < end && len(groups) < maxGroups {
+				next := min(end, start+stableGroupSize)
+				groups = append(groups, parent.parts[start:next])
+				start = next
+			}
+			if start != end {
+				break
+			}
+		}
+		if start == n {
+			return groups
+		}
+	}
+	size := scatterGroupSize(parent, terminals, freeSlots, reuse)
+	groups := make([][]intelligence.RecordPartition, 0, (n+size-1)/size)
+	for start := 0; start < n; start += size {
+		groups = append(groups, parent.parts[start:min(n, start+size)])
+	}
+	return groups
+}
+
 func (s *bulkSpool) scatterTerminals(ctx context.Context, parent *bulkBucket, terminal []*bulkBucket) error {
-	groupSize := scatterGroupSize(parent, len(terminal), s.store.RemainingPartitionSlots(), s.reuse != nil)
-	for offset := 0; offset < len(parent.parts); offset += groupSize {
-		parts := parent.parts[offset:min(len(parent.parts), offset+groupSize)]
+	routes, err := newBulkScatterRoutes(parent.prefix, terminal)
+	if err != nil {
+		return err
+	}
+	groups := scatterInputGroups(parent, len(terminal), s.store.RemainingPartitionSlots(), s.reuse != nil)
+	for _, parts := range groups {
 		entry := spatialCacheEntry{Domain: "scatter", Scatter: &spatialCacheScatter{}}
 		hit := false
 		if s.reuse != nil {
@@ -159,7 +204,7 @@ func (s *bulkSpool) scatterTerminals(ctx context.Context, parent *bulkBucket, te
 		}
 		if !hit {
 			var err error
-			entry.Scatter.Terminals, err = s.scatterFresh(ctx, parts, terminal)
+			entry.Scatter.Terminals, err = s.scatterFresh(ctx, parts, terminal, routes)
 			if err != nil {
 				return err
 			}
@@ -192,7 +237,7 @@ func (s *bulkSpool) scatterTerminals(ctx context.Context, parent *bulkBucket, te
 	return nil
 }
 
-func (s *bulkSpool) scatterFresh(ctx context.Context, parts []intelligence.RecordPartition, terminal []*bulkBucket) ([]spatialCacheTerminal, error) {
+func (s *bulkSpool) scatterFresh(ctx context.Context, parts []intelligence.RecordPartition, terminal []*bulkBucket, routes bulkScatterRoutes) ([]spatialCacheTerminal, error) {
 	writers := make([]*intelligence.RecordWriter, len(terminal))
 	values := make([]spatialCacheTerminal, len(terminal))
 	for i, node := range terminal {
@@ -205,11 +250,9 @@ func (s *bulkSpool) scatterFresh(ctx context.Context, parts []intelligence.Recor
 		if err != nil {
 			return err
 		}
-		for i := range values {
+		first, end := routes.overlapping(prefix)
+		for i := first; i < end; i++ {
 			value := &values[i]
-			if !prefix.Contains(value.Prefix.Addr()) && !value.Prefix.Contains(prefix.Addr()) {
-				continue
-			}
 			value.Cover = bulkPrefixCover(value.Cover, prefix)
 			if frame.EncodedBytes() != 0 {
 				err = frame.AppendTo(writers[i])

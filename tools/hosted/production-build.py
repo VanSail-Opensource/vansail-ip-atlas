@@ -14,6 +14,7 @@ import hashlib
 import heapq
 import json
 import os
+import stat
 from pathlib import Path
 import re
 import shutil
@@ -99,19 +100,28 @@ def transition(before: Path, after: Path, private: Path) -> dict:
 
 def disk_bytes(workspace: Path) -> int:
     total = 0
-    for relative in (".atlas-private", "build-private", "web/.output"):
-        directory = workspace / relative
-        if not directory.exists():
+    directories = [os.fspath(workspace / relative) for relative in (".atlas-private", "build-private", "web/.output")]
+    # This scan competes for the same two CPUs as the measured compiler.
+    # Count the same files at the same cadence using one metadata read per
+    # file instead of separate pathlib link-or-size queries.
+    while directories:
+        try:
+            with os.scandir(directories.pop()) as children:
+                for entry in children:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            directories.append(entry.path)
+                            continue
+                        info = entry.stat(follow_symlinks=False)
+                        if stat.S_ISLNK(info.st_mode):
+                            if not entry.is_dir():
+                                raise ContractError("private scratch cannot contain symlinks")
+                            continue
+                        total += info.st_size
+                    except FileNotFoundError:
+                        pass  # A concurrently pruned file has no remaining size.
+        except (FileNotFoundError, NotADirectoryError):
             continue
-        for root, dirs, files in os.walk(directory, followlinks=False):
-            for filename in files:
-                path = Path(root) / filename
-                if path.is_symlink():
-                    raise ContractError("private scratch cannot contain symlinks")
-                try:
-                    total += path.stat().st_size
-                except FileNotFoundError:
-                    pass
     return total
 
 

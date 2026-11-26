@@ -98,9 +98,9 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 		if err := policy.Validate(); err != nil {
 			return err
 		}
-		mappings := state
-		mappings.Sources = make([]intelligence.StoredSource, 0, len(state.Sources))
-		var mappingLengths []int
+		mappingLengths := encodedLengths
+		// Prepare-only (ASN context) visits never run the public mapping pass.
+		collectLengths := mappingLengths == nil && !(len(inputs) == 1 && inputs[0].prepareOnly)
 		var evidence []intelligence.Evidence
 		var coverage []intelligence.Coverage
 		var origins []intelligence.OriginMapping
@@ -136,8 +136,6 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 			if len(seen) > 1000 {
 				return errors.New("intelligence source count exceeded")
 			}
-			mapping := source
-			mapping.Records = nil
 			for _, record := range source.Records {
 				if err := ctx.Err(); err != nil {
 					return err
@@ -157,9 +155,7 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 				if count > 200000 || bytes > 96<<20 {
 					return errors.New("bounded intelligence working input exceeded")
 				}
-				switch record.Kind {
-				case intelligence.RecordGeo, intelligence.RecordUsage, intelligence.RecordOrigins, intelligence.RecordNetworkOrganization, intelligence.RecordNetworkName:
-					mapping.Records = append(mapping.Records, record)
+				if collectLengths {
 					mappingLengths = append(mappingLengths, size)
 				}
 				switch record.Kind {
@@ -283,7 +279,6 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 					asns[v.ASN] = struct{}{}
 				}
 			}
-			mappings.Sources = append(mappings.Sources, mapping)
 		}
 		engine, err := intelligence.NewEngine(policy, evidence, coverage, origins, clock)
 		if err != nil {
@@ -354,7 +349,7 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 		if len(inputs) == 1 {
 			mappingScope, locations = inputs[0].scope, inputs[0].locations
 		}
-		if err := mappingProducer(mappings, policy, clock, mappingLengths, true, mappingScope, locations)(ctx, emit); err != nil {
+		if err := mappingProducerRows(state, policy, clock, mappingLengths, true, mappingScope, locations, true)(ctx, emit); err != nil {
 			return err
 		}
 		profileKeys := make([]netip.Prefix, 0, len(profiles))

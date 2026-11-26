@@ -30,6 +30,7 @@ type bulkBucket struct {
 	first, last uint32
 	asn         bool
 	parts       []intelligence.RecordPartition
+	sourceEnds  []int // Original source boundaries for the ordered family root.
 	riskDigest  [32]byte
 	riskOnly    bool
 	active      bool
@@ -155,8 +156,19 @@ func (s *bulkSpool) collect(ctx context.Context, b *bulkBucket, withCoverage boo
 func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage bool, overflow error) (intelligence.BuildState, error) {
 	b.recordBytes = nil
 	source := intelligence.StoredSource{ID: "bounded-materialization", Fingerprint: s.binding, ExpiresAt: s.clock.Add(720 * time.Hour)}
-	var recordBytes []int
-	seen := map[[32]byte]bool{}
+	// Bound the allocation by the existing minimum cost per accepted row,
+	// even if a broad ancestor's descriptors count the same record twice.
+	maxRecords := min(s.batchRecords, s.batchBytes/1024)
+	reserve := 0
+	for _, part := range b.parts {
+		reserve += int(min(uint64(maxRecords-reserve), part.Records))
+		if reserve == maxRecords {
+			break
+		}
+	}
+	source.Records = make([]intelligence.NormalizedRecord, 0, reserve)
+	recordBytes := make([]int, 0, reserve)
+	seen := make(map[[32]byte]bool, reserve)
 	riskDigest := sha256.New()
 	collectRisk := s.reuse != nil && !withCoverage && !b.asn
 	b.riskDigest = [32]byte{}
@@ -283,6 +295,8 @@ func bulkChildren(b *bulkBucket) (*bulkBucket, *bulkBucket, error) {
 	left, right := *b, *b
 	left.parts = nil
 	right.parts = nil
+	left.sourceEnds = nil
+	right.sourceEnds = nil
 	left.recordBytes = nil
 	right.recordBytes = nil
 	left.scattered = [2]*bulkBucket{}
@@ -681,6 +695,14 @@ func (s *bulkSpool) seedStable(ctx context.Context, workspace string, state inte
 	s.usage = asnUsageIndex{}
 	s.riskParts = map[[32]byte]bool{}
 	var categories [6][]intelligence.RecordPartition
+	var sourceEnds [2][]int
+	markSource := func() {
+		if s.reuse != nil {
+			for i := range sourceEnds {
+				sourceEnds[i] = appendSourceEnd(sourceEnds[i], len(categories[i]))
+			}
+		}
+	}
 	for _, source := range state.Sources {
 		var replayKey [32]byte
 		var capture *seedSourceCapture
@@ -695,6 +717,7 @@ func (s *bulkSpool) seedStable(ctx context.Context, workspace string, state inte
 				return nil, nil, err
 			}
 			if hit {
+				markSource()
 				continue
 			}
 			capture = &seedSourceCapture{eligible: true}
@@ -796,12 +819,16 @@ func (s *bulkSpool) seedStable(ctx context.Context, workspace string, state inte
 				return nil, nil, err
 			}
 		}
+		markSource()
 	}
 	spatial := []*bulkBucket{{prefix: netip.PrefixFrom(netip.AddrFrom4([4]byte{}), 0), active: true}, {prefix: netip.PrefixFrom(netip.AddrFrom16([16]byte{}), 0), active: true}}
 	asn := &bulkBucket{asn: true, first: 0, last: ^uint32(0), active: true}
 	for i, b := range []*bulkBucket{spatial[0], spatial[1], asn} {
 		b.parts = categories[i]
 		s.all = append(s.all, b)
+	}
+	for i, b := range spatial {
+		b.sourceEnds = sourceEnds[i]
 	}
 	s.coverage, s.pathParts, s.prefixParts = categories[3], categories[4], categories[5]
 	return spatial, asn, nil

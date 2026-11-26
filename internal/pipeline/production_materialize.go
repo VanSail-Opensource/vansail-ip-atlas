@@ -483,7 +483,7 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 			mappings := func(ctx context.Context, produce mappingProducerFactory, emit func(via3.PublicRecord) error) error {
 				return spool.materializeMappings(ctx, bucket, locationPolicy, produce, emit)
 			}
-			return IntelligenceProducer(part, policy, clock, MaterializationInputs{mappings: mappings, geoReplay: bucket.geoReplay, VRPComplete: completeVRP, RPKIObservedAt: observedAt, RPKICoverageValidUntil: coverageValidUntil, verifiedEmptyVRP: completeVRP, scope: bucket.prefix, contexts: contexts, resolver: relations, encodedLengths: bucket.recordBytes})(ctx, func(record via3.PublicRecord) error {
+			return IntelligenceProducer(part, policy, clock, MaterializationInputs{mappings: mappings, geoReplay: bucket.geoReplay, VRPComplete: completeVRP, RPKIObservedAt: observedAt, RPKICoverageValidUntil: coverageValidUntil, verifiedEmptyVRP: completeVRP, scope: bucket.prefix, contexts: contexts, resolver: relations, encodedLengths: bucket.recordBytes, spatialOutputsOnly: true})(ctx, func(record via3.PublicRecord) error {
 				if record.Kind >= 8 && record.Kind != 9 {
 					return nil
 				}

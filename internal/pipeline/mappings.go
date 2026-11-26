@@ -65,10 +65,10 @@ func isMappingRecord(kind intelligence.RecordKind) bool {
 // Its mapping pass can project the same owned rows without copying them into a
 // separate state. The standalone entry point still rejects other kinds.
 func mappingProducerRows(state intelligence.BuildState, policy intelligence.Policy, clock time.Time, encodedLengths []int, omitInherited bool, scope netip.Prefix, locations *locationProjection, project bool) Producer {
-	return mappingProducerSelection(state, policy, clock, encodedLengths, omitInherited, scope, locations, project, true, true, nil)
+	return mappingProducerSelection(state, policy, clock, encodedLengths, omitInherited, scope, locations, project, true, true, true, nil)
 }
 
-func mappingProducerSelection(state intelligence.BuildState, policy intelligence.Policy, clock time.Time, encodedLengths []int, omitInherited bool, scope netip.Prefix, locations *locationProjection, project, locationRowsWanted, networkRowsWanted bool, projectedGeo *geoLayoutReplay) Producer {
+func mappingProducerSelection(state intelligence.BuildState, policy intelligence.Policy, clock time.Time, encodedLengths []int, omitInherited bool, scope netip.Prefix, locations *locationProjection, project, locationRowsWanted, networkRowsWanted, originRowsWanted bool, projectedGeo *geoLayoutReplay) Producer {
 	return func(ctx context.Context, emit func(via3.PublicRecord) error) error {
 		state := state
 		if err := checkOwnedRecordLengths(state, encodedLengths); err != nil {
@@ -385,8 +385,10 @@ func mappingProducerSelection(state intelligence.BuildState, policy intelligence
 					return errors.New("merged mapping origin count exceeded")
 				}
 				network.Origins = asns
-				if err := emit(via3.PublicRecord{Version: 3, Kind: 10, Prefix: prefix, Origins: &via3.OriginsData{ASNs: asns}}); err != nil {
-					return err
+				if originRowsWanted {
+					if err := emit(via3.PublicRecord{Version: 3, Kind: 10, Prefix: prefix, Origins: &via3.OriginsData{ASNs: asns}}); err != nil {
+						return err
+					}
 				}
 			}
 			if err := emit(via3.PublicRecord{Version: 3, Kind: 4, Prefix: prefix, Network: &network}); err != nil {

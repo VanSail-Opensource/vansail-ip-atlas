@@ -25,7 +25,7 @@ jobs:
       GOMAXPROCS: '2'
       GOMEMLIMIT: 5GiB
       RUNNER_TOOL_CACHE: ${{ github.workspace }}/build-private/toolcache
-      ATLAS_REPLAY_COMPILER: 2c3d867abdb31f9c8b307bcd462f9210877fddc8
+      ATLAS_REPLAY_COMPILER: 59dacbf5141678748956ed1f30fcbae23d2a0e87
     steps:
       - uses: actions/checkout@v7.0.0
         with:

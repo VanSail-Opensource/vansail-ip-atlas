@@ -2,6 +2,7 @@ package admission
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"path/filepath"
 	"time"
@@ -9,6 +10,12 @@ import (
 
 const tweetCommitAPI = "https://api.github.com/repos/0xDanielLopez/TweetFeed/commits"
 const tweetImmutableBase = "https://raw.githubusercontent.com/0xDanielLopez/TweetFeed/"
+
+// Separate original content-change receipts from older live-manifest receipts,
+// which may have been created during an unchanged CSV's later publication.
+func tweetFeedClockKey(digest [32]byte) [32]byte {
+	return sha256.Sum256(append([]byte("atlas-tweetfeed-content-change-v1\x00"), digest[:]...))
+}
 
 type tweetCommit struct {
 	commitMetadata
@@ -61,8 +68,24 @@ func (e *Engine) tweetManifestAt(ctx context.Context, dir, sha string, now time.
 
 // Resolve only the latest changed CSV and the edition present in its immediate
 // parent. A post-clock live manifest must match the immutable child before its
-// predecessor can be considered. Exactly one selected immutable CSV is read.
-func (e *Engine) fetchImmutableTweetFeed(ctx context.Context, payload string, s Source, live tweetFeedArtifact, now time.Time) (time.Time, error) {
+// predecessor can be considered. Reuse a locally verified mutable CSV when
+// available. Otherwise fetch only the selected immutable CSV.
+func (e *Engine) resolveTweetFeedEdition(ctx context.Context, payload string, s Source, live tweetFeedArtifact, now time.Time, localMatchesLive bool) (time.Time, error) {
+	if localMatchesLive {
+		// A manifest-only refresh can advance updated_at even when
+		// both mutable assets agree. Only a previously bound content
+		// change can skip the publisher's immutable metadata.
+		cached := e.knownClock(tweetFeedClockKey(live.digest))
+		if !cached.IsZero() && !cached.After(now) {
+			if cached.Before(live.published) {
+				live.published = cached
+			}
+			if !now.Before(live.published.Add(s.MaxAge)) {
+				return time.Time{}, errTweetFeedEdition
+			}
+			return live.published, live.verifyRows(ctx, payload)
+		}
+	}
 	dir := filepath.Dir(payload)
 	ref := "master"
 	var childTime time.Time
@@ -98,10 +121,15 @@ func (e *Engine) fetchImmutableTweetFeed(ctx context.Context, payload string, s 
 			if !now.Before(proof.published.Add(s.MaxAge)) {
 				return time.Time{}, errTweetFeedEdition
 			}
-			if _, err := e.fetch.Fetch(ctx, tweetImmutableBase+revision.SHA+"/week.csv", payload, min(s.MaxCompressedBytes, proof.size)); err != nil {
-				return time.Time{}, err
+			if !localMatchesLive || !matches {
+				if _, err := e.fetch.Fetch(ctx, tweetImmutableBase+revision.SHA+"/week.csv", payload, min(s.MaxCompressedBytes, proof.size)); err != nil {
+					return time.Time{}, err
+				}
+				if err := proof.verifyBytes(ctx, payload); err != nil {
+					return time.Time{}, err
+				}
 			}
-			return proof.published, proof.verify(ctx, payload)
+			return proof.published, proof.verifyRows(ctx, payload)
 		}
 		ref, childTime = revision.Parents[0].SHA, committed
 	}

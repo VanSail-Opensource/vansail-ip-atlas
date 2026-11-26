@@ -173,3 +173,13 @@ The excerpt preserves the original values. Production intake verifies the
 complete content-addressed list, its publisher signature and witness quorum.
 [Operator locations](https://mullvad.net/en/help/server-list) ·
 [Attribution and source terms](notices/mullvad-relay-geolocation.txt)
+
+`observed-apple-private-relay.csv` contains six complete, unmodified CSV rows
+from Apple’s November 19, 2026 publication. Three rows are IPv4 and three are
+IPv6. They exercise distinct prefix lengths and include both populated and
+empty location columns. Only the first column contributes to the normalized
+proxy signal. The sample SHA-256 is
+`62a5bf642c6ab7e723548d9a7b000e9b9fecd8b7e0eaaeb232112ae630c8d043`.
+The complete original and edition witnesses are recorded in the source audit.
+[Publisher CSV](https://mask-api.icloud.com/egress-ip-ranges.csv) ·
+[Source audit](../../SOURCES_AUDIT.md) · [Notice](notices/apple-private-relay.txt)

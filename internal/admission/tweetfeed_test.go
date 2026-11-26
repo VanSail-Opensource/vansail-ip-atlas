@@ -90,7 +90,10 @@ func verifyTweetFeedTestFile(ctx context.Context, meta, payload string, digest [
 	if err != nil || proof.size != size || proof.digest != digest {
 		return time.Time{}, errors.New("weekly test edition differs")
 	}
-	return proof.published, proof.verify(ctx, payload)
+	if err := proof.verifyBytes(ctx, payload); err != nil {
+		return time.Time{}, err
+	}
+	return proof.published, proof.verifyRows(ctx, payload)
 }
 
 func TestTweetFeedManifestBindsRowsDigestAndClock(t *testing.T) {
@@ -135,18 +138,34 @@ func TestTweetFeedManifestBindsRowsDigestAndClock(t *testing.T) {
 	s.Rights, s.Admission, s.Fixture = original.Rights, "active", original.Fixture
 	s.Fixture.Parser, s.Fixture.Schema = s.Parser.ID, s.Parser.Schema
 	certifyGeoTestSource(t, engine, s)
-	fetch.assets = map[string][]byte{tweetFeedCSV: b, tweetFeedManifest: []byte(manifest)}
+	sha, parent := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	first := strings.NewReplacer("2026-11-04T00:00:00Z", "2026-11-02T17:00:00Z", "2026-11-03T00:00:00Z", "2026-11-02T17:00:00Z").Replace(manifest)
+	fetch.assets = map[string][]byte{
+		tweetFeedCSV: b, tweetFeedManifest: []byte(manifest),
+		tweetCommitAPI + "?path=week.csv&sha=master&per_page=1": fmt.Appendf(nil, `[{"sha":%q,"url":%q,"parents":[{"sha":%q,"url":%q}],"commit":{"committer":{"date":"2026-11-02T17:00:01Z"}}}]`, sha, tweetCommitAPI+"/"+sha, parent, tweetCommitAPI+"/"+parent),
+		tweetImmutableBase + sha + "/manifest.json":             []byte(first),
+	}
+	// This entry represents an older release that only saw the later
+	// manifest. It cannot establish when these bytes last changed.
+	if _, err := engine.retainClock(context.Background(), hash, time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
 	res, err := engine.Ingest(context.Background(), s, clock, binding)
-	if err != nil || res.Snapshot == nil || len(res.Snapshot.Records) != 1 || !res.Snapshot.PublishedAt.Equal(time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)) || fetch.calls != 2 {
+	if err != nil || res.Snapshot == nil || len(res.Snapshot.Records) != 1 || !res.Snapshot.PublishedAt.Equal(time.Date(2026, 11, 2, 17, 0, 0, 0, time.UTC)) || fetch.calls != 4 {
 		t.Fatal("weekly source did not complete normal admission", res.Decision, err)
 	}
 	// The live static endpoint and manifest can be an edition apart. Only
 	// the exact publisher-listed origin matching the current digest can recover.
 	fetch.assets[tweetFeedCSV] = []byte(strings.Replace(string(b), "1.1.1.1", "1.1.1.2", 1))
 	fetch.assets[tweetFeedOrigin] = b
+	delete(fetch.assets, tweetCommitAPI+"?path=week.csv&sha=master&per_page=1")
+	delete(fetch.assets, tweetImmutableBase+sha+"/manifest.json")
+	if err := engine.loadClocks(); err != nil {
+		t.Fatal(err)
+	}
 	before := fetch.calls
 	recovered, recoverErr := engine.Ingest(context.Background(), s, clock, binding)
-	if recoverErr != nil || recovered.Snapshot == nil || fetch.calls-before != 3 || recovered.Snapshot.PayloadHash != hash || recovered.Snapshot.Records[0].Evidence.Address != netip.MustParseAddr("1.1.1.1") {
+	if recoverErr != nil || recovered.Snapshot == nil || fetch.calls-before != 3 || !recovered.Snapshot.PublishedAt.Equal(res.Snapshot.PublishedAt) || recovered.Snapshot.PayloadHash != hash || recovered.Snapshot.Records[0].Evidence.Address != netip.MustParseAddr("1.1.1.1") {
 		t.Fatal("current publisher edition failed to recover", recovered.Decision, recoverErr)
 	}
 	fetch.assets[tweetFeedOrigin] = fetch.assets[tweetFeedCSV]

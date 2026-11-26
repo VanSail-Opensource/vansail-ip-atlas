@@ -534,14 +534,7 @@ func (c *compiler) sort(produce Producer) ([]string, error) {
 		size = 0
 		return nil
 	}
-	err := produce(c.ctx, func(input via3.PublicRecord) error {
-		if err := c.ctx.Err(); err != nil {
-			return err
-		}
-		frame, err := c.newCanonicalRunFrame(input)
-		if err != nil {
-			return err
-		}
+	appendFrame := func(frame ownedRunFrame) error {
 		row := frame.row
 		if row.logicalBytes > c.options.Limits.RecordBytes {
 			return errors.New("single fact exceeds bounded record size")
@@ -569,6 +562,20 @@ func (c *compiler) sort(produce Producer) ([]string, error) {
 			c.stats.SortBufferPeak = uint64(size)
 		}
 		return nil
+	}
+	if spool := c.options.spatialSpool; spool != nil {
+		spool.replaySink = &spatialReplaySink{compiler: c, append: appendFrame}
+		defer func() { spool.replaySink = nil }()
+	}
+	err := produce(c.ctx, func(input via3.PublicRecord) error {
+		if err := c.ctx.Err(); err != nil {
+			return err
+		}
+		frame, err := c.newCanonicalRunFrame(input)
+		if err != nil {
+			return err
+		}
+		return appendFrame(frame)
 	})
 	if err != nil {
 		return nil, err
@@ -712,6 +719,17 @@ func (r *runReader) next() error {
 	r.row = row
 	r.record = record
 	return nil
+}
+
+// Split and scatter scans synchronously consume every frame before advancing.
+// Their child writers copy all bytes into their own segment buffers. Release
+// the consumed frame so the private decoder can reuse its bounded output.
+func (r *runReader) nextPartitionRow() error {
+	r.row, r.record = encoded{}, via3.PublicRecord{}
+	if r.file != nil && r.file.compressed != nil {
+		r.file.compressed.shared = false
+	}
+	return r.next()
 }
 
 type mergeHeap []*runReader
@@ -1088,7 +1106,7 @@ func (c *compiler) split(path string, children *[2]scope) ([2]string, error) {
 	var cover netip.Prefix
 	var firstASN, lastASN uint32
 	for {
-		if err := r.next(); err == io.EOF {
+		if err := r.nextPartitionRow(); err == io.EOF {
 			break
 		} else if err != nil {
 			return paths, err

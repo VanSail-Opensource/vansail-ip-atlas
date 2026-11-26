@@ -65,6 +65,12 @@ func (e *Engine) loadClocks() error {
 	return nil
 }
 
+func (e *Engine) knownClock(hash [32]byte) time.Time {
+	e.clockMu.Lock()
+	defer e.clockMu.Unlock()
+	return e.clocks[hash]
+}
+
 func (e *Engine) retainClock(ctx context.Context, hash [32]byte, published time.Time) (time.Time, error) {
 	e.clockMu.Lock()
 	defer e.clockMu.Unlock()

@@ -35,6 +35,9 @@ func publicationSupported(source Source) bool {
 	if source.Parser.ID == "ripe-ipv6-network-names" {
 		return ripeNamesSource(source)
 	}
+	if source.Parser.ID == "apple-private-relay" {
+		return appleRelaySource(source)
+	}
 	if source.Parser.ID == "mullvad-relay-geolocation" {
 		return mullvadSource(source)
 	}

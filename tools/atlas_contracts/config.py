@@ -185,6 +185,8 @@ def validate_sources(config):
                     targets = {"physical_country"}
                 elif key == "city":
                     targets = {"city", "region"}  # The US city label also contains its postal state code.
+            elif source["parser"]["id"] == "apple-private-relay" and key == "ip":
+                targets = {"reason_flags"}
             if any(target not in source["public_fields"] or target not in targets for target in values):
                 raise ContractError(f"{sid}: mapping bypasses field-specific normalization")
         if source["admission"] == "rights_approved":

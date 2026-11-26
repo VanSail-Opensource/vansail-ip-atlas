@@ -39,6 +39,29 @@ func TestTweetFeedImmutableEditions(t *testing.T) {
 		wantDate  string
 		wantCalls int
 	}{
+		{"matching CDN uses original publication clock without another CSV", "2026-11-03T07:36:00Z", manifest(second, "2026-11-03T07:35:00Z"), func(a map[string][]byte) {
+			a[tweetFeedCSV] = second
+			delete(a, childFiles+"week.csv")
+		}, second, after, 4},
+		{"matching origin uses the same immutable clock", "2026-11-03T07:36:00Z", manifest(second, "2026-11-03T07:35:00Z"), func(a map[string][]byte) {
+			a[tweetFeedOrigin] = second
+			delete(a, childFiles+"week.csv")
+		}, second, after, 5},
+		{"matching local bytes can bind the earlier weekly revision", "2026-11-03T07:36:00Z", manifest(first, "2026-11-03T07:20:00Z"), func(a map[string][]byte) {
+			a[tweetFeedCSV] = first
+			delete(a, parentFiles+"week.csv")
+		}, first, before, 6},
+		{"new digest during metadata outage cannot renew matching bytes", "2026-11-03T07:36:00Z", manifest(second, "2026-11-03T07:35:00Z"), func(a map[string][]byte) {
+			a[tweetFeedCSV] = second
+			delete(a, masterAPI)
+		}, nil, "", 3},
+		{"expired original cannot use a later matching heartbeat", "2026-12-03T07:30:00Z", manifest(second, "2026-12-03T07:29:00Z"), func(a map[string][]byte) {
+			a[tweetFeedCSV] = second
+		}, nil, "", 4},
+		{"all rows must predate the earliest bound publication", "2026-11-03T07:36:00Z", manifest(second, "2026-11-03T07:35:00Z"), func(a map[string][]byte) {
+			a[tweetFeedCSV] = second
+			a[childFiles+"manifest.json"] = manifest(second, "2026-11-01T11:59:59Z")
+		}, nil, "", 4},
 		{"head matches live after both mutable copies differ", "2026-11-03T07:35:00Z", manifest(second, after), nil, second, after, 6},
 		{"matching previous edition after live falls behind git", "2026-11-03T07:35:00Z", manifest(first, before), nil, first, before, 8},
 		{"post-clock update anchored to child uses only its earlier original parent", "2026-11-03T07:28:00Z", manifest(second, after), nil, first, before, 6},

@@ -12,6 +12,10 @@ from tools.hosted.checkpoint import REPOSITORY, WORKFLOWS, extract_authenticated
 from tools.release_contract.contracts import ContractError
 
 class CheckpointTests(unittest.TestCase):
+    receipt = '.atlas-private/production-receipts-v1/' + 'a' * 64 + '.json'
+    history = '.atlas-private/state-history-v2/' + 'b' * 64
+    partition = '.atlas-private/records-v2/' + 'c' * 64 + '.records'
+
     @unittest.skipUnless(shutil.which('age') and shutil.which('age-keygen'),'pinned age CLI required for crypto roundtrip')
     def test_real_age_roundtrip_wrong_key_and_ciphertext_corruption(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -22,6 +26,10 @@ class CheckpointTests(unittest.TestCase):
             (source/'.atlas-private/state-v1.json').write_bytes(b'{"Sources":[]}')
             (source/'.atlas-private/state-seal.key').write_bytes(b'x'*32)
             (source/'.atlas-private/production-build.json').write_bytes(b'{"scope":"hosted-production-build-v2"}')
+            generated = (self.receipt, self.history + '.json', self.history + '.seal', self.partition)
+            for name in generated:
+                (source / name).parent.mkdir(exist_ok=True)
+                (source / name).write_bytes(('synthetic ' + name).encode('ascii'))
             environment={'GITHUB_REPOSITORY':REPOSITORY,'GITHUB_REF':'refs/heads/main','GITHUB_SHA':'a'*40,
                 'GITHUB_RUN_ID':'1','GITHUB_RUN_ATTEMPT':'1','ATLAS_STATE_AGE_RECIPIENT':recipient,
                 'ATLAS_STATE_AGE_IDENTITY':identity.read_text()}
@@ -33,6 +41,24 @@ class CheckpointTests(unittest.TestCase):
                 unpack(root/'encrypted',restored,run,101)
                 self.assertEqual((restored/'.atlas-private/state-seal.key').read_bytes(),b'x'*32)
                 self.assertEqual((restored/'.atlas-private/production-build.json').read_bytes(),b'{"scope":"hosted-production-build-v2"}')
+                plaintext = subprocess.check_output(['age', '--decrypt', '--identity', str(identity),
+                                                     str(root/'encrypted/checkpoint.tar.gz.age')])
+                with tarfile.open(fileobj=io.BytesIO(plaintext), mode='r:gz') as archive:
+                    for name in generated:
+                        self.assertEqual(archive.getmember(name).pax_headers, {})
+                        self.assertEqual((restored / name).read_bytes(), (source / name).read_bytes())
+
+                # Reproduce the original trusted candidate packer's default PAX format.
+                tar_open = tarfile.open
+                def legacy_open(**options):
+                    return tar_open(**{**options, 'format': tarfile.PAX_FORMAT})
+                with patch.object(tarfile, 'open', side_effect=legacy_open):
+                    pack(source, root/'legacy', 'candidate', 100)
+                legacy_restore = root/'legacy-restored'
+                legacy_restore.mkdir()
+                unpack(root/'legacy', legacy_restore, {**run, 'path': WORKFLOWS['candidate']}, 101)
+                for name in generated:
+                    self.assertEqual((legacy_restore / name).read_bytes(), (source / name).read_bytes())
                 wrong=root/'wrong';wrong.mkdir()
                 with patch.dict(os.environ,{'ATLAS_STATE_AGE_IDENTITY':'invalid'}),self.assertRaises(ContractError):
                     unpack(root/'encrypted',wrong,run,101)
@@ -77,5 +103,28 @@ class CheckpointTests(unittest.TestCase):
                         [('../outside',tarfile.REGTYPE)],[('.atlas-private/production-receipt.json',tarfile.REGTYPE)]):
             with self.subTest(members=members),tempfile.TemporaryDirectory() as directory,self.assertRaises(ContractError):
                 extract_authenticated(self.archive(members),Path(directory))
+
+    def test_legacy_extended_path_must_be_an_original_regular_member(self):
+        for physical_name, headers, kind in (
+            (self.receipt, {'path': self.receipt, 'mtime': '0'}, tarfile.REGTYPE),
+            (self.receipt, {'path': '../' + self.receipt}, tarfile.REGTYPE),
+            (self.receipt, {'path': '.atlas-private/state-v1.json'}, tarfile.REGTYPE),
+            (self.receipt, {'path': self.receipt.upper()}, tarfile.REGTYPE),
+            ('.atlas-private/state-seal.key', {'path': self.receipt}, tarfile.REGTYPE),
+            (self.history + '.seal', {'path': self.history + '.json'}, tarfile.REGTYPE),
+            (self.history + '.junk', {'path': self.history + '.junk'}, tarfile.REGTYPE),
+            (self.receipt, {'path': self.receipt}, tarfile.SYMTYPE),
+        ):
+            with self.subTest(physical_name=physical_name, headers=headers, kind=kind):
+                stream = io.BytesIO()
+                with tarfile.open(fileobj=stream, mode='w', format=tarfile.PAX_FORMAT) as archive:
+                    archive.addfile(tarfile.TarInfo('.atlas-private/state-v1.json'))
+                    entry = tarfile.TarInfo(physical_name)
+                    entry.type = kind
+                    entry.pax_headers = headers
+                    archive.addfile(entry)
+                stream.seek(0)
+                with tempfile.TemporaryDirectory() as directory, self.assertRaises(ContractError):
+                    extract_authenticated(stream, Path(directory))
 
 if __name__=='__main__':unittest.main()

@@ -18,12 +18,26 @@ class ConfigurationTests(unittest.TestCase):
     def setUpClass(cls):
         cls.configs = load_configs()
 
+    def test_apple_relay_is_positive_prefix_proxy_evidence(self):
+        catalog = self.configs["sources"]
+        source = next(row for row in catalog["sources"] if row["id"] == "apple-private-relay")
+        self.assertEqual(source["publication_proof"], {"kind": "snapshot_metadata",
+                         "locator": source["download"]["url"], "field": "egress.scope_change"})
+        self.assertEqual(source["license"]["distribution"], "user_authorized_educational_use")
+        self.assertEqual(source["fixture"]["payload_format"], "original")
+        for field, value in (("signals", ["vpn"]), ("signals", ["abuse"]),
+                             ("public_fields", ["isp"]), ("field_mappings", {"ip": "anycast"}),
+                             ("coverage", {"kind": "complete", "scope": "prefix"}),
+                             ("assessment_layers", ["explicit_prefix"])):
+            with self.subTest(field=field, value=value), self.assertRaises(ContractError):
+                validate_schema("sources", {**catalog, "sources": [{**source, field: value}]})
+
     def test_actual_catalog_is_blocked_and_has_shared_family(self):
         report = capability_report(self.configs["sources"], utc("2026-11-08T00:00:00Z"), ROOT)
-        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (22, 22, 0))
+        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (23, 23, 0))
         self.assertEqual({s["id"] for s in self.configs["sources"]["sources"] if s["admission"] == "active"}, {
             "sapics-user-country-v4", "sapics-user-country-v6", "sapics-server-country-v4", "ipverse-as-metadata",
-            "dbip-lite-direct", "mullvad-relay-geolocation", "ipapi-free-geo-v4", "ipapi-free-geo-v6", "x4b-vpn-v4", "tor-exits", "ipverse-asn-usage",
+            "dbip-lite-direct", "apple-private-relay", "mullvad-relay-geolocation", "ipapi-free-geo-v4", "ipapi-free-geo-v6", "x4b-vpn-v4", "tor-exits", "ipverse-asn-usage",
             "google-network-organization", "ripe-ipv6-network-names", "nro-delegated-registration", "ffraud-ip", "iana-root-anycast", "tweetfeed-week", "azure-appservice-public", "routeviews-wide-rib", "ripe-mrt-rrc18", "caida-asrel2", "rpki-client-vrps"})
         self.assertFalse(report["production_eligible"])
         self.assertEqual(report["schema_version"], 3)

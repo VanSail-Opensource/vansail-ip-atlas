@@ -194,26 +194,54 @@ func (s *bulkSpool) replayPublic(ctx context.Context, stream spatialCacheStream,
 		return err
 	}
 	defer input.Close()
-	reader := &runReader{reader: input.reader, limit: DefaultLimits().RecordBytes}
+	limit := DefaultLimits().RecordBytes
+	reader := &runReader{reader: input.reader, limit: limit}
+	consume := func(data []byte) error {
+		_, record, err := decodeRunPayload(data, limit)
+		if err != nil {
+			return err
+		}
+		if record.Kind >= 8 && record.Kind != 9 {
+			return errSpatialPublicRow
+		}
+		return emit(record)
+	}
+	if sink := s.replaySink; sink != nil {
+		bodies := spatialReplayBodies{compiler: sink.compiler}
+		consume = func(data []byte) error {
+			frame, err := bodies.canonical(data, limit)
+			if err != nil {
+				return err
+			}
+			return sink.append(frame)
+		}
+	}
 	var records, decoded uint64
 	for {
 		if err = ctx.Err(); err != nil {
 			return err
 		}
-		err = reader.next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
+		data := input.reader.takeFrame(limit)
+		if data == nil {
+			data, err = reader.readPayload()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return err
+			}
 		}
 		records++
-		decoded += uint64(reader.row.frameBytes())
-		if records > stream.Records || decoded > stream.DecodedBytes || reader.record.Kind >= 8 && reader.record.Kind != 9 {
-			return errors.New("cached spatial public stream differs")
+		decoded += uint64(len(data)) + 4
+		if records > stream.Records || decoded > stream.DecodedBytes {
+			return errSpatialPublicRow
 		}
-		if err = emit(reader.record); err != nil {
+		if err = consume(data); err != nil {
 			return err
+		}
+		// The compiler sink copied all retained bytes into its own frame.
+		if s.replaySink != nil {
+			input.reader.shared = false
 		}
 	}
 	if records != stream.Records || decoded != stream.DecodedBytes {

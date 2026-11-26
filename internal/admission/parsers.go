@@ -36,6 +36,7 @@ const (
 	googleNetwork
 	ripeNetworkNames
 	nroRegistration
+	appleRelayCSV
 	mullvadRelaysJSON
 )
 
@@ -51,6 +52,8 @@ func selectAdapter(source Source) (adapter, bool) {
 		return 0, false
 	}
 	switch source.Parser.ID {
+	case intelligence.AppleRelaySourceID:
+		return appleRelayCSV, appleRelaySource(source)
 	case intelligence.MullvadRelaySourceID:
 		return mullvadRelaysJSON, mullvadSource(source)
 	case intelligence.RIPENetworkNameSourceID:
@@ -189,6 +192,8 @@ func parsePayloadTo(ctx context.Context, file *os.File, size int64, source Sourc
 	parse := func(_ string, reader io.Reader) error {
 		limits := intelligence.ParseLimits{Bytes: 3 << 30, Records: maxRecords, LineBytes: 1 << 20}
 		switch implementation {
+		case appleRelayCSV:
+			return parseAppleRelay(ctx, reader, source, published, maxRecords, emit)
 		case mullvadRelaysJSON:
 			_, err := parseMullvadRelays(ctx, reader, source, maxRecords, emit)
 			return err

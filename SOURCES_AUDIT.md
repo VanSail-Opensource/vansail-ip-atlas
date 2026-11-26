@@ -19,10 +19,10 @@ given IP has any observation depends on the included edition.
 | Anycast | Exact addresses of the IANA root DNS service identities |
 | Malware, botnet, command and control, abuse, scanning and spam | FFraud observations with individually mapped categories |
 | Fraud | Explicit phishing reports from TweetFeed, in the same community evidence family as FFraud |
-| Proxy, datacenter, Tor and VPN | FFraud typed records, Tor exit observations and X4B VPN prefixes where applicable |
+| Proxy, datacenter, Tor and VPN | FFraud typed records, Apple Private Relay egress prefixes, Tor exit observations and X4B VPN prefixes where applicable |
 | Hosting | Individual addresses in mature Microsoft Azure App Service allocations |
 
-The twenty-two-source catalog provides observed network prefixes, registration
+The twenty-three-source catalog provides observed network prefixes, registration
 countries, Google address-block ownership, RIPE IPv6 network names, selected
 subscriber ISP observations and origin ASNs. ISP outside the supported ranges, assignment
 mode and IPv4 directed-broadcast status display as unknown without an explicit
@@ -48,6 +48,32 @@ with each publisher update.
 The public /24 view derives its cells from the admitted address and network
 facts. An unobserved cell carries unknown values. Source qualification,
 runtime coverage and hosted availability are measured for each build.
+
+## November 25 iCloud Private Relay egress ranges
+
+Apple publishes the egress IP ranges that website operators may use to
+recognize Private Relay connections. The November 19 CSV contains 285,226
+unique public prefixes, including 41,863 IPv4 and 243,363 IPv6. The IPv4
+prefixes cover 105,776 distinct addresses. Atlas uses only prefix membership
+as positive proxy evidence. The source supplies no subscriber ISP, assignment
+mode, per-address VPN usage, abuse finding or negative coverage.
+[Apple’s network guidance](https://developer.apple.com/icloud/prepare-your-network-for-icloud-private-relay/) ·
+[Publisher CSV](https://mask-api.icloud.com/egress-ip-ranges.csv)
+
+The original contains 12,052,078 bytes with SHA-256
+`270b5cf4642d9e3d22ebc9c7ee874fa22dd5a8ce707906f854a4c228f6c31495`.
+Conditional requests against Apple's identified representation agreed on its
+modification time, November 19 at 15:46:45 UTC. Immutable independent captures
+bracket the edition change. Seven prefixes appeared between the November 19
+and 20 captures. The November 20 witness matches the complete set in the
+original. The preceding distinct capture bounds the lifetime of its successor.
+The intake deadline for this edition is December 19 at 05:54:47 UTC.
+The witnesses describe the address scope only. The publisher CSV
+supplies the input. The project records its educational-use decision under
+Apple's terms and includes a global Apple credit.
+[November 19 witness](https://github.com/disposable/cloud-ip-ranges/commit/847236eaf3ec188ca51b06a5a77895a0c936bcc3) ·
+[November 20 witness](https://github.com/disposable/cloud-ip-ranges/commit/120b5e4958c8af42d837583978b9a53cda887475) ·
+[Apple’s terms](https://www.apple.com/legal/internet-services/terms/site.html)
 
 ## November 25 geolocation fallback
 

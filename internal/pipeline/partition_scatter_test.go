@@ -102,6 +102,40 @@ func partitionFrameMap(t *testing.T, c *compiler, path string, s scope, useScatt
 	return result
 }
 
+func TestScatterPrefixSlotsMatchBinaryScopesAcrossByteBoundaries(t *testing.T) {
+	for _, addr := range []netip.Addr{netip.MustParseAddr("192.0.2.9"), netip.MustParseAddr("2001:db8:1234:5678::9")} {
+		ceiling := addr.BitLen()
+		if addr.Is4() {
+			ceiling = 24
+		}
+		for bits := 0; bits <= ceiling; bits++ {
+			parent := scope{prefix: netip.PrefixFrom(addr, bits).Masked()}
+			tree := scatterTree(parent, 0)
+			bins := newScatterPrefixes(tree)
+			if bins == nil {
+				if bits+4 <= ceiling {
+					t.Fatal("missing full-width scatter", parent.prefix)
+				}
+				continue
+			}
+			if _, ok := bins.slot(parent.prefix); ok {
+				t.Fatal("parent overlay lost", parent.prefix)
+			}
+			for want := 0; want < 16; want++ {
+				leaf := tree
+				for bit := 3; bit >= 0; bit-- {
+					leaf = leaf.children[want>>bit&1]
+				}
+				for _, prefix := range []netip.Prefix{leaf.prefix, netip.PrefixFrom(leaf.prefix.Addr(), addr.BitLen())} {
+					if got, ok := bins.slot(prefix); !ok || got != want {
+						t.Fatal("slot differs from binary scope", parent.prefix, prefix, got, want)
+					}
+				}
+			}
+		}
+	}
+}
+
 func TestPublicScatterPreservesBinaryFirstFitAndInheritedBytes(t *testing.T) {
 	for _, family := range []string{"IPv4", "IPv6", "ASN"} {
 		t.Run(family, func(t *testing.T) {
@@ -183,7 +217,7 @@ func TestPublicScatterSecondPassFailureCleansOnlyOwnedChildren(t *testing.T) {
 	for i := 0; i < 80; i++ {
 		rows = append(rows, via3.PublicRecord{Version: 3, Kind: 2, Prefix: netip.MustParsePrefix(fmt.Sprintf("%d.0.%d.0/24", 11+134*(i%2), i)), Geo: &via3.GeoData{Country: "US"}})
 	}
-	for _, mode := range []string{"mutation", "cancel_write", "collision"} {
+	for _, mode := range []string{"mutation", "new-prefix", "cancel_write", "collision"} {
 		t.Run(mode, func(t *testing.T) {
 			c, path := scatterFixture(t, rows)
 			before := c.used
@@ -207,8 +241,16 @@ func TestPublicScatterSecondPassFailureCleansOnlyOwnedChildren(t *testing.T) {
 				c.options.externalScratch = func() uint64 {
 					if !called {
 						called = true
-						if mode == "mutation" {
-							original = bytes.Replace(original, []byte(`"US"`), []byte(`"DE"`), 1)
+						if mode == "mutation" || mode == "new-prefix" {
+							from, to := `"US"`, `"DE"`
+							if mode == "new-prefix" {
+								from, to = `"11.0.`, `"75.0.`
+							}
+							changed := bytes.Replace(original, []byte(from), []byte(to), 1)
+							if bytes.Equal(original, changed) {
+								t.Fatal("fixture did not mutate the original")
+							}
+							original = changed
 							if err := os.WriteFile(path, original, 0600); err != nil {
 								t.Fatal(err)
 							}
@@ -290,5 +332,57 @@ func TestPublicScatterUnaryHandoffReusesExactRunAndBinaryScope(t *testing.T) {
 	after, err := os.ReadFile(path)
 	if err != nil || !bytes.Equal(original, after) || c.used != before || c.serial != serial || c.partitionSizes[path] != total {
 		t.Fatal("unary handoff rewrote or changed ownership of the immutable run", err)
+	}
+}
+
+func TestScatterRejectsModifiedOwnedRunAfterPlanning(t *testing.T) {
+	c := proofMergeCompiler(t)
+	c.options.Limits.PartitionRecords = 8
+	path := c.next()
+	w, err := c.newOwnedRunWriter(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	var size partitionSize
+	for i := 0; i < 32; i++ {
+		addr := netip.AddrFrom4([4]byte{byte(16 + 4*i), 0, 0, 0})
+		frame, err := c.newCanonicalRunFrame(via3.PublicRecord{Version: 3, Kind: 2, Prefix: netip.PrefixFrom(addr, 24), Geo: &via3.GeoData{Country: "US"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = w.AppendCanonical(frame); err != nil {
+			t.Fatal(err)
+		}
+		size.records++
+		size.bytes += frame.row.logicalBytes + 512
+	}
+	if err = w.Finish(); err != nil {
+		t.Fatal(err)
+	}
+	c.rememberPartitionSize(path, size)
+	before := c.used
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := false
+	c.options.externalScratch = func() uint64 {
+		if !changed {
+			changed = true
+			data[len(data)/2] ^= 1
+			if err := os.WriteFile(path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return 0
+	}
+	_, applied, err := c.scatterPartition(path, scope{prefix: netip.MustParsePrefix("0.0.0.0/0")})
+	if !changed || err == nil || applied || c.used != before {
+		t.Fatalf("changed=%v applied=%v err=%v scratch=%d, was %d", changed, applied, err, c.used, before)
+	}
+	remaining, err := os.ReadDir(c.scratch)
+	if err != nil || len(remaining) != 1 || remaining[0].Name() != filepath.Base(path) {
+		t.Fatal("could not isolate failure to owned parent", remaining, err)
 	}
 }

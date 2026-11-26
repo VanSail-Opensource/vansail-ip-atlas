@@ -17,11 +17,15 @@ type scatteredRun struct {
 	scope
 }
 
+type scatterTotals struct {
+	size      partitionSize
+	wireBytes int64
+	cover     netip.Prefix
+}
+
 type scatterNode struct {
 	scope
-	size        partitionSize
-	wireBytes   int64
-	cover       netip.Prefix
+	scatterTotals
 	first, last uint32
 	children    [2]*scatterNode
 	target      int
@@ -66,6 +70,83 @@ func scatterRow(record via3.PublicRecord, row ownedRunFrame, target scope, inher
 		return row, true, nil
 	}
 	return row, target.prefix.Contains(record.Prefix.Addr()), nil
+}
+
+// A row at least four bits below this IP scope belongs to one terminal. Its
+// original bytes and cover are identical at all four ancestors. Add these
+// contributions once per terminal and fold the bounded totals after scanning.
+type scatterPrefixes struct {
+	root    *scatterNode
+	bits    int
+	totals  [16]scatterTotals
+	targets [16]int
+}
+
+func newScatterPrefixes(root *scatterNode) *scatterPrefixes {
+	if root.asn {
+		return nil
+	}
+	bits := root.prefix.Bits()
+	ceiling := root.prefix.Addr().BitLen()
+	if root.prefix.Addr().Is4() {
+		ceiling = 24
+	}
+	if bits+4 > ceiling {
+		return nil
+	}
+	return &scatterPrefixes{root: root, bits: bits}
+}
+
+func (s *scatterPrefixes) slot(p netip.Prefix) (int, bool) {
+	if s == nil || p.Bits() < s.bits+4 || !s.root.prefix.Contains(p.Addr()) {
+		return 0, false
+	}
+	bits := s.bits
+	if p.Addr().Is4() {
+		bits += 96
+	}
+	addr := p.Addr().As16()
+	index, offset := bits/8, uint(bits%8)
+	if offset <= 4 {
+		return int(addr[index] >> (4 - offset) & 15), true
+	}
+	word := uint16(addr[index])<<8 | uint16(addr[index+1])
+	return int(word >> (12 - offset) & 15), true
+}
+
+func (s *scatterPrefixes) addTotals() {
+	if s == nil {
+		return
+	}
+	for slot, sum := range s.totals {
+		if sum.size.records == 0 {
+			continue
+		}
+		node := s.root
+		for bit := 3; ; bit-- {
+			node.size.records += sum.size.records
+			node.size.bytes += sum.size.bytes
+			node.wireBytes += sum.wireBytes
+			node.cover = bulkPrefixCover(node.cover, sum.cover)
+			if bit < 0 {
+				break
+			}
+			node = node.children[slot>>bit&1]
+		}
+	}
+}
+
+func (s *scatterPrefixes) selectTargets() {
+	if s == nil {
+		return
+	}
+	for slot := range s.targets {
+		node := s.root
+		for bit := 3; bit >= 0 && node.target < 0; bit-- {
+			node = node.children[slot>>bit&1]
+		}
+		s.targets[slot] = node.target
+	}
 }
 
 func (node *scatterNode) count(record via3.PublicRecord, row ownedRunFrame, inherited *ownedRunFrame) error {
@@ -158,7 +239,13 @@ func hashRunFrame(h hash.Hash, row encoded) {
 // sixteen-way partition. Actual binary size/profile checks remain in partition.
 func (c *compiler) scatterPartition(path string, s scope) (runs []scatteredRun, applied bool, failure error) {
 	total, known := c.partitionSizes[path]
-	if !known || total.records <= 8*int64(c.options.Limits.PartitionRecords) && total.bytes <= 8*c.options.Limits.PartitionBytes {
+	threshold := int64(8)
+	if !s.asn {
+		// Above two leaf budgets, a direct IP scatter avoids repeatedly
+		// rewriting the same ordered records through binary children.
+		threshold = 2
+	}
+	if !known || total.records <= threshold*int64(c.options.Limits.PartitionRecords) && total.bytes <= threshold*c.options.Limits.PartitionBytes {
 		return nil, false, nil
 	}
 	tree := scatterTree(s, 0)
@@ -177,18 +264,27 @@ func (c *compiler) scatterPartition(path string, s scope) (runs []scatteredRun, 
 	if r.owner != nil {
 		proof = r.file.compressed.proof
 	}
+	bins := newScatterPrefixes(tree)
 	firstHash := sha256.New()
 	for {
 		if err := c.ctx.Err(); err != nil {
 			return nil, false, err
 		}
-		if err := r.next(); err == io.EOF {
+		if err := r.nextPartitionRow(); err == io.EOF {
 			break
 		} else if err != nil {
 			return nil, false, err
 		}
 		if proof == nil {
 			hashRunFrame(firstHash, r.row)
+		}
+		if slot, ok := bins.slot(r.record.Prefix); ok {
+			terminal := &bins.totals[slot]
+			terminal.size.records++
+			terminal.size.bytes += r.row.logicalBytes + 512
+			terminal.wireBytes += r.row.frameBytes()
+			terminal.cover = bulkPrefixCover(terminal.cover, r.record.Prefix)
+			continue
 		}
 		var inherited ownedRunFrame
 		if err := tree.count(r.record, r.frame(), &inherited); err != nil {
@@ -198,6 +294,7 @@ func (c *compiler) scatterPartition(path string, s scope) (runs []scatteredRun, 
 	if err := r.file.Close(); err != nil {
 		return nil, false, err
 	}
+	bins.addTotals()
 	if tree.size != total {
 		return nil, false, errors.New("private run totals changed")
 	}
@@ -254,10 +351,11 @@ func (c *compiler) scatterPartition(path string, s scope) (runs []scatteredRun, 
 		// No file or accounting mutation has occurred at this fallback point.
 		return nil, false, nil
 	}
-	return c.writeScatter(path, tree, selected, proof, firstHash.Sum(nil))
+	bins.selectTargets()
+	return c.writeScatter(path, tree, selected, proof, firstHash.Sum(nil), bins)
 }
 
-func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scatterNode, proof *ownedRunProof, digest []byte) (runs []scatteredRun, applied bool, failure error) {
+func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scatterNode, proof *ownedRunProof, digest []byte, bins *scatterPrefixes) (runs []scatteredRun, applied bool, failure error) {
 	before := c.used
 	writers := make([]*ownedRunWriter, len(selected))
 	sizes := make([]partitionSize, len(selected))
@@ -298,7 +396,7 @@ func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scat
 		if err := c.ctx.Err(); err != nil {
 			return runs, false, err
 		}
-		if err := r.next(); err == io.EOF {
+		if err := r.nextPartitionRow(); err == io.EOF {
 			break
 		} else if err != nil {
 			return runs, false, err
@@ -307,7 +405,7 @@ func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scat
 			hashRunFrame(secondHash, r.row)
 		}
 		var inherited ownedRunFrame
-		if err := tree.visitTargets(r.record, func(i int) error {
+		write := func(i int) error {
 			node := selected[i]
 			frame, keep, err := scatterRow(r.record, r.frame(), node.scope, &inherited)
 			if err != nil {
@@ -331,7 +429,17 @@ func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scat
 			sizes[i].bytes += frame.row.logicalBytes + 512
 			wireBytes[i] += frame.row.frameBytes()
 			return nil
-		}); err != nil {
+		}
+		if slot, ok := bins.slot(r.record.Prefix); ok {
+			target := bins.targets[slot]
+			if target < 0 {
+				return runs, false, errors.New("private run changed during scatter")
+			}
+			err = write(target)
+		} else {
+			err = tree.visitTargets(r.record, write)
+		}
+		if err != nil {
 			return runs, false, err
 		}
 	}

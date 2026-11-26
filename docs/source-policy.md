@@ -43,7 +43,12 @@ The November 15 v6 release catalog has fifteen reviewed sources enabled for atte
 
 The November 22 catalog also includes TweetFeed's static weekly CSV. Intake
 matches the complete file to the publisher's manifest and retains each
-qualifying IP report's UTC observation time. A phishing tag contributes the
+qualifying IP report's UTC observation time. For a new weekly CSV digest,
+the immutable manifest from its last change in the publisher's Git history
+supplies the original artifact time. Later manifest revisions can repeat the
+same digest, size and row count. A retained original clock for those bytes
+allows verification during a history outage. Every row must predate or match
+the selected publication time. A phishing tag contributes the
 existing fraud reason. The reported address must be a literal public IP.
 TweetFeed and FFraud share a scoring family because the original community
 reports may overlap. Each publisher retains its own withdrawal identity.

@@ -1,5 +1,7 @@
 # Production CI cloud handoff — 2026-11-25
 
+For the November 26 release status, remaining benchmark failure and instructions for resuming deployment, see the [production release handover](RELEASE_HANDOVER.md).
+
 PRs #1, #2 and #4 are merged. The twenty-source release entered protected
 production checks on main at `48c94e8162942cbbdfa70c7983ba001a297cc069`.
 The owner approved publishing verified data, displaying unknowns where

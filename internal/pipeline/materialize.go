@@ -301,8 +301,9 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 			}
 		}
 		completeVRP := len(inputs) == 1 && inputs[0].VRPComplete && (len(vrps) > 0 || inputs[0].verifiedEmptyVRP)
+		datedVRP := completeVRP && !inputs[0].RPKIObservedAt.IsZero() && !inputs[0].RPKICoverageValidUntil.IsZero()
 		var vrpIndex *intelligence.VRPIndex
-		if completeVRP && !inputs[0].RPKIObservedAt.IsZero() && !inputs[0].RPKICoverageValidUntil.IsZero() {
+		if datedVRP {
 			vrpIndex, err = intelligence.NewVRPObservationIndex(vrps, inputs[0].RPKIObservedAt, inputs[0].RPKICoverageValidUntil)
 		} else {
 			// Incomplete/legacy snapshots remain unavailable, but their retained
@@ -473,44 +474,12 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 				return err
 			}
 		}
-		announcements := map[netip.Prefix]map[uint32]struct{}{}
-		for _, mapping := range origins {
-			if announcements[mapping.Prefix] == nil {
-				announcements[mapping.Prefix] = map[uint32]struct{}{}
-			}
-			for _, asn := range mapping.Origins {
-				announcements[mapping.Prefix][asn] = struct{}{}
-			}
-		}
-		prefixes := make([]netip.Prefix, 0, len(announcements))
-		for p := range announcements {
-			prefixes = append(prefixes, p)
-		}
-		sortPrefixes(prefixes)
-		for _, p := range prefixes {
-			keys := make([]uint32, 0, len(announcements[p]))
-			for asn := range announcements[p] {
-				keys = append(keys, asn)
-			}
-			sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
-			for _, asn := range keys {
-				status := uint8(0)
-				observation := vrpIndex.Observe(p, asn)
-				switch observation.Status {
-				case intelligence.RPKIValid:
-					status = 1
-				case intelligence.RPKIInvalid:
-					status = 2
-				case intelligence.RPKINotFound:
-					status = 3
-				}
-				data := via3.RPKIData{Status: status, MaximumLength: observation.MaximumLength}
-				if status != 0 {
-					data.ObservedAt, data.ValidUntil = observation.ObservedAt.Unix(), observation.ValidUntil.Unix()
-				}
-				if err := emit(via3.PublicRecord{Version: 3, Kind: 9, Prefix: p, ASN: asn, RPKI: &data}); err != nil {
-					return err
-				}
+		// Readers derive an unavailable answer from each announcement origin.
+		// Do not sort and write an explicit negative placeholder for every
+		// origin when there is no verified snapshot observation.
+		if datedVRP {
+			if err := emitRPKIObservations(origins, vrpIndex, emit); err != nil {
+				return err
 			}
 		}
 		ranks := map[uint32]uint16{}
@@ -542,6 +511,50 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 		}
 		return nil
 	}
+}
+
+func emitRPKIObservations(origins []intelligence.OriginMapping, index *intelligence.VRPIndex, emit func(via3.PublicRecord) error) error {
+	announcements := map[netip.Prefix]map[uint32]struct{}{}
+	for _, mapping := range origins {
+		if announcements[mapping.Prefix] == nil {
+			announcements[mapping.Prefix] = map[uint32]struct{}{}
+		}
+		for _, asn := range mapping.Origins {
+			announcements[mapping.Prefix][asn] = struct{}{}
+		}
+	}
+	prefixes := make([]netip.Prefix, 0, len(announcements))
+	for p := range announcements {
+		prefixes = append(prefixes, p)
+	}
+	sortPrefixes(prefixes)
+	for _, p := range prefixes {
+		keys := make([]uint32, 0, len(announcements[p]))
+		for asn := range announcements[p] {
+			keys = append(keys, asn)
+		}
+		sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+		for _, asn := range keys {
+			observation := index.Observe(p, asn)
+			var status uint8
+			switch observation.Status {
+			case intelligence.RPKIValid:
+				status = 1
+			case intelligence.RPKIInvalid:
+				status = 2
+			case intelligence.RPKINotFound:
+				status = 3
+			default:
+				return errors.New("complete RPKI snapshot did not classify a validated announcement")
+			}
+			data := via3.RPKIData{Status: status, MaximumLength: observation.MaximumLength,
+				ObservedAt: observation.ObservedAt.Unix(), ValidUntil: observation.ValidUntil.Unix()}
+			if err := emit(via3.PublicRecord{Version: 3, Kind: 9, Prefix: p, ASN: asn, RPKI: &data}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func confidenceID(value string) uint8 {

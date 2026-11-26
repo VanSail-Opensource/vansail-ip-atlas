@@ -225,7 +225,9 @@ RPKI and BGP-origin keys are prefix facts and never set the exact-address flag.
   Status 0 unavailable,1 valid,2 invalid,3 not_found. Statuses 1–3 describe the
   exact announcement at the complete publisher snapshot observation time.
   Both clocks are whole UTC Unix seconds: `0 < observed_at < valid_until <=
-  9007199254740991`. Unavailable has both clocks zero and exposes public nulls.
+  9007199254740991`. Explicit status 0 has both clocks zero and exposes public
+  nulls. The compiler omits unavailable observations. An absent exact row has
+  the same per-origin public result as status 0, including both null clocks.
   Known lookup answers expose `observedAt` and `validUntil` as numbers.
   Valid uses the latest expiry among matching authorizations; invalid/not_found
   use the earliest authorization expiry of the complete snapshot. No missing or

@@ -35,6 +35,13 @@ func TestExpiredRPKISnapshotMaterializesExactAnnouncementStatusAndClocks(t *test
 		if err != nil || candidate.Manifest.SchemaVersion != 5 || candidate.Manifest.ValidUntil != options.ValidUntil {
 			t.Fatal("snapshot expiry altered whole-release eligibility", err)
 		}
+		hasObservations := false
+		for _, object := range candidate.Manifest.Objects {
+			hasObservations = hasObservations || object.Kind == 9
+		}
+		if hasObservations != dated {
+			t.Fatal("an unavailable snapshot must not emit placeholder objects, and a dated snapshot must retain its observations")
+		}
 		reader, err := via3.OpenRelease(options.Output, func() int64 { return options.Clock })
 		if err != nil {
 			t.Fatal(err)

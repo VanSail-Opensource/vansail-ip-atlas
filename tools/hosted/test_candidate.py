@@ -199,6 +199,8 @@ class CandidateTests(unittest.TestCase):
                         self.send_header("X-Content-Type-Options", "nosniff")
                         immutable = name.startswith(("_atlas/objects/", "_atlas/releases/", "_atlas/credits/"))
                         cache = "max-age=31536000, immutable" if immutable else "max-age=0, must-revalidate"
+                        if failures.get(path) == "duplicate-cache":
+                            self.send_header("Cache-Control", "max-age=0, must-revalidate")
                         self.send_header("Cache-Control", cache if failures.get(path) != "header" else "no-cache")
                         self.end_headers()
                         self.wfile.write(body)
@@ -236,7 +238,7 @@ class CandidateTests(unittest.TestCase):
                     expected = ["/" + path for path, _, _ in entries if path.startswith("_atlas/objects/")]
                     first = next(i for i, path in enumerate(requests) if path in expected)
                     self.assertCountEqual(requests[first:first + len(expected)], expected)
-                    for failure in ("redirect", "overrun", "header"):
+                    for failure in ("redirect", "overrun", "header", "duplicate-cache"):
                         with self.subTest(failure=failure):
                             failures[expected[0]] = failure
                             requests.clear()
@@ -355,6 +357,22 @@ class CandidateTests(unittest.TestCase):
                 return status, headers, body
             with self.assertRaises(ContractError):
                 verify_preview(root, report, "https://a01b23cd.atlas.pages.dev", 150, no_csp)
+
+            # Cloudflare Pages comma-joins overlapping `_headers` rules.
+            for cache_control in (
+                "public, max-age=0, must-revalidate, public, max-age=31536000, immutable",
+                "public, max-age=31536000, immutable, max-age=31536000",
+            ):
+                def conflicting_cache(path, size):
+                    status, headers, body = fetch(path, size)
+                    if path.startswith("/_atlas/objects/"):
+                        headers["cache-control"] = cache_control
+                    return status, headers, body
+
+                with self.subTest(cache_control=cache_control), self.assertRaisesRegex(
+                    ContractError, "immutable preview object cache policy"
+                ):
+                    verify_preview(root, report, "https://a01b23cd.atlas.pages.dev", 150, conflicting_cache)
 
 
 if __name__ == "__main__":

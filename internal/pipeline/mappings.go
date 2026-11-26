@@ -65,6 +65,10 @@ func isMappingRecord(kind intelligence.RecordKind) bool {
 // Its mapping pass can project the same owned rows without copying them into a
 // separate state. The standalone entry point still rejects other kinds.
 func mappingProducerRows(state intelligence.BuildState, policy intelligence.Policy, clock time.Time, encodedLengths []int, omitInherited bool, scope netip.Prefix, locations *locationProjection, project bool) Producer {
+	return mappingProducerSelection(state, policy, clock, encodedLengths, omitInherited, scope, locations, project, true, true, true, nil)
+}
+
+func mappingProducerSelection(state intelligence.BuildState, policy intelligence.Policy, clock time.Time, encodedLengths []int, omitInherited bool, scope netip.Prefix, locations *locationProjection, project, locationRowsWanted, networkRowsWanted, originRowsWanted bool, projectedGeo *geoLayoutReplay) Producer {
 	return func(ctx context.Context, emit func(via3.PublicRecord) error) error {
 		state := state
 		if err := checkOwnedRecordLengths(state, encodedLengths); err != nil {
@@ -93,6 +97,15 @@ func mappingProducerRows(state intelligence.BuildState, policy intelligence.Poli
 		}
 		boundaries := map[netip.Prefix]boundaryVotes{}
 		replayingLocations := locations != nil && locations.hit
+		if projectedGeo != nil && locationRowsWanted {
+			if !project || !replayingLocations {
+				return errSpatialCache
+			}
+			boundaries = make(map[netip.Prefix]boundaryVotes, len(projectedGeo.boundaries))
+			for _, row := range projectedGeo.boundaries {
+				boundaries[row.prefix] = boundaryVotes{geoCount: row.count}
+			}
+		}
 		origins := map[netip.Prefix][]uint32{}
 		type labels struct {
 			name, organization, isp  string
@@ -101,6 +114,9 @@ func mappingProducerRows(state intelligence.BuildState, policy intelligence.Poli
 		networkLabels := map[netip.Prefix]labels{}
 		seen := map[string]struct{}{}
 		var bytes, count, inputOrdinal int
+		if projectedGeo != nil && locationRowsWanted {
+			bytes, count = projectedGeo.entry.Leaf.GeoLayout.GeoCharge/2, projectedGeo.entry.Leaf.GeoLayout.GeoRecords
+		}
 		for _, source := range state.Sources {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -122,6 +138,12 @@ func mappingProducerRows(state intelligence.BuildState, policy intelligence.Poli
 					return err
 				}
 				if project && !isMappingRecord(record.Kind) {
+					continue
+				}
+				if project && (record.Kind == intelligence.RecordGeo || record.Kind == intelligence.RecordUsage) && !locationRowsWanted {
+					continue
+				}
+				if project && record.Kind != intelligence.RecordGeo && record.Kind != intelligence.RecordUsage && !networkRowsWanted {
 					continue
 				}
 				if err := record.Validate(); err != nil {
@@ -363,8 +385,10 @@ func mappingProducerRows(state intelligence.BuildState, policy intelligence.Poli
 					return errors.New("merged mapping origin count exceeded")
 				}
 				network.Origins = asns
-				if err := emit(via3.PublicRecord{Version: 3, Kind: 10, Prefix: prefix, Origins: &via3.OriginsData{ASNs: asns}}); err != nil {
-					return err
+				if originRowsWanted {
+					if err := emit(via3.PublicRecord{Version: 3, Kind: 10, Prefix: prefix, Origins: &via3.OriginsData{ASNs: asns}}); err != nil {
+						return err
+					}
 				}
 			}
 			if err := emit(via3.PublicRecord{Version: 3, Kind: 4, Prefix: prefix, Network: &network}); err != nil {

@@ -32,6 +32,7 @@ from tools.release_contract.contracts import ContractError, canonical_bytes, par
 from tools.release_contract.production import read_private
 from tools.hosted.production_benchmarks import (benchmark_identity, case_report, ENVELOPE,
     json_report, verify_native_lookup)
+from tools.hosted.production_workflow import compile_phase_records
 
 
 def private_path(root: Path, value: str) -> Path:
@@ -208,18 +209,23 @@ def command(args: list[str], workspace: Path, metrics: dict | None = None, *, st
         with tempfile.TemporaryFile(dir=workspace / ".atlas-private") as log:
             process = subprocess.Popen(args, cwd=workspace, stdout=stdout or log, stderr=log,
                 start_new_session=True, env=environment)
-            while process.poll() is None:
-                rss, scratch, free = group_rss(process.pid), disk_bytes(workspace), shutil.disk_usage(workspace).free
-                if metrics is not None:
-                    metrics["runtime_ms"] = ((time.monotonic_ns() - metrics["_started_ns"] + 999999) // 1000000
-                        if "_started_ns" in metrics else (time.monotonic() - metrics["_started"]) * 1000)
-                    metrics["process_group_peak_rss_bytes"] = max(metrics["process_group_peak_rss_bytes"], rss)
-                    metrics["scratch_peak_bytes"] = max(metrics["scratch_peak_bytes"], scratch)
-                    metrics["physical_free_low_water_bytes"] = min(metrics["physical_free_low_water_bytes"], free)
-                if rss >= 6656 * 1024**2 or scratch >= 10240 * 1024**2 or free < 1024**3:
-                    os.killpg(process.pid, signal.SIGKILL); process.wait()
-                    raise ContractError("production resource ceiling reached")
-                time.sleep(.1)
+            try:
+                while process.poll() is None:
+                    rss, scratch, free = group_rss(process.pid), disk_bytes(workspace), shutil.disk_usage(workspace).free
+                    if metrics is not None:
+                        metrics["runtime_ms"] = ((time.monotonic_ns() - metrics["_started_ns"] + 999999) // 1000000
+                            if "_started_ns" in metrics else (time.monotonic() - metrics["_started"]) * 1000)
+                        metrics["process_group_peak_rss_bytes"] = max(metrics["process_group_peak_rss_bytes"], rss)
+                        metrics["scratch_peak_bytes"] = max(metrics["scratch_peak_bytes"], scratch)
+                        metrics["physical_free_low_water_bytes"] = min(metrics["physical_free_low_water_bytes"], free)
+                    if rss >= 6656 * 1024**2 or scratch >= 10240 * 1024**2 or free < 1024**3:
+                        os.killpg(process.pid, signal.SIGKILL); process.wait()
+                        raise ContractError("production resource ceiling reached")
+                    time.sleep(.1)
+            finally:
+                if args[1:2] == ['benchmark-state']:
+                    for row in compile_phase_records(log):
+                        print('ATLAS_COMPILE_PHASE '+canonical_bytes(row).decode('ascii'),file=sys.stderr,flush=True)
             if temporary is not None:
                 records = collect_go_allocations(Path(temporary.name), invocation, phase, atlas_commands, process.pid, process.returncode)
                 metrics["go_processes"].extend(records)

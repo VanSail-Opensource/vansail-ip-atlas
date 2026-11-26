@@ -178,6 +178,31 @@ class CandidateClockTests(unittest.TestCase):
 
 
 class CompilePhaseDiagnosticsTests(unittest.TestCase):
+    def test_failed_rebuild_identifies_measured_phase_without_child_log(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            public_out, public_err = io.StringIO(), io.StringIO()
+            begin = {'event': 'begin', 'elapsed_ms': 0, 'ok': True}
+            rows = [{**begin, 'phase': 'benchmark-prepare'},
+                    {'phase': 'benchmark-prepare', 'event': 'end', 'elapsed_ms': 1900, 'ok': True},
+                    {**begin, 'phase': 'benchmark-measure'},
+                    {**begin, 'phase': 'materialize-spatial'}]
+            def execute(argv, **kwargs):
+                for row in rows:
+                    kwargs['stderr'].write(('ATLAS_COMPILE_PHASE ' + json.dumps(row) + '\n').encode())
+                kwargs['stderr'].write(b'private-token-marker\nATLAS_COMPILE_PHASE {"truncated":')
+                return workflow.subprocess.CompletedProcess(argv, 1)
+            with patch.object(workflow, 'ROOT', root), patch.object(workflow.subprocess, 'run', side_effect=execute), \
+                 contextlib.redirect_stdout(public_out), contextlib.redirect_stderr(public_err), \
+                 self.assertRaises(ContractError):
+                workflow.run(['python', 'tools/hosted/production-build.py'])
+            output = public_out.getvalue() + public_err.getvalue()
+            self.assertIn('phase ended: benchmark-prepare elapsed_ms=1900 ok=true', output)
+            self.assertIn('phase entered: benchmark-measure', output)
+            self.assertIn('phase entered: materialize-spatial', output)
+            self.assertNotIn('private-token-marker', output)
+            self.assertNotIn('truncated', output)
+
     def test_aggregate_materializer_and_pipeline_phases_remain_nested_and_bounded(self):
         phases = ('materialize-seed', 'materialize-paths', 'materialize-asn-risk',
                   'materialize-spatial', 'materialize-asn', 'pipeline-sort',

@@ -379,14 +379,18 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 				if separateRisk {
 					roles = nil
 				}
-				layoutKey, err := spatialReuseKey("exact-risk-layout", struct {
-					Score [32]byte
-					Usage asnUsageIndex
-				}{scoreKey, roles})
+				shapeKey, err := spatialReuseKey("exact-risk-shape", struct {
+					Separate bool
+					Usage    asnUsageIndex
+				}{separateRisk, roles})
 				if err != nil {
 					return err
 				}
-				reuse = &bulkLeafReuse{domain: "risk", dependencies: layoutKey, riskPolicy: scoreKey, spool: spool, risk: accumulate}
+				layoutKey, err := spatialReuseKey("exact-risk-layout", [2][32]byte{scoreKey, shapeKey})
+				if err != nil {
+					return err
+				}
+				reuse = &bulkLeafReuse{domain: "risk", dependencies: layoutKey, riskShape: shapeKey, riskPolicy: scoreKey, spool: spool, risk: accumulate}
 			}
 			var riskLeaves []*bulkBucket
 			riskLeaves, err = spool.leavesReusing(ctx, riskRoots, false, reuse, func(bucket *bulkBucket, part intelligence.BuildState) error {
@@ -475,13 +479,11 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 			}
 			publicReuse = &bulkLeafReuse{domain: "public", dependencies: key, contexts: contexts, locationPolicy: locationPolicy, spool: spool, public: emit}
 		}
-		spatial, err = spool.leavesReusing(ctx, spatial, true, publicReuse, func(bucket *bulkBucket, part intelligence.BuildState) (visitErr error) {
-			locations, err := spool.openLocations(ctx, bucket, locationPolicy)
-			if err != nil {
-				return err
+		spatial, err = spool.leavesReusing(ctx, spatial, true, publicReuse, func(bucket *bulkBucket, part intelligence.BuildState) error {
+			mappings := func(ctx context.Context, produce mappingProducerFactory, emit func(via3.PublicRecord) error) error {
+				return spool.materializeMappings(ctx, bucket, locationPolicy, produce, emit)
 			}
-			defer func() { visitErr = errors.Join(visitErr, locations.close()) }()
-			err = IntelligenceProducer(part, policy, clock, MaterializationInputs{locations: locations, VRPComplete: completeVRP, RPKIObservedAt: observedAt, RPKICoverageValidUntil: coverageValidUntil, verifiedEmptyVRP: completeVRP, scope: bucket.prefix, contexts: contexts, resolver: relations, encodedLengths: bucket.recordBytes})(ctx, func(record via3.PublicRecord) error {
+			return IntelligenceProducer(part, policy, clock, MaterializationInputs{mappings: mappings, geoReplay: bucket.geoReplay, VRPComplete: completeVRP, RPKIObservedAt: observedAt, RPKICoverageValidUntil: coverageValidUntil, verifiedEmptyVRP: completeVRP, scope: bucket.prefix, contexts: contexts, resolver: relations, encodedLengths: bucket.recordBytes, spatialOutputsOnly: true})(ctx, func(record via3.PublicRecord) error {
 				if record.Kind >= 8 && record.Kind != 9 {
 					return nil
 				}
@@ -493,10 +495,6 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 				spool.publicRows++
 				return emit(record)
 			})
-			if err != nil {
-				return err
-			}
-			return locations.finish(ctx)
 		})
 		spatialPhase(err == nil)
 		if err != nil {

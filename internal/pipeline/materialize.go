@@ -25,6 +25,14 @@ type MaterializationInputs struct {
 	prepareOnly                            bool
 	resolver                               intelligence.RelationResolver
 	verifiedEmptyVRP                       bool
+	geoReplay                              *geoLayoutReplay
+	// The bulk producer owns ASN, path and relationship facts outside the
+	// spatial leaves, and uses Kind 4 for original network origins. Validate
+	// all rows but do not construct output that this leaf cannot publish.
+	spatialOutputsOnly bool
+	// The spatial compiler can cache and replay only the clock-independent
+	// Geo/coordinates/network/usage rows. Every risk and RPKI row is produced below.
+	mappings func(context.Context, mappingProducerFactory, func(via3.PublicRecord) error) error
 	// Exact canonical lengths from the closed bulk collector. No caller-facing
 	// completeness or validation assertion is accepted through this bookkeeping.
 	encodedLengths []int
@@ -75,15 +83,21 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 			return errors.New("one materialization policy and an output sink are required")
 		}
 		var encodedLengths []int
+		var spatialOutputsOnly bool
 		if len(inputs) == 1 {
 			encodedLengths = inputs[0].encodedLengths
+			spatialOutputsOnly = inputs[0].spatialOutputsOnly
 		}
 		if err := checkOwnedRecordLengths(state, encodedLengths); err != nil {
 			return err
 		}
-		state, joinErr := joinASNUsage(ctx, state)
-		if joinErr != nil {
-			return joinErr
+		state := state
+		if encodedLengths == nil {
+			var joinErr error
+			state, joinErr = joinASNUsage(ctx, state)
+			if joinErr != nil {
+				return joinErr
+			}
 		}
 		sink := emit
 		emit = func(record via3.PublicRecord) error {
@@ -110,6 +124,16 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 		asnPrefixes := map[uint32][]netip.Prefix{}
 		identities := map[uint32][]intelligence.ASNIdentityEvidence{}
 		asns := map[uint32]struct{}{}
+		trackASN := func(asn uint32) error {
+			if spatialOutputsOnly {
+				if !facts.PublicASN(asn) {
+					return errors.New("invalid intelligence ASN")
+				}
+			} else {
+				asns[asn] = struct{}{}
+			}
+			return nil
+		}
 		edges := map[intelligence.ASNEdge]bool{}
 		relations := intelligence.NewRelationships(true)
 		profiles := map[netip.Prefix]struct{}{}
@@ -187,7 +211,9 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 							return err
 						}
 					case intelligence.ASN:
-						asns[v.ASN] = struct{}{}
+						if err := trackASN(v.ASN); err != nil {
+							return err
+						}
 					default:
 						return errors.New("invalid evidence scope")
 					}
@@ -198,7 +224,9 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 					}
 					coverage = append(coverage, v)
 					if v.Layer == intelligence.ASN {
-						asns[v.ASN] = struct{}{}
+						if err := trackASN(v.ASN); err != nil {
+							return err
+						}
 					} else if err := regions.add(v.Prefix); err != nil {
 						return err
 					}
@@ -230,9 +258,13 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 					if err := regions.add(p); err != nil {
 						return err
 					}
-					for _, asn := range v.Origins {
-						asns[asn] = struct{}{}
-						asnPrefixes[asn] = append(asnPrefixes[asn], p)
+					// NewEngine validates every origin before any output. Only the
+					// full producer needs the reverse index for its ASN rows.
+					if !spatialOutputsOnly {
+						for _, asn := range v.Origins {
+							asns[asn] = struct{}{}
+							asnPrefixes[asn] = append(asnPrefixes[asn], p)
+						}
 					}
 				case intelligence.RecordVRP:
 					v := *record.VRP
@@ -257,16 +289,20 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 						return errors.New("noncurrent normalized path")
 					}
 					observations = append(observations, v)
-					asns[v.Origin] = struct{}{}
+					if err := trackASN(v.Origin); err != nil {
+						return err
+					}
 				case intelligence.RecordRelationship:
 					v := record.Relationship
 					if err := relations.Add(v.From, v.To, v.Relation); err != nil {
 						return err
 					}
-					edges[intelligence.ASNEdge{From: v.From, To: v.To}] = false
-					edges[intelligence.ASNEdge{From: v.To, To: v.From}] = false
-					asns[v.From] = struct{}{}
-					asns[v.To] = struct{}{}
+					if !spatialOutputsOnly {
+						edges[intelligence.ASNEdge{From: v.From, To: v.To}] = false
+						edges[intelligence.ASNEdge{From: v.To, To: v.From}] = false
+						asns[v.From] = struct{}{}
+						asns[v.To] = struct{}{}
+					}
 				case intelligence.RecordASNIdentity:
 					v := *record.ASNIdentity
 					if !facts.PublicASN(v.ASN) || !v.Current || v.Family == "" {
@@ -276,7 +312,9 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 						return errors.New("ASN identity working set exceeded")
 					}
 					identities[v.ASN] = append(identities[v.ASN], v)
-					asns[v.ASN] = struct{}{}
+					if !spatialOutputsOnly {
+						asns[v.ASN] = struct{}{}
+					}
 				}
 			}
 		}
@@ -298,8 +336,9 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 			}
 		}
 		completeVRP := len(inputs) == 1 && inputs[0].VRPComplete && (len(vrps) > 0 || inputs[0].verifiedEmptyVRP)
+		datedVRP := completeVRP && !inputs[0].RPKIObservedAt.IsZero() && !inputs[0].RPKICoverageValidUntil.IsZero()
 		var vrpIndex *intelligence.VRPIndex
-		if completeVRP && !inputs[0].RPKIObservedAt.IsZero() && !inputs[0].RPKICoverageValidUntil.IsZero() {
+		if datedVRP {
 			vrpIndex, err = intelligence.NewVRPObservationIndex(vrps, inputs[0].RPKIObservedAt, inputs[0].RPKICoverageValidUntil)
 		} else {
 			// Incomplete/legacy snapshots remain unavailable, but their retained
@@ -320,7 +359,7 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 		for _, p := range paths {
 			// Nonlinear/looped/private-ASN observations are retained verbatim in
 			// their typed path row, but cannot create displayed graph edges.
-			if !p.GraphEligible {
+			if spatialOutputsOnly || !p.GraphEligible {
 				continue
 			}
 			previous := uint32(0)
@@ -346,10 +385,20 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 		}
 		var mappingScope netip.Prefix
 		var locations *locationProjection
+		var projectedGeo *geoLayoutReplay
 		if len(inputs) == 1 {
 			mappingScope, locations = inputs[0].scope, inputs[0].locations
+			projectedGeo = inputs[0].geoReplay
 		}
-		if err := mappingProducerRows(state, policy, clock, mappingLengths, true, mappingScope, locations, true)(ctx, emit); err != nil {
+		produceMappings := func(locations *locationProjection, emitLocation, emitNetwork bool) Producer {
+			return mappingProducerSelection(state, policy, clock, mappingLengths, true, mappingScope, locations, true, emitLocation, emitNetwork, !spatialOutputsOnly, projectedGeo)
+		}
+		if len(inputs) == 1 && inputs[0].mappings != nil {
+			err = inputs[0].mappings(ctx, produceMappings, emit)
+		} else {
+			err = produceMappings(locations, true, true)(ctx, emit)
+		}
+		if err != nil {
 			return err
 		}
 		profileKeys := make([]netip.Prefix, 0, len(profiles))
@@ -434,6 +483,19 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 		if err := qualityWriter.flush(); err != nil {
 			return err
 		}
+		if spatialOutputsOnly {
+			// A normal bulk leaf contains no ASN identities. Preserve input
+			// validation even if a direct internal caller supplies them.
+			for _, records := range identities {
+				if _, err := intelligence.FuseASNIdentities(records); err != nil {
+					return err
+				}
+			}
+			if datedVRP {
+				return emitRPKIObservations(origins, vrpIndex, emit)
+			}
+			return nil
+		}
 		asnKeys := make([]uint32, 0, len(asns))
 		for asn := range asns {
 			asnKeys = append(asnKeys, asn)
@@ -462,44 +524,12 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 				return err
 			}
 		}
-		announcements := map[netip.Prefix]map[uint32]struct{}{}
-		for _, mapping := range origins {
-			if announcements[mapping.Prefix] == nil {
-				announcements[mapping.Prefix] = map[uint32]struct{}{}
-			}
-			for _, asn := range mapping.Origins {
-				announcements[mapping.Prefix][asn] = struct{}{}
-			}
-		}
-		prefixes := make([]netip.Prefix, 0, len(announcements))
-		for p := range announcements {
-			prefixes = append(prefixes, p)
-		}
-		sortPrefixes(prefixes)
-		for _, p := range prefixes {
-			keys := make([]uint32, 0, len(announcements[p]))
-			for asn := range announcements[p] {
-				keys = append(keys, asn)
-			}
-			sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
-			for _, asn := range keys {
-				status := uint8(0)
-				observation := vrpIndex.Observe(p, asn)
-				switch observation.Status {
-				case intelligence.RPKIValid:
-					status = 1
-				case intelligence.RPKIInvalid:
-					status = 2
-				case intelligence.RPKINotFound:
-					status = 3
-				}
-				data := via3.RPKIData{Status: status, MaximumLength: observation.MaximumLength}
-				if status != 0 {
-					data.ObservedAt, data.ValidUntil = observation.ObservedAt.Unix(), observation.ValidUntil.Unix()
-				}
-				if err := emit(via3.PublicRecord{Version: 3, Kind: 9, Prefix: p, ASN: asn, RPKI: &data}); err != nil {
-					return err
-				}
+		// Readers derive an unavailable answer from each announcement origin.
+		// Do not sort and write an explicit negative placeholder for every
+		// origin when there is no verified snapshot observation.
+		if datedVRP {
+			if err := emitRPKIObservations(origins, vrpIndex, emit); err != nil {
+				return err
 			}
 		}
 		ranks := map[uint32]uint16{}
@@ -531,6 +561,50 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 		}
 		return nil
 	}
+}
+
+func emitRPKIObservations(origins []intelligence.OriginMapping, index *intelligence.VRPIndex, emit func(via3.PublicRecord) error) error {
+	announcements := map[netip.Prefix]map[uint32]struct{}{}
+	for _, mapping := range origins {
+		if announcements[mapping.Prefix] == nil {
+			announcements[mapping.Prefix] = map[uint32]struct{}{}
+		}
+		for _, asn := range mapping.Origins {
+			announcements[mapping.Prefix][asn] = struct{}{}
+		}
+	}
+	prefixes := make([]netip.Prefix, 0, len(announcements))
+	for p := range announcements {
+		prefixes = append(prefixes, p)
+	}
+	sortPrefixes(prefixes)
+	for _, p := range prefixes {
+		keys := make([]uint32, 0, len(announcements[p]))
+		for asn := range announcements[p] {
+			keys = append(keys, asn)
+		}
+		sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+		for _, asn := range keys {
+			observation := index.Observe(p, asn)
+			var status uint8
+			switch observation.Status {
+			case intelligence.RPKIValid:
+				status = 1
+			case intelligence.RPKIInvalid:
+				status = 2
+			case intelligence.RPKINotFound:
+				status = 3
+			default:
+				return errors.New("complete RPKI snapshot did not classify a validated announcement")
+			}
+			data := via3.RPKIData{Status: status, MaximumLength: observation.MaximumLength,
+				ObservedAt: observation.ObservedAt.Unix(), ValidUntil: observation.ValidUntil.Unix()}
+			if err := emit(via3.PublicRecord{Version: 3, Kind: 9, Prefix: p, ASN: asn, RPKI: &data}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func confidenceID(value string) uint8 {

@@ -61,18 +61,14 @@ func TestVerifiedGlobalVRPAbsenceSurvivesEmptySpatialBucket(t *testing.T) {
 		err := IntelligenceProducer(state, policy, state.EvaluatedAt, MaterializationInputs{VRPComplete: true, RPKIObservedAt: state.EvaluatedAt, RPKICoverageValidUntil: state.EvaluatedAt.Add(time.Hour), verifiedEmptyVRP: verified})(context.Background(), func(record via3.PublicRecord) error {
 			if record.Kind == 9 {
 				seen++
-				want := uint8(0)
-				if verified {
-					want = 3
-				}
-				if record.RPKI.Status != want {
-					t.Fatalf("verified=%v status=%d", verified, record.RPKI.Status)
+				if !verified || record.RPKI.Status != 3 || record.RPKI.ObservedAt != state.EvaluatedAt.Unix() || record.RPKI.ValidUntil != state.EvaluatedAt.Add(time.Hour).Unix() {
+					t.Fatalf("verified=%v observation=%+v", verified, record.RPKI)
 				}
 			}
 			return nil
 		})
-		if err != nil || seen == 0 {
-			t.Fatal(err)
+		if err != nil || (seen > 0) != verified {
+			t.Fatalf("verified=%v emitted=%d err=%v", verified, seen, err)
 		}
 	}
 }

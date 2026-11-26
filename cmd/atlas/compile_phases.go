@@ -12,31 +12,34 @@ import (
 
 // Diagnostics are fixed, source-free measurements, never acceptance evidence.
 // Beginning a phase is flushed before its work so a killed process still shows
-// the active phase. The logger is activated only by compile-production.
+// the active phase. Only production compilation and its engineering replays
+// activate the logger.
 type compilePhase string
 
 const (
-	phaseStage         compilePhase = "stage"
-	phaseConfig        compilePhase = "config"
-	phaseQualification compilePhase = "qualification"
-	phaseTier1         compilePhase = "tier1"
-	phaseBuild         compilePhase = "build"
-	phaseBoundary      compilePhase = "boundary"
-	phaseObjects       compilePhase = "objects"
-	phaseReceipt       compilePhase = "receipt"
-	phaseRetention     compilePhase = "retention"
-	phaseHistory       compilePhase = "history"
-	phaseSeal          compilePhase = "seal"
-	phaseSeed          compilePhase = "materialize-seed"
-	phasePaths         compilePhase = "materialize-paths"
-	phaseASNRisk       compilePhase = "materialize-asn-risk"
-	phaseSpatial       compilePhase = "materialize-spatial"
-	phaseASN           compilePhase = "materialize-asn"
-	phaseSort          compilePhase = "pipeline-sort"
-	phaseMerge         compilePhase = "pipeline-merge"
-	phaseClassify      compilePhase = "pipeline-classify"
-	phasePartition     compilePhase = "pipeline-partition"
-	phasePublish       compilePhase = "pipeline-publish"
+	phaseStage            compilePhase = "stage"
+	phaseBenchmarkPrepare compilePhase = "benchmark-prepare"
+	phaseBenchmarkMeasure compilePhase = "benchmark-measure"
+	phaseConfig           compilePhase = "config"
+	phaseQualification    compilePhase = "qualification"
+	phaseTier1            compilePhase = "tier1"
+	phaseBuild            compilePhase = "build"
+	phaseBoundary         compilePhase = "boundary"
+	phaseObjects          compilePhase = "objects"
+	phaseReceipt          compilePhase = "receipt"
+	phaseRetention        compilePhase = "retention"
+	phaseHistory          compilePhase = "history"
+	phaseSeal             compilePhase = "seal"
+	phaseSeed             compilePhase = "materialize-seed"
+	phasePaths            compilePhase = "materialize-paths"
+	phaseASNRisk          compilePhase = "materialize-asn-risk"
+	phaseSpatial          compilePhase = "materialize-spatial"
+	phaseASN              compilePhase = "materialize-asn"
+	phaseSort             compilePhase = "pipeline-sort"
+	phaseMerge            compilePhase = "pipeline-merge"
+	phaseClassify         compilePhase = "pipeline-classify"
+	phasePartition        compilePhase = "pipeline-partition"
+	phasePublish          compilePhase = "pipeline-publish"
 )
 
 type compilePhaseKey struct{}
@@ -63,7 +66,7 @@ func beginCompilePhase(ctx context.Context, phase compilePhase) func(bool) {
 		return func(bool) {}
 	}
 	switch phase {
-	case phaseStage, phaseConfig, phaseQualification, phaseTier1, phaseBuild, phaseBoundary, phaseObjects, phaseReceipt, phaseRetention, phaseHistory, phaseSeal,
+	case phaseStage, phaseBenchmarkPrepare, phaseBenchmarkMeasure, phaseConfig, phaseQualification, phaseTier1, phaseBuild, phaseBoundary, phaseObjects, phaseReceipt, phaseRetention, phaseHistory, phaseSeal,
 		phaseSeed, phasePaths, phaseASNRisk, phaseSpatial, phaseASN, phaseSort, phaseMerge, phaseClassify, phasePartition, phasePublish:
 	default:
 		return func(bool) {}

@@ -230,6 +230,20 @@ func CompilePartition(ctx context.Context, input PartitionInput) (CompiledPartit
 // CompilePartition retains every original validation and output bound while
 // sharing only the encoder workspace owned by this build.
 func (encoder *PublicEncoder) CompilePartition(ctx context.Context, input PartitionInput) (CompiledPartition, error) {
+	return encoder.compilePartition(ctx, input, nil)
+}
+
+// VerifiedStaticKindLookup is private compiler plumbing. The caller must bind
+// a returned object to the exact checked kind rows, the leaf scope, dictionary
+// and compiler contract. A hit supplies reauthenticated binary bytes and their
+// validated shard. The encoder still combines and checks every final kind.
+type VerifiedStaticKindLookup func(context.Context, uint16, BuiltObject) (BuiltObject, bool, error)
+
+func (encoder *PublicEncoder) CompilePartitionWithStaticReuse(ctx context.Context, input PartitionInput, lookup VerifiedStaticKindLookup) (CompiledPartition, error) {
+	return encoder.compilePartition(ctx, input, lookup)
+}
+
+func (encoder *PublicEncoder) compilePartition(ctx context.Context, input PartitionInput, lookup VerifiedStaticKindLookup) (CompiledPartition, error) {
 	out := CompiledPartition{Objects: []BuiltObject{}, Destinations: make(map[uint16]BuiltObject)}
 	if err := encoder.checkOpen(); err != nil {
 		return out, err
@@ -373,6 +387,24 @@ func (encoder *PublicEncoder) CompilePartition(ctx context.Context, input Partit
 		records := groups[kind]
 		if len(records) == 0 {
 			continue
+		}
+		if lookup != nil && kind >= 2 && kind <= 4 {
+			var expectedDictionary BuiltObject
+			if kind == 2 || kind == 4 {
+				expectedDictionary = dict
+			}
+			cached, hit, err := lookup(ctx, kind, expectedDictionary)
+			if err != nil {
+				return out, err
+			}
+			if hit {
+				if cached.Info.Kind != kind || cached.Info.Partition != input.Partition || cached.Shard.Kind != kind || len(cached.Bytes) != cached.Info.Bytes {
+					return out, fail("record")
+				}
+				out.Objects = append(out.Objects, cached)
+				out.Destinations[kind] = cached
+				continue
+			}
 		}
 		sort.SliceStable(records, func(i, j int) bool {
 			a, b := records[i], records[j]
@@ -933,7 +965,22 @@ func validateAnycastFacts(partition CompiledPartition) error {
 	if !ok {
 		return nil
 	}
-	boundaries := make(map[string]netip.Prefix)
+	// Without any affirmative usage row there is no scope where a lookup
+	// can select true. This is common in geo-heavy leaves. A mixed leaf still
+	// walks every old boundary, including inherited false overrides.
+	rows, _ := usage.Shard.Rows(3)
+	hasAnycast := false
+	for p := 0; p < len(rows); p += 8 {
+		row := rows[p : p+8]
+		if present(row, 7) && row[6]&1 != 0 {
+			hasAnycast = true
+			break
+		}
+	}
+	if !hasAnycast {
+		return nil
+	}
+	boundaries := make(map[netip.Prefix]struct{})
 	for _, kind := range []uint16{2, 3, 5} {
 		object, ok := partition.Destinations[kind]
 		if !ok {
@@ -945,11 +992,11 @@ func validateAnycastFacts(partition CompiledPartition) error {
 				row := rows[p : p+32]
 				addr, _ := keyAddr(row)
 				prefix := netip.PrefixFrom(addr, int(row[1]))
-				boundaries[prefix.String()] = prefix
+				boundaries[prefix] = struct{}{}
 			}
 		}
 	}
-	for _, scope := range boundaries {
+	for scope := range boundaries {
 		use, _, known := usage.Shard.findPrefixWithin(scope.Addr(), scope.Bits())
 		if !known || !present(use, 7) || use[6]&1 == 0 {
 			continue

@@ -3,6 +3,8 @@ package pipeline
 import (
 	"bytes"
 	"errors"
+
+	"vansail-ip-atlas/internal/via3"
 )
 
 // This sink belongs to the running compiler sort. Direct Producer callers
@@ -26,12 +28,16 @@ type spatialReplayBodies struct {
 var errSpatialPublicRow = errors.New("cached spatial public stream differs")
 
 func (b *spatialReplayBodies) canonical(frame []byte, limit int64) (ownedRunFrame, error) {
+	return b.canonicalMatching(frame, limit, nil)
+}
+
+func (b *spatialReplayBodies) canonicalMatching(frame []byte, limit int64, matches func(via3.PublicRecord) bool) (ownedRunFrame, error) {
 	if !bytes.HasPrefix(frame, []byte(compactRunMarker)) {
 		_, record, err := decodeRunPayload(frame, limit)
 		if err != nil {
 			return ownedRunFrame{}, err
 		}
-		if record.Kind >= 8 && record.Kind != 9 {
+		if record.Kind >= 8 && record.Kind != 9 || matches != nil && !matches(record) {
 			return ownedRunFrame{}, errSpatialPublicRow
 		}
 		return b.compiler.newCanonicalRunFrame(record)
@@ -41,7 +47,7 @@ func (b *spatialReplayBodies) canonical(frame []byte, limit int64) (ownedRunFram
 	if err != nil {
 		return ownedRunFrame{}, err
 	}
-	if record.Inherited || record.Kind >= 8 && record.Kind != 9 {
+	if record.Inherited || record.Kind >= 8 && record.Kind != 9 || matches != nil && !matches(record) {
 		return ownedRunFrame{}, errSpatialPublicRow
 	}
 	body := data[compactRunHeader:]

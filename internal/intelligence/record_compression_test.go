@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-func putRecordFixture(t *testing.T, root string, data []byte, part RecordPartition) RecordPartition {
+func putRecordFixture(t testing.TB, root string, data []byte, part RecordPartition) RecordPartition {
 	t.Helper()
 	part.SHA256 = sha256.Sum256(data)
 	part.Bytes = int64(len(data))

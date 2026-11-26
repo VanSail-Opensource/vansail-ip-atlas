@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,6 +12,58 @@ import (
 
 	"vansail-ip-atlas/internal/intelligence"
 )
+
+func TestClockIndependentRiskShapeDoesNotHideNewExactEvidence(t *testing.T) {
+	ctx := context.Background()
+	state, policy, _, _, _ := intelligenceFixture(t)
+	origin := intelligence.OriginMapping{Prefix: netip.MustParsePrefix("2001:db8::/32"), Origins: []uint32{15169}}
+	state.Sources[0].Records = append(state.Sources[0].Records, intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordOrigins, Origins: &origin})
+	opt := testOptions(t)
+	opt.Limits = DefaultLimits()
+	build := func(state intelligence.BuildState, name string) (Candidate, map[[32]byte]bool) {
+		t.Helper()
+		opt.Output = filepath.Join(opt.Workspace, "build-private", name)
+		opt.Clock, opt.ValidUntil = state.EvaluatedAt.Unix(), state.Sources[0].ExpiresAt.Unix()
+		candidate, err := BuildStreamedIntelligence(ctx, opt, partitionSpatialFixture(t, opt.Workspace, state), policy)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(opt.Workspace, ".atlas-private", "spatial-cache-v1", "index.json")
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var index spatialCacheIndex
+		if err := json.Unmarshal(b, &index); err != nil {
+			t.Fatal(err)
+		}
+		keys := map[[32]byte]bool{}
+		for _, e := range index.Entries {
+			if e.Domain == riskShapeDomain && !e.Leaf.Split {
+				keys[e.Key] = true
+			}
+		}
+		return candidate, keys
+	}
+	_, before := build(state, "before")
+	state.EvaluatedAt = state.EvaluatedAt.Add(time.Minute)
+	_, after := build(state, "advanced")
+	if len(before) != 1 || !reflect.DeepEqual(before, after) {
+		t.Fatal("expected one retained origin-only IPv6 leaf at both clocks", len(before), len(after))
+	}
+	newEvidence := intelligence.Evidence{Family: "new-fixture", Signal: "malware", Scope: intelligence.Exact, Address: netip.MustParseAddr("2001:db8::1"), Weight: 100, Current: true, SourcePublishedAt: state.EvaluatedAt}
+	state.Sources[0].Records = append(state.Sources[0].Records, intelligence.NormalizedRecord{Version: 3, Kind: intelligence.RecordEvidence, Evidence: &newEvidence})
+	warm, changed := build(state, "new-evidence")
+	if len(changed) != 0 {
+		t.Fatal("the former origin-only IPv6 leaf kept its no-evidence proof")
+	}
+	cold := testOptions(t)
+	cold.Clock, cold.ValidUntil, cold.Limits = opt.Clock, opt.ValidUntil, opt.Limits
+	want, err := BuildStreamedIntelligence(ctx, cold, partitionSpatialFixture(t, cold.Workspace, state), policy)
+	if err != nil || want.Pointer != warm.Pointer {
+		t.Fatal("new evidence changed warm/cold parity", err)
+	}
+}
 
 func TestExactRiskLeafReuseBindsOnlyRiskInputs(t *testing.T) {
 	for _, mode := range []string{"role", "geo", "coverage", "vrp", "prefix-risk", "exact", "origin", "clock"} {

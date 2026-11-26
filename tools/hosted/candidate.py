@@ -171,7 +171,10 @@ def _live_inventory_fetch(origin, deadline):
                         count += len(block)
                         digest.update(block)
                     remaining()
-                    return response.status, {k.lower(): v for k, v in response.headers.items()}, count, digest.hexdigest()
+                    # HTTPHeaderDict lookup joins repetitions; converting
+                    # .items() straight to a dict would silently discard them.
+                    headers = {k.lower(): response.headers[k] for k in response.headers}
+                    return response.status, headers, count, digest.hexdigest()
                 finally:
                     # A fully consumed response returns its healthy socket to
                     # the pool. Discard interrupted or oversized responses.
@@ -234,10 +237,13 @@ def _verify_inventory(candidate, report, origin, expected_headers, fetch_digest,
                 continue
             if " ".join(headers.get(name, "").split()) != " ".join(value.split()):
                 raise ContractError(f"preview effective header differs: {name}")
-        cache = {token.strip() for token in headers.get("cache-control", "").lower().split(",")}
+        cache = [token.strip() for token in headers.get("cache-control", "").lower().split(",")]
         if path.startswith(("_atlas/objects/", "_atlas/browser/", "_atlas/releases/", "_atlas/credits/", "_atlas/legal/", "_nuxt/")):
-            if "immutable" not in cache or "max-age=31536000" not in cache:
-                raise ContractError("immutable preview object cache policy missing")
+            # Pages joins overlapping rules instead of replacing the broader
+            # header. A second max-age can make an immutable object revalidate.
+            max_ages = [token for token in cache if token.partition("=")[0].strip() == "max-age"]
+            if "immutable" not in cache or max_ages != ["max-age=31536000"] or "must-revalidate" in cache:
+                raise ContractError("immutable preview object cache policy is missing or conflicting")
         elif path in ("_atlas/current.json", "dataset-credits.json") and ("max-age=0" not in cache or "must-revalidate" not in cache):
             raise ContractError("preview mutable pointer/credit alias revalidation policy missing")
         return 1

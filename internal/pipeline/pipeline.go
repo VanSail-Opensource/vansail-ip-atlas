@@ -545,6 +545,11 @@ func (c *compiler) sort(produce Producer) ([]string, error) {
 			if err := spool.publicStream.appendPublic(row); err != nil {
 				return err
 			}
+			if spool.mappingStreams != ([2]*spatialStreamWriter{}) && len(row.key) != 0 && isMappingFact(uint16(row.key[0])) {
+				if err := spool.mappingStreams[mappingStreamIndex(uint16(row.key[0]))].appendPublic(row); err != nil {
+					return err
+				}
+			}
 		}
 		cost := row.logicalBytes + 128
 		if cost > c.options.Limits.SortBytes {
@@ -956,6 +961,7 @@ func (s scope) children() (scope, scope, error) {
 
 func (c *compiler) partitionFresh(path string, s scope) error {
 	var err error
+	staticKinds := c.compiledStaticKinds(s)
 	var records []via3.PublicRecord
 	var size int64
 	// These exact totals belong only to this compiler's newly closed immutable
@@ -990,6 +996,7 @@ func (c *compiler) partitionFresh(path string, s scope) error {
 				overflow = true
 				break
 			}
+			staticKinds.add(r.record.Kind, r.row)
 			records = append(records, r.record)
 			size += cost
 			if uint64(size) > c.stats.PartitionBufferPeak {
@@ -1000,7 +1007,12 @@ func (c *compiler) partitionFresh(path string, s scope) error {
 	}
 	var compiled via3.CompiledPartition
 	if !overflow {
-		compiled, err = c.encoder.CompilePartition(c.ctx, via3.PartitionInput{Partition: s.name(), Records: records, PrefixProvider: c.options.prefixProvider})
+		input := via3.PartitionInput{Partition: s.name(), Records: records, PrefixProvider: c.options.prefixProvider}
+		if staticKinds != nil {
+			compiled, err = c.encoder.CompilePartitionWithStaticReuse(c.ctx, input, staticKinds.lookup)
+		} else {
+			compiled, err = c.encoder.CompilePartition(c.ctx, input)
+		}
 		if err != nil {
 			code := via3.ErrorCode(err)
 			if code == "partition_budget" || code == "resource_limit" || code == "length" {
@@ -1075,6 +1087,9 @@ func (c *compiler) partitionFresh(path string, s scope) error {
 		route.prefix = s.prefix
 	}
 	if err := c.registerCompiledRoute(route); err != nil {
+		return err
+	}
+	if err := staticKinds.retain(compiled); err != nil {
 		return err
 	}
 	return c.remove(path)

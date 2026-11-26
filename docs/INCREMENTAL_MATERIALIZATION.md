@@ -16,13 +16,27 @@ The private `spatial-cache-v1` inventory records separate dependencies for each 
 | Raw split | Subdivision required by the distinct raw records before adding ASN roles or coverage | Scope, ordered physical partition descriptors and collection limits. Each hit verifies the current bytes of every input object. |
 | Risk | A fitting leaf's ordered exact-address risk events, or its split decision | Scope, ordered descriptors, fit limits, scoring policy and evaluation clock. Shared public geometry also binds the joined roles. |
 | Risk input | A fitting leaf's exact-address events across unrelated spatial edits | Exact evidence, prefix-to-origin observations, their canonical order, scope, exact-layer scoring policy and evaluation clock |
+| Risk shape | Exact-risk collection split or a fully validated leaf with no exact observations | Scope, ordered physical descriptors, fit limits and relevant joined role layout. Such proofs contain no scored events and do not depend on clock. |
+| Mapping | Validated geographic, coordinate, usage and network rows in separate location and network streams | Scope, ordered physical descriptors, fit limits and mapping policy. Location also binds the joined origin usage types actually consulted and whether unmatched origins emit contextual unknown boundaries. |
 | Public | A fitting leaf's public records, or its split decision | Risk dependencies, final global ASN contexts, RPKI completeness, publisher observation time and coverage deadline |
+| Geo layout | A fitting geo-heavy leaf's unique geographic boundary counts and remaining raw rows | Exact ordered input descriptors, scope, location policy, raw fit counts and charges. Reuse requires the corresponding validated location values. |
 | Compiled | Final public objects and routes for a public partition subtree | Actual complete public-run bytes, scope and actual ASN prefix-provider bytes and index |
+| Compiled static kind | Geography, coordinates or network object within an existing bounded compiled leaf | Exact ordered consumed kind frames, current dictionary identity, fact group and exact leaf scope |
 
 All domains additionally bind the executable's actual bytes, compiler limits,
 public schema and build mode. No key relies on `Source.Fingerprint` alone.
 Changing the compiler, packing limits or implementation therefore creates an
 incompatible cache and takes the ordinary cold path.
+
+A geo-heavy leaf may retain a closed projection after its full bounded build
+succeeds. It includes every original geographic boundary, even where the value
+was unchanged, and the exact deduplicated non-geographic rows before any role or
+coverage join. On reuse the compiler rehashes the original parts and the bytes
+actually consumed from the projection, checks counts, canonical rows and byte
+charges, and charges the omitted votes to the ordinary fit limit. It regenerates
+the current usage and coverage joins and evaluates current-clock risk and routing.
+Separate source verification and the full source seed walk still run. Absence
+of a fitting projection or its location values takes the ordinary path.
 
 Seed streams end at original input-partition boundaries. A changed city does not
 shift later category chunks. Every source still completes its full strict
@@ -52,6 +66,14 @@ Replay performs the original additions; it does not combine floating-point sums.
 Public streams pass the normal selected-payload validation and sorter/conflict
 logic. Their consumed encoded bytes are hashed during replay.
 
+A changed evaluation clock does not invalidate network, geographic, coordinate
+or usage values on its own. A fitting leaf can replay unchanged mapping streams
+while recomputing scoring, coverage and RPKI. Network rows do not consult ASN
+usage. A role change invalidates locations only for affected join inputs, with
+an explicit dependency on creation of unknown join boundaries when the role
+index changes between empty and nonempty. Mapping replay rechecks current input
+objects and actual encoded output bytes within the normal resource envelope.
+
 Relationship and Tier-1 results are recomputed through their existing paths.
 The spatial public filter emits only kinds 2 through 7 and 9, whose dependencies
 are the spatial inputs and the explicitly bound global contexts. It cannot replay
@@ -68,6 +90,14 @@ public profile, reference closure and route scope. Object and route registration
 normal compiler paths. Shared objects are deduplicated against the current output
 inventory, including verification of any existing destination. Historical byte,
 file and scratch counters are never copied. The final router is rebuilt.
+
+If a whole grouped leaf misses, the compiler can reuse a matching kind-2, kind-3
+or kind-4 binary object. This does not alter grouped partition fit or the final
+router geometry. Existing typed validation and dictionary encoding still run.
+A hit verifies the actual object bytes, exact scope and dictionary reference.
+The encoder then checks anycast against the current usage rows and binds current
+profile cells to the verified network object's actual record ordinals. Only a
+fully accepted grouped leaf can retain its individual static kinds.
 
 ## Storage and failure behavior
 

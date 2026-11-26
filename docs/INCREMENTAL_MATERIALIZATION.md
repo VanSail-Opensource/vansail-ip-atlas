@@ -20,6 +20,7 @@ The private `spatial-cache-v1` inventory records separate dependencies for each 
 | Mapping | Validated geographic, coordinate, usage and network rows in separate location and network streams | Scope, ordered physical descriptors, fit limits and mapping policy. Location also binds the joined origin usage types actually consulted and whether unmatched origins emit contextual unknown boundaries. |
 | Public | A fitting leaf's public records, or its split decision | Risk dependencies, final global ASN contexts, RPKI completeness, publisher observation time and coverage deadline |
 | Public core | A fitting unchanged public leaf when the current RPKI snapshot is unavailable | Same full leaf identity, except the RPKI snapshot's output controls. Verify the complete recorded stream while omitting kind 9 on replay. |
+| Untimed public core | A fully collected leaf without evidence or assessed coverage, with no qualified current RPKI snapshot | Exact current physical descriptors, policy, fit, scope, joined usage and local origin risk contexts. The clock may differ. Verify the complete recorded stream and omit kind 9. |
 | Geo layout | A fitting geo-heavy leaf's unique geographic boundary counts and remaining raw rows | Exact ordered input descriptors, scope, location policy, raw fit counts and charges. Reuse requires the corresponding validated location values. |
 | Compiled | Final public objects and routes for a public partition subtree | Actual complete public-run bytes, scope and actual ASN prefix-provider bytes and index |
 | Compiled static kind | Geography, coordinates or network object within an existing bounded compiled leaf | Exact ordered consumed kind frames, current dictionary identity, fact group and exact leaf scope |
@@ -46,6 +47,12 @@ qualification is absent. The reader validates and hashes the full stream and
 does not emit its RPKI frames. An available snapshot, changed input scope, new
 clock, joined usage change or different origin risk contexts cannot use this
 fallback to replace fresh materialization.
+
+A separate untimed alias can survive a clock advance. It is created only
+after a complete bounded raw collection proves that no evidence or coverage
+record reaches the leaf, including joined coverage. Current physical inputs,
+joined usage, scope, and the exact origin risk contexts still have to match.
+As with the same-clock core, no old RPKI frames are emitted.
 
 Seed streams end at original input-partition boundaries. A changed city does not
 shift later category chunks. Every source still completes its full strict

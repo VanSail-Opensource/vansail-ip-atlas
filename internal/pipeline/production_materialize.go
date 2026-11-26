@@ -483,7 +483,13 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 			if keyErr != nil {
 				return keyErr
 			}
-			publicReuse = &bulkLeafReuse{domain: "public", dependencies: key, publicCore: core, withoutRPKI: !completeVRP, contexts: contexts, locationPolicy: locationPolicy, spool: spool, public: emit}
+			invariantInputs := coreInputs
+			invariantInputs.Clock = time.Time{}
+			invariant, keyErr := spatialReuseKey(publicInvariantDomain, invariantInputs)
+			if keyErr != nil {
+				return keyErr
+			}
+			publicReuse = &bulkLeafReuse{domain: "public", dependencies: key, publicCore: core, publicInvariant: invariant, withoutRPKI: !completeVRP, contexts: contexts, locationPolicy: locationPolicy, spool: spool, public: emit}
 		}
 		spatial, err = spool.leavesReusing(ctx, spatial, true, publicReuse, func(bucket *bulkBucket, part intelligence.BuildState) error {
 			mappings := func(ctx context.Context, produce mappingProducerFactory, emit func(via3.PublicRecord) error) error {

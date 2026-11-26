@@ -13,6 +13,7 @@ type bulkLeafReuse struct {
 	contexts              map[uint32]intelligence.ASNContext
 	dependencies          [32]byte
 	publicCore            [32]byte
+	publicInvariant       [32]byte
 	withoutRPKI           bool
 	locationPolicy        [32]byte
 	riskShape             [32]byte
@@ -45,7 +46,7 @@ func (r *bulkLeafReuse) begin(ctx context.Context) error {
 	return nil
 }
 
-func (r *bulkLeafReuse) finish(ctx context.Context, key, coreKey [32]byte, origins []uint32) (returnErr error) {
+func (r *bulkLeafReuse) finish(ctx context.Context, key, coreKey, invariantKey [32]byte, origins []uint32) (returnErr error) {
 	writer := r.writer
 	r.writer = nil
 	r.spool.publicStream = nil
@@ -90,15 +91,23 @@ func (r *bulkLeafReuse) finish(ctx context.Context, key, coreKey [32]byte, origi
 		return err
 	}
 	retained, err := r.spool.reuse.Retain(ctx, entry, files)
-	if err != nil || !retained || coreKey == ([32]byte{}) {
+	if err != nil || !retained {
 		return err
 	}
-	// Both entries authenticate the exact same checked stream. A lookup of
-	// the second identity is only usable with absent RPKI qualification, and
-	// its reader still parses and hashes all frames, including omitted ones.
-	entry.Domain, entry.Key = publicCoreDomain, coreKey
-	_, err = r.spool.reuse.Retain(ctx, entry, files)
-	return err
+	// Each alias authenticates the exact same checked stream. Both require
+	// absent RPKI qualification, regardless of the original stream's rows.
+	for _, alias := range []struct {
+		domain string
+		key    [32]byte
+	}{{publicCoreDomain, coreKey}, {publicInvariantDomain, invariantKey}} {
+		if alias.key != ([32]byte{}) {
+			entry.Domain, entry.Key = alias.domain, alias.key
+			if _, err := r.spool.reuse.Retain(ctx, entry, files); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (r *bulkLeafReuse) abort() error {
@@ -121,6 +130,7 @@ func (r *bulkLeafReuse) replay(ctx context.Context, stream spatialCacheStream) e
 const rawSplitDomain = "raw-split"
 const riskShapeDomain = "risk-shape"
 const publicCoreDomain = "public-core"
+const publicInvariantDomain = "public-invariant"
 
 // Small buckets take the normal collect path without a second cache lookup.
 // Overlapping records can overstate this estimate. Only collect itself may
@@ -195,6 +205,7 @@ func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, cove
 		}
 		var shapeKey [32]byte
 		var coreKey [32]byte
+		var invariantKey [32]byte
 		if reuse.publicCore != ([32]byte{}) {
 			coreKey, err = s.leafKey(publicCoreDomain, bucket, coverage, reuse.publicCore)
 			if err != nil {
@@ -222,6 +233,17 @@ func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, cove
 		coreHit := false
 		if !hit && reuse.withoutRPKI && coreKey != ([32]byte{}) {
 			entry, hit, err = s.reuse.Lookup(ctx, publicCoreDomain, coreKey)
+			if err != nil {
+				return err
+			}
+			coreHit = hit
+		}
+		if !hit && reuse.withoutRPKI && reuse.publicInvariant != ([32]byte{}) {
+			invariantKey, err = s.leafKey(publicInvariantDomain, bucket, coverage, reuse.publicInvariant)
+			if err != nil {
+				return err
+			}
+			entry, hit, err = s.reuse.Lookup(ctx, publicInvariantDomain, invariantKey)
 			if err != nil {
 				return err
 			}
@@ -266,6 +288,19 @@ func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, cove
 						}
 					}
 				}
+				if entry.Domain != publicInvariantDomain && reuse.publicInvariant != ([32]byte{}) {
+					invariantKey, err = s.leafKey(publicInvariantDomain, bucket, coverage, reuse.publicInvariant)
+					if err != nil {
+						return err
+					}
+					if prior, found, err := s.reuse.Lookup(ctx, publicInvariantDomain, invariantKey); err != nil {
+						return err
+					} else if found {
+						if _, err := s.reuse.Retain(ctx, prior, nil); err != nil {
+							return err
+						}
+					}
+				}
 				if reuse.locationPolicy != ([32]byte{}) {
 					if err := s.retainLocations(ctx, bucket, reuse.locationPolicy); err != nil {
 						return err
@@ -297,6 +332,7 @@ func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, cove
 			}
 			state, err := s.collectWithSplitProof(ctx, bucket, coverage)
 			if err == nil {
+				untimedScoring := bucket.geoReplay == nil && !bucket.timedScoring
 				if err := reuse.begin(ctx); err != nil {
 					return err
 				}
@@ -323,7 +359,18 @@ func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, cove
 						return err
 					}
 				} else {
-					if err := reuse.finish(ctx, key, coreKey, bucket.originASNs); err != nil {
+					// A successful full collect proves this leaf has no dated risk
+					// evidence or coverage. Current origin contexts and exact physical
+					// input are still checked at replay. Clock-dependent RPKI
+					// rows are never replayed across this alias.
+					invariantKey = [32]byte{}
+					if reuse.publicInvariant != ([32]byte{}) && untimedScoring {
+						invariantKey, err = s.leafKey(publicInvariantDomain, bucket, coverage, reuse.publicInvariant)
+						if err != nil {
+							return errors.Join(err, reuse.abort())
+						}
+					}
+					if err := reuse.finish(ctx, key, coreKey, invariantKey, bucket.originASNs); err != nil {
 						return err
 					}
 				}

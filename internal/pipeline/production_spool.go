@@ -35,6 +35,7 @@ type bulkBucket struct {
 	riskDigest   [32]byte
 	mappingInput [2][32]byte
 	riskExact    bool
+	timedScoring bool
 	riskOnly     bool
 	active       bool
 	cover        netip.Prefix
@@ -201,6 +202,7 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 	collectRisk := s.reuse != nil && !withCoverage && !b.asn
 	b.riskDigest = [32]byte{}
 	b.riskExact = false
+	b.timedScoring = false
 	b.mappingInput = [2][32]byte{}
 	// A geographic replay omits original Geo rows, so it cannot establish this
 	// narrower identity. The ordinary exact physical mapping path still works.
@@ -225,6 +227,7 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 		if projected+len(source.Records) >= s.batchRecords || bytes > s.batchBytes {
 			return overflow
 		}
+		b.timedScoring = b.timedScoring || record.Kind == intelligence.RecordEvidence || record.Kind == intelligence.RecordCoverage
 		if collectRisk && exactRiskInput(record) {
 			_, _ = riskDigest.Write(digest[:])
 			b.riskExact = b.riskExact || record.Kind == intelligence.RecordEvidence

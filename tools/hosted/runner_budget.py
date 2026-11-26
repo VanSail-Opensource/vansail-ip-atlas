@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -70,17 +71,28 @@ def storage_roots(workspace: Path, installations: list[Path]) -> list[Path]:
     return roots
 
 def usage(root: Path) -> int:
-    # Count every writable task directory, including input checkpoints, caches and staging.
-    total=0;seen=set()
-    for current,dirs,files in os.walk(root,followlinks=False):
-        for name in files:
-            path=Path(current)/name
-            try:
-                if not path.is_symlink():
-                    info=path.stat();identity=(info.st_dev,info.st_ino)
-                    if identity not in seen:
-                        seen.add(identity);total += info.st_blocks * 512
-            except FileNotFoundError: pass
+    # The checker shares the workload's CPU quota. Count the same physical
+    # allocation and hardlink identities at the same polling cadence with one
+    # metadata read per file. Never follow a file or directory symlink.
+    total=0;seen=set();directories=[os.fspath(root)]
+    while directories:
+        try:
+            with os.scandir(directories.pop()) as children:
+                for entry in children:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            directories.append(entry.path)
+                            continue
+                        info=entry.stat(follow_symlinks=False)
+                        if stat.S_ISLNK(info.st_mode) or stat.S_ISDIR(info.st_mode):
+                            continue
+                        identity=(info.st_dev,info.st_ino)
+                        if identity not in seen:
+                            seen.add(identity);total += info.st_blocks * 512
+                    except FileNotFoundError:
+                        pass
+        except (FileNotFoundError,NotADirectoryError):
+            continue
     return total
 
 def effective(root: Path) -> dict:

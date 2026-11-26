@@ -63,9 +63,17 @@ class RunnerBudgetTests(unittest.TestCase):
             root = Path(directory)
             original = root / 'store-package'
             original.write_bytes(b'x' * 8192)
-            os.link(original, root / 'installed-package')
+            nested = root / 'installed'
+            nested.mkdir()
+            os.link(original, nested / 'installed-package')
             (root / 'symlink').symlink_to(original)
-            self.assertEqual(budget.usage(root), original.stat().st_blocks * 512)
+            (nested / 'cycle').symlink_to(root, target_is_directory=True)
+            sparse = nested / 'sparse'
+            with sparse.open('wb') as output:
+                output.seek(16 * 1024 * 1024)
+                output.write(b'x')
+            (nested / 'broken-link').symlink_to(root / 'missing')
+            self.assertEqual(budget.usage(root), (original.stat().st_blocks + sparse.stat().st_blocks) * 512)
 
     def test_toolchain_roots_are_active_installations_and_counted_once(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -3,6 +3,7 @@ import contextlib
 import io
 import os
 from pathlib import Path
+import subprocess
 import tempfile
 import sys
 import unittest
@@ -144,6 +145,41 @@ class CandidateClockTests(unittest.TestCase):
         self.assertEqual(workflow.failure_category(log, len(previous)), 'public-data-string')
         log.write_bytes(previous + label + b': private-value\n')
         self.assertEqual(workflow.failure_category(log, len(previous)), 'command-failed')
+
+    def test_pages_failure_category_is_exact_current_and_pages_only(self):
+        log = self.private / 'stage.log'
+        marker = b'ATLAS_PAGES_FAILURE asset-upload http-503'
+        previous = b'ATLAS_PAGES_FAILURE qualification contract\n'
+        start = len(previous)
+        for data in (marker + b'\n', b'noisy\n' + b'x'*70000 + b'\n' + marker + b'\r\n'):
+            log.write_bytes(previous + data)
+            self.assertEqual(workflow.failure_category(log, start, phase='pages-deployment'), 'pages-asset-upload-http-503')
+            self.assertEqual(workflow.failure_category(log, start, phase='compile-production'), 'command-failed')
+        for malformed in (
+            b'no new marker\n', marker, marker + b' body-and-token\n', b'fake source line\r' + marker + b'\n',
+            b'ATLAS_PAGES_FAILURE http://private-input http-503\n', b'ATLAS_PAGES_FAILURE asset-upload http-999\n',
+            b'ATLAS_PAGES_FAILURE asset-upload arbitrary-exception-message\n',
+            b'x'*100 + marker + b'\n' + b'x'*(65536-len(marker)-1),
+        ):
+            with self.subTest(malformed=malformed[:100]):
+                log.write_bytes(previous + malformed)
+                self.assertEqual(workflow.failure_category(log, start, phase='pages-deployment'), 'command-failed')
+
+    def test_failed_pages_child_exposes_no_command_or_response_details(self):
+        private = 'example-private-body-path-and-bearer-token'
+        public_out, public_err = io.StringIO(), io.StringIO()
+
+        def failed_child(argv, **kwargs):
+            kwargs['stderr'].write((private + '\nATLAS_PAGES_FAILURE asset-token network-timeout\n').encode())
+            return subprocess.CompletedProcess(argv, 1)
+
+        with (patch.object(workflow, 'ROOT', self.root), patch.object(workflow.subprocess, 'run', side_effect=failed_child),
+              contextlib.redirect_stdout(public_out), contextlib.redirect_stderr(public_err), self.assertRaises(ContractError)):
+            workflow.run(['python', 'tools/release_contract/pages.py', 'preview', private])
+        self.assertEqual(public_out.getvalue(), 'Production step started: pages-deployment\n')
+        self.assertEqual(public_err.getvalue(), 'Production step failed: pages-deployment\n'
+                         'Production failure category: pages-asset-token-network-timeout\n')
+        self.assertIn(private, (self.private / 'stage.log').read_text())
 
     def test_intake_waits_for_longer_exact_head_integration_without_relaxing_identity(self):
         head = 'a' * 40

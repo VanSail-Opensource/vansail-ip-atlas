@@ -1,9 +1,14 @@
 import base64
+import contextlib
 import hashlib
 import http.client
 import io
 import json
+import os
 from pathlib import Path
+import socket
+import ssl
+import sys
 import tempfile
 import unittest
 import urllib.error
@@ -11,7 +16,8 @@ from unittest.mock import patch
 
 from tools.hosted import test_candidate as candidate_fixture
 from tools.release_contract.contracts import ContractError
-from tools.release_contract.pages import MAX_ASSET_ATTEMPTS, NoRedirect, Pages, _retry_delay
+from tools.release_contract import pages
+from tools.release_contract.pages import MAX_ASSET_ATTEMPTS, NoRedirect, Pages, PagesRequestFailure, _retry_delay
 
 
 class PagesReleaseTests(unittest.TestCase):
@@ -108,6 +114,63 @@ class PagesReleaseTests(unittest.TestCase):
             client.request("/pages/assets/upload", method="POST", value=[])
         self.assertEqual(opening.call_count, MAX_ASSET_ATTEMPTS)
         self.assertEqual(sleep.call_count, MAX_ASSET_ATTEMPTS - 1)
+
+    def test_api_failure_class_never_copies_wire_details(self):
+        private = "not-a-real-secret-fixture"
+        failures = (
+            (urllib.error.HTTPError(f'https://example.invalid/{private}', 401, private,
+                                    {"Location": private, "Retry-After": private}, io.BytesIO(private.encode())), "http-401"),
+            (urllib.error.URLError(socket.gaierror(socket.EAI_AGAIN, private)), "network-dns"),
+            (TimeoutError(private), "network-timeout"),
+            (urllib.error.URLError(ssl.SSLError(private)), "network-tls"),
+            (ConnectionResetError(private), "network-connection"),
+            (http.client.IncompleteRead(private.encode()), "network-interrupted"),
+        )
+        client = self.client()
+        for error, classification in failures:
+            with self.subTest(classification=classification), patch.object(client._opener, "open", side_effect=error):
+                with self.assertRaises(PagesRequestFailure) as context:
+                    client.request(client.prefix)
+                self.assertEqual(context.exception.classification, classification)
+                self.assertNotIn(private, str(context.exception))
+        class Response(io.BytesIO):
+            length = 0
+        with patch.object(client._opener, "open", return_value=Response(json.dumps({"success": False, "errors": [private]}).encode())):
+            with self.assertRaises(PagesRequestFailure) as context:
+                client.request(client.prefix)
+            self.assertEqual(context.exception.classification, "response")
+            self.assertNotIn(private, str(context.exception))
+
+    def test_main_logs_only_closed_failure_phase_and_safe_class(self):
+        private = "private-lineage-token-path-fixture"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            public = path / "public"
+            report = path / "report.json"
+            argv = ['pages.py', 'preview', '--public', str(public), '--report', str(report),
+                    '--qualification-receipt', private, '--account', 'a'*32, '--project', 'atlas', '--head', 'b'*40]
+            for phase, code in (("frontend-inspection", "contract"), ("asset-token", "http-503")):
+                class Response(io.BytesIO):
+                    length = 0
+                project = Response(b'{"success":true,"result":{"production_branch":"main"}}')
+                upstream_error = urllib.error.HTTPError(f'https://example.invalid/{private}', 503, private,
+                                                        {"Location": private}, io.BytesIO(private.encode()))
+                frontend_error = ContractError(private + '\nATLAS_PAGES_FAILURE deployment-create http-401')
+                out, err = io.StringIO(), io.StringIO()
+                with (patch.object(sys, 'argv', argv), patch.dict(os.environ, {'CLOUDFLARE_API_TOKEN': private}),
+                      patch.object(pages, 'read_private', return_value=json.dumps({'mode':'production', 'candidate_bundle_sha256':'c'*64}).encode()),
+                      patch.object(pages, 'check_candidate'), patch.object(pages, 'qualify_public'),
+                      patch.object(pages, 'verify_atlas', return_value={'object_count': 1}), patch.object(pages, 'inspect_binary', return_value=1),
+                      patch.object(pages, 'known_private_values'), patch.object(pages, 'scan_frontend',
+                          side_effect=frontend_error if code == 'contract' else None),
+                      patch.object(pages.urllib.request.OpenerDirector, 'open', side_effect=[project, upstream_error]) as calls,
+                      contextlib.redirect_stdout(out), contextlib.redirect_stderr(err)):
+                    self.assertEqual(pages.main(), 1)
+                self.assertEqual(err.getvalue(), f'ATLAS_PAGES_FAILURE {phase} {code}\n')
+                self.assertEqual(out.getvalue(), '')
+                self.assertNotIn(private, report.read_text())
+                self.assertIsNone(json.loads(report.read_text())['deployment_id'])
+                self.assertEqual(calls.call_count, 0 if code == 'contract' else 2)
 
     def test_create_keeps_control_bytes_separate_and_records_exact_bundle_revision(self):
         with tempfile.TemporaryDirectory() as directory:

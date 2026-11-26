@@ -31,6 +31,7 @@ if __package__ in (None, ""):
 
 from tools.hosted.candidate import check_candidate, verify_preview
 from tools.release_contract.contracts import ContractError, parse_canonical, rollback_eligible, sha256, tree_inventory
+from tools.release_contract.pages_failures import failure_marker
 from tools.release_contract.production import qualify_public, read_private
 from tools.release_contract.prepare_static import inspect_binary, known_private_values, scan_frontend, verify_atlas
 from tools.release_contract.promotion import approve, automatic, json_object
@@ -44,6 +45,38 @@ UPLOAD_BUCKET_FILES = 1000 if os.name == "nt" else 2000
 ASSET_ROUTES = {"/pages/assets/check-missing", "/pages/assets/upload", "/pages/assets/upsert-hashes"}
 MAX_ASSET_ATTEMPTS = 5
 TRANSIENT_HTTP = {408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524}
+DEPLOYMENT_ID = r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}"
+
+
+class PagesProgress:
+    phase = "arguments"
+
+
+class PagesRequestFailure(ContractError):
+    def __init__(self, classification):
+        super().__init__("Pages API request did not satisfy its contract")
+        self.classification = classification
+
+
+def _network_class(error):
+    reason = error.reason if isinstance(error, urllib.error.URLError) else error
+    if isinstance(reason, socket.gaierror):
+        return "network-dns"
+    if isinstance(reason, TimeoutError):
+        return "network-timeout"
+    if isinstance(reason, ssl.SSLError):
+        return "network-tls"
+    if isinstance(reason, (http.client.IncompleteRead, http.client.RemoteDisconnected)):
+        return "network-interrupted"
+    if isinstance(reason, ConnectionError):
+        return "network-connection"
+    if isinstance(reason, http.client.HTTPException):
+        return "network-protocol"
+    return "network-other"
+
+
+def _failure_identity(value, pattern):
+    return value if isinstance(value, str) and re.fullmatch(pattern, value) else None
 
 
 def _transient_network(error):
@@ -75,7 +108,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class Pages:
-    def __init__(self, account: str, project: str, token: str):
+    def __init__(self, account: str, project: str, token: str, *, progress: PagesProgress | None = None):
         if (not re.fullmatch(r"[0-9a-f]{32}", account)
                 or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,56}[a-z0-9])?", project)
                 or not isinstance(token, str) or not token.isascii() or not 20 <= len(token) <= 4096
@@ -85,6 +118,7 @@ class Pages:
         self.prefix = f"/accounts/{account}/pages/projects/{project}"
         self._token = token
         self._opener = urllib.request.build_opener(NoRedirect)
+        self.progress = progress if progress is not None else PagesProgress()
 
     def request(self, path: str, *, method="GET", value=None, body=None, content_type="application/json", asset_token=None):
         if path != self.prefix and not path.startswith(self.prefix + "/") and path not in ASSET_ROUTES:
@@ -110,34 +144,42 @@ class Pages:
                         raise http.client.IncompleteRead(b"")
                 break
             except urllib.error.HTTPError as error:
-                # Keep server bodies and locations (which may contain credentials) private.
-                message = f"Pages API request failed (HTTP {error.code})"
+                # Expose only a conventional HTTP status. Never stringify the
+                # exception, request URL, response body or retry headers.
+                code = error.code
+                classification = f"http-{code}" if type(code) is int and 100 <= code <= 599 else "http-error"
                 retry = error.code in TRANSIENT_HTTP
                 header = error.headers.get("Retry-After") if error.headers else None
                 error.close()
                 delay = _retry_delay(header, delay)
                 retry = retry and delay is not None
             except (OSError, http.client.HTTPException) as error:
-                message = "Pages API request unavailable"
+                classification = _network_class(error)
                 retry = _transient_network(error)
             if not retry or attempt + 1 == attempts:
-                raise ContractError(message) from None
+                raise PagesRequestFailure(classification) from None
             time.sleep(delay)
         if len(data) > 2 * 1024 * 1024:
-            raise ContractError("Pages API response exceeds bound")
-        result = json_object(data)
+            raise PagesRequestFailure("response")
+        try:
+            result = json_object(data)
+        except ValueError:
+            raise PagesRequestFailure("response") from None
         if result.get("success") is not True:
-            raise ContractError("Pages API rejected the operation")
+            raise PagesRequestFailure("response")
         return result.get("result")
 
     def upload_assets(self, public: Path, candidate: dict) -> dict[str, str]:
+        self.progress.phase = "asset-preflight"
         verified = check_candidate(public, candidate, int(time.time()))
+        self.progress.phase = "asset-token"
         result = self.request(self.prefix + "/upload-token")
         if not isinstance(result, dict) or not isinstance(result.get("jwt"), str):
             raise ContractError("ephemeral Pages asset credential unavailable")
         jwt = result["jwt"]
         if not jwt.isascii() or not 20 <= len(jwt) <= 8192 or any(ord(ch) <= 32 or ord(ch) == 127 for ch in jwt):
             raise ContractError("invalid ephemeral Pages asset credential")
+        self.progress.phase = "asset-hashes"
         manifest, assets = {}, {}
         for relative, size, digest in verified["entries"]:
             if relative in ("_headers", "_redirects"):
@@ -158,6 +200,7 @@ class Pages:
             assets[key] = (relative, size, digest)
         keys = sorted(assets)
         missing = []
+        self.progress.phase = "asset-check"
         for index in range(0, len(keys), 1000):
             requested = keys[index:index + 1000]
             absent = self.request("/pages/assets/check-missing", method="POST", value={"hashes": requested}, asset_token=jwt)
@@ -165,6 +208,7 @@ class Pages:
                     or len(absent) != len(set(absent))):
                 raise ContractError("invalid Pages missing-asset response")
             missing.extend(absent)
+        self.progress.phase = "asset-upload"
         batch, batch_size = [], 0
         def flush():
             nonlocal batch, batch_size
@@ -183,12 +227,15 @@ class Pages:
             batch.append({"key": key, "base64": True, "value": content, "metadata": {"contentType": mime}})
             batch_size += size
         flush()
+        self.progress.phase = "asset-upsert"
         for index in range(0, len(keys), 1000):
             self.request("/pages/assets/upsert-hashes", method="POST", value={"hashes": keys[index:index + 1000]}, asset_token=jwt)
+        self.progress.phase = "asset-final-check"
         check_candidate(public, candidate, int(time.time()))
         return manifest
 
     def create(self, public: Path, candidate: dict, manifest: dict, branch: str, head: str) -> dict:
+        self.progress.phase = "deployment-create"
         boundary = "atlas-" + uuid.uuid4().hex
         fields = {"manifest": json.dumps(manifest, separators=(",", ":")).encode(), "branch": branch.encode(),
                   "commit_hash": head.encode(), "commit_message": ("atlas:" + candidate["candidate_bundle_sha256"]).encode(),
@@ -210,7 +257,8 @@ class Pages:
         return self.wait(result["id"], candidate["valid_until"])
 
     def wait(self, deployment_id: str, expires: int) -> dict:
-        if not re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", str(deployment_id)):
+        self.progress.phase = "deployment-wait"
+        if not re.fullmatch(DEPLOYMENT_ID, str(deployment_id)):
             raise ContractError("invalid Pages deployment identity")
         deadline = time.monotonic() + 600
         while time.monotonic() < deadline and time.time() < expires:
@@ -240,20 +288,27 @@ def main() -> int:
     parser.add_argument("--report", type=Path, default=Path("reports/pages-deployment.json"))
     args = parser.parse_args()
     client, candidate = None, None
+    progress = PagesProgress()
     try:
         if not re.fullmatch(r"[0-9a-f]{40}", args.head) or args.report.resolve().is_relative_to(args.public.resolve()):
             raise ContractError("invalid deployment revision or report location")
+        progress.phase = "candidate"
         candidate = json_object(read_private(args.candidate_report))
         check_candidate(args.public, candidate, int(time.time()))
         if candidate["mode"] != "production":
             raise ContractError("production workflow cannot upload synthetic data")
+        progress.phase = "qualification"
         qualify_public(args.public, candidate, args.qualification_receipt, int(time.time()))
+        progress.phase = "atlas-validation"
         atlas = verify_atlas(args.public / "_atlas", int(time.time()), production=True, credits=True)
+        progress.phase = "binary-inspection"
         private_values = known_private_values()
         if inspect_binary(args.public / "_atlas", private_values) != atlas["object_count"]:
             raise ContractError("Pages candidate binary scanner did not inspect all objects")
+        progress.phase = "frontend-inspection"
         scan_frontend(args.public, private_values)
         def authorization():
+            progress.phase = "authorization"
             if not args.evidence or not (args.approval or args.automatic):
                 raise ContractError("production promotion requires exact evidence and explicit approval")
             from tools.atlas_contracts.config import load_yaml
@@ -267,12 +322,15 @@ def main() -> int:
             return approve(args.public, args.qualification_receipt, evidence, load_yaml(args.approval), int(time.time()))
         if args.operation != "preview":
             authorization()
-        client = Pages(args.account, args.project, os.environ.get("CLOUDFLARE_API_TOKEN", ""))
+        progress.phase = "credentials"
+        client = Pages(args.account, args.project, os.environ.get("CLOUDFLARE_API_TOKEN", ""), progress=progress)
+        progress.phase = "project"
         project = client.request(client.prefix)
         production_branch = project.get("production_branch")
         if not isinstance(production_branch, str) or not production_branch:
             raise ContractError("Pages production branch unavailable")
         if args.operation == "rollback":
+            progress.phase = "rollback-target"
             if not rollback_eligible(candidate["valid_from"], candidate["valid_until"], int(time.time())):
                 raise ContractError("original approved release is no longer rollback eligible")
             if not re.fullmatch(r"[0-9a-f-]{36}", str(args.deployment_id)):
@@ -284,6 +342,7 @@ def main() -> int:
                 raise ContractError("rollback target is not the original approved production artifact")
             verify_preview(args.public, candidate, deployment["url"], int(time.time()))
             authorization()
+            progress.phase = "rollback"
             client.request(client.prefix + "/deployments/" + args.deployment_id + "/rollback", method="POST")
         else:
             manifest = client.upload_assets(args.public, candidate)
@@ -293,13 +352,16 @@ def main() -> int:
             if args.operation == "promote":
                 authorization()  # Expiry/rights/approval can change while assets upload.
             deployment = client.create(args.public, candidate, manifest, branch, args.head)
+        progress.phase = "deployment-identity"
         expected_environment = "preview" if args.operation == "preview" else "production"
         if deployment.get("environment") != expected_environment:
             raise ContractError("Pages created an unexpected deployment environment")
+        progress.phase = "served-preview" if expected_environment == "preview" else "served-production"
         identity = verify_preview(args.public, candidate, deployment["url"], int(time.time()))
         alias = None
         if expected_environment == "production":
             alias = verify_preview(args.public, candidate, f"https://{client.project}.pages.dev", int(time.time()), production_alias=True)
+        progress.phase = "report"
         report = {"format_version": 1, "operation": args.operation, "status": "verified", "deployment_id": deployment["id"],
             "url": deployment["url"], "environment": expected_environment, "head_sha": args.head,
             "candidate_bundle_sha256": candidate["candidate_bundle_sha256"], "release_id": candidate["release_id"],
@@ -308,16 +370,24 @@ def main() -> int:
         args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         print(f"PASS: exact Pages {args.operation} and served-file verification")
         return 0
-    except (ContractError, OSError, ValueError, KeyError, TypeError) as error:
+    except (ContractError, OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+        classification = "io" if isinstance(error, OSError) else "contract"
+        if isinstance(error, PagesRequestFailure):
+            classification = error.classification
+        print(failure_marker(progress.phase, classification), file=sys.stderr, flush=True)
         # Preserve a source-free failed-attempt identity for bounded recovery.
         # Failure before a known deployment must not trigger an arbitrary restore.
-        if not args.report.resolve().is_relative_to(args.public.resolve()):
-            args.report.parent.mkdir(parents=True, exist_ok=True)
-            args.report.write_text(json.dumps({"format_version": 1, "operation": args.operation,
-                "status": "failed", "deployment_id": getattr(client, "created_deployment_id", None),
-                "candidate_bundle_sha256": candidate.get("candidate_bundle_sha256") if candidate else None,
-                "head_sha": args.head}, indent=2) + "\n", encoding="utf-8")
-        print(f"FAIL: Pages release: {error}")
+        try:
+            if not args.report.resolve().is_relative_to(args.public.resolve()):
+                args.report.parent.mkdir(parents=True, exist_ok=True)
+                args.report.write_text(json.dumps({"format_version": 1, "operation": args.operation,
+                    "status": "failed", "deployment_id": _failure_identity(getattr(client, "created_deployment_id", None), DEPLOYMENT_ID),
+                    "candidate_bundle_sha256": _failure_identity(candidate.get("candidate_bundle_sha256") if candidate else None, r"[0-9a-f]{64}"),
+                    "head_sha": _failure_identity(args.head, r"[0-9a-f]{40}")}, indent=2) + "\n", encoding="utf-8")
+        except (OSError, ValueError):
+            # A failure to record recovery evidence must never cause raw path
+            # diagnostics or allow a deployment to be marked verified.
+            pass
         return 1
 
 

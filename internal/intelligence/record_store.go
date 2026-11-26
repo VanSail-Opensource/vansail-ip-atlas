@@ -473,14 +473,28 @@ func (w *RecordWriter) Abort() error {
 }
 
 func walkPartition(ctx context.Context, root string, part RecordPartition, emit func(NormalizedRecord) error) error {
-	var frames func(NormalizedRecord, []byte) error
-	if emit != nil {
-		frames = func(record NormalizedRecord, _ []byte) error { return emit(record) }
-	}
-	return walkPartitionFrames(ctx, root, part, frames)
+	return walkPartitionRecords(ctx, root, part, recordDecodeSink{typed: emit})
 }
 
 func walkPartitionFrames(ctx context.Context, root string, part RecordPartition, emit func(NormalizedRecord, []byte) error) error {
+	return walkPartitionRecords(ctx, root, part, recordDecodeSink{raw: emit})
+}
+
+// Only the typed callback is eligible for recycling. It never receives a raw
+// buffer or a view into one, even if it retains the entire decoded record.
+type recordDecodeSink struct {
+	typed func(NormalizedRecord) error
+	raw   func(NormalizedRecord, []byte) error
+}
+
+func (s recordDecodeSink) emit(record NormalizedRecord, frame []byte) error {
+	if s.typed != nil {
+		return s.typed(record)
+	}
+	return s.raw(record, frame)
+}
+
+func walkPartitionRecords(ctx context.Context, root string, part RecordPartition, sink recordDecodeSink) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -516,7 +530,7 @@ func walkPartitionFrames(ctx context.Context, root string, part RecordPartition,
 			return err
 		}
 	}
-	if emit == nil {
+	if sink.typed == nil && sink.raw == nil {
 		return nil
 	}
 	if _, err = file.Seek(0, io.SeekStart); err != nil {
@@ -568,11 +582,12 @@ func walkPartitionFrames(ctx context.Context, root string, part RecordPartition,
 	remaining := decodedBytes - int64(len(header))
 	var count uint64
 	if part.Records > recordDecodeBatchFrames {
-		count, err = walkRecordDecodeBatches(ctx, buffer, remaining, part.Records, emit)
+		count, err = walkRecordDecodeBatchesWithSink(ctx, buffer, remaining, part.Records, sink)
 		if err != nil {
 			return finishRead(err)
 		}
 	} else {
+		var scratch []byte
 		for remaining > 0 {
 			if err = ctx.Err(); err != nil {
 				return err
@@ -589,7 +604,15 @@ func walkPartitionFrames(ctx context.Context, root string, part RecordPartition,
 			if n == 0 || n > 1<<20 || int64(n) > remaining || count >= part.Records {
 				return errors.New("private record frame invalid")
 			}
-			data := make([]byte, int(n))
+			var data []byte
+			if sink.typed == nil {
+				data = make([]byte, int(n))
+			} else {
+				if int(n) > cap(scratch) {
+					scratch = make([]byte, min(recordDecodeBatchBytes, max(int(n), 2*cap(scratch))))
+				}
+				data = scratch[:n:n]
+			}
 			if _, err = io.ReadFull(buffer, data); err != nil {
 				return err
 			}
@@ -598,7 +621,7 @@ func walkPartitionFrames(ctx context.Context, root string, part RecordPartition,
 			if err != nil {
 				return err
 			}
-			if err = emit(record, data); err != nil {
+			if err = sink.emit(record, data); err != nil {
 				return finishRead(err)
 			}
 			count++
@@ -644,6 +667,14 @@ type recordDecodeBatch struct {
 	records               [recordDecodeBatchFrames]NormalizedRecord
 	count, bytes, decoded int
 	readErr, decodeErr    error
+}
+
+func (b *recordDecodeBatch) reset(recycle bool) {
+	var buffer []byte
+	if recycle {
+		buffer = b.buffer[:0]
+	}
+	*b = recordDecodeBatch{buffer: buffer}
 }
 
 // The caller exclusively owns framing and all underlying reader state. A
@@ -745,10 +776,15 @@ func runRecordDecodeWorker(ctx context.Context, jobs <-chan *recordDecodeBatch, 
 // failures. Once cancellation is observed, scheduling and callbacks stop; read
 // ahead intentionally does not reproduce a serial reader's wall-clock ordering
 // of cancellation side effects.
-// The worker pair is joined before returning, hence before the caller closes
-// its decoder or file. Frames are never pooled/recycled: canonical callers may
-// retain their immutable bytes beyond a callback or this entire walk.
 func walkRecordDecodeBatches(ctx context.Context, reader io.Reader, remaining int64, expected uint64, emit func(NormalizedRecord, []byte) error) (uint64, error) {
+	return walkRecordDecodeBatchesWithSink(ctx, reader, remaining, expected, recordDecodeSink{raw: emit})
+}
+
+// The worker pair is joined before returning, hence before the caller closes
+// its decoder or file. Canonical callers may retain their immutable raw bytes,
+// so only the typed-only route can recycle a slot after its worker and all of
+// its callbacks have finished. Decoded values own their storage in both modes.
+func walkRecordDecodeBatchesWithSink(ctx context.Context, reader io.Reader, remaining int64, expected uint64, sink recordDecodeSink) (uint64, error) {
 	var slots [2]recordDecodeBatch
 	var jobs [2]chan *recordDecodeBatch
 	var done [2]chan *recordDecodeBatch
@@ -772,7 +808,7 @@ func walkRecordDecodeBatches(ctx context.Context, reader io.Reader, remaining in
 			return err
 		}
 		b := &slots[slot]
-		*b = recordDecodeBatch{}
+		b.reset(sink.typed != nil)
 		input.fill(b)
 		ended = b.readErr != nil || input.remaining == 0
 		if err := ctx.Err(); err != nil {
@@ -794,7 +830,7 @@ func walkRecordDecodeBatches(ctx context.Context, reader io.Reader, remaining in
 			if err := ctx.Err(); err != nil {
 				return input.count, err
 			}
-			if err := emit(b.records[i], b.frames[i]); err != nil {
+			if err := sink.emit(b.records[i], b.frames[i]); err != nil {
 				return input.count, err
 			}
 		}

@@ -58,7 +58,7 @@ func decodeBatchPayload(frames [][]byte) []byte {
 	return raw
 }
 
-func decodeBatchFixture(t *testing.T, frames [][]byte, tail []byte, compressed bool) (string, RecordPartition) {
+func decodeBatchFixture(t testing.TB, frames [][]byte, tail []byte, compressed bool) (string, RecordPartition) {
 	t.Helper()
 	raw := append([]byte(recordHeader), decodeBatchPayload(frames)...)
 	raw = append(raw, tail...)
@@ -241,9 +241,10 @@ func TestRecordDecodeBatchHostileFramesRetainStrictSemantics(t *testing.T) {
 	}
 	for _, test := range cases {
 		for _, compressed := range []bool{false, true} {
-			for _, ordinal := range []int{0, 63, 64, 127} {
-				t.Run(fmt.Sprintf("%s/%t/%d", test.name, compressed, ordinal), func(t *testing.T) {
-					frames := decodeBatchFrames(t, 129)
+			for _, size := range []struct{ total, ordinal int }{{16, 9}, {193, 0}, {193, 63}, {193, 64}, {193, 127}, {193, 128}, {193, 191}} {
+				t.Run(fmt.Sprintf("%s/%t/%d-of-%d", test.name, compressed, size.ordinal, size.total), func(t *testing.T) {
+					frames := decodeBatchFrames(t, size.total)
+					ordinal := size.ordinal
 					frames[ordinal] = test.frame
 					_, expectedErr := decodeRecordWithPreviousDecoder(test.frame)
 					root, part := decodeBatchFixture(t, frames, nil, compressed)

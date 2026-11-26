@@ -448,7 +448,7 @@ sources:
     parser: country-range-csv
     schema: start-end-country-csv-v1
     schema_observed: true
-    tested_at: '2026-11-26T20:47:06Z'
+    tested_at: '2026-11-26T20:53:54Z'
     synthetic: false
   parser:
     id: country-range-csv
@@ -504,7 +504,7 @@ sources:
     parser: country-range-csv
     schema: start-end-country-csv-v1
     schema_observed: true
-    tested_at: '2026-11-26T20:47:06Z'
+    tested_at: '2026-11-26T20:53:54Z'
     synthetic: false
   parser:
     id: country-range-csv
@@ -560,7 +560,7 @@ sources:
     parser: country-range-csv
     schema: start-end-country-csv-v1
     schema_observed: true
-    tested_at: '2026-11-26T20:47:06Z'
+    tested_at: '2026-11-26T20:53:54Z'
     synthetic: false
   parser:
     id: country-range-csv
@@ -630,7 +630,7 @@ sources:
     status: passed
     sha256: 9f1d79394ceedd24445922f84d17325c0f1809cadac60da410a5c7610bbf57ef
     schema_observed: true
-    tested_at: '2026-11-26T20:47:06Z'
+    tested_at: '2026-11-26T20:53:54Z'
     path: fixtures/source-certification/observed-dbip-city.csv
     parser: city-range-csv
     schema: dbip-city-eight-columns-v1
@@ -705,7 +705,7 @@ sources:
     parser: mullvad-relay-geolocation
     schema: mullvad-transparent-relay-json-v1
     schema_observed: true
-    tested_at: '2026-11-26T20:47:06Z'
+    tested_at: '2026-11-26T20:53:54Z'
     synthetic: false
     payload_format: mullvad-relay-excerpt
   parser:
@@ -779,7 +779,7 @@ sources:
     status: passed
     sha256: 4df74d3dbe3a08c3bc7e6a63d4c3912f7bf4932fc203a69f566656f1f71e2836
     schema_observed: true
-    tested_at: '2026-11-26T20:47:06Z'
+    tested_at: '2026-11-26T20:53:54Z'
     path: fixtures/source-certification/observed-ipapi-city-ipv4.csv
     parser: ipapi-free-city-csv
     schema: ipapi-free-fourteen-columns-v1
@@ -858,7 +858,7 @@ sources:
     status: passed
     sha256: 99f6c0ba9fbeacda88749d62782ba1a9eadb55aea2a5e4940a6f4a20b03704b7
     schema_observed: true
-    tested_at: '2026-11-26T20:47:06Z'
+    tested_at: '2026-11-26T20:53:54Z'
     path: fixtures/source-certification/observed-ipapi-city-ipv6.csv
     parser: ipapi-free-city-csv
     schema: ipapi-free-fourteen-columns-v1
@@ -927,7 +927,7 @@ sources:
     parser: asn-identity-csv
     schema: asn-handle-description-country-csv-v1
     schema_observed: true
-    tested_at: '2026-11-26T20:47:06Z'
+    tested_at: '2026-11-26T20:53:54Z'
     synthetic: false
   parser:
     id: asn-identity-csv
@@ -990,7 +990,7 @@ sources:
     status: passed
     sha256: 62a5bf642c6ab7e723548d9a7b000e9b9fecd8b7e0eaaeb232112ae630c8d043
     schema_observed: true
-    tested_at: '2026-11-26T20:47:06Z'
+    tested_at: '2026-11-26T20:53:54Z'
     path: fixtures/source-certification/observed-apple-private-relay.csv
     parser: apple-private-relay
     schema: apple-relay-egress-csv-v1
@@ -1063,7 +1063,7 @@ sources:
     status: passed
     sha256: a7038a372eebed2e872c8e8ee92c52ce5340c62c585f891b13f139de75d8f640
     schema_observed: true
-    tested_at: '2026-11-26T20:47:06Z'
+    tested_at: '2026-11-26T20:53:54Z'
     path: fixtures/source-certification/observed-x4b-vpn-ipv4.txt
     parser: literal-prefix-text
     schema: one-literal-ip-or-prefix-per-line-v1
@@ -1123,7 +1123,7 @@ sources:
     parser: tor-exit-addresses
     schema: tordnsel-exit-addresses-v1
     schema_observed: true
-    tested_at: '2026-11-26T20:47:06Z'
+    tested_at: '2026-11-26T20:53:54Z'
     synthetic: false
   parser:
     id: tor-exit-addresses
@@ -1182,7 +1182,7 @@ sources:
     parser: ipverse-asn-usage-json
     schema: ipverse-as-category-json-v1
     schema_observed: true
-    tested_at: '2026-11-26T20:47:06Z'
+    tested_at: '2026-11-26T20:53:54Z'
     synthetic: false
   parser:
     id: ipverse-asn-usage-json
@@ -1265,7 +1265,7 @@ sources:
     parser: ffraud-csv
     schema: ffraud-five-column-risk-csv-v2
     schema_observed: true
-    tested_at: '2026-11-26T20:47:06Z'
+    tested_at: '2026-11-26T20:53:54Z'
     synthetic: false
     payload_format: original
   parser:
@@ -1343,7 +1343,7 @@ sources:
     parser: google-network-organization
     schema: google-owned-ip-ranges-v1
     schema_observed: true
-    tested_at: '2026-11-26T20:47:06Z'
+    tested_at: '2026-11-26T20:53:54Z'
     synthetic: false
     payload_format: original
   parser:
@@ -1415,7 +1415,7 @@ sources:
     parser: ripe-ipv6-network-names
     schema: ripe-db-inet6num-v2
     schema_observed: true
-    tested_at: '2026-11-26T20:47:06Z'
+    tested_at: '2026-11-26T20:53:54Z'
     synthetic: false
     payload_format: ripe-inet6num-excerpt
   parser:
@@ -1489,7 +1489,7 @@ sources:
     parser: nro-delegated-registration
     schema: nro-global-extended-v2
     schema_observed: true
-    tested_at: '2026-11-26T20:47:06Z'
+    tested_at: '2026-11-26T20:53:54Z'
     synthetic: false
     payload_format: nro-delegated-excerpt
   parser:
@@ -1560,7 +1560,7 @@ sources:
     parser: azure-appservice-service-tag
     schema: azure-service-tags-json-v1
     schema_observed: true
-    tested_at: '2026-11-26T20:47:06Z'
+    tested_at: '2026-11-26T20:53:54Z'
     synthetic: false
   parser:
     id: azure-appservice-service-tag
@@ -1626,7 +1626,7 @@ sources:
     parser: root-zone-anycast
     schema: root-zone-in-soa-glue-v1
     schema_observed: true
-    tested_at: '2026-11-26T20:47:06Z'
+    tested_at: '2026-11-26T20:53:54Z'
     synthetic: false
   parser:
     id: root-zone-anycast
@@ -1682,7 +1682,7 @@ sources:
     parser: tweetfeed-week-csv
     schema: tweetfeed-six-column-ioc-v1
     schema_observed: true
-    tested_at: '2026-11-26T20:47:06Z'
+    tested_at: '2026-11-26T20:53:54Z'
     synthetic: false
   parser:
     id: tweetfeed-week-csv
@@ -1767,7 +1767,7 @@ sources:
     path: fixtures/source-certification/routeviews-wide-20261115-1200.mrt.bz2
     sha256: 5361ec3605f86ecab79f210df266602bb8833ec9b64bb47705efce4c2c345818
     schema_observed: true
-    tested_at: '2026-11-26T20:47:06Z'
+    tested_at: '2026-11-26T20:53:54Z'
     parser: mrt-table-dump-v2
     schema: mrt-table-dump-v2-unicast-v1
     synthetic: false
@@ -1858,7 +1858,7 @@ sources:
     path: fixtures/source-certification/ris-rrc18-20261115-0800.mrt.gz
     sha256: 37931b008476cfd2fb385bff603c9a68badffa51411649c912a35b14adc4bbb3
     schema_observed: true
-    tested_at: '2026-11-26T20:47:06Z'
+    tested_at: '2026-11-26T20:53:54Z'
     parser: mrt-table-dump-v2
     schema: mrt-table-dump-v2-unicast-v1
     synthetic: false
@@ -1931,7 +1931,7 @@ sources:
     path: fixtures/source-certification/observed-caida-asrel2.txt.bz2
     sha256: e36b548f613b4ae09f9a848cf9893fb02fc326185d7439db6b0a0995aeccc6a8
     schema_observed: true
-    tested_at: '2026-11-26T20:47:06Z'
+    tested_at: '2026-11-26T20:53:54Z'
     parser: caida-relationships
     schema: asn-asn-relation-pipe-v1
     synthetic: false
@@ -2014,7 +2014,7 @@ sources:
     path: fixtures/source-certification/observed-rpki-client-excerpt.json
     sha256: fedd54c17bd596ecb93792aa5b31566549698edbfee914cc06c27002dc5db91b
     schema_observed: true
-    tested_at: '2026-11-26T20:47:06Z'
+    tested_at: '2026-11-26T20:53:54Z'
     parser: rpki-client-json
     schema: rpki-client-payloads-json-v1
     synthetic: false

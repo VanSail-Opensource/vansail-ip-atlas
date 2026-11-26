@@ -13,6 +13,7 @@ type bulkLeafReuse struct {
 	contexts              map[uint32]intelligence.ASNContext
 	dependencies          [32]byte
 	locationPolicy        [32]byte
+	riskShape             [32]byte
 	riskPolicy, riskInput [32]byte
 	riskHit               *spatialCacheLeaf
 	spool                 *bulkSpool
@@ -108,6 +109,7 @@ func (r *bulkLeafReuse) replay(ctx context.Context, stream spatialCacheStream) e
 }
 
 const rawSplitDomain = "raw-split"
+const riskShapeDomain = "risk-shape"
 
 // Small buckets take the normal collect path without a second cache lookup.
 // Overlapping records can overstate this estimate. Only collect itself may
@@ -180,7 +182,22 @@ func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, cove
 		if err != nil {
 			return err
 		}
-		entry, hit, err := s.reuse.Lookup(ctx, reuse.domain, key)
+		var shapeKey [32]byte
+		var entry spatialCacheEntry
+		var hit bool
+		if reuse.riskShape != ([32]byte{}) {
+			shapeKey, err = s.leafKey(riskShapeDomain, bucket, coverage, reuse.riskShape)
+			if err != nil {
+				return err
+			}
+			entry, hit, err = s.reuse.Lookup(ctx, riskShapeDomain, shapeKey)
+			if err != nil {
+				return err
+			}
+		}
+		if !hit {
+			entry, hit, err = s.reuse.Lookup(ctx, reuse.domain, key)
+		}
 		if err != nil {
 			return err
 		}
@@ -213,6 +230,13 @@ func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, cove
 					if err := s.retainLocations(ctx, bucket, reuse.locationPolicy); err != nil {
 						return err
 					}
+					origins, err := entry.Leaf.OriginContexts.origins()
+					if err != nil {
+						return err
+					}
+					if err := s.retainMappings(ctx, bucket, reuse.locationPolicy, origins); err != nil {
+						return err
+					}
 				}
 				leaves = append(leaves, bucket)
 				return nil
@@ -230,8 +254,22 @@ func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, cove
 					return errors.Join(err, reuse.abort())
 				}
 				bucket.recordBytes = nil
-				if err := reuse.finish(ctx, key, bucket.originASNs); err != nil {
-					return err
+				if shapeKey != ([32]byte{}) && !bucket.riskExact {
+					// A fully validated leaf without any exact observation cannot
+					// produce a time-dependent event, even as the clock changes.
+					if reuse.writer.records != 0 || reuse.riskHit != nil && reuse.riskHit.Stream != (spatialCacheStream{}) {
+						return errors.Join(errSpatialCache, reuse.abort())
+					}
+					if err := reuse.abort(); err != nil {
+						return err
+					}
+					if _, err := s.reuse.Retain(ctx, spatialCacheEntry{Domain: riskShapeDomain, Key: shapeKey, Leaf: &spatialCacheLeaf{}}, nil); err != nil {
+						return err
+					}
+				} else {
+					if err := reuse.finish(ctx, key, bucket.originASNs); err != nil {
+						return err
+					}
 				}
 				bucket.originASNs = nil
 				leaves = append(leaves, bucket)
@@ -241,7 +279,11 @@ func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, cove
 				return err
 			}
 			if !errors.Is(err, errRawBulkPartition) {
-				entry = spatialCacheEntry{Domain: reuse.domain, Key: key, Leaf: &spatialCacheLeaf{Split: true}}
+				domain := reuse.domain
+				if shapeKey != ([32]byte{}) {
+					domain, key = riskShapeDomain, shapeKey
+				}
+				entry = spatialCacheEntry{Domain: domain, Key: key, Leaf: &spatialCacheLeaf{Split: true}}
 				if _, err := s.reuse.Retain(ctx, entry, nil); err != nil {
 					return err
 				}

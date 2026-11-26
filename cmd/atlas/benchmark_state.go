@@ -67,6 +67,13 @@ func benchmarkState(ctx context.Context, args []string) (returnErr error) {
 	default:
 		return errors.New("invalid benchmark scenario")
 	}
+	ctx = withCompilePhases(ctx, os.Stderr)
+	phase := phaseBenchmarkMeasure
+	if *prepare {
+		phase = phaseBenchmarkPrepare
+	}
+	finish := beginCompilePhase(ctx, phase)
+	defer func() { finish(returnErr == nil) }()
 	root, err := resolveProductionRoot(*workspace)
 	if err != nil {
 		return err
@@ -80,7 +87,9 @@ func benchmarkState(ctx context.Context, args []string) (returnErr error) {
 	// Use the production compiler's exact process-local validation path. The
 	// observed source epoch precedes unrelated capability failures, while the
 	// opaque handle rechecks every object byte before source qualification.
+	finishTier1 := beginCompilePhase(ctx, phaseTier1)
 	tier, verified, err := observeVerifiedCurrentTier1(ctx, root, baseClock)
+	finishTier1(err == nil)
 	if err != nil {
 		return err
 	}
@@ -226,7 +235,7 @@ func benchmarkState(ctx context.Context, args []string) (returnErr error) {
 	if err = writeJSON(filepath.Join(destination, "benchmark-state.json"), state); err != nil {
 		return err
 	}
-	options := pipeline.Options{PrivateLabelValues: admission.PrivateLabelValues(binding.catalog), Workspace: destination, Output: filepath.Join(destination, "build-private", "result"), Mode: "engineering", Clock: report.Clock, ValidUntil: validUntil.Unix(), Limits: pipeline.DefaultLimits()}
+	options := pipeline.Options{PrivateLabelValues: admission.PrivateLabelValues(binding.catalog), Workspace: destination, Output: filepath.Join(destination, "build-private", "result"), Mode: "engineering", Clock: report.Clock, ValidUntil: validUntil.Unix(), Limits: pipeline.DefaultLimits(), ObserveStage: beginPipelinePhase}
 	options.InputGate = func(checkCtx context.Context) error {
 		current, e := privateStateHash(checkCtx, root)
 		if e != nil || current != binding.stateHash {
@@ -247,7 +256,9 @@ func benchmarkState(ctx context.Context, args []string) (returnErr error) {
 	}
 	// All scenarios execute the same materializer. A warm measurement must not
 	// substitute cached validation for work the production compiler performs.
+	finishBuild := beginCompilePhase(ctx, phaseBuild)
 	candidate, err := pipeline.BuildEngineeringBenchmark(ctx, options, baseline, state, policy, inputs)
+	finishBuild(err == nil)
 	if err != nil {
 		return err
 	}

@@ -57,7 +57,7 @@ SAFE_FAILURES={
     'FAIL: static candidate: atlas contains missing, private or unreferenced extra files':'atlas-inventory',
 }
 
-COMPILE_PHASES=frozenset({'stage','config','qualification','tier1','build','boundary',
+COMPILE_PHASES=frozenset({'stage','benchmark-prepare','benchmark-measure','config','qualification','tier1','build','boundary',
     'objects','receipt','retention','history','seal','materialize-seed','materialize-paths',
     'materialize-asn-risk','materialize-spatial','materialize-asn','pipeline-sort',
     'pipeline-merge','pipeline-classify','pipeline-partition','pipeline-publish'})
@@ -111,12 +111,23 @@ def compile_counter_diagnostics(path, start):
 
 def compile_phase_diagnostics(path, start):
     """Read bounded fixed-schema diagnostics, never arbitrary child output."""
+    try:
+        with path.open('rb') as stream:
+            return compile_phase_records(stream, start)
+    except OSError:
+        return []
+
+def compile_phase_records(stream, start=0):
     records=[]
     stack=[]
     try:
-        with path.open('rb') as stream:
-            stream.seek(0,2);end=stream.tell();stream.seek(max(start,end-65536))
-            lines=stream.read(65536).splitlines()
+        stream.seek(0,2);end=stream.tell()
+        offset=max(start,end-65536)
+        stream.seek(offset)
+        data=stream.read(65536)
+        if offset>start:
+            data=data.partition(b'\n')[2]
+        lines=data.split(b'\n')[:-1]
         for line in lines:
             prefix=b'ATLAS_COMPILE_PHASE '
             if not line.startswith(prefix) or len(line)>1024:
@@ -165,15 +176,16 @@ def run(argv, *, output=None):
     with (private/'stage.log').open('ab') as log:
         start=log.tell()
         result=subprocess.run([str(x) for x in argv],cwd=ROOT,stdout=output or log,stderr=log,check=False)
-    if phase=='compile-production':
+    if phase in ('compile-production','measure-production-builds'):
         for row in compile_phase_diagnostics(private/'stage.log',start):
             if row['event']=='begin':
                 print('Production compiler phase entered: '+row['phase'],flush=True)
             else:
                 print('Production compiler phase ended: '+row['phase']
                     +' elapsed_ms='+str(row['elapsed_ms'])+' ok='+str(row['ok']).lower(),flush=True)
-        for row in compile_counter_diagnostics(private/'stage.log',start):
-            print('Production compiler counters: '+json.dumps(row,sort_keys=True,separators=(',',':')),flush=True)
+        if phase=='compile-production':
+            for row in compile_counter_diagnostics(private/'stage.log',start):
+                print('Production compiler counters: '+json.dumps(row,sort_keys=True,separators=(',',':')),flush=True)
     if result.returncode:
         print('Production step failed: '+phase,file=sys.stderr,flush=True)
         print('Production failure category: '+failure_category(private/'stage.log',start),file=sys.stderr,flush=True)

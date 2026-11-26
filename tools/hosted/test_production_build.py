@@ -1,5 +1,7 @@
 import importlib.util
 import copy
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -15,6 +17,21 @@ spec.loader.exec_module(build)
 
 
 class ProductionBuildTransitionTests(unittest.TestCase):
+    def test_rebuild_republishes_only_typed_phase_diagnostics(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / '.atlas-private').mkdir()
+            phase = {'phase': 'benchmark-measure', 'event': 'begin', 'elapsed_ms': 0, 'ok': True}
+            def execute(argv, **kwargs):
+                kwargs['stderr'].write(b'private parser data\n')
+                kwargs['stderr'].write(b'ATLAS_COMPILE_PHASE ' + canonical_bytes(phase) + b'\n')
+                kwargs['stderr'].write(b'ATLAS_COMPILE_PHASE {"phase":"private"}\n')
+                return type('CompletedProcess', (), {'poll': lambda self: 1, 'returncode': 1})()
+            diagnostics = io.StringIO()
+            with patch.object(build.subprocess, 'Popen', side_effect=execute), contextlib.redirect_stderr(diagnostics):
+                self.assertEqual(build.command(['/fixed/atlas', 'benchmark-state'], root), 1)
+            self.assertEqual(diagnostics.getvalue(), 'ATLAS_COMPILE_PHASE ' + canonical_bytes(phase).decode('ascii') + '\n')
+
     def test_scratch_scan_counts_all_file_bytes_and_does_not_follow_links(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

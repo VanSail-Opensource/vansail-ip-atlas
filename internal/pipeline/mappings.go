@@ -65,6 +65,10 @@ func isMappingRecord(kind intelligence.RecordKind) bool {
 // Its mapping pass can project the same owned rows without copying them into a
 // separate state. The standalone entry point still rejects other kinds.
 func mappingProducerRows(state intelligence.BuildState, policy intelligence.Policy, clock time.Time, encodedLengths []int, omitInherited bool, scope netip.Prefix, locations *locationProjection, project bool) Producer {
+	return mappingProducerSelection(state, policy, clock, encodedLengths, omitInherited, scope, locations, project, true, true)
+}
+
+func mappingProducerSelection(state intelligence.BuildState, policy intelligence.Policy, clock time.Time, encodedLengths []int, omitInherited bool, scope netip.Prefix, locations *locationProjection, project, locationRowsWanted, networkRowsWanted bool) Producer {
 	return func(ctx context.Context, emit func(via3.PublicRecord) error) error {
 		state := state
 		if err := checkOwnedRecordLengths(state, encodedLengths); err != nil {
@@ -122,6 +126,12 @@ func mappingProducerRows(state intelligence.BuildState, policy intelligence.Poli
 					return err
 				}
 				if project && !isMappingRecord(record.Kind) {
+					continue
+				}
+				if project && (record.Kind == intelligence.RecordGeo || record.Kind == intelligence.RecordUsage) && !locationRowsWanted {
+					continue
+				}
+				if project && record.Kind != intelligence.RecordGeo && record.Kind != intelligence.RecordUsage && !networkRowsWanted {
 					continue
 				}
 				if err := record.Validate(); err != nil {

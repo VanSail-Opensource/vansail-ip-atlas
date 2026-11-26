@@ -183,6 +183,10 @@ func (w *spatialStreamWriter) abort() error {
 }
 
 func (s *bulkSpool) replayPublic(ctx context.Context, stream spatialCacheStream, emit func(via3.PublicRecord) error) error {
+	return s.replayPublicMatching(ctx, stream, emit, nil)
+}
+
+func (s *bulkSpool) replayPublicMatching(ctx context.Context, stream spatialCacheStream, emit func(via3.PublicRecord) error, matches func(via3.PublicRecord) bool) error {
 	if stream == (spatialCacheStream{}) {
 		return ctx.Err()
 	}
@@ -201,7 +205,7 @@ func (s *bulkSpool) replayPublic(ctx context.Context, stream spatialCacheStream,
 		if err != nil {
 			return err
 		}
-		if record.Kind >= 8 && record.Kind != 9 {
+		if record.Kind >= 8 && record.Kind != 9 || matches != nil && !matches(record) {
 			return errSpatialPublicRow
 		}
 		return emit(record)
@@ -209,7 +213,7 @@ func (s *bulkSpool) replayPublic(ctx context.Context, stream spatialCacheStream,
 	if sink := s.replaySink; sink != nil {
 		bodies := spatialReplayBodies{compiler: sink.compiler}
 		consume = func(data []byte) error {
-			frame, err := bodies.canonical(data, limit)
+			frame, err := bodies.canonicalMatching(data, limit, matches)
 			if err != nil {
 				return err
 			}

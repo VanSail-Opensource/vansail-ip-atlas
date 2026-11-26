@@ -545,6 +545,11 @@ func (c *compiler) sort(produce Producer) ([]string, error) {
 			if err := spool.publicStream.appendPublic(row); err != nil {
 				return err
 			}
+			if spool.mappingStreams != ([2]*spatialStreamWriter{}) && len(row.key) != 0 && isMappingFact(uint16(row.key[0])) {
+				if err := spool.mappingStreams[mappingStreamIndex(uint16(row.key[0]))].appendPublic(row); err != nil {
+					return err
+				}
+			}
 		}
 		cost := row.logicalBytes + 128
 		if cost > c.options.Limits.SortBytes {

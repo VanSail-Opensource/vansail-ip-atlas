@@ -25,6 +25,9 @@ type MaterializationInputs struct {
 	prepareOnly                            bool
 	resolver                               intelligence.RelationResolver
 	verifiedEmptyVRP                       bool
+	// The spatial compiler can cache and replay only the clock-independent
+	// Geo/coordinates/network/usage rows. Every risk and RPKI row is produced below.
+	mappings func(context.Context, mappingProducerFactory, func(via3.PublicRecord) error) error
 	// Exact canonical lengths from the closed bulk collector. No caller-facing
 	// completeness or validation assertion is accepted through this bookkeeping.
 	encodedLengths []int
@@ -349,7 +352,15 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 		if len(inputs) == 1 {
 			mappingScope, locations = inputs[0].scope, inputs[0].locations
 		}
-		if err := mappingProducerRows(state, policy, clock, mappingLengths, true, mappingScope, locations, true)(ctx, emit); err != nil {
+		produceMappings := func(locations *locationProjection, emitLocation, emitNetwork bool) Producer {
+			return mappingProducerSelection(state, policy, clock, mappingLengths, true, mappingScope, locations, true, emitLocation, emitNetwork)
+		}
+		if len(inputs) == 1 && inputs[0].mappings != nil {
+			err = inputs[0].mappings(ctx, produceMappings, emit)
+		} else {
+			err = produceMappings(locations, true, true)(ctx, emit)
+		}
+		if err != nil {
 			return err
 		}
 		profileKeys := make([]netip.Prefix, 0, len(profiles))

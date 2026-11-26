@@ -32,6 +32,7 @@ type bulkBucket struct {
 	parts       []intelligence.RecordPartition
 	sourceEnds  []int // Original source boundaries for the ordered family root.
 	riskDigest  [32]byte
+	riskExact   bool
 	riskOnly    bool
 	active      bool
 	cover       netip.Prefix
@@ -41,35 +42,36 @@ type bulkBucket struct {
 	originASNs  []uint32
 }
 type bulkSpool struct {
-	root         string
-	store        *intelligence.RecordStore
-	canonical    map[[32]byte]intelligence.CanonicalPartition
-	riskParts    map[[32]byte]bool
-	clock        time.Time
-	binding      [32]byte
-	maximum      uint64
-	external     func() uint64
-	all          []*bulkBucket
-	coverage     []intelligence.RecordPartition
-	pathParts    []intelligence.RecordPartition
-	prefixParts  []intelligence.RecordPartition
-	prefixFile   *os.File
-	prefixIndex  map[uint32]bulkPrefixRange
-	pathBytes    uint64
-	known        map[uint32]bool
-	edges        map[intelligence.ASNEdge]bool
-	batchBytes   int
-	batchRecords int
-	relations    *intelligence.RelationshipIndex
-	hasExact     bool
-	hasASNDirect bool
-	usage        asnUsageIndex
-	observe      func(context.Context, Stage) func(bool)
-	reuse        *spatialCache
-	publicStream *spatialStreamWriter
-	replaySink   *spatialReplaySink
-	publicRows   uint64
-	started      bool
+	root           string
+	store          *intelligence.RecordStore
+	canonical      map[[32]byte]intelligence.CanonicalPartition
+	riskParts      map[[32]byte]bool
+	clock          time.Time
+	binding        [32]byte
+	maximum        uint64
+	external       func() uint64
+	all            []*bulkBucket
+	coverage       []intelligence.RecordPartition
+	pathParts      []intelligence.RecordPartition
+	prefixParts    []intelligence.RecordPartition
+	prefixFile     *os.File
+	prefixIndex    map[uint32]bulkPrefixRange
+	pathBytes      uint64
+	known          map[uint32]bool
+	edges          map[intelligence.ASNEdge]bool
+	batchBytes     int
+	batchRecords   int
+	relations      *intelligence.RelationshipIndex
+	hasExact       bool
+	hasASNDirect   bool
+	usage          asnUsageIndex
+	observe        func(context.Context, Stage) func(bool)
+	reuse          *spatialCache
+	publicStream   *spatialStreamWriter
+	mappingStreams [2]*spatialStreamWriter
+	replaySink     *spatialReplaySink
+	publicRows     uint64
+	started        bool
 
 	logicalSplits int
 }
@@ -172,6 +174,7 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 	riskDigest := sha256.New()
 	collectRisk := s.reuse != nil && !withCoverage && !b.asn
 	b.riskDigest = [32]byte{}
+	b.riskExact = false
 	bytes := 0
 	paths := 0
 	asns := map[uint32]bool{}
@@ -197,6 +200,7 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 		}
 		if collectRisk && exactRiskInput(record) {
 			_, _ = riskDigest.Write(digest[:])
+			b.riskExact = b.riskExact || record.Kind == intelligence.RecordEvidence
 		}
 		if record.Kind == intelligence.RecordPath {
 			paths++

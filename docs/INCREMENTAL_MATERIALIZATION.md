@@ -16,6 +16,8 @@ The private `spatial-cache-v1` inventory records separate dependencies for each 
 | Raw split | Subdivision required by the distinct raw records before adding ASN roles or coverage | Scope, ordered physical partition descriptors and collection limits. Each hit verifies the current bytes of every input object. |
 | Risk | A fitting leaf's ordered exact-address risk events, or its split decision | Scope, ordered descriptors, fit limits, scoring policy and evaluation clock. Shared public geometry also binds the joined roles. |
 | Risk input | A fitting leaf's exact-address events across unrelated spatial edits | Exact evidence, prefix-to-origin observations, their canonical order, scope, exact-layer scoring policy and evaluation clock |
+| Risk shape | Exact-risk collection split or a fully validated leaf with no exact observations | Scope, ordered physical descriptors, fit limits and relevant joined role layout. Such proofs contain no scored events and do not depend on clock. |
+| Mapping | Validated geographic, coordinate, usage and network rows in separate location and network streams | Scope, ordered physical descriptors, fit limits and mapping policy. Location also binds the joined origin usage types actually consulted and whether unmatched origins emit contextual unknown boundaries. |
 | Public | A fitting leaf's public records, or its split decision | Risk dependencies, final global ASN contexts, RPKI completeness, publisher observation time and coverage deadline |
 | Compiled | Final public objects and routes for a public partition subtree | Actual complete public-run bytes, scope and actual ASN prefix-provider bytes and index |
 
@@ -51,6 +53,14 @@ order, with exact floating-point risk values and ordered families and origins.
 Replay performs the original additions; it does not combine floating-point sums.
 Public streams pass the normal selected-payload validation and sorter/conflict
 logic. Their consumed encoded bytes are hashed during replay.
+
+A changed evaluation clock does not invalidate network, geographic, coordinate
+or usage values on its own. A fitting leaf can replay unchanged mapping streams
+while recomputing scoring, coverage and RPKI. Network rows do not consult ASN
+usage. A role change invalidates locations only for affected join inputs, with
+an explicit dependency on creation of unknown join boundaries when the role
+index changes between empty and nonempty. Mapping replay rechecks current input
+objects and actual encoded output bytes within the normal resource envelope.
 
 Relationship and Tier-1 results are recomputed through their existing paths.
 The spatial public filter emits only kinds 2 through 7 and 9, whose dependencies

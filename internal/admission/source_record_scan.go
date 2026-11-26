@@ -24,13 +24,56 @@ type sourceRecordScan struct {
 	clocks         intelligence.SourceRecordClocks
 	now            time.Time
 	stat           SourceStatistics
+	geoFields      geoFieldMask
 	err            error
+}
+
+type geoFieldMask uint8
+
+const (
+	geoRegistration geoFieldMask = 1 << iota
+	geoPhysical
+	geoRegion
+	geoCity
+	geoLatitude
+	geoLongitude
+)
+
+func allowedGeoFields(fields []string) geoFieldMask {
+	var mask geoFieldMask
+	for _, field := range fields {
+		switch field {
+		case "registration_country":
+			mask |= geoRegistration
+		case "physical_country":
+			mask |= geoPhysical
+		case "region":
+			mask |= geoRegion
+		case "city":
+			mask |= geoCity
+		case "latitude":
+			mask |= geoLatitude
+		case "longitude":
+			mask |= geoLongitude
+		}
+	}
+	return mask
+}
+
+func (m geoFieldMask) allows(x *intelligence.GeoEvidence) bool {
+	const coordinates = geoLatitude | geoLongitude
+	return x.Current &&
+		(x.RegistrationCountry == "" || m&geoRegistration != 0) &&
+		(x.PhysicalCountry == "" || m&geoPhysical != 0) &&
+		(x.Region == "" || m&geoRegion != 0) &&
+		(x.City == "" || m&geoCity != 0) &&
+		(x.Coordinates == nil || m&coordinates == coordinates)
 }
 
 func newSourceRecordScan(s Source, clocks intelligence.SourceRecordClocks, now time.Time) *sourceRecordScan {
 	s.Signals = append([]string(nil), s.Signals...)
 	s.PublicFields = append([]string(nil), s.PublicFields...)
-	scan := &sourceRecordScan{source: s, clocks: clocks, now: now, stat: SourceStatistics{ID: clocks.ID, Signals: map[intelligence.Signal]bool{}}}
+	scan := &sourceRecordScan{source: s, clocks: clocks, now: now, geoFields: allowedGeoFields(s.PublicFields), stat: SourceStatistics{ID: clocks.ID, Signals: map[intelligence.Signal]bool{}}}
 	if ripeNamesSource(s) {
 		scan.ripeNameDigest = new(intelligence.RIPENetworkNameDigest)
 	}
@@ -56,10 +99,16 @@ func newSourceRecordScan(s Source, clocks intelligence.SourceRecordClocks, now t
 }
 
 func (scan *sourceRecordScan) accept(record intelligence.NormalizedRecord) error {
-	s, v, now, stat := &scan.source, &scan.clocks, scan.now, &scan.stat
 	if err := record.Validate(); err != nil {
 		return err
 	}
+	return scan.acceptValidated(record)
+}
+
+// The fused seal callback already validated the exact typed record shape.
+// Keep every source-specific predicate here and retain accept for raw callers.
+func (scan *sourceRecordScan) acceptValidated(record intelligence.NormalizedRecord) error {
+	s, v, now, stat := &scan.source, &scan.clocks, scan.now, &scan.stat
 	if scan.ripeNameDigest != nil {
 		if err := scan.ripeNameDigest.Add(record); err != nil {
 			return err
@@ -139,7 +188,7 @@ func (scan *sourceRecordScan) accept(record intelligence.NormalizedRecord) error
 	case intelligence.RecordGeo:
 		x := record.Geo
 		family = x.Family
-		if !x.Current || x.RegistrationCountry != "" && !contains(s.PublicFields, "registration_country") || x.PhysicalCountry != "" && !contains(s.PublicFields, "physical_country") || x.Region != "" && !contains(s.PublicFields, "region") || x.City != "" && !contains(s.PublicFields, "city") || x.Coordinates != nil && (!contains(s.PublicFields, "latitude") || !contains(s.PublicFields, "longitude")) {
+		if !scan.geoFields.allows(x) {
 			return errors.New("production geographic field binding invalid")
 		}
 		stat.Country = stat.Country || x.PhysicalCountry != ""
@@ -264,7 +313,7 @@ func VerifySourceRecordsForTier1(ctx context.Context, root string, catalog []Sou
 		v.records[clocks.ID] = scan
 		return func(record intelligence.NormalizedRecord) {
 			if scan.err == nil {
-				scan.err = scan.accept(record)
+				scan.err = scan.acceptValidated(record)
 			}
 		}
 	}

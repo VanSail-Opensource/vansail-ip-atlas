@@ -35,6 +35,7 @@ type bulkBucket struct {
 	riskDigest   [32]byte
 	mappingInput [2][32]byte
 	riskExact    bool
+	timedScoring bool
 	riskOnly     bool
 	active       bool
 	cover        netip.Prefix
@@ -180,27 +181,38 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 	b.recordBytes = nil
 	b.geoRawCount = 0
 	source := intelligence.StoredSource{ID: "bounded-materialization", Fingerprint: s.binding, ExpiresAt: s.clock.Add(720 * time.Hour)}
-	// Bound the allocation by the existing minimum cost per accepted row,
-	// even if a broad ancestor's descriptors count the same record twice.
-	maxRecords := min(s.batchRecords, s.batchBytes/1024)
-	reserve := 0
-	if b.geoReplay != nil {
-		reserve = len(b.geoReplay.other)
+	var recordBytes []int
+	var seen map[[32]byte]bool
+	bytes, projected := 0, 0
+	if replay := b.geoReplay; replay != nil {
+		layout := replay.entry.Leaf.GeoLayout
+		if !withCoverage || b.asn || b.riskOnly || len(replay.records) != layout.OtherRecords ||
+			len(replay.lengths) != layout.OtherRecords || len(replay.seen) != layout.OtherRecords || replay.seen == nil {
+			return intelligence.BuildState{}, errSpatialCache
+		}
+		source.Records, recordBytes, seen = replay.records, replay.lengths, replay.seen
+		replay.records, replay.lengths, replay.seen = nil, nil, nil
+		bytes, projected = layout.GeoCharge+layout.OtherCharge, layout.GeoRecords
 	} else {
+		// Bound the allocation by the existing minimum cost per accepted row,
+		// even if a broad ancestor's descriptors count the same record twice.
+		maxRecords := min(s.batchRecords, s.batchBytes/1024)
+		reserve := 0
 		for _, part := range b.parts {
 			reserve += int(min(uint64(maxRecords-reserve), part.Records))
 			if reserve == maxRecords {
 				break
 			}
 		}
+		source.Records = make([]intelligence.NormalizedRecord, 0, reserve)
+		recordBytes = make([]int, 0, reserve)
+		seen = make(map[[32]byte]bool, reserve)
 	}
-	source.Records = make([]intelligence.NormalizedRecord, 0, reserve)
-	recordBytes := make([]int, 0, reserve)
-	seen := make(map[[32]byte]bool, reserve)
 	riskDigest := sha256.New()
 	collectRisk := s.reuse != nil && !withCoverage && !b.asn
 	b.riskDigest = [32]byte{}
 	b.riskExact = false
+	b.timedScoring = false
 	b.mappingInput = [2][32]byte{}
 	// A geographic replay omits original Geo rows, so it cannot establish this
 	// narrower identity. The ordinary exact physical mapping path still works.
@@ -209,13 +221,22 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 	if s.reuse != nil && withCoverage && !b.asn && !b.riskOnly && b.geoReplay == nil {
 		mapping[0], mapping[1] = sha256.New(), sha256.New()
 	}
-	bytes, projected := 0, 0
-	if b.geoReplay != nil {
-		layout := b.geoReplay.entry.Leaf.GeoLayout
-		bytes, projected = layout.GeoCharge, layout.GeoRecords
-	}
 	paths := 0
 	asns := map[uint32]bool{}
+	observeRecord := func(record intelligence.NormalizedRecord) error {
+		if record.Kind == intelligence.RecordPath {
+			paths++
+			if paths > 100000 {
+				return overflow
+			}
+		}
+		if withCoverage && record.Origins != nil {
+			for _, asn := range record.Origins.Origins {
+				asns[asn] = true
+			}
+		}
+		return nil
+	}
 	appendDecoded := func(record intelligence.NormalizedRecord, size int, digest [32]byte) error {
 		if seen[digest] {
 			return nil
@@ -225,6 +246,7 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 		if projected+len(source.Records) >= s.batchRecords || bytes > s.batchBytes {
 			return overflow
 		}
+		b.timedScoring = b.timedScoring || record.Kind == intelligence.RecordEvidence || record.Kind == intelligence.RecordCoverage
 		if collectRisk && exactRiskInput(record) {
 			_, _ = riskDigest.Write(digest[:])
 			b.riskExact = b.riskExact || record.Kind == intelligence.RecordEvidence
@@ -237,19 +259,11 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 			copy(mappingRow[5:], digest[:])
 			_, _ = mapping[index].Write(mappingRow[:])
 		}
-		if record.Kind == intelligence.RecordPath {
-			paths++
-			if paths > 100000 {
-				return overflow
-			}
+		if err := observeRecord(record); err != nil {
+			return err
 		}
 		source.Records = append(source.Records, record)
 		recordBytes = append(recordBytes, size)
-		if withCoverage && record.Origins != nil {
-			for _, asn := range record.Origins.Origins {
-				asns[asn] = true
-			}
-		}
 		return nil
 	}
 	add := func(record intelligence.NormalizedRecord, frame intelligence.CanonicalRecordMeasure) error {
@@ -267,11 +281,11 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 		return appendDecoded(record, size, digest)
 	}
 	if b.geoReplay != nil {
-		for _, row := range b.geoReplay.other {
-			if err := boundedNormalizedRecord(row.record); err != nil {
+		for _, record := range source.Records {
+			if err := ctx.Err(); err != nil {
 				return intelligence.BuildState{}, err
 			}
-			if err := appendDecoded(row.record, row.size, row.digest); err != nil {
+			if err := observeRecord(record); err != nil {
 				return intelligence.BuildState{}, err
 			}
 		}

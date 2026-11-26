@@ -867,8 +867,9 @@ func (c *compiler) classify(inputs []string) ([]classifiedRun, error) {
 				return err
 			}
 			writers[i] = w
+			w.enablePartitionPlan(classifiedScope(i))
 		}
-		if err := writers[i].appendFrame(r.frame()); err != nil {
+		if err := writers[i].appendPartitionFrame(r.frame(), record); err != nil {
 			return err
 		}
 		sizes[i].records++

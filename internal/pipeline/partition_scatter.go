@@ -82,6 +82,44 @@ type scatterPrefixes struct {
 	targets [16]int
 }
 
+// At most 31 tree nodes and 16 prefix bins, charged to the existing private
+// run-proof memory ceiling. The plan does not retain any frame or fact body.
+const ownedScatterPlanCost = 8192
+
+type ownedScatterPlan struct {
+	tree *scatterNode
+	bins *scatterPrefixes
+}
+
+func newOwnedScatterPlan(s scope) *ownedScatterPlan {
+	tree := scatterTree(s, 0)
+	if tree.children[0] == nil {
+		return nil
+	}
+	return &ownedScatterPlan{tree: tree, bins: newScatterPrefixes(tree)}
+}
+
+func (p *ownedScatterPlan) count(record via3.PublicRecord, frame ownedRunFrame) error {
+	if slot, ok := p.bins.slot(record.Prefix); ok {
+		terminal := &p.bins.totals[slot]
+		terminal.size.records++
+		terminal.size.bytes += frame.row.logicalBytes + 512
+		terminal.wireBytes += frame.row.frameBytes()
+		terminal.cover = bulkPrefixCover(terminal.cover, record.Prefix)
+		return nil
+	}
+	var inherited ownedRunFrame
+	return p.tree.count(record, frame, &inherited)
+}
+
+func scatterEligible(s scope, total partitionSize, limits Limits) bool {
+	threshold := int64(8)
+	if !s.asn {
+		threshold = 2
+	}
+	return total.records > threshold*int64(limits.PartitionRecords) || total.bytes > threshold*limits.PartitionBytes
+}
+
 func newScatterPrefixes(root *scatterNode) *scatterPrefixes {
 	if root.asn {
 		return nil
@@ -234,22 +272,13 @@ func hashRunFrame(h hash.Hash, row encoded) {
 	_ = writeRunFrame(h, row)
 }
 
-// scatterPartition amortizes up to four binary split passes into two verified
-// scans. It selects the original first-fitting logical scopes, not a fixed
-// sixteen-way partition. Actual binary size/profile checks remain in partition.
+// scatterPartition amortizes up to four binary splits. A producer-side plan
+// can replace the first scan of a proved run when a verified redistribution
+// will follow. It selects the original first-fitting logical scopes, not a
+// fixed sixteen-way partition. Binary size/profile checks remain in partition.
 func (c *compiler) scatterPartition(path string, s scope) (runs []scatteredRun, applied bool, failure error) {
 	total, known := c.partitionSizes[path]
-	threshold := int64(8)
-	if !s.asn {
-		// Above two leaf budgets, a direct IP scatter avoids repeatedly
-		// rewriting the same ordered records through binary children.
-		threshold = 2
-	}
-	if !known || total.records <= threshold*int64(c.options.Limits.PartitionRecords) && total.bytes <= threshold*c.options.Limits.PartitionBytes {
-		return nil, false, nil
-	}
-	tree := scatterTree(s, 0)
-	if tree.children[0] == nil {
+	if !known || !scatterEligible(s, total, c.options.Limits) {
 		return nil, false, nil
 	}
 	r, err := c.openIntermediateRun(path)
@@ -257,44 +286,55 @@ func (c *compiler) scatterPartition(path string, s scope) (runs []scatteredRun, 
 		return nil, false, err
 	}
 	defer r.file.Close()
-	// Both scans of an owned run authenticate each segment and its order and
-	// verify the terminal and underlying EOF against this process-local proof.
-	// The first reader pins the proof until the second reader finishes.
+	// Every scan of an owned run authenticates each segment, order, terminal
+	// and actual EOF against this same process-local proof.
 	var proof *ownedRunProof
 	if r.owner != nil {
 		proof = r.file.compressed.proof
 	}
-	bins := newScatterPrefixes(tree)
-	firstHash := sha256.New()
-	for {
-		if err := c.ctx.Err(); err != nil {
-			return nil, false, err
+	var plan *ownedScatterPlan
+	if proof != nil && proof.scatter != nil && proof.scatter.tree.scope == s {
+		plan, proof.scatter = proof.scatter, nil
+		plan.bins.addTotals()
+		if plan.tree.size != total {
+			return nil, false, errOwnedRunProof
 		}
-		if err := r.nextPartitionRow(); err == io.EOF {
-			break
-		} else if err != nil {
-			return nil, false, err
+		// A unary scope jump would not run the subsequent full writer scan.
+		// Authenticate its actual input now, exactly as the previous path did.
+		if plan.tree.children[0].size.records == 0 || plan.tree.children[1].size.records == 0 {
+			plan = nil
 		}
-		if proof == nil {
-			hashRunFrame(firstHash, r.row)
+	}
+	var firstDigest []byte
+	if plan == nil {
+		plan = newOwnedScatterPlan(s)
+		if plan == nil {
+			return nil, false, nil
 		}
-		if slot, ok := bins.slot(r.record.Prefix); ok {
-			terminal := &bins.totals[slot]
-			terminal.size.records++
-			terminal.size.bytes += r.row.logicalBytes + 512
-			terminal.wireBytes += r.row.frameBytes()
-			terminal.cover = bulkPrefixCover(terminal.cover, r.record.Prefix)
-			continue
+		firstHash := sha256.New()
+		for {
+			if err := c.ctx.Err(); err != nil {
+				return nil, false, err
+			}
+			if err := r.nextPartitionRow(); err == io.EOF {
+				break
+			} else if err != nil {
+				return nil, false, err
+			}
+			if proof == nil {
+				hashRunFrame(firstHash, r.row)
+			}
+			if err := plan.count(r.record, r.frame()); err != nil {
+				return nil, false, err
+			}
 		}
-		var inherited ownedRunFrame
-		if err := tree.count(r.record, r.frame(), &inherited); err != nil {
-			return nil, false, err
-		}
+		firstDigest = firstHash.Sum(nil)
+		plan.bins.addTotals()
 	}
 	if err := r.file.Close(); err != nil {
 		return nil, false, err
 	}
-	bins.addTotals()
+	tree, bins := plan.tree, plan.bins
 	if tree.size != total {
 		return nil, false, errors.New("private run totals changed")
 	}
@@ -352,7 +392,7 @@ func (c *compiler) scatterPartition(path string, s scope) (runs []scatteredRun, 
 		return nil, false, nil
 	}
 	bins.selectTargets()
-	return c.writeScatter(path, tree, selected, proof, firstHash.Sum(nil), bins)
+	return c.writeScatter(path, tree, selected, proof, firstDigest, bins)
 }
 
 func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scatterNode, proof *ownedRunProof, digest []byte, bins *scatterPrefixes) (runs []scatteredRun, applied bool, failure error) {
@@ -420,9 +460,12 @@ func (c *compiler) writeScatter(path string, tree *scatterNode, selected []*scat
 				if err != nil {
 					return err
 				}
+				if scatterEligible(node.scope, node.size, c.options.Limits) {
+					writers[i].enablePartitionPlan(node.scope)
+				}
 				runs[i] = scatteredRun{target, node.scope}
 			}
-			if err := writers[i].appendFrame(frame); err != nil {
+			if err := writers[i].appendPartitionFrame(frame, r.record); err != nil {
 				return err
 			}
 			sizes[i].records++

@@ -336,22 +336,34 @@ func TestPublicScatterUnaryHandoffReusesExactRunAndBinaryScope(t *testing.T) {
 }
 
 func TestScatterRejectsModifiedOwnedRunAfterPlanning(t *testing.T) {
+	for _, writerPlan := range []bool{false, true} {
+		t.Run(fmt.Sprint(writerPlan), func(t *testing.T) { testScatterRejectsModifiedOwnedRunAfterPlanning(t, writerPlan) })
+	}
+}
+
+func testScatterRejectsModifiedOwnedRunAfterPlanning(t *testing.T, writerPlan bool) {
+	t.Helper()
 	c := proofMergeCompiler(t)
 	c.options.Limits.PartitionRecords = 8
+	root := scope{prefix: netip.MustParsePrefix("0.0.0.0/0")}
 	path := c.next()
 	w, err := c.newOwnedRunWriter(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer w.Close()
+	if writerPlan {
+		w.enablePartitionPlan(root)
+	}
 	var size partitionSize
 	for i := 0; i < 32; i++ {
 		addr := netip.AddrFrom4([4]byte{byte(16 + 4*i), 0, 0, 0})
-		frame, err := c.newCanonicalRunFrame(via3.PublicRecord{Version: 3, Kind: 2, Prefix: netip.PrefixFrom(addr, 24), Geo: &via3.GeoData{Country: "US"}})
+		record := via3.PublicRecord{Version: 3, Kind: 2, Prefix: netip.PrefixFrom(addr, 24), Geo: &via3.GeoData{Country: "US"}}
+		frame, err := c.newCanonicalRunFrame(record)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err = w.AppendCanonical(frame); err != nil {
+		if err = w.appendPartitionFrame(frame, record); err != nil {
 			t.Fatal(err)
 		}
 		size.records++
@@ -359,6 +371,9 @@ func TestScatterRejectsModifiedOwnedRunAfterPlanning(t *testing.T) {
 	}
 	if err = w.Finish(); err != nil {
 		t.Fatal(err)
+	}
+	if p := c.runProofs.lookup(path); p == nil || (p.scatter != nil) != writerPlan {
+		t.Fatal("fixture did not produce the expected owned plan state")
 	}
 	c.rememberPartitionSize(path, size)
 	before := c.used
@@ -377,12 +392,90 @@ func TestScatterRejectsModifiedOwnedRunAfterPlanning(t *testing.T) {
 		}
 		return 0
 	}
-	_, applied, err := c.scatterPartition(path, scope{prefix: netip.MustParsePrefix("0.0.0.0/0")})
+	_, applied, err := c.scatterPartition(path, root)
 	if !changed || err == nil || applied || c.used != before {
 		t.Fatalf("changed=%v applied=%v err=%v scratch=%d, was %d", changed, applied, err, c.used, before)
 	}
 	remaining, err := os.ReadDir(c.scratch)
 	if err != nil || len(remaining) != 1 || remaining[0].Name() != filepath.Base(path) {
 		t.Fatal("could not isolate failure to owned parent", remaining, err)
+	}
+}
+
+func TestOwnedScatterPlansKeepBinaryScopesAndBytes(t *testing.T) {
+	for _, family := range []string{"IPv4", "IPv6", "ASN"} {
+		t.Run(family, func(t *testing.T) {
+			root := scope{prefix: netip.MustParsePrefix("0.0.0.0/0"), group: locationFacts}
+			if family == "IPv6" {
+				root.prefix = netip.MustParsePrefix("::/0")
+			} else if family == "ASN" {
+				root = scope{asn: true, last: ^uint32(0), group: aggregateFacts}
+			}
+			var records []via3.PublicRecord
+			if !root.asn {
+				records = append(records, via3.PublicRecord{Version: 3, Kind: 2, Prefix: root.prefix, Geo: &via3.GeoData{Country: "CA"}})
+			}
+			for i := range 160 {
+				var r via3.PublicRecord
+				switch family {
+				case "IPv4":
+					p := netip.PrefixFrom(netip.AddrFrom4([4]byte{byte(i*37 + 17), 120, byte(i), 0}), 24)
+					if i%7 == 0 {
+						p = netip.PrefixFrom(p.Addr(), 8).Masked()
+					}
+					r = via3.PublicRecord{Version: 3, Kind: 2, Prefix: p, Geo: &via3.GeoData{Country: "US"}}
+				case "IPv6":
+					p := netip.PrefixFrom(netip.AddrFrom16([16]byte{byte(i*37 + 17), 1, 1, byte(i)}), 32)
+					if i%7 == 0 {
+						p = netip.PrefixFrom(p.Addr(), 8).Masked()
+					}
+					r = via3.PublicRecord{Version: 3, Kind: 2, Prefix: p, Geo: &via3.GeoData{Country: "US"}}
+				case "ASN":
+					r = via3.PublicRecord{Version: 3, Kind: 8, ASN: uint32(300000+i) + 2200000000*uint32(i%2), ASNAggregate: &via3.ASNData{Name: "Synthetic Network"}}
+				}
+				records = append(records, r)
+			}
+			fixture := func(withPlan bool) (*compiler, string) {
+				t.Helper()
+				c := proofMergeCompiler(t)
+				c.options.Limits.PartitionRecords = 8
+				path := c.next()
+				writer, err := c.newOwnedRunWriter(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer writer.Close()
+				if withPlan {
+					writer.enablePartitionPlan(root)
+				}
+				var size partitionSize
+				for _, r := range records {
+					frame, err := c.newCanonicalRunFrame(r)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := writer.appendPartitionFrame(frame, r); err != nil {
+						t.Fatal(err)
+					}
+					size.records++
+					size.bytes += frame.row.logicalBytes + 512
+				}
+				if err := writer.Finish(); err != nil {
+					t.Fatal(err)
+				}
+				c.rememberPartitionSize(path, size)
+				if proof := c.runProofs.lookup(path); proof == nil || (proof.scatter != nil) != withPlan {
+					t.Fatal("unexpected producer-side plan")
+				}
+				return c, path
+			}
+			old, oldPath := fixture(false)
+			current, path := fixture(true)
+			want := partitionFrameMap(t, old, oldPath, root, false)
+			got := partitionFrameMap(t, current, path, root, true)
+			if !reflect.DeepEqual(want, got) {
+				t.Fatalf("preplanning changed the binary first-fit geometry or canonical rows (%d versus %d leaves)", len(got), len(want))
+			}
+		})
 	}
 }

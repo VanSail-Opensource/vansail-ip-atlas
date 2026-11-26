@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func testPolicy(t *testing.T) Policy {
+func testPolicy(t testing.TB) Policy {
 	t.Helper()
 	f, err := os.Open("../../configs/scoring.yaml")
 	if err != nil {

@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"errors"
 	"os"
+
+	"vansail-ip-atlas/internal/via3"
 )
 
 const (
@@ -39,6 +41,7 @@ type ownedRunProof struct {
 	registry *ownedRunRegistry
 	readers  int
 	retired  bool
+	scatter  *ownedScatterPlan
 }
 
 func (p *ownedRunProof) checkFile(info os.FileInfo) error {
@@ -111,6 +114,7 @@ func (p *ownedRunProof) releaseIfUnused() {
 	if p.retired && p.readers == 0 && p.cost != 0 {
 		p.registry.used -= p.cost
 		p.cost, p.first, p.last, p.file, p.path = 0, nil, nil, nil, ""
+		p.scatter = nil
 	}
 }
 
@@ -199,6 +203,43 @@ func (w *ownedRunWriter) appendFrame(f ownedRunFrame) error {
 		return w.AppendUnproved(f.row)
 	}
 	return w.AppendCanonical(f)
+}
+
+// A plan is optional and shares the preexisting aggregate proof budget. It
+// belongs to this exact writer's byte-authenticated output, not its path.
+func (w *ownedRunWriter) enablePartitionPlan(s scope) {
+	if w.proof == nil || !w.proof.registry.charge(ownedScatterPlanCost) {
+		return
+	}
+	plan := newOwnedScatterPlan(s)
+	if plan == nil {
+		w.proof.registry.used -= ownedScatterPlanCost
+		return
+	}
+	w.proof.cost += ownedScatterPlanCost
+	w.proof.scatter = plan
+}
+
+func (w *ownedRunWriter) appendPartitionFrame(frame ownedRunFrame, record via3.PublicRecord) error {
+	if err := w.appendFrame(frame); err != nil {
+		return err
+	}
+	if proof := w.proof; proof != nil && proof.scatter != nil {
+		plan := proof.scatter
+		// The copied frame may have acquired the inherited bit on its way
+		// into the current child. Its prefix and wire size are unchanged.
+		if !plan.tree.asn && record.Prefix.Bits() < plan.tree.prefix.Bits() {
+			record.Inherited = true
+		}
+		if err := plan.count(record, frame); err != nil {
+			// Only the ordinary partition traversal may report a planning
+			// error. A producer-side plan is never required for correctness.
+			proof.scatter = nil
+			proof.cost -= ownedScatterPlanCost
+			proof.registry.used -= ownedScatterPlanCost
+		}
+	}
+	return nil
 }
 
 func (w *ownedRunWriter) appendRow(row encoded) error {

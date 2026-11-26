@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -46,16 +45,14 @@ type geoLayoutBoundary struct {
 	count  int
 }
 
-type geoLayoutRecord struct {
-	record intelligence.NormalizedRecord
-	size   int
-	digest [32]byte
-}
-
 type geoLayoutReplay struct {
 	entry      spatialCacheEntry
 	boundaries []geoLayoutBoundary
-	other      []geoLayoutRecord
+	// The one owned raw population. Collection adopts these buffers and the
+	// validated dedupe set before appending generated role/coverage records.
+	records []intelligence.NormalizedRecord
+	lengths []int
+	seen    map[[32]byte]bool
 }
 
 func (s *bulkSpool) geoLayoutKey(b *bulkBucket, policy [32]byte) ([32]byte, error) {
@@ -110,7 +107,9 @@ func (s *bulkSpool) loadGeoLayout(ctx context.Context, b *bulkBucket, policy [32
 	defer input.Close()
 	result := &geoLayoutReplay{
 		entry: entry, boundaries: make([]geoLayoutBoundary, 0, layout.Boundaries),
-		other: make([]geoLayoutRecord, 0, layout.OtherRecords),
+		records: make([]intelligence.NormalizedRecord, 0, layout.OtherRecords),
+		lengths: make([]int, 0, layout.OtherRecords),
+		seen:    make(map[[32]byte]bool, layout.OtherRecords),
 	}
 	var previous netip.Prefix
 	var count int
@@ -136,7 +135,8 @@ func (s *bulkSpool) loadGeoLayout(ctx context.Context, b *bulkBucket, policy [32
 		result.boundaries = append(result.boundaries, geoLayoutBoundary{prefix, n})
 	}
 	remaining := (layout.OtherCharge - 1024*layout.OtherRecords) / 2
-	seen := make(map[[32]byte]bool, layout.OtherRecords)
+	var buffer []byte
+	var decoder intelligence.CanonicalRecordDecoder
 	for i := 0; i < layout.OtherRecords; i++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -148,26 +148,26 @@ func (s *bulkSpool) loadGeoLayout(ctx context.Context, b *bulkBucket, policy [32
 		if size <= 0 || size > 1<<20 || size > remaining {
 			return nil, errSpatialCache
 		}
-		data := make([]byte, size)
+		if size > cap(buffer) {
+			buffer = make([]byte, min(1<<20, max(size, 2*cap(buffer))))
+		}
+		data := buffer[:size]
 		if _, err = io.ReadFull(input.reader, data); err != nil {
 			return nil, err
 		}
-		var r intelligence.NormalizedRecord
-		if err := json.Unmarshal(data, &r); err != nil || r.Validate() != nil || r.Kind == intelligence.RecordGeo {
-			return nil, errSpatialCache
-		}
-		canonical, err := json.Marshal(r)
-		if err != nil || !bytes.Equal(data, canonical) {
+		r, err := decoder.Decode(data)
+		if err != nil || r.Kind == intelligence.RecordGeo || boundedNormalizedRecord(r) != nil {
 			return nil, errSpatialCache
 		}
 		prefix, err := spatialPrefix(r)
 		digest := sha256.Sum256(data)
-		if err != nil || !prefix.Overlaps(b.prefix) || seen[digest] {
+		if err != nil || !prefix.Overlaps(b.prefix) || result.seen[digest] {
 			return nil, errSpatialCache
 		}
-		seen[digest] = true
+		result.seen[digest] = true
 		remaining -= size
-		result.other = append(result.other, geoLayoutRecord{r, size, digest})
+		result.records = append(result.records, r)
+		result.lengths = append(result.lengths, size)
 	}
 	if _, err := io.ReadFull(input.reader, row[:1]); err != io.EOF || count != layout.GeoRecords || remaining != 0 {
 		return nil, errSpatialCache

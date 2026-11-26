@@ -401,6 +401,11 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 		if err != nil {
 			return err
 		}
+		if spatialOutputsOnly {
+			if err := engine.PreparePrefixScores(ctx); err != nil {
+				return err
+			}
+		}
 		profileKeys := make([]netip.Prefix, 0, len(profiles))
 		for p := range profiles {
 			if mappingScope.IsValid() && (p.Bits() < mappingScope.Bits() || !mappingScope.Contains(p.Addr())) {

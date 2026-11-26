@@ -40,6 +40,7 @@ type spatialCacheStream struct {
 }
 type spatialCacheLeaf struct {
 	OriginContexts *leafOriginContexts `json:",omitempty"`
+	GeoLayout      *geoLayout          `json:",omitempty"`
 	RiskInput      [32]byte            `json:",omitzero"`
 	Split          bool
 	Stream         spatialCacheStream
@@ -122,6 +123,9 @@ func spatialCacheFiles(e spatialCacheEntry) (map[[32]byte]uint64, error) {
 		if _, err := e.Leaf.OriginContexts.origins(); err != nil {
 			return nil, err
 		}
+	}
+	if e.Leaf != nil && e.Leaf.GeoLayout != nil && e.Domain != geoLayoutDomain {
+		return nil, errSpatialCache
 	}
 	if e.Domain == "compiled" {
 		if e.Compiled == nil || e.Seed != nil || e.Scatter != nil || e.Leaf != nil {
@@ -208,6 +212,17 @@ func spatialCacheFiles(e spatialCacheEntry) (map[[32]byte]uint64, error) {
 	case riskShapeDomain:
 		if e.Seed != nil || e.Scatter != nil || e.Leaf == nil || *e.Leaf != (spatialCacheLeaf{Split: e.Leaf.Split}) {
 			return nil, errSpatialCache
+		}
+	case geoLayoutDomain:
+		if e.Seed != nil || e.Scatter != nil || e.Leaf == nil || e.Leaf.Split || !e.Leaf.GeoLayout.valid() {
+			return nil, errSpatialCache
+		}
+		s := e.Leaf.Stream
+		if s.Records != uint64(e.Leaf.GeoLayout.Boundaries+e.Leaf.GeoLayout.OtherRecords) || s.DecodedBytes != e.Leaf.GeoLayout.streamSize() || s.DecodedBytes > spatialStreamDecodedLimit {
+			return nil, errSpatialCache
+		}
+		if err := add(s.SHA256, s.Bytes); err != nil {
+			return nil, err
 		}
 	case "risk", "risk-input", "public", "location", mappingDomain:
 		if e.Seed != nil || e.Scatter != nil || e.Leaf == nil || (e.Domain == "location" || e.Domain == "risk-input" || e.Domain == mappingDomain) && e.Leaf.Split {
@@ -466,6 +481,10 @@ func cloneSpatialEntry(e spatialCacheEntry) spatialCacheEntry {
 			origins.ASNDeltas = append([]byte(nil), origins.ASNDeltas...)
 			value.OriginContexts = &origins
 		}
+		if value.GeoLayout != nil {
+			layout := *value.GeoLayout
+			value.GeoLayout = &layout
+		}
 		e.Leaf = &value
 	}
 	if e.Compiled != nil {
@@ -533,7 +552,7 @@ func (c *spatialCache) Lookup(ctx context.Context, domain string, key [32]byte) 
 		return spatialCacheEntry{}, false, errSpatialCache
 	}
 	switch domain {
-	case "seed", seedSourceDomain, "scatter", "risk", "risk-input", "public", "compiled", "location", mappingDomain, rawSplitDomain, riskShapeDomain, sortedPathsDomain, sortedPrefixesDomain:
+	case "seed", seedSourceDomain, "scatter", "risk", "risk-input", "public", "compiled", "location", mappingDomain, rawSplitDomain, riskShapeDomain, geoLayoutDomain, sortedPathsDomain, sortedPrefixesDomain:
 	default:
 		return spatialCacheEntry{}, false, errSpatialCache
 	}

@@ -230,6 +230,9 @@ func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, cove
 					if err := s.retainLocations(ctx, bucket, reuse.locationPolicy); err != nil {
 						return err
 					}
+					if err := s.retainExistingGeoLayout(ctx, bucket, reuse.locationPolicy); err != nil {
+						return err
+					}
 					origins, err := entry.Leaf.OriginContexts.origins()
 					if err != nil {
 						return err
@@ -245,6 +248,13 @@ func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, cove
 				return err
 			}
 		} else {
+			if reuse.locationPolicy != ([32]byte{}) && s.replaySink != nil {
+				bucket.geoCapture = true
+				bucket.geoReplay, err = s.loadGeoLayout(ctx, bucket, reuse.locationPolicy)
+				if err != nil {
+					return err
+				}
+			}
 			state, err := s.collectWithSplitProof(ctx, bucket, coverage)
 			if err == nil {
 				if err := reuse.begin(ctx); err != nil {
@@ -253,7 +263,13 @@ func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, cove
 				if err = visit(bucket, state); err != nil {
 					return errors.Join(err, reuse.abort())
 				}
+				if bucket.geoCapture {
+					if err := s.retainGeoLayout(ctx, bucket, reuse.locationPolicy, state); err != nil {
+						return errors.Join(err, reuse.abort())
+					}
+				}
 				bucket.recordBytes = nil
+				bucket.geoReplay = nil
 				if shapeKey != ([32]byte{}) && !bucket.riskExact {
 					// A fully validated leaf without any exact observation cannot
 					// produce a time-dependent event, even as the clock changes.
@@ -275,6 +291,7 @@ func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, cove
 				leaves = append(leaves, bucket)
 				return nil
 			}
+			bucket.geoReplay = nil
 			if !errors.Is(err, errBulkPartition) {
 				return err
 			}

@@ -65,10 +65,10 @@ func isMappingRecord(kind intelligence.RecordKind) bool {
 // Its mapping pass can project the same owned rows without copying them into a
 // separate state. The standalone entry point still rejects other kinds.
 func mappingProducerRows(state intelligence.BuildState, policy intelligence.Policy, clock time.Time, encodedLengths []int, omitInherited bool, scope netip.Prefix, locations *locationProjection, project bool) Producer {
-	return mappingProducerSelection(state, policy, clock, encodedLengths, omitInherited, scope, locations, project, true, true)
+	return mappingProducerSelection(state, policy, clock, encodedLengths, omitInherited, scope, locations, project, true, true, nil)
 }
 
-func mappingProducerSelection(state intelligence.BuildState, policy intelligence.Policy, clock time.Time, encodedLengths []int, omitInherited bool, scope netip.Prefix, locations *locationProjection, project, locationRowsWanted, networkRowsWanted bool) Producer {
+func mappingProducerSelection(state intelligence.BuildState, policy intelligence.Policy, clock time.Time, encodedLengths []int, omitInherited bool, scope netip.Prefix, locations *locationProjection, project, locationRowsWanted, networkRowsWanted bool, projectedGeo *geoLayoutReplay) Producer {
 	return func(ctx context.Context, emit func(via3.PublicRecord) error) error {
 		state := state
 		if err := checkOwnedRecordLengths(state, encodedLengths); err != nil {
@@ -97,6 +97,15 @@ func mappingProducerSelection(state intelligence.BuildState, policy intelligence
 		}
 		boundaries := map[netip.Prefix]boundaryVotes{}
 		replayingLocations := locations != nil && locations.hit
+		if projectedGeo != nil && locationRowsWanted {
+			if !project || !replayingLocations {
+				return errSpatialCache
+			}
+			boundaries = make(map[netip.Prefix]boundaryVotes, len(projectedGeo.boundaries))
+			for _, row := range projectedGeo.boundaries {
+				boundaries[row.prefix] = boundaryVotes{geoCount: row.count}
+			}
+		}
 		origins := map[netip.Prefix][]uint32{}
 		type labels struct {
 			name, organization, isp  string
@@ -105,6 +114,9 @@ func mappingProducerSelection(state intelligence.BuildState, policy intelligence
 		networkLabels := map[netip.Prefix]labels{}
 		seen := map[string]struct{}{}
 		var bytes, count, inputOrdinal int
+		if projectedGeo != nil && locationRowsWanted {
+			bytes, count = projectedGeo.entry.Leaf.GeoLayout.GeoCharge/2, projectedGeo.entry.Leaf.GeoLayout.GeoRecords
+		}
 		for _, source := range state.Sources {
 			if err := ctx.Err(); err != nil {
 				return err

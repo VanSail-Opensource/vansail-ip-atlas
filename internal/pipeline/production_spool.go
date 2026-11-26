@@ -40,6 +40,9 @@ type bulkBucket struct {
 	// Retained only for the synchronous visit of an owned collected state.
 	recordBytes []int
 	originASNs  []uint32
+	geoCapture  bool
+	geoRawCount int
+	geoReplay   *geoLayoutReplay
 }
 type bulkSpool struct {
 	root           string
@@ -157,15 +160,20 @@ func (s *bulkSpool) collect(ctx context.Context, b *bulkBucket, withCoverage boo
 
 func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage bool, overflow error) (intelligence.BuildState, error) {
 	b.recordBytes = nil
+	b.geoRawCount = 0
 	source := intelligence.StoredSource{ID: "bounded-materialization", Fingerprint: s.binding, ExpiresAt: s.clock.Add(720 * time.Hour)}
 	// Bound the allocation by the existing minimum cost per accepted row,
 	// even if a broad ancestor's descriptors count the same record twice.
 	maxRecords := min(s.batchRecords, s.batchBytes/1024)
 	reserve := 0
-	for _, part := range b.parts {
-		reserve += int(min(uint64(maxRecords-reserve), part.Records))
-		if reserve == maxRecords {
-			break
+	if b.geoReplay != nil {
+		reserve = len(b.geoReplay.other)
+	} else {
+		for _, part := range b.parts {
+			reserve += int(min(uint64(maxRecords-reserve), part.Records))
+			if reserve == maxRecords {
+				break
+			}
 		}
 	}
 	source.Records = make([]intelligence.NormalizedRecord, 0, reserve)
@@ -175,27 +183,20 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 	collectRisk := s.reuse != nil && !withCoverage && !b.asn
 	b.riskDigest = [32]byte{}
 	b.riskExact = false
-	bytes := 0
+	bytes, projected := 0, 0
+	if b.geoReplay != nil {
+		layout := b.geoReplay.entry.Leaf.GeoLayout
+		bytes, projected = layout.GeoCharge, layout.GeoRecords
+	}
 	paths := 0
 	asns := map[uint32]bool{}
-	add := func(record intelligence.NormalizedRecord, frame intelligence.CanonicalRecordFrame) error {
-		if err := boundedNormalizedRecord(record); err != nil {
-			return err
-		}
-		size, digest := frame.EncodedBytes(), frame.Digest()
-		if size == 0 {
-			data, err := json.Marshal(record)
-			if err != nil {
-				return err
-			}
-			size, digest = len(data), sha256.Sum256(data)
-		}
+	appendDecoded := func(record intelligence.NormalizedRecord, size int, digest [32]byte) error {
 		if seen[digest] {
 			return nil
 		}
 		seen[digest] = true
 		bytes += 2*size + 1024
-		if len(source.Records) >= s.batchRecords || bytes > s.batchBytes {
+		if projected+len(source.Records) >= s.batchRecords || bytes > s.batchBytes {
 			return overflow
 		}
 		if collectRisk && exactRiskInput(record) {
@@ -217,9 +218,33 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 		}
 		return nil
 	}
-	if err := s.walkOwned(ctx, b.parts, add); err != nil {
+	add := func(record intelligence.NormalizedRecord, frame intelligence.CanonicalRecordFrame) error {
+		if err := boundedNormalizedRecord(record); err != nil {
+			return err
+		}
+		size, digest := frame.EncodedBytes(), frame.Digest()
+		if size == 0 {
+			data, err := json.Marshal(record)
+			if err != nil {
+				return err
+			}
+			size, digest = len(data), sha256.Sum256(data)
+		}
+		return appendDecoded(record, size, digest)
+	}
+	if b.geoReplay != nil {
+		for _, row := range b.geoReplay.other {
+			if err := boundedNormalizedRecord(row.record); err != nil {
+				return intelligence.BuildState{}, err
+			}
+			if err := appendDecoded(row.record, row.size, row.digest); err != nil {
+				return intelligence.BuildState{}, err
+			}
+		}
+	} else if err := s.walkOwned(ctx, b.parts, add); err != nil {
 		return intelligence.BuildState{}, err
 	}
+	b.geoRawCount = len(source.Records)
 	overflow = errBulkPartition
 	if !b.asn && !b.riskOnly && len(s.usage) > 0 {
 		origins := map[netip.Prefix][]uint32{}

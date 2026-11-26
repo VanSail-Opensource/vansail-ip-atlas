@@ -25,6 +25,7 @@ type MaterializationInputs struct {
 	prepareOnly                            bool
 	resolver                               intelligence.RelationResolver
 	verifiedEmptyVRP                       bool
+	geoReplay                              *geoLayoutReplay
 	// The spatial compiler can cache and replay only the clock-independent
 	// Geo/coordinates/network/usage rows. Every risk and RPKI row is produced below.
 	mappings func(context.Context, mappingProducerFactory, func(via3.PublicRecord) error) error
@@ -350,11 +351,13 @@ func IntelligenceProducer(state intelligence.BuildState, policy intelligence.Pol
 		}
 		var mappingScope netip.Prefix
 		var locations *locationProjection
+		var projectedGeo *geoLayoutReplay
 		if len(inputs) == 1 {
 			mappingScope, locations = inputs[0].scope, inputs[0].locations
+			projectedGeo = inputs[0].geoReplay
 		}
 		produceMappings := func(locations *locationProjection, emitLocation, emitNetwork bool) Producer {
-			return mappingProducerSelection(state, policy, clock, mappingLengths, true, mappingScope, locations, true, emitLocation, emitNetwork)
+			return mappingProducerSelection(state, policy, clock, mappingLengths, true, mappingScope, locations, true, emitLocation, emitNetwork, projectedGeo)
 		}
 		if len(inputs) == 1 && inputs[0].mappings != nil {
 			err = inputs[0].mappings(ctx, produceMappings, emit)

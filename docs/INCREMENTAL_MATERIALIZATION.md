@@ -19,12 +19,23 @@ The private `spatial-cache-v1` inventory records separate dependencies for each 
 | Risk shape | Exact-risk collection split or a fully validated leaf with no exact observations | Scope, ordered physical descriptors, fit limits and relevant joined role layout. Such proofs contain no scored events and do not depend on clock. |
 | Mapping | Validated geographic, coordinate, usage and network rows in separate location and network streams | Scope, ordered physical descriptors, fit limits and mapping policy. Location also binds the joined origin usage types actually consulted and whether unmatched origins emit contextual unknown boundaries. |
 | Public | A fitting leaf's public records, or its split decision | Risk dependencies, final global ASN contexts, RPKI completeness, publisher observation time and coverage deadline |
+| Geo layout | A fitting geo-heavy leaf's unique geographic boundary counts and remaining raw rows | Exact ordered input descriptors, scope, location policy, raw fit counts and charges. Reuse requires the corresponding validated location values. |
 | Compiled | Final public objects and routes for a public partition subtree | Actual complete public-run bytes, scope and actual ASN prefix-provider bytes and index |
 
 All domains additionally bind the executable's actual bytes, compiler limits,
 public schema and build mode. No key relies on `Source.Fingerprint` alone.
 Changing the compiler, packing limits or implementation therefore creates an
 incompatible cache and takes the ordinary cold path.
+
+A geo-heavy leaf may retain a closed projection after its full bounded build
+succeeds. It includes every original geographic boundary, even where the value
+was unchanged, and the exact deduplicated non-geographic rows before any role or
+coverage join. On reuse the compiler rehashes the original parts and the bytes
+actually consumed from the projection, checks counts, canonical rows and byte
+charges, and charges the omitted votes to the ordinary fit limit. It regenerates
+the current usage and coverage joins and evaluates current-clock risk and routing.
+Separate source verification and the full source seed walk still run. Absence
+of a fitting projection or its location values takes the ordinary path.
 
 Seed streams end at original input-partition boundaries. A changed city does not
 shift later category chunks. Every source still completes its full strict

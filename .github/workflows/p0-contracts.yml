@@ -27,7 +27,8 @@ jobs:
       - uses: actions/checkout@v7.0.0
         with:
           persist-credentials: false
-          fetch-depth: 2
+          # The checked compiler must still be reachable after harness-only commits.
+          fetch-depth: 0
       - name: Pin the exact prior diagnostic compiler
         shell: bash
         run: |

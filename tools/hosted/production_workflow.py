@@ -202,10 +202,14 @@ def context(kind: str, upstream: int | None):
               'benchmark':MATRIX_WORKFLOW,'preview':WORKFLOWS['benchmark'],'promotion':WORKFLOWS['preview']}[kind]
     if upstream is None:
         event=json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
-        upstream=event.get('workflow_run',{}).get('id')
-        if upstream is None and event.get('inputs',{}).get('upstream_run_id'):
-            raw=event['inputs']['upstream_run_id']
-            if not re.fullmatch(r'[1-9][0-9]{0,19}',raw): raise ContractError('invalid upstream run input')
+        if not isinstance(event,dict): raise ContractError('invalid production event')
+        trigger,inputs=event.get('workflow_run'),event.get('inputs')
+        if (trigger is not None and not isinstance(trigger,dict)) or (inputs is not None and not isinstance(inputs,dict)):
+            raise ContractError('invalid production event inputs')
+        upstream=(trigger or {}).get('id')
+        raw=(inputs or {}).get('upstream_run_id')
+        if upstream is None and raw is not None:
+            if not isinstance(raw,str) or not re.fullmatch(r'[1-9][0-9]{0,19}',raw): raise ContractError('invalid upstream run input')
             upstream=int(raw)
     if upstream is None and kind=='intake':
         deadline=time.monotonic()+EXACT_HEAD_WAIT_SECONDS

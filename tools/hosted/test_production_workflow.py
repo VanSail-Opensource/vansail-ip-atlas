@@ -176,6 +176,22 @@ class CandidateClockTests(unittest.TestCase):
                 self.assertRaises(ContractError):
             workflow.context('intake', None)
 
+        # GitHub sends null rather than an empty object when an operator
+        # dispatches intake without inputs. It still requires a completed
+        # exact-main integration and preserves its actual retry attempt.
+        event.write_text('{"inputs":null}')
+        env['GITHUB_EVENT_NAME'] = 'workflow_dispatch'
+        output.unlink()
+        with patch.dict(os.environ, env), patch.object(workflow, 'api', side_effect=api):
+            self.assertEqual(workflow.context('intake', None), (11, 1))
+        self.assertEqual(output.read_text(), 'upstream_run_id=11\nupstream_run_attempt=1\n')
+        self.assertEqual(polls, 3)
+        for payload in ('{"inputs":[]}', '{"inputs":{"upstream_run_id":11}}', '{"inputs":{"upstream_run_id":""}}'):
+            event.write_text(payload)
+            with self.subTest(payload=payload), patch.dict(os.environ, env), \
+                    patch.object(workflow, 'api', side_effect=api), self.assertRaises(ContractError):
+                workflow.context('intake', None)
+
 
 class CompilePhaseDiagnosticsTests(unittest.TestCase):
     def test_failed_rebuild_identifies_measured_phase_without_child_log(self):

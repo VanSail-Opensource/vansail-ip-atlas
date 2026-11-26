@@ -208,11 +208,11 @@ func (r *Release) prefixPage(ctx context.Context, s *Shard, row []byte, asn, cur
 		c := target.components()
 		key := target.componentKey(factPrefixes, first, total)
 		if v, ok := c.get(key); ok {
-			copy(answer.Prefixes, v.([]string))
+			v.(nativePrefixLabels).fill(answer.Prefixes)
 		} else {
-			target.disk.prefixStrings(first, total, answer.Prefixes)
-			if c.active {
-				c.put(key, slices.Clone(answer.Prefixes), prefixSpanBytes(answer.Prefixes)+24)
+			p := target.disk.prefixStrings(first, total, answer.Prefixes, c.active)
+			if p.offsets != nil {
+				c.put(key, p, p.bytes())
 			}
 		}
 	} else if labels := target.cachedPrefixSpan(first, total); labels != nil {

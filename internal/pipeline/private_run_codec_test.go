@@ -4,13 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"github.com/klauspost/compress/zstd"
+	"errors"
 	"io"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 func compressedRunFixture(t *testing.T, data []byte) ([]byte, uint64) {
@@ -74,6 +76,77 @@ func TestPrivateRunFramesStayImmutableAcrossSegments(t *testing.T) {
 		if !bytes.Equal(read[i], payloads[i]) || cap(read[i]) != len(read[i]) {
 			t.Fatal("later segment overwrote an earlier frame or left its capacity open", i)
 		}
+	}
+}
+
+func TestPrivateRunCompactFrameWriterKeepsIdenticalProofBytes(t *testing.T) {
+	const prefix = 4 + len(compactRunMarker)
+	frames := [][]byte{
+		bytes.Repeat([]byte("q"), privateRunBlockBytes-prefix),
+		[]byte("inside"),
+		bytes.Repeat([]byte("x"), privateRunBlockBytes-2-2*prefix-len("inside")),
+		[]byte("split-header"),
+		bytes.Repeat([]byte("y"), privateRunBlockBytes-3*prefix-len("split-header")),
+		[]byte("split-body"),
+		bytes.Repeat([]byte("z"), 2*privateRunBlockBytes),
+		[]byte("tail"),
+	}
+	var stored [2][]byte
+	for mode := range stored {
+		c := &compiler{ctx: context.Background(), options: Options{Limits: DefaultLimits()}}
+		var out bytes.Buffer
+		w, err := newPrivateRunWriter(c, &out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var sink io.Writer = w
+		if mode == 0 {
+			sink = struct{ io.Writer }{w}
+		}
+		for _, data := range frames {
+			if err := writeRunFrame(sink, encoded{compact: true, data: data}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := w.Flush(); err != nil || c.used != uint64(out.Len()) {
+			t.Fatalf("flush changed physical accounting: %d/%d %v", c.used, out.Len(), err)
+		}
+		stored[mode] = out.Bytes()
+	}
+	if !bytes.Equal(stored[0], stored[1]) {
+		t.Fatal("fast compact frame writer changed stored bytes or segment proofs")
+	}
+}
+
+func TestPrivateRunCompactFrameWriterPreservesCancellationAndAccounting(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := &compiler{ctx: ctx, options: Options{Limits: DefaultLimits()}}
+	var out bytes.Buffer
+	w, err := newPrivateRunWriter(c, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	cancel()
+	if err := writeRunFrame(w, encoded{compact: true, data: []byte("small")}); !errors.Is(err, context.Canceled) || len(w.pending) != 0 || out.Len() != len(privateRunMagic) {
+		t.Fatalf("cancellation allowed a frame write: %v", err)
+	}
+	c.ctx = context.Background()
+	out.Reset()
+	w2, err := newPrivateRunWriter(c, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w2.Close()
+	before := c.used
+	c.options.Limits.ScratchBytes = before + 1
+	data := bytes.Repeat([]byte("x"), privateRunBlockBytes-4-len(compactRunMarker))
+	if err := writeRunFrame(w2, encoded{compact: true, data: data}); err == nil || c.used != before || out.Len() != len(privateRunMagic) {
+		t.Fatalf("failed accounting wrote or charged a segment: %v", err)
+	}
+	if err := w2.Flush(); err == nil {
+		t.Fatal("failed compact frame was not sticky")
 	}
 }
 

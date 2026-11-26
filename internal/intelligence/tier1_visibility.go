@@ -1,6 +1,9 @@
 package intelligence
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 type tier1Visibility struct {
 	families        map[string]struct{}
@@ -65,37 +68,68 @@ func pathVisibilityReader(walk func(func(PathObservation) error) error) func(*Re
 	}
 }
 
-// Collect visibility during the initial authenticated traversal. Relationships
-// may occur in any later source, so defer interpreting every distinct directed
-// adjacency until the complete relationship table has been verified.
+// Collect visibility during the initial authenticated traversal. With an
+// already observed relationship graph, interpret adjacencies directly and
+// discard the summary if any later relationship could change those answers.
+// Otherwise defer interpretation by retaining distinct directed adjacencies.
 type tier1PathSummary struct {
-	visibility tier1Visibility
-	edges      map[ASNEdge]struct{}
-	replay     bool
+	visibility           tier1Visibility
+	edges                map[ASNEdge]struct{}
+	provisionalRelations *RelationshipIndex
+	replay               bool
 }
 
 // Larger inputs use the ordinary verified second pass. This memory bound
 // never selects a smaller population for evaluating a graph.
 const tier1RetainedPathEntries = 256 * 1024
 
-func (s *tier1PathSummary) collect(path PathObservation) {
+func (s *tier1PathSummary) observeRelationship() {
+	if s.provisionalRelations != nil {
+		*s = tier1PathSummary{replay: true}
+	}
+}
+
+func (s *tier1PathSummary) collect(path PathObservation, relations *RelationshipIndex) {
 	if s.replay {
 		return
 	}
-	if s.edges == nil {
-		s.edges = make(map[ASNEdge]struct{})
+	if s.visibility.families == nil {
 		s.visibility = newTier1Visibility()
+		if relations != nil && len(relations.edges) > 0 {
+			s.provisionalRelations = relations
+			s.visibility.incidentUnknown = make(map[uint32]bool)
+		} else {
+			s.edges = make(map[ASNEdge]struct{})
+		}
 	}
-	err := s.visibility.add(path, func(edge ASNEdge) { s.edges[edge] = struct{}{} })
+	err := s.visibility.add(path, func(edge ASNEdge) {
+		if s.provisionalRelations != nil {
+			// Once both endpoints already have an unknown incident edge, no
+			// further relationship lookup can change the visibility summary.
+			if !s.visibility.incidentUnknown[edge.From] || !s.visibility.incidentUnknown[edge.To] {
+				s.visibility.relation(s.provisionalRelations, edge)
+			}
+		} else {
+			s.edges[edge] = struct{}{}
+		}
+	})
 	if err != nil || len(s.edges) > tier1RetainedPathEntries || s.visibility.pairs > tier1RetainedPathEntries {
 		*s = tier1PathSummary{replay: true}
 	}
 }
 
-func (s *tier1PathSummary) available() bool { return s.edges != nil && !s.replay }
+func (s *tier1PathSummary) available(relations *RelationshipIndex) bool {
+	return !s.replay && (s.edges != nil || s.provisionalRelations != nil && s.provisionalRelations == relations)
+}
 
 func (s *tier1PathSummary) resolve(ctx context.Context, relations *RelationshipIndex) (tier1Visibility, error) {
+	if !s.available(relations) {
+		return tier1Visibility{}, errors.New("unavailable Tier-1 path summary")
+	}
 	v := s.visibility
+	if s.provisionalRelations != nil {
+		return v, ctx.Err()
+	}
 	v.incidentUnknown = make(map[uint32]bool)
 	for edge := range s.edges {
 		if err := ctx.Err(); err != nil {

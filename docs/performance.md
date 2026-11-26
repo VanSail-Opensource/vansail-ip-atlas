@@ -101,6 +101,9 @@ external sort and packaging children; use cgroup peak counters where available a
 report sampling blind spots. Linux `resource.getrusage(RUSAGE_CHILDREN)` alone is not
 simultaneous process-group peak RSS. Set Go memory target to 5120 MiB but enforce the
 whole-group RSS abort independently; `GOMEMLIMIT` is not an RSS bound.
+The long-running compiler and its hosted rebuild replays use the same GC pacing
+default under that heap target. The RSS and disk ceilings are unchanged. An
+explicit `GOGC` setting still takes precedence for local operations.
 
 The runner and independently measured Chrome scope share one transient systemd
 slice. Its aggregate CPU, memory and swap limits apply before task processes

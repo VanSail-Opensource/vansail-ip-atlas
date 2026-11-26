@@ -30,6 +30,13 @@ normalized walk before any cached category stream is adopted. That walk rebuilds
 usage, relationship, known-ASN, edge, exact-record, path and prefix side indexes
 from the current state. Withdrawn sources cannot leave a cached side index.
 
+At the address-family roots, bounded scatter batches preserve the original
+source boundaries when they fit within the remaining partition budget. A
+withdrawal can therefore reuse groups from surviving sources without changing
+their record order or counting them again. Normalized records route directly
+to the contiguous terminals they overlap, including every inherited terminal
+for broad rows. Both fast paths retain the existing split and verification gates.
+
 During that same walk, the compiler records which IPv4 and IPv6 seed groups
 contain exact evidence or prefix-to-origin observations. The ASN risk pass
 can process those groups separately. It keeps every record in a mixed group

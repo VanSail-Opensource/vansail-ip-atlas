@@ -1,6 +1,7 @@
 import importlib.util
 import copy
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -14,6 +15,23 @@ spec.loader.exec_module(build)
 
 
 class ProductionBuildTransitionTests(unittest.TestCase):
+    def test_scratch_scan_counts_all_file_bytes_and_does_not_follow_links(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name in ('.atlas-private', 'build-private/nested', 'web/.output'):
+                directory = root / name
+                directory.mkdir(parents=True)
+                (directory / 'payload').write_bytes(b'123')
+            path = root / 'build-private/nested/payload'
+            os.link(path, path.with_name('hardlink'))
+            (root / 'outside').mkdir()
+            (root / 'outside/excluded').write_bytes(b'12345')
+            (root / 'build-private/outside').symlink_to(root / 'outside', target_is_directory=True)
+            self.assertEqual(build.disk_bytes(root), 12)
+            path.with_name('symlink').symlink_to(path)
+            with self.assertRaises(ContractError):
+                build.disk_bytes(root)
+
     def test_single_replay_preserves_warm_preparation_before_measured_timer(self):
         for scenario in ('cold_full', 'warm_unchanged'):
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as temporary:

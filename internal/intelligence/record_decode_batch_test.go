@@ -31,6 +31,24 @@ func decodeBatchFrames(t *testing.T, count int) [][]byte {
 	return frames
 }
 
+func TestBatchRetainsExactFrameExtentsAcrossSlotReuse(t *testing.T) {
+	frames := decodeBatchFrames(t, 257)
+	raw := decodeBatchPayload(frames)
+	var retained [][]byte
+	count, err := walkRecordDecodeBatches(context.Background(), bytes.NewReader(raw), int64(len(raw)), uint64(len(frames)), func(_ NormalizedRecord, frame []byte) error {
+		retained = append(retained, frame)
+		return nil
+	})
+	if err != nil || count != uint64(len(frames)) || len(retained) != len(frames) {
+		t.Fatalf("retained batch population differs: %d %d %v", count, len(retained), err)
+	}
+	for i, frame := range retained {
+		if len(frame) != cap(frame) || !bytes.Equal(frame, frames[i]) {
+			t.Fatalf("frame %d exposes another extent or was overwritten", i)
+		}
+	}
+}
+
 func decodeBatchPayload(frames [][]byte) []byte {
 	var raw []byte
 	for _, frame := range frames {

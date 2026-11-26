@@ -26,11 +26,16 @@ func (s *bulkSpool) routedRiskRoots(roots []*bulkBucket) ([]*bulkBucket, bool) {
 	omitted := false
 	for _, root := range roots {
 		bucket := &bulkBucket{prefix: root.prefix, active: true, riskOnly: true}
-		for _, part := range root.parts {
+		sourceEnds := root.sourceEnds
+		for i, part := range root.parts {
 			if s.riskParts[part.SHA256] {
 				bucket.parts = append(bucket.parts, part)
 			} else {
 				omitted = true
+			}
+			if len(sourceEnds) != 0 && sourceEnds[0] == i+1 {
+				bucket.sourceEnds = appendSourceEnd(bucket.sourceEnds, len(bucket.parts))
+				sourceEnds = sourceEnds[1:]
 			}
 		}
 		filtered = append(filtered, bucket)

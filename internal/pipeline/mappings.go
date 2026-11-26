@@ -49,13 +49,33 @@ func MappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 // mappingProducer accepts lengths only from IntelligenceProducer's owned,
 // already bounded mapping subset. Exported entry points always encode inputs.
 func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, clock time.Time, encodedLengths []int, omitInherited bool, scope netip.Prefix, locations *locationProjection) Producer {
+	return mappingProducerRows(state, policy, clock, encodedLengths, omitInherited, scope, locations, false)
+}
+
+func isMappingRecord(kind intelligence.RecordKind) bool {
+	switch kind {
+	case intelligence.RecordGeo, intelligence.RecordUsage, intelligence.RecordOrigins, intelligence.RecordNetworkOrganization, intelligence.RecordNetworkName:
+		return true
+	default:
+		return false
+	}
+}
+
+// The intelligence producer already verifies and visits all record kinds.
+// Its mapping pass can project the same owned rows without copying them into a
+// separate state. The standalone entry point still rejects other kinds.
+func mappingProducerRows(state intelligence.BuildState, policy intelligence.Policy, clock time.Time, encodedLengths []int, omitInherited bool, scope netip.Prefix, locations *locationProjection, project bool) Producer {
 	return func(ctx context.Context, emit func(via3.PublicRecord) error) error {
+		state := state
 		if err := checkOwnedRecordLengths(state, encodedLengths); err != nil {
 			return err
 		}
-		state, joinErr := joinASNUsage(ctx, state)
-		if joinErr != nil {
-			return joinErr
+		if !project {
+			joined, err := joinASNUsage(ctx, state)
+			if err != nil {
+				return err
+			}
+			state = joined
 		}
 		if emit == nil {
 			return errors.New("mapping output sink is required")
@@ -80,7 +100,7 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 		}
 		networkLabels := map[netip.Prefix]labels{}
 		seen := map[string]struct{}{}
-		var bytes, count int
+		var bytes, count, inputOrdinal int
 		for _, source := range state.Sources {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -96,13 +116,18 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 				return errors.New("mapping source receipt count exceeded")
 			}
 			for _, record := range source.Records {
+				ordinal := inputOrdinal
+				inputOrdinal++
 				if err := ctx.Err(); err != nil {
 					return err
+				}
+				if project && !isMappingRecord(record.Kind) {
+					continue
 				}
 				if err := record.Validate(); err != nil {
 					return err
 				}
-				if record.Kind != intelligence.RecordGeo && record.Kind != intelligence.RecordUsage && record.Kind != intelligence.RecordOrigins && record.Kind != intelligence.RecordNetworkOrganization && record.Kind != intelligence.RecordNetworkName {
+				if !isMappingRecord(record.Kind) {
 					return errors.New("mapping-only materializer cannot discard risk, coverage, RPKI, path or relationship facts")
 				}
 				// Reject huge nested fields before allocating their JSON encoding.
@@ -115,7 +140,7 @@ func mappingProducer(state intelligence.BuildState, policy intelligence.Policy, 
 				if record.Origins != nil && len(record.Origins.Origins) > via3.PublicOrigins {
 					return errors.New("mapping origin count exceeded")
 				}
-				size, err := normalizedRecordBytes(record, encodedLengths, count)
+				size, err := normalizedRecordBytes(record, encodedLengths, ordinal)
 				if err != nil {
 					return err
 				}

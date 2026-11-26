@@ -14,18 +14,18 @@ concurrency:
 jobs:
   source-intake:
     name: rebuild-${{ matrix.scenario }}
-    if: github.ref == 'refs/heads/codex/retest-full-data-rebuilds'
+    if: github.ref == 'refs/heads/codex/measure-clock-aware-full-data'
     runs-on: ubuntu-24.04
     timeout-minutes: 100
     strategy:
       fail-fast: false
       matrix:
-        scenario: [warm_changed, clock_advance, withdrawal]
+        scenario: [clock_advance, withdrawal]
     env:
       GOMAXPROCS: '2'
       GOMEMLIMIT: 5GiB
       RUNNER_TOOL_CACHE: ${{ github.workspace }}/build-private/toolcache
-      ATLAS_REPLAY_COMPILER: 58b43a2fd54eb8bb880e19304e1d430b0daa6b90
+      ATLAS_REPLAY_COMPILER: a60261753ef91b153d95a1202def040fae20b91f
     steps:
       - uses: actions/checkout@v7.0.0
         with:

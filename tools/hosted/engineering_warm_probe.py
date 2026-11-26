@@ -25,6 +25,10 @@ BASE = "f0cff9f0616222c839adbbd7bd174f9da06e7098"
 PHASES = ("prepare", "measure")
 SCENARIOS = ("warm_changed", "warm_unchanged")
 COMPILER_HEAD = "76095aa2f085d502c4f02892be72096bd352590c"
+ROW_VERIFICATION_FAILURES = {
+    b"state-read", b"state-identity", b"source-identity", b"row-population",
+    b"original-object", b"mutated-object", b"row-difference", b"changed-count",
+}
 
 
 def sha(data):
@@ -119,22 +123,32 @@ def run_case(scenario, phase):
         records = alloc(Path(directory), invocation, "benchmark-state", {"benchmark-state": 1}, process.pid, process.returncode)
         report.update(allocation_count=records[0]["allocation_count"], allocated_bytes=records[0]["allocated_bytes"])
     if phase == "measure":
+        print(f"Engineering {scenario} native measurement completed", flush=True)
         native = checked_native(data, clock, baseline, scenario)
+        print(f"Engineering {scenario} native transition shape verified", flush=True)
         before = read_private(ROOT / ".atlas-private/state-v1.json", 64 << 20)
         after = read_private(out / "benchmark-state.json", 64 << 20)
         if sha(before) != native["before_state_sha256"] or sha(after) != native["after_state_sha256"]:
             raise ContractError("original or transformed state byte digest differs")
+        print(f"Engineering {scenario} original and resulting state digests verified", flush=True)
         def populations(raw):
             sources = json.loads(raw)["Sources"]
             return {row["ID"]: sum(integer(p["Records"], 1) for p in row["RecordPartitions"]) for row in sources}
         old, new = populations(before), populations(after)
         if len(old) != 23 or old != new or sum(old.values()) != native["input_records"]:
             raise ContractError("original population changed unexpectedly")
+        print(f"Engineering {scenario} original and resulting populations verified", flush=True)
         if scenario == "warm_changed":
             verified = subprocess.run([str(ROOT / "build-private/verify-warm-rows"), str(ROOT), str(out)],
                                       capture_output=True, timeout=30 * 60, check=False)
             if verified.returncode:
+                category = verified.stderr.strip()
+                if category in ROW_VERIFICATION_FAILURES:
+                    print(f"Engineering row verification failed: {category.decode('ascii')}", flush=True)
+                else:
+                    print(f"Engineering row verifier exited {verified.returncode}", flush=True)
                 raise ContractError("independent row verification failed")
+            print(f"Engineering {scenario} independent row verifier completed", flush=True)
             comparison = keys(json_report(verified.stdout, 4096), {"records", "changed", "compared"})
             if (integer(comparison["records"]) != native["input_records"]
                     or integer(comparison["changed"]) != native["transition"]["changed_records"]

@@ -16,6 +16,19 @@ import (
 
 var mismatch = errors.New("warm row comparison failed")
 
+// These closed stages are safe in the hosted diagnostic logs. The responsible
+// source, object, path and underlying errors stay private.
+var (
+	readState      = errors.New("state-read")
+	stateIdentity  = errors.New("state-identity")
+	sourceIdentity = errors.New("source-identity")
+	rowPopulation  = errors.New("row-population")
+	originalObject = errors.New("original-object")
+	mutatedObject  = errors.New("mutated-object")
+	rowDifference  = errors.New("row-difference")
+	changedCount   = errors.New("changed-count")
+)
+
 func state(path string) (intelligence.BuildState, error) {
 	var s intelligence.BuildState
 	info, err := os.Lstat(path)
@@ -105,24 +118,24 @@ func inspect(root, out string) (counts, error) {
 	ctx := context.Background()
 	a, e := state(filepath.Join(root, ".atlas-private/state-v1.json"))
 	if e != nil {
-		return c, e
+		return c, readState
 	}
 	b, e := state(filepath.Join(out, "benchmark-state.json"))
 	if e != nil {
-		return c, e
+		return c, readState
 	}
 	if len(a.Sources) != 23 || len(a.Sources) != len(b.Sources) || a.Version != b.Version || a.PolicyHash != b.PolicyHash || !a.EvaluatedAt.Equal(b.EvaluatedAt) {
-		return c, mismatch
+		return c, stateIdentity
 	}
 	for i, x := range a.Sources {
 		y := b.Sources[i]
 		p, q := x.RecordPartitions, y.RecordPartitions
 		if len(x.Records) != 0 || len(y.Records) != 0 {
-			return c, mismatch
+			return c, rowPopulation
 		}
 		x.RecordPartitions, y.RecordPartitions = nil, nil
 		if !reflect.DeepEqual(x, y) {
-			return c, mismatch
+			return c, sourceIdentity
 		}
 		x.RecordPartitions, y.RecordPartitions = p, q
 		var before, after uint64
@@ -133,23 +146,23 @@ func inspect(root, out string) (counts, error) {
 			after += v.Records
 		}
 		if before != after {
-			return c, mismatch
+			return c, rowPopulation
 		}
 		c.Records += before
 		if e = intelligence.VerifyStoredSourceObjects(ctx, root, x); e != nil {
-			return c, e
+			return c, originalObject
 		}
 		if e = intelligence.VerifyStoredSourceObjects(ctx, out, y); e != nil {
-			return c, e
+			return c, mutatedObject
 		}
 		if !slices.Equal(p, q) {
 			if e = differing(ctx, root, out, x, y, &c); e != nil {
-				return c, e
+				return c, rowDifference
 			}
 		}
 	}
 	if c.Records == 0 || c.Changed != (c.Records+99)/100 {
-		return c, mismatch
+		return c, changedCount
 	}
 	return c, nil
 }
@@ -159,7 +172,7 @@ func main() {
 	}
 	c, e := inspect(os.Args[1], os.Args[2])
 	if e != nil {
-		fmt.Fprintln(os.Stderr, "Engineering row comparison failed")
+		fmt.Fprintln(os.Stderr, e)
 		os.Exit(1)
 	}
 	if json.NewEncoder(os.Stdout).Encode(c) != nil {

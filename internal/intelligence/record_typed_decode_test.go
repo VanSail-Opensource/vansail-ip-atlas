@@ -3,9 +3,13 @@ package intelligence
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -100,6 +104,111 @@ func TestCanonicalDecodeRetainsUnmodifiedRawFrames(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCanonicalMeasuredDecodeKeepsCanonicalIdentityAndOwnership(t *testing.T) {
+	const long = 5*recordDecodeBatchFrames + 13
+	for _, total := range []int{14, long} {
+		for _, compressed := range []bool{false, true} {
+			for _, noncanonical := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%d/%t/%t", total, compressed, noncanonical), func(t *testing.T) {
+					exact, expected := mixedTypedDecodeFrames(t, total)
+					physical := append([][]byte(nil), exact...)
+					if noncanonical {
+						at := total / 2
+						physical[at] = append([]byte{' ', '\t'}, physical[at]...)
+					}
+					root, part := decodeBatchFixture(t, physical, nil, compressed)
+					var retained []NormalizedRecord
+					var measured []CanonicalRecordMeasure
+					add := func(row NormalizedRecord, measure CanonicalRecordMeasure) error {
+						retained = append(retained, row)
+						measured = append(measured, measure)
+						return nil
+					}
+					capability, err := CompareCanonicalMeasures(t.Context(), root, part, add)
+					if err != nil || (capability.Descriptor() == part) == noncanonical {
+						t.Fatalf("wrong canonical capability: %v, %v", capability.Descriptor(), err)
+					}
+					if !noncanonical {
+						if err = capability.WalkMeasures(t.Context(), add); err != nil {
+							t.Fatal(err)
+						}
+					}
+					want := total
+					if !noncanonical {
+						want += total
+					}
+					if len(retained) != want {
+						t.Fatalf("unexpected record population: %d, expected %d", len(retained), want)
+					}
+					for i, row := range retained {
+						j := i % total
+						measure := measured[i]
+						if !reflect.DeepEqual(row, expected[j]) || measure.Digest() != sha256.Sum256(exact[j]) || measure.EncodedBytes() != len(exact[j]) {
+							t.Fatalf("record or canonical identity changed at read %d", i)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestCanonicalMeasuredDecodePreservesStrictFailures(t *testing.T) {
+	for _, corrupt := range []func([]byte) []byte{
+		func(data []byte) []byte { return append(data, []byte(` {}`)...) },
+		func(data []byte) []byte {
+			return bytes.Replace(data, []byte(`"Version":`), []byte(`"Unknown":false,"Version":`), 1)
+		},
+		func(data []byte) []byte { return bytes.Replace(data, []byte("Network 2"), []byte{0xff}, 1) },
+	} {
+		frames := decodeBatchFrames(t, 193)
+		valid := []byte(`{"Version":3,"Kind":9,"ASNIdentity":{"ASN":13335,"Name":"Network 2"}}`)
+		frames[65] = corrupt(valid)
+		root, part := decodeBatchFixture(t, frames, nil, true)
+		seen := 0
+		capability, err := CompareCanonicalMeasures(t.Context(), root, part, func(NormalizedRecord, CanonicalRecordMeasure) error {
+			seen++
+			return nil
+		})
+		if err == nil || capability.Descriptor() == part || seen != 65 {
+			t.Fatalf("hostile frame bypassed strict callback boundary: count %d, err %v", seen, err)
+		}
+	}
+}
+
+func TestCanonicalMeasuredDecodeAuthenticatesUnreadSuffixOnEarlyStop(t *testing.T) {
+	frames := decodeBatchFrames(t, 257)
+	for i := range frames {
+		frames[i] = bytes.Replace(frames[i], []byte(fmt.Sprintf("Network %d", i)), bytes.Repeat([]byte{'x'}, 2048), 1)
+	}
+	root, part := decodeBatchFixture(t, frames, nil, false)
+	capability, err := CompareCanonicalMeasures(t.Context(), root, part, func(NormalizedRecord, CanonicalRecordMeasure) error { return nil })
+	if err != nil || capability.Descriptor() != part {
+		t.Fatalf("fixture was not canonical: %v", err)
+	}
+	for _, mutate := range []bool{false, true} {
+		seen := 0
+		err = capability.WalkMeasures(t.Context(), func(NormalizedRecord, CanonicalRecordMeasure) error {
+			seen++
+			if mutate {
+				path := filepath.Join(root, ".atlas-private", "records-v2", partitionName(part))
+				f, err := os.OpenFile(path, os.O_WRONLY, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = f.WriteAt([]byte{'x'}, part.Bytes-1)
+				if closeErr := f.Close(); err != nil || closeErr != nil {
+					t.Fatalf("change unread fixture suffix: %v, %v", err, closeErr)
+				}
+			}
+			return ErrVerifyRecordPrefix
+		})
+		if err == nil || errors.Is(err, ErrVerifyRecordPrefix) == mutate || seen != 1 {
+			t.Fatalf("wrong early-stop result after mutation %v: count %d err %v", mutate, seen, err)
+		}
 	}
 }
 

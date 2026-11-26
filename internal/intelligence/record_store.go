@@ -49,7 +49,16 @@ func (p CanonicalPartition) Descriptor() RecordPartition { return p.part }
 // Walk retains the normal byte, framing, decoding and semantic checks. Only the
 // proven writer encoding permits reusing the encoded length and digest.
 func (p CanonicalPartition) Walk(ctx context.Context, emit func(CanonicalRecordFrame) error) error {
-	if p.root == "" || !validPartition(p.part) || emit == nil {
+	if emit == nil {
+		return errors.New("canonical partition capability invalid")
+	}
+	return p.walk(ctx, recordDecodeSink{raw: func(record NormalizedRecord, data []byte) error {
+		return emit(CanonicalRecordFrame{record: record, data: data})
+	}})
+}
+
+func (p CanonicalPartition) walk(ctx context.Context, sink recordDecodeSink) error {
+	if p.root == "" || !validPartition(p.part) {
 		return errors.New("canonical partition capability invalid")
 	}
 	if err := ctx.Err(); err != nil {
@@ -62,9 +71,7 @@ func (p CanonicalPartition) Walk(ctx context.Context, emit func(CanonicalRecordF
 	if root != p.root {
 		return errors.New("canonical partition root changed")
 	}
-	return walkPartitionFrames(ctx, root, p.part, func(record NormalizedRecord, data []byte) error {
-		return emit(CanonicalRecordFrame{record: record, data: data})
-	})
+	return walkPartitionRecords(ctx, root, p.part, sink)
 }
 
 // CompareCanonicalFrames walks the ordinary strict representation, including
@@ -75,6 +82,49 @@ func CompareCanonicalFrames(ctx context.Context, workspace string, part RecordPa
 	if ctx == nil || emit == nil {
 		return CanonicalPartition{}, errors.New("canonical comparison sink required")
 	}
+	return compareCanonicalFrames(ctx, workspace, part, func(record NormalizedRecord, data []byte) error {
+		return emit(CanonicalRecordFrame{record: record, data: data})
+	}, true)
+}
+
+// CanonicalRecordMeasure contains only the canonical encoded length and digest.
+// The independently owned typed row and these values may outlive the walk.
+type CanonicalRecordMeasure struct {
+	size   int
+	digest [32]byte
+}
+
+func (m CanonicalRecordMeasure) EncodedBytes() int { return m.size }
+func (m CanonicalRecordMeasure) Digest() [32]byte  { return m.digest }
+
+type canonicalMeasureSink = func(NormalizedRecord, CanonicalRecordMeasure) error
+
+func measureCanonicalFrames(emit canonicalMeasureSink) func(NormalizedRecord, []byte) error {
+	return func(record NormalizedRecord, data []byte) error {
+		return emit(record, CanonicalRecordMeasure{size: len(data), digest: sha256.Sum256(data)})
+	}
+}
+
+// WalkMeasures performs the same authentication and decoding as Walk. Unlike
+// Walk, it never exposes the frame backing store, so the verifier can recycle
+// its two bounded byte buffers after the synchronous callbacks complete.
+func (p CanonicalPartition) WalkMeasures(ctx context.Context, emit canonicalMeasureSink) error {
+	if emit == nil {
+		return errors.New("canonical partition capability invalid")
+	}
+	return p.walk(ctx, recordDecodeSink{raw: measureCanonicalFrames(emit), ephemeralRaw: true})
+}
+
+// CompareCanonicalMeasures derives the same canonical frames as
+// CompareCanonicalFrames, but exposes only measurements and owned records.
+func CompareCanonicalMeasures(ctx context.Context, workspace string, part RecordPartition, emit canonicalMeasureSink) (CanonicalPartition, error) {
+	if ctx == nil || emit == nil {
+		return CanonicalPartition{}, errors.New("canonical comparison sink required")
+	}
+	return compareCanonicalFrames(ctx, workspace, part, measureCanonicalFrames(emit), false)
+}
+
+func compareCanonicalFrames(ctx context.Context, workspace string, part RecordPartition, emit func(NormalizedRecord, []byte) error, keepFrames bool) (CanonicalPartition, error) {
 	root, err := recordDirectory(workspace, false)
 	if err != nil {
 		return CanonicalPartition{}, err
@@ -82,9 +132,9 @@ func CompareCanonicalFrames(ctx context.Context, workspace string, part RecordPa
 	equal := true
 	var buffer bytes.Buffer
 	encoder := json.NewEncoder(&buffer)
-	err = walkPartitionFrames(ctx, root, part, func(record NormalizedRecord, data []byte) error {
+	compare := func(record NormalizedRecord, data []byte) error {
 		if (record.Geo != nil && canonicalWriterGeo(data, record.Geo)) || canonicalWriterRouting(data, record) {
-			return emit(CanonicalRecordFrame{record: record, data: data})
+			return emit(record, data)
 		}
 		buffer.Reset()
 		if err := encoder.Encode(record); err != nil {
@@ -94,10 +144,14 @@ func CompareCanonicalFrames(ctx context.Context, workspace string, part RecordPa
 		encoded := buffer.Bytes()[:buffer.Len()-1]
 		if !bytes.Equal(data, encoded) {
 			equal = false
-			data = bytes.Clone(encoded)
+			data = encoded
+			if keepFrames {
+				data = bytes.Clone(data)
+			}
 		}
-		return emit(CanonicalRecordFrame{record: record, data: data})
-	})
+		return emit(record, data)
+	}
+	err = walkPartitionRecords(ctx, root, part, recordDecodeSink{raw: compare, ephemeralRaw: !keepFrames})
 	if err != nil || !equal {
 		return CanonicalPartition{}, err
 	}
@@ -480,12 +534,14 @@ func walkPartitionFrames(ctx context.Context, root string, part RecordPartition,
 	return walkPartitionRecords(ctx, root, part, recordDecodeSink{raw: emit})
 }
 
-// Only the typed callback is eligible for recycling. It never receives a raw
-// buffer or a view into one, even if it retains the entire decoded record.
+// Only callbacks that cannot expose the raw backing store may recycle it.
 type recordDecodeSink struct {
-	typed func(NormalizedRecord) error
-	raw   func(NormalizedRecord, []byte) error
+	typed        func(NormalizedRecord) error
+	raw          func(NormalizedRecord, []byte) error
+	ephemeralRaw bool // The private wrapper exposes only measurements.
 }
+
+func (s recordDecodeSink) recyclesBytes() bool { return s.typed != nil || s.ephemeralRaw }
 
 func (s recordDecodeSink) emit(record NormalizedRecord, frame []byte) error {
 	if s.typed != nil {
@@ -605,7 +661,7 @@ func walkPartitionRecords(ctx context.Context, root string, part RecordPartition
 				return errors.New("private record frame invalid")
 			}
 			var data []byte
-			if sink.typed == nil {
+			if !sink.recyclesBytes() {
 				data = make([]byte, int(n))
 			} else {
 				if int(n) > cap(scratch) {
@@ -782,8 +838,8 @@ func walkRecordDecodeBatches(ctx context.Context, reader io.Reader, remaining in
 
 // The worker pair is joined before returning, hence before the caller closes
 // its decoder or file. Canonical callers may retain their immutable raw bytes,
-// so only the typed-only route can recycle a slot after its worker and all of
-// its callbacks have finished. Decoded values own their storage in both modes.
+// so only routes that never expose bytes can recycle a slot after its worker
+// and callbacks finish. Decoded values own their storage in either mode.
 func walkRecordDecodeBatchesWithSink(ctx context.Context, reader io.Reader, remaining int64, expected uint64, sink recordDecodeSink) (uint64, error) {
 	var slots [2]recordDecodeBatch
 	var jobs [2]chan *recordDecodeBatch
@@ -808,7 +864,7 @@ func walkRecordDecodeBatchesWithSink(ctx context.Context, reader io.Reader, rema
 			return err
 		}
 		b := &slots[slot]
-		b.reset(sink.typed != nil)
+		b.reset(sink.recyclesBytes())
 		input.fill(b)
 		ended = b.readErr != nil || input.remaining == 0
 		if err := ctx.Err(); err != nil {

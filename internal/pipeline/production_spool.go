@@ -113,17 +113,33 @@ func (s *bulkSpool) walkOwned(ctx context.Context, parts []intelligence.RecordPa
 		}
 		return emit(record, frame)
 	}
+	return s.walkCanonicalParts(parts, func(part intelligence.CanonicalPartition) error {
+		return part.Walk(ctx, consume)
+	}, func(part intelligence.RecordPartition) (intelligence.CanonicalPartition, error) {
+		return intelligence.CompareCanonicalFrames(ctx, s.root, part, consume)
+	})
+}
+
+func (s *bulkSpool) walkMeasured(ctx context.Context, parts []intelligence.RecordPartition, emit func(intelligence.NormalizedRecord, intelligence.CanonicalRecordMeasure) error) error {
+	return s.walkCanonicalParts(parts, func(part intelligence.CanonicalPartition) error {
+		return part.WalkMeasures(ctx, emit)
+	}, func(part intelligence.RecordPartition) (intelligence.CanonicalPartition, error) {
+		return intelligence.CompareCanonicalMeasures(ctx, s.root, part, emit)
+	})
+}
+
+func (s *bulkSpool) walkCanonicalParts(parts []intelligence.RecordPartition, walk func(intelligence.CanonicalPartition) error, compare func(intelligence.RecordPartition) (intelligence.CanonicalPartition, error)) error {
 	for _, part := range parts {
 		if capability, ok := s.canonical[part.SHA256]; ok {
 			if capability.Descriptor() != part {
 				return errors.New("canonical spool partition identity differs")
 			}
-			if err := capability.Walk(ctx, consume); err != nil {
+			if err := walk(capability); err != nil {
 				return err
 			}
 			continue
 		}
-		verified, err := intelligence.CompareCanonicalFrames(ctx, s.root, part, consume)
+		verified, err := compare(part)
 		if err != nil {
 			return err
 		}
@@ -236,7 +252,7 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 		}
 		return nil
 	}
-	add := func(record intelligence.NormalizedRecord, frame intelligence.CanonicalRecordFrame) error {
+	add := func(record intelligence.NormalizedRecord, frame intelligence.CanonicalRecordMeasure) error {
 		if err := boundedNormalizedRecord(record); err != nil {
 			return err
 		}
@@ -259,7 +275,7 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 				return intelligence.BuildState{}, err
 			}
 		}
-	} else if err := s.walkOwned(ctx, b.parts, add); err != nil {
+	} else if err := s.walkMeasured(ctx, b.parts, add); err != nil {
 		return intelligence.BuildState{}, err
 	}
 	b.geoRawCount = len(source.Records)
@@ -279,13 +295,13 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 		for _, p := range keys {
 			v := origins[p]
 			slices.Sort(v)
-			if err := add(s.usage.joined(p, compact(v)), intelligence.CanonicalRecordFrame{}); err != nil {
+			if err := add(s.usage.joined(p, compact(v)), intelligence.CanonicalRecordMeasure{}); err != nil {
 				return intelligence.BuildState{}, err
 			}
 		}
 	}
 	if withCoverage {
-		if err := s.walkOwned(ctx, s.coverage, func(record intelligence.NormalizedRecord, frame intelligence.CanonicalRecordFrame) error {
+		if err := s.walkMeasured(ctx, s.coverage, func(record intelligence.NormalizedRecord, frame intelligence.CanonicalRecordMeasure) error {
 			if record.Coverage == nil || record.Coverage.Layer != intelligence.ASN {
 				return errors.New("invalid ASN coverage spool")
 			}

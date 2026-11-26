@@ -493,6 +493,7 @@ func narrowBulkChild(child *bulkBucket, cover netip.Prefix) {
 			node = next
 		}
 		child.parts, child.scattered, child.cover = node.parts, node.scattered, node.cover
+		child.sourceEnds = node.sourceEnds
 		child.prefix = target
 	}
 }
@@ -510,6 +511,7 @@ func (s *bulkSpool) splitSpatial(ctx context.Context, b *bulkBucket) (left, righ
 	if wroteParts {
 		root := *b
 		root.parts = nil
+		root.sourceEnds = nil
 		var terminal []*bulkBucket
 		var expand func(*bulkBucket, int) error
 		expand = func(node *bulkBucket, depth int) error {
@@ -557,15 +559,20 @@ func (s *bulkSpool) splitSpatial(ctx context.Context, b *bulkBucket) (left, righ
 				if child.cover.IsValid() {
 					node.cover = bulkPrefixCover(node.cover, child.cover)
 				}
-				for _, part := range child.parts {
+				boundaries := child.sourceEnds
+				for i, part := range child.parts {
 					if prior, exists := seen[part.SHA256]; exists {
 						if prior != part {
 							return errors.New("shared spatial partition identity differs")
 						}
-						continue
+					} else {
+						seen[part.SHA256] = part
+						node.parts = append(node.parts, part)
 					}
-					seen[part.SHA256] = part
-					node.parts = append(node.parts, part)
+					if len(boundaries) != 0 && i+1 == boundaries[0] {
+						node.sourceEnds = appendSourceEnd(node.sourceEnds, len(node.parts))
+						boundaries = boundaries[1:]
+					}
 				}
 			}
 			return nil

@@ -80,6 +80,10 @@ Closing the reader removes the scratch file.
 Prepared readers can reuse individual verified rows, dictionary labels,
 prefix lists and per-origin BGP path components. A cached address range
 must have the same longest match across both original prefix indexes.
+Stable prefix cells are kept in a single sorted list per shard and address
+family. Each holds an inline immutable row and the full selected prefix length,
+whose mask reconstructs the exact winner for any address in the proven cell.
+The shared budget accounts for the row, index and linked entry.
 All retained components share at most 16 MiB of the existing decoded cache,
 with a 256 KiB ceiling per component. Each lookup re-admits the referenced
 source objects and builds a caller-owned result. If optional components

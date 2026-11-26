@@ -88,6 +88,9 @@ func (r encoded) frameBytes() int64 {
 }
 
 func writeRunFrame(w io.Writer, row encoded) error {
+	if run, ok := w.(*privateRunWriter); ok && row.compact && !row.sparse {
+		return run.writeCompactFrame(row.data)
+	}
 	length := row.frameBytes() - 4
 	if length <= 0 || length > int64(^uint32(0)) {
 		return errors.New("private sort frame exceeds limit")

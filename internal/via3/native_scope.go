@@ -7,9 +7,27 @@ import (
 	"sort"
 )
 
+const (
+	// A scope is stored in its shard's sorted pointer vector, with no second
+	// hash-table key. Charge the 96-byte linked entry plus 32 bytes for the
+	// pointer vector's retained capacity and allocation rounding.
+	nativeScopeEntryBytes = 128
+	nativeScopeValueBytes = 48
+)
+
 type prefixComponent struct {
-	row    []byte
-	winner netip.Prefix
+	bits int16 // -1 is a missing winner. IPv4 and IPv6 lengths fit exactly.
+	size uint8
+	row  [40]byte // widest public point row. Larger future rows stay uncached.
+}
+
+func (p *prefixComponent) result(ip netip.Addr) ([]byte, netip.Prefix, bool) {
+	if p.bits < 0 {
+		return nil, netip.Prefix{}, false
+	}
+	// Within this proven cell the actual winner cannot change. Its length and
+	// the current canonical address recover the original full-precision key.
+	return p.row[:p.size:p.size], netip.PrefixFrom(ip, int(p.bits)).Masked(), true
 }
 
 func componentAddress(ip netip.Addr) (a [16]byte, family int) {
@@ -95,8 +113,7 @@ func (s *Shard) cachedPoint(ip netip.Addr) ([]byte, netip.Prefix, bool) {
 		e := scopes[i]
 		if e.key.address == maskedComponentAddress(a, family, int(e.key.depth)) {
 			c.use(e)
-			v := e.value.(prefixComponent)
-			return v.row, v.winner, v.winner.IsValid()
+			return e.value.(*prefixComponent).result(ip)
 		}
 	}
 	row, winner, ok := s.findPrefixWithin(ip, ip.BitLen())
@@ -116,21 +133,42 @@ func (s *Shard) cachedPoint(ip netip.Addr) ([]byte, netip.Prefix, bool) {
 	key.family = byte(family)
 	key.depth = byte(lo)
 	key.address = maskedComponentAddress(a, family, lo)
-	if c.put(key, prefixComponent{bytes.Clone(row), winner}, len(row)+88) {
-		// get/put and all query work run under the release mutex. trim may
-		// have evicted neighbors since the initial search.
-		scopes = d.scopes[family]
-		pos := sort.Search(len(scopes), func(i int) bool { return bytes.Compare(scopes[i].key.address[:], key.address[:]) >= 0 })
-		if pos == len(scopes) || scopes[pos].key.address != key.address {
-			d.scopes[family] = slices.Insert(scopes, pos, c.find(key))
-		}
+	if len(row) <= len((prefixComponent{}).row) {
+		fact := &prefixComponent{bits: int16(winner.Bits()), size: uint8(len(row))}
+		copy(fact.row[:], row)
+		c.put(key, fact, nativeScopeValueBytes)
 	}
 	return row, winner, ok
+}
+
+func (d *indexedShard) scopePosition(key componentKey) int {
+	scopes := d.scopes[key.family]
+	return sort.Search(len(scopes), func(i int) bool { return bytes.Compare(scopes[i].key.address[:], key.address[:]) >= 0 })
+}
+func (d *indexedShard) findScope(key componentKey) *componentEntry {
+	position := d.scopePosition(key)
+	scopes := d.scopes[key.family]
+	if position == len(scopes) || scopes[position].key != key {
+		return nil
+	}
+	return scopes[position]
+}
+func (d *indexedShard) insertScope(e *componentEntry) bool {
+	key := e.key
+	position := d.scopePosition(key)
+	scopes := d.scopes[key.family]
+	// Valid widest cells do not overlap. Reject an ambiguous start rather
+	// than retaining unaffiliated components or changing the selected answer.
+	if position < len(scopes) && scopes[position].key.address == key.address {
+		return false
+	}
+	d.scopes[key.family] = slices.Insert(scopes, position, e)
+	return true
 }
 func (d *indexedShard) dropScope(e *componentEntry) {
 	group := &d.scopes[e.key.family]
 	scopes := *group
-	i := sort.Search(len(scopes), func(i int) bool { return bytes.Compare(scopes[i].key.address[:], e.key.address[:]) >= 0 })
+	i := d.scopePosition(e.key)
 	if i == len(scopes) || scopes[i] != e {
 		return
 	}

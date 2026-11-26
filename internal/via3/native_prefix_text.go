@@ -42,15 +42,46 @@ func writePrefixText(w *nativeIndexWriter, rows []byte) error {
 	}
 	return nil
 }
-func (d *indexedShard) prefixStrings(first, count uint32, out []string) {
+
+// The private index already owns one concatenated text span per requested
+// page. Keep that immutable string and bounded relative offsets, not a second
+// slice of 16-byte string headers. No mutable caller header is retained.
+type nativePrefixLabels struct {
+	text    string
+	offsets []uint16
+}
+
+func (p nativePrefixLabels) bytes() int {
+	// 16-byte string and 24-byte slice header on supported architectures.
+	return 40 + len(p.text) + 2*cap(p.offsets)
+}
+
+func (p nativePrefixLabels) fill(out []string) {
+	for i := range out {
+		out[i] = p.text[p.offsets[i]:p.offsets[i+1]]
+	}
+}
+
+func (d *indexedShard) prefixStrings(first, count uint32, out []string, retain bool) nativePrefixLabels {
 	offsets := d.pages.span(d.base+int64(d.prefixOffsets.offset)+int64(first)*4, (int(count)+1)*4)
 	start, end := u32(offsets, 0), u32(offsets, int(count)*4)
 	// Only the requested characters escape the private page cache. Every
 	// returned string header belongs to this caller's mutable result slice.
 	text := d.pages.text(d.base+int64(d.prefixText.offset)+int64(start), int(end-start))
+	if retain && count <= prefixPageSize && len(text) <= 43*prefixPageSize {
+		// A full canonical page has at most 256*43 spelling bytes, safely
+		// below the 16-bit offset ceiling. Larger spans use the ordinary path.
+		p := nativePrefixLabels{text: text, offsets: make([]uint16, int(count)+1)}
+		for i := range p.offsets {
+			p.offsets[i] = uint16(u32(offsets, i*4) - start)
+		}
+		p.fill(out)
+		return p
+	}
 	for i := range out {
 		out[i] = text[u32(offsets, i*4)-start : u32(offsets, (i+1)*4)-start]
 	}
+	return nativePrefixLabels{}
 }
 
 // Copy just the requested text into an immutable caller-owned string. A

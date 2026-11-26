@@ -109,6 +109,9 @@ func (k componentKey) integerKey() (uint64, bool) {
 	return uint64(k.source.slot)<<49 | uint64(k.kind)<<45 | selector, true
 }
 func (c *nativeComponents) find(k componentKey) *componentEntry {
+	if k.kind == factIP {
+		return k.source.findScope(k)
+	}
 	if i, ok := k.integerKey(); ok {
 		return c.integers[i]
 	}
@@ -139,8 +142,7 @@ func (c *nativeComponents) trim(limit int) {
 					c.unlink(e)
 					if e.key.kind == factIP {
 						e.key.source.dropScope(e)
-					}
-					if i, short := e.key.integerKey(); short {
+					} else if i, short := e.key.integerKey(); short {
 						delete(c.integers, i)
 					} else {
 						delete(c.slots, e.key)
@@ -176,7 +178,11 @@ func compactComponentMap[K comparable](table *map[K]*componentEntry, peak *int) 
 	*peak = count
 }
 func (c *nativeComponents) put(k componentKey, v any, owned int) bool {
-	size := componentEntryBytes + owned
+	entryBytes := componentEntryBytes
+	if k.kind == factIP {
+		entryBytes = nativeScopeEntryBytes
+	}
+	size := entryBytes + owned
 	if !c.active || size > nativeComponentEntryLimit {
 		return false
 	}
@@ -193,7 +199,11 @@ func (c *nativeComponents) put(k componentKey, v any, owned int) bool {
 		return false
 	}
 	e := &componentEntry{key: k, value: v, bytes: size}
-	if i, short := k.integerKey(); short {
+	if k.kind == factIP {
+		if !k.source.insertScope(e) {
+			return false
+		}
+	} else if i, short := k.integerKey(); short {
 		if c.integers == nil {
 			c.integers = make(map[uint64]*componentEntry)
 		}

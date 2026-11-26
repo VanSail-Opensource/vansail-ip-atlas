@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"maps"
 	"math/bits"
 	"net/netip"
@@ -26,17 +27,18 @@ var errBulkPartition = errors.New("normalized working partition requires subdivi
 var errRawBulkPartition = fmt.Errorf("raw spatial input exceeds collection limit: %w: %w", errBulkPartition, intelligence.ErrVerifyRecordPrefix)
 
 type bulkBucket struct {
-	prefix      netip.Prefix
-	first, last uint32
-	asn         bool
-	parts       []intelligence.RecordPartition
-	sourceEnds  []int // Original source boundaries for the ordered family root.
-	riskDigest  [32]byte
-	riskExact   bool
-	riskOnly    bool
-	active      bool
-	cover       netip.Prefix
-	scattered   [2]*bulkBucket
+	prefix       netip.Prefix
+	first, last  uint32
+	asn          bool
+	parts        []intelligence.RecordPartition
+	sourceEnds   []int // Original source boundaries for the ordered family root.
+	riskDigest   [32]byte
+	mappingInput [2][32]byte
+	riskExact    bool
+	riskOnly     bool
+	active       bool
+	cover        netip.Prefix
+	scattered    [2]*bulkBucket
 	// Retained only for the synchronous visit of an owned collected state.
 	recordBytes []int
 	originASNs  []uint32
@@ -111,17 +113,33 @@ func (s *bulkSpool) walkOwned(ctx context.Context, parts []intelligence.RecordPa
 		}
 		return emit(record, frame)
 	}
+	return s.walkCanonicalParts(parts, func(part intelligence.CanonicalPartition) error {
+		return part.Walk(ctx, consume)
+	}, func(part intelligence.RecordPartition) (intelligence.CanonicalPartition, error) {
+		return intelligence.CompareCanonicalFrames(ctx, s.root, part, consume)
+	})
+}
+
+func (s *bulkSpool) walkMeasured(ctx context.Context, parts []intelligence.RecordPartition, emit func(intelligence.NormalizedRecord, intelligence.CanonicalRecordMeasure) error) error {
+	return s.walkCanonicalParts(parts, func(part intelligence.CanonicalPartition) error {
+		return part.WalkMeasures(ctx, emit)
+	}, func(part intelligence.RecordPartition) (intelligence.CanonicalPartition, error) {
+		return intelligence.CompareCanonicalMeasures(ctx, s.root, part, emit)
+	})
+}
+
+func (s *bulkSpool) walkCanonicalParts(parts []intelligence.RecordPartition, walk func(intelligence.CanonicalPartition) error, compare func(intelligence.RecordPartition) (intelligence.CanonicalPartition, error)) error {
 	for _, part := range parts {
 		if capability, ok := s.canonical[part.SHA256]; ok {
 			if capability.Descriptor() != part {
 				return errors.New("canonical spool partition identity differs")
 			}
-			if err := capability.Walk(ctx, consume); err != nil {
+			if err := walk(capability); err != nil {
 				return err
 			}
 			continue
 		}
-		verified, err := intelligence.CompareCanonicalFrames(ctx, s.root, part, consume)
+		verified, err := compare(part)
 		if err != nil {
 			return err
 		}
@@ -183,6 +201,14 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 	collectRisk := s.reuse != nil && !withCoverage && !b.asn
 	b.riskDigest = [32]byte{}
 	b.riskExact = false
+	b.mappingInput = [2][32]byte{}
+	// A geographic replay omits original Geo rows, so it cannot establish this
+	// narrower identity. The ordinary exact physical mapping path still works.
+	var mapping [2]hash.Hash
+	var mappingRow [37]byte
+	if s.reuse != nil && withCoverage && !b.asn && !b.riskOnly && b.geoReplay == nil {
+		mapping[0], mapping[1] = sha256.New(), sha256.New()
+	}
 	bytes, projected := 0, 0
 	if b.geoReplay != nil {
 		layout := b.geoReplay.entry.Leaf.GeoLayout
@@ -203,6 +229,14 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 			_, _ = riskDigest.Write(digest[:])
 			b.riskExact = b.riskExact || record.Kind == intelligence.RecordEvidence
 		}
+		if index := mappingInputStream(record.Kind); index >= 0 && mapping[index] != nil {
+			// Use the already accepted canonical row, after normal deduplication.
+			// This also sees the actual generated usage rows below.
+			mappingRow[0] = byte(record.Kind)
+			binary.LittleEndian.PutUint32(mappingRow[1:5], uint32(size))
+			copy(mappingRow[5:], digest[:])
+			_, _ = mapping[index].Write(mappingRow[:])
+		}
 		if record.Kind == intelligence.RecordPath {
 			paths++
 			if paths > 100000 {
@@ -218,7 +252,7 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 		}
 		return nil
 	}
-	add := func(record intelligence.NormalizedRecord, frame intelligence.CanonicalRecordFrame) error {
+	add := func(record intelligence.NormalizedRecord, frame intelligence.CanonicalRecordMeasure) error {
 		if err := boundedNormalizedRecord(record); err != nil {
 			return err
 		}
@@ -241,7 +275,7 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 				return intelligence.BuildState{}, err
 			}
 		}
-	} else if err := s.walkOwned(ctx, b.parts, add); err != nil {
+	} else if err := s.walkMeasured(ctx, b.parts, add); err != nil {
 		return intelligence.BuildState{}, err
 	}
 	b.geoRawCount = len(source.Records)
@@ -260,14 +294,14 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 		sortPrefixes(keys)
 		for _, p := range keys {
 			v := origins[p]
-			sort.Slice(v, func(i, j int) bool { return v[i] < v[j] })
-			if err := add(s.usage.joined(p, compact(v)), intelligence.CanonicalRecordFrame{}); err != nil {
+			slices.Sort(v)
+			if err := add(s.usage.joined(p, compact(v)), intelligence.CanonicalRecordMeasure{}); err != nil {
 				return intelligence.BuildState{}, err
 			}
 		}
 	}
 	if withCoverage {
-		if err := s.walkOwned(ctx, s.coverage, func(record intelligence.NormalizedRecord, frame intelligence.CanonicalRecordFrame) error {
+		if err := s.walkMeasured(ctx, s.coverage, func(record intelligence.NormalizedRecord, frame intelligence.CanonicalRecordMeasure) error {
 			if record.Coverage == nil || record.Coverage.Layer != intelligence.ASN {
 				return errors.New("invalid ASN coverage spool")
 			}
@@ -284,6 +318,11 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 	}
 	if collectRisk {
 		copy(b.riskDigest[:], riskDigest.Sum(nil))
+	}
+	for i, digest := range mapping {
+		if digest != nil {
+			copy(b.mappingInput[i][:], digest.Sum(nil))
+		}
 	}
 	b.recordBytes = recordBytes
 	return intelligence.BuildState{Version: 1, PolicyHash: s.binding, EvaluatedAt: s.clock, Sources: []intelligence.StoredSource{source}}, nil

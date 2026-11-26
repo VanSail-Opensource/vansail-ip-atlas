@@ -56,9 +56,11 @@ func (r *NetworkNameRecord) validSubscriberISP() bool {
 }
 
 // ValidRIPENetworkName enforces the registry's published inet6num netname
-// grammar. Contact handles of the form AA123-RIPE cannot become network labels.
+// grammar. Every permitted ASCII spelling is already a safe label and the
+// length bound is below SafeLabel's truncation limit. Contact handles of the
+// form AA123-RIPE cannot become network labels.
 func ValidRIPENetworkName(name string) bool {
-	if len(name) == 0 || len(name) > 128 || SafeLabel(name) != name {
+	if len(name) == 0 || len(name) > 128 {
 		return false
 	}
 	letter := func(b byte) bool { return b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z' }

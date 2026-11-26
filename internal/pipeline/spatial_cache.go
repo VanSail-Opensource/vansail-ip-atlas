@@ -42,6 +42,7 @@ type spatialCacheLeaf struct {
 	OriginContexts *leafOriginContexts `json:",omitempty"`
 	GeoLayout      *geoLayout          `json:",omitempty"`
 	RiskInput      [32]byte            `json:",omitzero"`
+	MappingInput   [32]byte            `json:",omitzero"`
 	Split          bool
 	Stream         spatialCacheStream
 }
@@ -113,11 +114,14 @@ func spatialCacheFiles(e spatialCacheEntry) (map[[32]byte]uint64, error) {
 		}
 		return files, nil
 	}
+	if e.Leaf != nil && e.Leaf.MappingInput != ([32]byte{}) && (e.Domain != mappingDomain || e.Leaf.Split || e.Key == e.Leaf.MappingInput) {
+		return nil, errSpatialCache
+	}
 	if e.Leaf != nil && e.Leaf.RiskInput != ([32]byte{}) && (e.Domain != "risk" || e.Leaf.Split || e.Key == e.Leaf.RiskInput) {
 		return nil, errSpatialCache
 	}
 	if e.Leaf != nil && e.Leaf.OriginContexts != nil {
-		if e.Domain != "public" || e.Leaf.Split {
+		if e.Domain != "public" && e.Domain != publicCoreDomain || e.Leaf.Split {
 			return nil, errSpatialCache
 		}
 		if _, err := e.Leaf.OriginContexts.origins(); err != nil {
@@ -224,8 +228,9 @@ func spatialCacheFiles(e spatialCacheEntry) (map[[32]byte]uint64, error) {
 		if err := add(s.SHA256, s.Bytes); err != nil {
 			return nil, err
 		}
-	case "risk", "risk-input", "public", "location", mappingDomain:
-		if e.Seed != nil || e.Scatter != nil || e.Leaf == nil || (e.Domain == "location" || e.Domain == "risk-input" || e.Domain == mappingDomain) && e.Leaf.Split {
+	case "risk", "risk-input", "public", "location", mappingDomain, publicCoreDomain:
+		if e.Seed != nil || e.Scatter != nil || e.Leaf == nil || (e.Domain == "location" || e.Domain == "risk-input" || e.Domain == mappingDomain || e.Domain == publicCoreDomain) && e.Leaf.Split ||
+			e.Domain == publicCoreDomain && e.Leaf.OriginContexts == nil {
 			return nil, errSpatialCache
 		}
 		s := e.Leaf.Stream
@@ -552,7 +557,7 @@ func (c *spatialCache) Lookup(ctx context.Context, domain string, key [32]byte) 
 		return spatialCacheEntry{}, false, errSpatialCache
 	}
 	switch domain {
-	case "seed", seedSourceDomain, "scatter", "risk", "risk-input", "public", "compiled", "location", mappingDomain, rawSplitDomain, riskShapeDomain, geoLayoutDomain, sortedPathsDomain, sortedPrefixesDomain:
+	case "seed", seedSourceDomain, "scatter", "risk", "risk-input", "public", "compiled", "location", mappingDomain, rawSplitDomain, riskShapeDomain, geoLayoutDomain, sortedPathsDomain, sortedPrefixesDomain, publicCoreDomain:
 	default:
 		return spatialCacheEntry{}, false, errSpatialCache
 	}

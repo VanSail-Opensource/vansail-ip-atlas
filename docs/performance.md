@@ -80,6 +80,10 @@ Closing the reader removes the scratch file.
 Prepared readers can reuse individual verified rows, dictionary labels,
 prefix lists and per-origin BGP path components. A cached address range
 must have the same longest match across both original prefix indexes.
+Stable prefix cells are kept in a single sorted list per shard and address
+family. Each holds an inline immutable row and the full selected prefix length,
+whose mask reconstructs the exact winner for any address in the proven cell.
+The shared budget accounts for the row, index and linked entry.
 All retained components share at most 16 MiB of the existing decoded cache,
 with a 256 KiB ceiling per component. Each lookup re-admits the referenced
 source objects and builds a caller-owned result. If optional components
@@ -97,6 +101,9 @@ external sort and packaging children; use cgroup peak counters where available a
 report sampling blind spots. Linux `resource.getrusage(RUSAGE_CHILDREN)` alone is not
 simultaneous process-group peak RSS. Set Go memory target to 5120 MiB but enforce the
 whole-group RSS abort independently; `GOMEMLIMIT` is not an RSS bound.
+The long-running compiler and its hosted rebuild replays use the same GC pacing
+default under that heap target. The RSS and disk ceilings are unchanged. An
+explicit `GOGC` setting still takes precedence for local operations.
 
 The runner and independently measured Chrome scope share one transient systemd
 slice. Its aggregate CPU, memory and swap limits apply before task processes

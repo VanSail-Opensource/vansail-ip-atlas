@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 	"net/netip"
+	"slices"
 	"sort"
 	"time"
 
@@ -384,7 +385,7 @@ func newEngine(p Policy, evidence []Evidence, coverage []Coverage, mapping []Ori
 		}
 		key := prefix
 		origins := append(e.origins[key], m.Origins...)
-		sort.Slice(origins, func(i, j int) bool { return origins[i] < origins[j] })
+		slices.Sort(origins)
 		e.origins[key] = uniqueASNs(origins)
 	}
 	e.originDepths = indexPrefixLengths(e.origins)

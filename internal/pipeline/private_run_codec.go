@@ -88,6 +88,42 @@ func (w *privateRunWriter) Write(p []byte) (int, error) {
 	return original, nil
 }
 
+// A canonical compact frame has a fixed marker. Append its identical counted
+// prefix and body directly for a segment with room. Keep the ordinary stream
+// writer for a frame that crosses a segment boundary.
+func (w *privateRunWriter) writeCompactFrame(data []byte) error {
+	length := int64(len(data)) + int64(len(compactRunMarker))
+	if length > int64(^uint32(0)) {
+		return errors.New("private sort frame exceeds limit")
+	}
+	var head [4 + len(compactRunMarker)]byte
+	binary.LittleEndian.PutUint32(head[:4], uint32(length))
+	copy(head[4:], compactRunMarker)
+	if len(data) > privateRunBlockBytes-len(w.pending)-len(head) {
+		if _, err := w.Write(head[:]); err != nil {
+			return err
+		}
+		_, err := w.Write(data)
+		return err
+	}
+	if w.failure != nil {
+		return w.failure
+	}
+	if w.finished {
+		return errors.New("private compressed run closed")
+	}
+	if err := w.ctx.Err(); err != nil {
+		return err
+	}
+	w.pending = append(w.pending, head[:]...)
+	w.pending = append(w.pending, data...)
+	if len(w.pending) == privateRunBlockBytes {
+		w.failure = w.segment()
+		return w.failure
+	}
+	return nil
+}
+
 func (w *privateRunWriter) segment() error {
 	if len(w.pending) == 0 {
 		return nil

@@ -19,6 +19,7 @@ The private `spatial-cache-v1` inventory records separate dependencies for each 
 | Risk shape | Exact-risk collection split or a fully validated leaf with no exact observations | Scope, ordered physical descriptors, fit limits and relevant joined role layout. Such proofs contain no scored events and do not depend on clock. |
 | Mapping | Validated geographic, coordinate, usage and network rows in separate location and network streams | Scope, ordered physical descriptors, fit limits and mapping policy. Location also binds the joined origin usage types actually consulted and whether unmatched origins emit contextual unknown boundaries. |
 | Public | A fitting leaf's public records, or its split decision | Risk dependencies, final global ASN contexts, RPKI completeness, publisher observation time and coverage deadline |
+| Public core | A fitting unchanged public leaf when the current RPKI snapshot is unavailable | Same full leaf identity, except the RPKI snapshot's output controls. Verify the complete recorded stream while omitting kind 9 on replay. |
 | Geo layout | A fitting geo-heavy leaf's unique geographic boundary counts and remaining raw rows | Exact ordered input descriptors, scope, location policy, raw fit counts and charges. Reuse requires the corresponding validated location values. |
 | Compiled | Final public objects and routes for a public partition subtree | Actual complete public-run bytes, scope and actual ASN prefix-provider bytes and index |
 | Compiled static kind | Geography, coordinates or network object within an existing bounded compiled leaf | Exact ordered consumed kind frames, current dictionary identity, fact group and exact leaf scope |
@@ -37,6 +38,14 @@ charges, and charges the omitted votes to the ordinary fit limit. It regenerates
 the current usage and coverage joins and evaluates current-clock risk and routing.
 Separate source verification and the full source seed walk still run. Absence
 of a fitting projection or its location values takes the ordinary path.
+
+An independently unqualified RPKI snapshot must not retain a dated answer. The
+public core alias gives the exact emitted stream a second identity for its other
+facts, without storing a second copy. It may be read only when current RPKI
+qualification is absent. The reader validates and hashes the full stream and
+does not emit its RPKI frames. An available snapshot, changed input scope, new
+clock, joined usage change or different origin risk contexts cannot use this
+fallback to replace fresh materialization.
 
 Seed streams end at original input-partition boundaries. A changed city does not
 shift later category chunks. Every source still completes its full strict
@@ -71,8 +80,15 @@ or usage values on its own. A fitting leaf can replay unchanged mapping streams
 while recomputing scoring, coverage and RPKI. Network rows do not consult ASN
 usage. A role change invalidates locations only for affected join inputs, with
 an explicit dependency on creation of unknown join boundaries when the role
-index changes between empty and nonempty. Mapping replay rechecks current input
-objects and actual encoded output bytes within the normal resource envelope.
+index changes between empty and nonempty. After ordinary bounded collection
+and deduplication, a leaf may also match its mapping streams by their exact
+ordered input records. Location binds Geo and both direct and generated usage.
+Network binds origins, registration names and organizations. Both bind current
+policy and exact leaf geometry. Evidence, coverage and RPKI do not enter these
+aliases, and their dynamic outputs are still rebuilt. A geographic shortcut
+which omits original Geo rows cannot generate this proof. Mapping replay rechecks
+current input objects and actual encoded output bytes within the normal resource
+envelope.
 
 Relationship and Tier-1 results are recomputed through their existing paths.
 The spatial public filter emits only kinds 2 through 7 and 9, whose dependencies

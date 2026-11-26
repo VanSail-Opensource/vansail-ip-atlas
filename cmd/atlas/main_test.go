@@ -12,6 +12,19 @@ import (
 	"vansail-ip-atlas/internal/via3"
 )
 
+func TestLongCompilerGCScope(t *testing.T) {
+	for _, command := range []string{"benchmark-state", "compile-production", "compile-state"} {
+		if !longCompilerCommand(command) {
+			t.Errorf("%s should share the long compiler default", command)
+		}
+	}
+	for _, command := range []string{"", "lookup", "corpus", "intake", "verify-production", "memory-profile"} {
+		if longCompilerCommand(command) {
+			t.Errorf("%s should keep the ordinary GC default", command)
+		}
+	}
+}
+
 func TestScannerInputRequiresBoundedRegularFile(t *testing.T) {
 	directory := t.TempDir()
 	if _, err := openRegularInput(directory, via3.MaxFile-1); err == nil {

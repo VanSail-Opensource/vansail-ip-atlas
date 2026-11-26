@@ -56,13 +56,16 @@ func (d *tier1Discovery) collect(index int, record NormalizedRecord) {
 	if d.failed {
 		return
 	}
+	if record.Kind == RecordRelationship {
+		d.paths.observeRelationship()
+	}
 	source := &d.sources[index]
 	if source.err = discoverTier1Record(d.relations, source, record); source.err != nil {
 		// Preserve the first error's source position, and stop graph growth while
 		// the verifier independently finishes structural validation of all rows.
 		d.failed = true
 	} else if record.Kind == RecordPath {
-		d.paths.collect(record.Path.Observation)
+		d.paths.collect(record.Path.Observation, d.relations)
 	}
 }
 
@@ -274,7 +277,7 @@ func observeTier1StateDiscovered(ctx context.Context, workspace string, state Bu
 		return nil
 	}
 	read := pathVisibilityReader(walk)
-	if discovery != nil && discovery.paths.available() {
+	if discovery != nil && discovery.paths.available(qualified.relations) {
 		read = func(relations *RelationshipIndex) (tier1Visibility, error) {
 			for i, source := range state.Sources {
 				if discovery.sources[i].hasPaths {

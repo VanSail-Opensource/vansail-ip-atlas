@@ -68,10 +68,12 @@ func TestMappingProjectionReusesCurrentInputsWithoutFreezingRisk(t *testing.T) {
 				t.Fatal(err)
 			}
 			var retained bool
+			tampered := map[[32]byte]bool{}
 			for _, e := range index.Entries {
 				if e.Domain == "mapping" && e.Leaf.Stream.Records > 0 {
 					retained = true
-					if damage {
+					if damage && !tampered[e.Leaf.Stream.SHA256] {
+						tampered[e.Leaf.Stream.SHA256] = true
 						path := filepath.Join(cacheRoot, "objects", spatialCacheFileName(e.Leaf.Stream.SHA256))
 						payload, err := os.ReadFile(path)
 						if err != nil {

@@ -12,6 +12,8 @@ type bulkLeafReuse struct {
 	domain                string
 	contexts              map[uint32]intelligence.ASNContext
 	dependencies          [32]byte
+	publicCore            [32]byte
+	withoutRPKI           bool
 	locationPolicy        [32]byte
 	riskShape             [32]byte
 	riskPolicy, riskInput [32]byte
@@ -43,7 +45,7 @@ func (r *bulkLeafReuse) begin(ctx context.Context) error {
 	return nil
 }
 
-func (r *bulkLeafReuse) finish(ctx context.Context, key [32]byte, origins []uint32) (returnErr error) {
+func (r *bulkLeafReuse) finish(ctx context.Context, key, coreKey [32]byte, origins []uint32) (returnErr error) {
 	writer := r.writer
 	r.writer = nil
 	r.spool.publicStream = nil
@@ -87,7 +89,15 @@ func (r *bulkLeafReuse) finish(ctx context.Context, key [32]byte, origins []uint
 	if err := r.retainRiskInput(ctx, entry, files); err != nil {
 		return err
 	}
-	_, err := r.spool.reuse.Retain(ctx, entry, files)
+	retained, err := r.spool.reuse.Retain(ctx, entry, files)
+	if err != nil || !retained || coreKey == ([32]byte{}) {
+		return err
+	}
+	// Both entries authenticate the exact same checked stream. A lookup of
+	// the second identity is only usable with absent RPKI qualification, and
+	// its reader still parses and hashes all frames, including omitted ones.
+	entry.Domain, entry.Key = publicCoreDomain, coreKey
+	_, err = r.spool.reuse.Retain(ctx, entry, files)
 	return err
 }
 
@@ -110,6 +120,7 @@ func (r *bulkLeafReuse) replay(ctx context.Context, stream spatialCacheStream) e
 
 const rawSplitDomain = "raw-split"
 const riskShapeDomain = "risk-shape"
+const publicCoreDomain = "public-core"
 
 // Small buckets take the normal collect path without a second cache lookup.
 // Overlapping records can overstate this estimate. Only collect itself may
@@ -183,6 +194,13 @@ func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, cove
 			return err
 		}
 		var shapeKey [32]byte
+		var coreKey [32]byte
+		if reuse.publicCore != ([32]byte{}) {
+			coreKey, err = s.leafKey(publicCoreDomain, bucket, coverage, reuse.publicCore)
+			if err != nil {
+				return err
+			}
+		}
 		var entry spatialCacheEntry
 		var hit bool
 		if reuse.riskShape != ([32]byte{}) {
@@ -201,6 +219,14 @@ func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, cove
 		if err != nil {
 			return err
 		}
+		coreHit := false
+		if !hit && reuse.withoutRPKI && coreKey != ([32]byte{}) {
+			entry, hit, err = s.reuse.Lookup(ctx, publicCoreDomain, coreKey)
+			if err != nil {
+				return err
+			}
+			coreHit = hit
+		}
 		if hit && reuse.domain == "public" && !entry.Leaf.Split {
 			hit, err = entry.Leaf.OriginContexts.matches(reuse.contexts)
 			if err != nil {
@@ -217,7 +243,12 @@ func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, cove
 				}
 			}
 			if !entry.Leaf.Split {
-				if err := reuse.replay(ctx, entry.Leaf.Stream); err != nil {
+				if coreHit {
+					err = s.replayPublicFiltered(ctx, entry.Leaf.Stream, reuse.public, nil, true)
+				} else {
+					err = reuse.replay(ctx, entry.Leaf.Stream)
+				}
+				if err != nil {
 					return err
 				}
 				if err := reuse.retainRiskInput(ctx, entry, nil); err != nil {
@@ -225,6 +256,15 @@ func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, cove
 				}
 				if _, err := s.reuse.Retain(ctx, entry, nil); err != nil {
 					return err
+				}
+				if !coreHit && coreKey != ([32]byte{}) {
+					if prior, found, err := s.reuse.Lookup(ctx, publicCoreDomain, coreKey); err != nil {
+						return err
+					} else if found {
+						if _, err := s.reuse.Retain(ctx, prior, nil); err != nil {
+							return err
+						}
+					}
 				}
 				if reuse.locationPolicy != ([32]byte{}) {
 					if err := s.retainLocations(ctx, bucket, reuse.locationPolicy); err != nil {
@@ -283,7 +323,7 @@ func (s *bulkSpool) leavesReusing(ctx context.Context, roots []*bulkBucket, cove
 						return err
 					}
 				} else {
-					if err := reuse.finish(ctx, key, bucket.originASNs); err != nil {
+					if err := reuse.finish(ctx, key, coreKey, bucket.originASNs); err != nil {
 						return err
 					}
 				}

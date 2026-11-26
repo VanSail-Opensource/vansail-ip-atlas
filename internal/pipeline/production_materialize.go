@@ -477,7 +477,13 @@ func bulkIntelligenceProducer(workspace string, state intelligence.BuildState, p
 			if keyErr != nil {
 				return keyErr
 			}
-			publicReuse = &bulkLeafReuse{domain: "public", dependencies: key, contexts: contexts, locationPolicy: locationPolicy, spool: spool, public: emit}
+			coreInputs := dependencies
+			coreInputs.VRPComplete, coreInputs.RPKIObservedAt, coreInputs.RPKICoverageValidUntil = false, time.Time{}, time.Time{}
+			core, keyErr := spatialReuseKey(publicCoreDomain, coreInputs)
+			if keyErr != nil {
+				return keyErr
+			}
+			publicReuse = &bulkLeafReuse{domain: "public", dependencies: key, publicCore: core, withoutRPKI: !completeVRP, contexts: contexts, locationPolicy: locationPolicy, spool: spool, public: emit}
 		}
 		spatial, err = spool.leavesReusing(ctx, spatial, true, publicReuse, func(bucket *bulkBucket, part intelligence.BuildState) error {
 			mappings := func(ctx context.Context, produce mappingProducerFactory, emit func(via3.PublicRecord) error) error {

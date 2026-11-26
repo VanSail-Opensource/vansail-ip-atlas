@@ -21,6 +21,14 @@ import (
 func main() {
 	// These are the reviewed runner ceilings, not a whole-process RSS proof.
 	debug.SetMemoryLimit(5120 << 20)
+	if len(os.Args) > 1 && longCompilerCommand(os.Args[1]) {
+		// Frame decoding and materialization move many short-lived values.
+		// With the same heap target and external runner guard, allow more work
+		// between collections. Keep explicit operator GC settings intact.
+		if _, configured := os.LookupEnv("GOGC"); !configured {
+			debug.SetGCPercent(250)
+		}
+	}
 	signals, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	ctx, cancel := context.WithTimeout(signals, 35*time.Minute)
@@ -30,6 +38,15 @@ func main() {
 		os.Exit(1)
 	}
 }
+
+func longCompilerCommand(command string) bool {
+	switch command {
+	case "benchmark-state", "compile-production", "compile-state":
+		return true
+	}
+	return false
+}
+
 func writeJSON(path string, value any) error {
 	b, err := json.Marshal(value)
 	if err != nil {

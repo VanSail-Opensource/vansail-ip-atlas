@@ -136,3 +136,71 @@ func TestNativeComponentPressureHonorsPinsAndSecondChance(t *testing.T) {
 		t.Fatal("inactive component directory or storage remains")
 	}
 }
+
+func TestNativeCompactScopeRetainsExactPrefixPrecision(t *testing.T) {
+	if entry := reflect.TypeFor[componentEntry]().Size(); entry > nativeScopeEntryBytes-32 {
+		t.Fatal("scope charge does not cover the linked entry", entry)
+	}
+	if value := reflect.TypeFor[prefixComponent]().Size(); value > nativeScopeValueBytes {
+		t.Fatal("scope charge does not cover the compact row", value)
+	}
+	for _, tc := range []struct {
+		address string
+		lengths []int
+	}{
+		{"203.0.113.217", []int{0, 1, 15, 16, 23, 24, 30, 31, 32}},
+		{"2001:db8:1234:5678:dead:beef:1616:42", []int{0, 1, 47, 48, 63, 64, 95, 96, 126, 127, 128}},
+	} {
+		ip := netip.MustParseAddr(tc.address)
+		for _, depth := range tc.lengths {
+			value := &prefixComponent{bits: int16(depth), size: 1, row: [40]byte{1}}
+			row, got, ok := value.result(ip)
+			if !ok || got != netip.PrefixFrom(ip, depth).Masked() || len(row) != 1 || cap(row) != 1 || row[0] != 1 {
+				t.Fatal("compact result changed row or exact winner", ip, depth, got)
+			}
+		}
+	}
+	missing := &prefixComponent{bits: -1}
+	row, prefix, ok := missing.result(netip.MustParseAddr("::"))
+	if row != nil || prefix.IsValid() || ok {
+		t.Fatal("negative proof acquired a winner")
+	}
+}
+
+func TestNativeCompactScopeDoesNotDuplicateKeysOrLeakEvictions(t *testing.T) {
+	index := &nativeIndex{}
+	pages := &nativePages{epoch: 1}
+	r := &Release{native: index}
+	pages.owner = r
+	index.pages = pages
+	facts := &index.facts
+	facts.pages, facts.active = pages, true
+	source := &indexedShard{slot: 1}
+	value := &prefixComponent{bits: -1}
+	key := componentKey{source: source, kind: factIP, depth: 24}
+	if !facts.put(key, value, nativeScopeValueBytes) || !facts.put(key, value, nativeScopeValueBytes) {
+		t.Fatal("eligible compact scope rejected")
+	}
+	conflict := key
+	conflict.depth++
+	if facts.find(conflict) != nil || facts.put(conflict, value, nativeScopeValueBytes) {
+		t.Fatal("same-start different-depth scope used an incompatible proof")
+	}
+	other := key
+	other.family = 1
+	if !facts.put(other, value, nativeScopeValueBytes) || len(facts.slots) != 0 || len(facts.integers) != 0 {
+		t.Fatal("scope stored a duplicate generic map key")
+	}
+	if facts.bytes != 2*(nativeScopeEntryBytes+nativeScopeValueBytes) || pages.metadata != facts.bytes {
+		t.Fatal("cached scope storage was not fully charged")
+	}
+	facts.trim(0)
+	if len(source.scopes[0])+len(source.scopes[1]) != 2 {
+		t.Fatal("trim released active query storage")
+	}
+	pages.next()
+	facts.trim(0)
+	if facts.bytes != 0 || pages.metadata != 0 || source.scopes[0] != nil || source.scopes[1] != nil {
+		t.Fatal("trim leaked scope directory storage")
+	}
+}

@@ -3,8 +3,82 @@ package intelligence
 import (
 	"bytes"
 	"net/netip"
+	"strconv"
 	"time"
 )
+
+// Match the exact default JSON writer spelling of the ordinary spatial origin,
+// path and VRP rows. Private peer identities, escaped strings, and unfamiliar
+// layouts retain the standard encoder. This only recognizes canonical bytes
+// after the caller has independently decoded and validated the whole record.
+func canonicalWriterRouting(data []byte, record NormalizedRecord) bool {
+	if record.MRTOriginatedAt != nil || record.MRT != nil {
+		return false
+	}
+	r := writerFrameReader{remaining: data}
+	var scratch [64]byte
+	prefix := func(p netip.Prefix) bool {
+		return p.IsValid() && r.take(`"`) && r.take(string(p.AppendTo(scratch[:0]))) && r.take(`"`)
+	}
+	unsigned := func(v uint32) bool {
+		return r.take(string(strconv.AppendUint(scratch[:0], uint64(v), 10)))
+	}
+	array := func(values []uint32) bool {
+		if values == nil {
+			return r.take(`null`)
+		}
+		if !r.take(`[`) {
+			return false
+		}
+		for i, value := range values {
+			if (i != 0 && !r.take(`,`)) || !unsigned(value) {
+				return false
+			}
+		}
+		return r.take(`]`)
+	}
+	switch record.Kind {
+	case RecordOrigins:
+		v := record.Origins
+		return r.take(`{"Version":3,"Kind":3,"Origins":{"Prefix":`) && prefix(v.Prefix) &&
+			r.take(`,"Origins":`) && array(v.Origins) && string(r.remaining) == `}}`
+	case RecordVRP:
+		v := record.VRP
+		if !r.take(`{"Version":3,"Kind":6,"VRP":{"Prefix":`) || !prefix(v.Prefix) ||
+			!r.take(`,"MaxLength":`) || !unsigned(uint32(v.MaxLength)) || !r.take(`,"ASN":`) || !unsigned(v.ASN) {
+			return false
+		}
+		if t := v.ValidUntil; !t.IsZero() {
+			if t.Location() != time.UTC || t.Year() < 0 || t.Year() > 9999 || !r.take(`,"ValidUntil":"`) ||
+				!r.take(string(t.AppendFormat(scratch[:0], time.RFC3339Nano))) || !r.take(`"`) {
+				return false
+			}
+		}
+		return string(r.remaining) == `}}`
+	case RecordPath:
+		v := record.Path
+		x := v.Observation
+		if len(x.Segments) != 1 || x.Segments[0].Type != ASSequence || !x.Current || x.OriginOutward {
+			return false
+		}
+		for i := range len(x.Family) {
+			switch c := x.Family[i]; c {
+			case '"', '\\', '<', '>', '&':
+				return false
+			default:
+				if c < 0x20 || c > 0x7e {
+					return false
+				}
+			}
+		}
+		return r.take(`{"Version":3,"Kind":7,"Path":{"Prefix":`) && prefix(v.Prefix) &&
+			r.take(`,"Observation":{"Origin":`) && unsigned(x.Origin) && r.take(`,"Segments":[{"Type":1,"ASNs":`) &&
+			array(x.Segments[0].ASNs) && r.take(`}],"Family":"`) && r.take(x.Family) &&
+			string(r.remaining) == `","Current":true,"OriginOutward":false}}}`
+	default:
+		return false
+	}
+}
 
 // decodeWriterRouting recognizes common writer shapes for a single origin, a
 // single AS_SEQUENCE and a VRP. Spatial spools strip private MRT peer identity,

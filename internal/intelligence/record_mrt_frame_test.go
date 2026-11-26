@@ -82,3 +82,90 @@ func FuzzWriterMRTRouteFrameParity(f *testing.F) {
 		}
 	})
 }
+
+func TestCanonicalRoutingWriterComparison(t *testing.T) {
+	rows := writerMRTRows()[2:]
+	for _, p := range []string{"203.0.113.128/24", "2001:0db8:1:2::/32", "::ffff:192.0.2.0/120"} {
+		for _, values := range [][]uint32{nil, {}, {1}, {1, 2, 4294967295}} {
+			rows = append(rows, NormalizedRecord{Version: 3, Kind: RecordOrigins, Origins: &OriginMapping{Prefix: netip.MustParsePrefix(p), Origins: values}})
+		}
+	}
+	for _, row := range rows {
+		data, err := json.Marshal(row)
+		if err != nil || !canonicalWriterRouting(data, row) {
+			t.Fatalf("did not recognize normalized writer output %s: %v", data, err)
+		}
+		for _, change := range [][2]string{
+			{`{"Version":3,`, `{"Version":3, `}, {`{"Version":3,`, `{"Version":3,"Version":3,`},
+			{`"Kind":3`, `"kind":3`}, {`2001:db8::`, `2001:0db8::`}, {`08:00:00Z`, `08:00:00+00:00`},
+			{`08:00:00Z`, `08:00:00.0Z`}, {`"Family":"example"`, `"Family":"exam\u0070le"`},
+		} {
+			altered := bytes.Replace(data, []byte(change[0]), []byte(change[1]), 1)
+			if !bytes.Equal(data, altered) && canonicalWriterRouting(altered, row) {
+				t.Fatalf("accepted noncanonical writer output %s", altered)
+			}
+		}
+	}
+	for _, row := range writerMRTRows()[:2] {
+		data, err := json.Marshal(row)
+		if err != nil || canonicalWriterRouting(data, row) {
+			t.Fatal("private MRT identity should use the standard writer", err)
+		}
+	}
+}
+
+func FuzzCanonicalRoutingWriterComparison(f *testing.F) {
+	for _, row := range writerMRTRows() {
+		data, err := json.Marshal(row)
+		if err != nil {
+			f.Fatal(err)
+		}
+		f.Add(data)
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) > 8192 {
+			return
+		}
+		r, err := decodeRecordFrame(data)
+		if err != nil || !canonicalWriterRouting(data, r) {
+			return
+		}
+		canonical, err := json.Marshal(r)
+		if err != nil || !bytes.Equal(canonical, data) {
+			t.Fatal("accepted bytes differ from standard writer")
+		}
+	})
+}
+
+func BenchmarkCanonicalRoutingWriterComparison(b *testing.B) {
+	rows := writerMRTRows()[2:]
+	data := make([][]byte, len(rows))
+	for i, row := range rows {
+		encoded, err := json.Marshal(row)
+		if err != nil {
+			b.Fatal(err)
+		}
+		data[i] = encoded
+	}
+	b.Run("exact-shape", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; b.Loop(); i++ {
+			j := i % len(rows)
+			if !canonicalWriterRouting(data[j], rows[j]) {
+				b.Fatal("writer comparison failed")
+			}
+		}
+	})
+	b.Run("generic-json", func(b *testing.B) {
+		b.ReportAllocs()
+		var buffer bytes.Buffer
+		encoder := json.NewEncoder(&buffer)
+		for i := 0; b.Loop(); i++ {
+			j := i % len(rows)
+			buffer.Reset()
+			if err := encoder.Encode(rows[j]); err != nil || !bytes.Equal(data[j], buffer.Bytes()[:buffer.Len()-1]) {
+				b.Fatal("writer comparison failed", err)
+			}
+		}
+	})
+}

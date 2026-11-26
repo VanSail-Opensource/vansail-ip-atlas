@@ -338,6 +338,7 @@ type Engine struct {
 	exact                   map[netip.Addr]exactFact
 	exactAddresses          []netip.Addr
 	prefix                  map[netip.Prefix][]Evidence
+	prefixScores            map[netip.Prefix]prefixScore
 	asn                     map[uint32]ASNContext
 	globalASN               map[uint32]ASNContext
 	origins                 map[netip.Prefix][]uint32
@@ -562,6 +563,10 @@ func uniqueASNs(values []uint32) []uint32 {
 	return out
 }
 func (e *Engine) Origins(addr netip.Addr) []uint32 {
+	return append([]uint32(nil), e.originSet(addr)...)
+}
+
+func (e *Engine) originSet(addr netip.Addr) []uint32 {
 	if addr.Zone() != "" {
 		return nil
 	}
@@ -574,7 +579,7 @@ func (e *Engine) Origins(addr netip.Addr) []uint32 {
 	}
 	for _, bits := range e.originDepths.forAddress(addr) {
 		if origins, ok := e.origins[netip.PrefixFrom(addr, int(bits)).Masked()]; ok {
-			return append([]uint32(nil), origins...)
+			return origins
 		}
 	}
 	return nil
@@ -750,27 +755,23 @@ func (e *Engine) Lookup(addr netip.Addr) (QualityResult, error) {
 	exactFamilies := e.complete(Exact, addr)
 	prefixFamilies := e.complete(ExplicitPrefix, addr)
 	neighborFamilies := e.complete(Neighbors24, addr)
-	prefixRecords := []Evidence{}
-	for _, bits := range e.evidenceDepths.forAddress(addr) {
-		prefixRecords = append(prefixRecords, e.prefix[netip.PrefixFrom(addr, int(bits)).Masked()]...)
-	}
-	// All records were frozen and decayed against the same explicit build clock.
-	prefix, err := e.policy.layer(prefixRecords, e.buildClock())
+	prefix, err := e.lookupPrefixScore(addr)
 	if err != nil {
 		return result, err
 	}
-	result.Reasons = exact.Reasons | prefix.Reasons
-	support := [4]int{len(exact.Families), len(prefix.Families), 0, 0}
+	result.Reasons = exact.Reasons | prefix.reasons
+	support := [4]int{len(exact.Families), prefix.families, 0, 0}
 	if exact.Risk > 0 || len(exactFamilies) > 0 {
 		v := e.policy.Weights[0] * exact.Risk
 		result.Contributions[0] = &v
 	}
-	if prefix.Risk > 0 || len(prefixFamilies) > 0 {
-		v := e.policy.Weights[1] * prefix.Risk
+	if prefix.risk > 0 || len(prefixFamilies) > 0 {
+		v := e.policy.Weights[1] * prefix.risk
 		result.Contributions[1] = &v
 	}
-	origins := e.Origins(addr)
-	asnSets := []map[string]struct{}{}
+	origins := e.originSet(addr)
+	var asnSets []map[string]struct{}
+	sharedCoverage := len(e.asnCoverage) != 0
 	maxContribution := 0.0
 	asnPresent := false
 	for _, asn := range origins {
@@ -781,9 +782,18 @@ func (e *Engine) Lookup(addr netip.Addr) (QualityResult, error) {
 			support[2] = min(support[2], int(context.Support))
 		}
 		asnPresent = asnPresent || context.Present && context.Risk > 0
-		asnSets = append(asnSets, e.asnCoverage[asn])
+		if sharedCoverage {
+			set := e.asnCoverage[asn]
+			sharedCoverage = len(set) != 0
+			if sharedCoverage {
+				asnSets = append(asnSets, set)
+			}
+		}
 	}
-	asnFamilies := intersect(asnSets...)
+	var asnFamilies map[string]struct{}
+	if sharedCoverage {
+		asnFamilies = intersect(asnSets...)
+	}
 	if asnPresent || len(asnFamilies) > 0 {
 		result.Contributions[2] = &maxContribution
 		if maxContribution > 0 {

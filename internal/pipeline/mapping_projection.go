@@ -24,6 +24,30 @@ func mappingStreamIndex(kind uint16) int {
 	return 0
 }
 
+// The public mapping pass consumes only these record groups. Direct and
+// generated Usage both reach the ordinary collection deduplicator first.
+func mappingInputStream(kind intelligence.RecordKind) int {
+	switch kind {
+	case intelligence.RecordGeo, intelligence.RecordUsage:
+		return 0
+	case intelligence.RecordOrigins, intelligence.RecordNetworkOrganization, intelligence.RecordNetworkName:
+		return 1
+	default:
+		return -1
+	}
+}
+
+func (s *bulkSpool) semanticMappingKey(bucket *bulkBucket, policy [32]byte, stream int) ([32]byte, error) {
+	if bucket.mappingInput[stream] == ([32]byte{}) {
+		return [32]byte{}, nil
+	}
+	return spatialReuseKey("mapping-semantic-input", struct {
+		Policy, Inputs                   [32]byte
+		Prefix                           netip.Prefix
+		Stream, BatchBytes, BatchRecords int
+	}{policy, bucket.mappingInput[stream], bucket.prefix, stream, s.batchBytes, s.batchRecords})
+}
+
 func acceptsMappingFact(scope netip.Prefix, stream int, record via3.PublicRecord) bool {
 	return isMappingFact(record.Kind) && mappingStreamIndex(record.Kind) == stream && !record.Exact && !record.Inherited && validSpatialPrefix(record.Prefix) &&
 		(scope.Contains(record.Prefix.Addr()) || record.Prefix.Contains(scope.Addr()))
@@ -70,10 +94,12 @@ func (s *bulkSpool) mappingKeys(bucket *bulkBucket, policy [32]byte, origins []u
 	return keys, err
 }
 
-// Project only clock-independent outputs from the mapping pass. The keys bind
-// all ordered normalized records and any joined ASN usage consulted by each
-// stream. The caller has already collected the current leaf under its normal
-// resource limits, and still runs the current-clock scoring and RPKI passes.
+// Project only clock-independent outputs from the mapping pass. The exact key
+// binds the ordered physical inputs and joined usage. An optional alias binds
+// precisely the ordered, deduplicated current records these kinds consume.
+// Both attempts follow ordinary bounded collection and do not cache scores,
+// RPKI or qualification. A full public hit can carry a linked alias using its
+// authenticated physical entry, without collecting the same inputs twice.
 func (s *bulkSpool) materializeMappings(ctx context.Context, bucket *bulkBucket, policy [32]byte, produce mappingProducerFactory, emit func(via3.PublicRecord) error) (returnErr error) {
 	if s.reuse == nil || s.replaySink == nil {
 		return produce(nil, true, true)(ctx, emit)
@@ -83,6 +109,7 @@ func (s *bulkSpool) materializeMappings(ctx context.Context, bucket *bulkBucket,
 		return err
 	}
 	var hits [2]bool
+	var semantic [2][32]byte
 	var verified bool
 	defer func() {
 		for i, w := range s.mappingStreams {
@@ -93,9 +120,25 @@ func (s *bulkSpool) materializeMappings(ctx context.Context, bucket *bulkBucket,
 		}
 	}()
 	for i, key := range keys {
+		semantic[i], err = s.semanticMappingKey(bucket, policy, i)
+		if err != nil {
+			return err
+		}
 		entry, hit, err := s.reuse.Lookup(ctx, mappingDomain, key)
 		if err != nil {
 			return err
+		}
+		if hit && semantic[i] != ([32]byte{}) && entry.Leaf.MappingInput != ([32]byte{}) && entry.Leaf.MappingInput != semantic[i] {
+			return errSpatialCache
+		}
+		if !hit && semantic[i] != ([32]byte{}) {
+			entry, hit, err = s.reuse.Lookup(ctx, mappingDomain, semantic[i])
+			if err != nil {
+				return err
+			}
+			if hit && entry.Leaf.MappingInput != ([32]byte{}) {
+				return errSpatialCache
+			}
 		}
 		hits[i] = hit
 		if !hit {
@@ -123,7 +166,11 @@ func (s *bulkSpool) materializeMappings(ctx context.Context, bucket *bulkBucket,
 		// The canonical compiler sink taps this into the new full-leaf stream,
 		// but does not call the logical wrapper which increments publicRows.
 		s.publicRows += stream.Records
-		if _, err = s.reuse.Retain(ctx, entry, nil); err != nil {
+		entry.Key = key
+		if semantic[i] != ([32]byte{}) {
+			entry.Leaf.MappingInput = semantic[i]
+		}
+		if err := s.retainMappingStream(ctx, entry, nil); err != nil {
 			return err
 		}
 	}
@@ -164,10 +211,31 @@ func (s *bulkSpool) materializeMappings(ctx context.Context, bucket *bulkBucket,
 		if stream != (spatialCacheStream{}) {
 			files[stream.SHA256] = writer.path
 		}
-		entry := spatialCacheEntry{Domain: mappingDomain, Key: keys[i], Leaf: &spatialCacheLeaf{Stream: stream}}
-		if _, err = s.reuse.Retain(ctx, entry, files); err != nil {
+		entry := spatialCacheEntry{Domain: mappingDomain, Key: keys[i], Leaf: &spatialCacheLeaf{Stream: stream, MappingInput: semantic[i]}}
+		if err := s.retainMappingStream(ctx, entry, files); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// Both cache entries refer to the same already verified immutable stream.
+func (s *bulkSpool) retainMappingStream(ctx context.Context, entry spatialCacheEntry, files map[[32]byte]string) error {
+	stream := entry.Leaf.Stream
+	if files == nil && stream != (spatialCacheStream{}) {
+		path, err := s.reuse.ObjectPath(stream.SHA256)
+		if err != nil {
+			return err
+		}
+		files = map[[32]byte]string{stream.SHA256: path}
+	}
+	if _, err := s.reuse.Retain(ctx, entry, files); err != nil {
+		return err
+	}
+	if entry.Leaf.MappingInput != ([32]byte{}) {
+		alias := spatialCacheEntry{Domain: mappingDomain, Key: entry.Leaf.MappingInput, Leaf: &spatialCacheLeaf{Stream: stream}}
+		_, err := s.reuse.Retain(ctx, alias, files)
+		return err
 	}
 	return nil
 }
@@ -183,7 +251,7 @@ func (s *bulkSpool) retainMappings(ctx context.Context, bucket *bulkBucket, poli
 			return err
 		}
 		if hit {
-			if _, err := s.reuse.Retain(ctx, entry, nil); err != nil {
+			if err := s.retainMappingStream(ctx, entry, nil); err != nil {
 				return err
 			}
 		}

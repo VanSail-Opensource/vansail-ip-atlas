@@ -42,6 +42,7 @@ type spatialCacheLeaf struct {
 	OriginContexts *leafOriginContexts `json:",omitempty"`
 	GeoLayout      *geoLayout          `json:",omitempty"`
 	RiskInput      [32]byte            `json:",omitzero"`
+	MappingInput   [32]byte            `json:",omitzero"`
 	Split          bool
 	Stream         spatialCacheStream
 }
@@ -112,6 +113,9 @@ func spatialCacheFiles(e spatialCacheEntry) (map[[32]byte]uint64, error) {
 			return nil, errSpatialCache
 		}
 		return files, nil
+	}
+	if e.Leaf != nil && e.Leaf.MappingInput != ([32]byte{}) && (e.Domain != mappingDomain || e.Leaf.Split || e.Key == e.Leaf.MappingInput) {
+		return nil, errSpatialCache
 	}
 	if e.Leaf != nil && e.Leaf.RiskInput != ([32]byte{}) && (e.Domain != "risk" || e.Leaf.Split || e.Key == e.Leaf.RiskInput) {
 		return nil, errSpatialCache

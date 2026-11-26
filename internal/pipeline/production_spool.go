@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"maps"
 	"math/bits"
 	"net/netip"
@@ -26,17 +27,18 @@ var errBulkPartition = errors.New("normalized working partition requires subdivi
 var errRawBulkPartition = fmt.Errorf("raw spatial input exceeds collection limit: %w: %w", errBulkPartition, intelligence.ErrVerifyRecordPrefix)
 
 type bulkBucket struct {
-	prefix      netip.Prefix
-	first, last uint32
-	asn         bool
-	parts       []intelligence.RecordPartition
-	sourceEnds  []int // Original source boundaries for the ordered family root.
-	riskDigest  [32]byte
-	riskExact   bool
-	riskOnly    bool
-	active      bool
-	cover       netip.Prefix
-	scattered   [2]*bulkBucket
+	prefix       netip.Prefix
+	first, last  uint32
+	asn          bool
+	parts        []intelligence.RecordPartition
+	sourceEnds   []int // Original source boundaries for the ordered family root.
+	riskDigest   [32]byte
+	mappingInput [2][32]byte
+	riskExact    bool
+	riskOnly     bool
+	active       bool
+	cover        netip.Prefix
+	scattered    [2]*bulkBucket
 	// Retained only for the synchronous visit of an owned collected state.
 	recordBytes []int
 	originASNs  []uint32
@@ -183,6 +185,14 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 	collectRisk := s.reuse != nil && !withCoverage && !b.asn
 	b.riskDigest = [32]byte{}
 	b.riskExact = false
+	b.mappingInput = [2][32]byte{}
+	// A geographic replay omits original Geo rows, so it cannot establish this
+	// narrower identity. The ordinary exact physical mapping path still works.
+	var mapping [2]hash.Hash
+	var mappingRow [37]byte
+	if s.reuse != nil && withCoverage && !b.asn && !b.riskOnly && b.geoReplay == nil {
+		mapping[0], mapping[1] = sha256.New(), sha256.New()
+	}
 	bytes, projected := 0, 0
 	if b.geoReplay != nil {
 		layout := b.geoReplay.entry.Leaf.GeoLayout
@@ -202,6 +212,14 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 		if collectRisk && exactRiskInput(record) {
 			_, _ = riskDigest.Write(digest[:])
 			b.riskExact = b.riskExact || record.Kind == intelligence.RecordEvidence
+		}
+		if index := mappingInputStream(record.Kind); index >= 0 && mapping[index] != nil {
+			// Use the already accepted canonical row, after normal deduplication.
+			// This also sees the actual generated usage rows below.
+			mappingRow[0] = byte(record.Kind)
+			binary.LittleEndian.PutUint32(mappingRow[1:5], uint32(size))
+			copy(mappingRow[5:], digest[:])
+			_, _ = mapping[index].Write(mappingRow[:])
 		}
 		if record.Kind == intelligence.RecordPath {
 			paths++
@@ -284,6 +302,11 @@ func (s *bulkSpool) collectRaw(ctx context.Context, b *bulkBucket, withCoverage 
 	}
 	if collectRisk {
 		copy(b.riskDigest[:], riskDigest.Sum(nil))
+	}
+	for i, digest := range mapping {
+		if digest != nil {
+			copy(b.mappingInput[i][:], digest.Sum(nil))
+		}
 	}
 	b.recordBytes = recordBytes
 	return intelligence.BuildState{Version: 1, PolicyHash: s.binding, EvaluatedAt: s.clock, Sources: []intelligence.StoredSource{source}}, nil

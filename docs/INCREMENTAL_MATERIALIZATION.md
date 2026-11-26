@@ -80,8 +80,15 @@ or usage values on its own. A fitting leaf can replay unchanged mapping streams
 while recomputing scoring, coverage and RPKI. Network rows do not consult ASN
 usage. A role change invalidates locations only for affected join inputs, with
 an explicit dependency on creation of unknown join boundaries when the role
-index changes between empty and nonempty. Mapping replay rechecks current input
-objects and actual encoded output bytes within the normal resource envelope.
+index changes between empty and nonempty. After ordinary bounded collection
+and deduplication, a leaf may also match its mapping streams by their exact
+ordered input records. Location binds Geo and both direct and generated usage.
+Network binds origins, registration names and organizations. Both bind current
+policy and exact leaf geometry. Evidence, coverage and RPKI do not enter these
+aliases, and their dynamic outputs are still rebuilt. A geographic shortcut
+which omits original Geo rows cannot generate this proof. Mapping replay rechecks
+current input objects and actual encoded output bytes within the normal resource
+envelope.
 
 Relationship and Tier-1 results are recomputed through their existing paths.
 The spatial public filter emits only kinds 2 through 7 and 9, whose dependencies

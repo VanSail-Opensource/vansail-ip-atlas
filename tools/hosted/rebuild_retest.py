@@ -4,6 +4,7 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import re
 import runpy
 import shutil
 import subprocess
@@ -24,6 +25,29 @@ scenario = case.parse_args().scenario
 build = runpy.run_path(str(ROOT / "tools/hosted/production-build.py"))
 report = {"scope": "authenticated-real-rebuild-diagnostic", "scenario": scenario, "error_stage": None}
 stage = "environment"
+
+
+def profile_summary(profile):
+    """Retain bounded compiled function timings, never raw profiles or paths."""
+    names = ("vansail-ip-atlas/internal/", "runtime.", "encoding/json", "net/netip.",
+             "crypto/internal/", "github.com/klauspost/compress/zstd.", "math.", "os.", "syscall.")
+    result = {}
+    for key, flags in (("self", []), ("inclusive", ["-cum"])):
+        top = subprocess.run(["go", "tool", "pprof", "-top", "-nodecount=55", *flags,
+                              str(ROOT / "build-private/atlas"), str(profile)],
+                             cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             timeout=25, check=False, text=True)
+        if top.returncode != 0 or len(top.stdout) > 64 << 10:
+            raise ContractError("source-free profile report unavailable")
+        result[key] = []
+        for line in top.stdout.splitlines():
+            fields = line.split()
+            if len(fields) < 6 or not all(re.fullmatch(r"[0-9.]+(s|ms|us|ns|%)?", field) for field in fields[:5]):
+                continue
+            symbol = fields[5]
+            if len(symbol) <= 180 and symbol.startswith(names) and re.fullmatch(r"[\w./*()[\],·-]+", symbol):
+                result[key].append({"function": symbol, "self": fields[0], "inclusive": fields[3]})
+    return result
 
 
 def partition_population(data):
@@ -63,16 +87,24 @@ try:
                       allocated_bytes=0, allocation_process_count=0, go_processes=[], go_invocations=[],
                       physical_free_low_water_bytes=shutil.disk_usage(ROOT).free)
         result = root / "measurement.json"
+        profile = root / "private-expiry.pprof"
         with tempfile.TemporaryDirectory(prefix="retest-metrics-", dir=ROOT / ".atlas-private") as metrics:
             metric["_go_metrics_root"] = metrics
             metric["_started_ns"] = start = time.monotonic_ns()
-            with result.open("wb") as output:
-                status = build["command"](argv, ROOT, metric, stdout=output, atlas_commands={"benchmark-state": 1}, phase="benchmark-state")
+            os.environ["ATLAS_DIAGNOSTIC_CPU_PROFILE"] = str(profile)
+            try:
+                with result.open("wb") as output:
+                    status = build["command"](argv, ROOT, metric, stdout=output, atlas_commands={"benchmark-state": 1}, phase="benchmark-state")
+            finally:
+                del os.environ["ATLAS_DIAGNOSTIC_CPU_PROFILE"]
             metric["runtime_ms"] = (time.monotonic_ns() - start + 999999) // 1000000
             del metric["_go_metrics_root"], metric["_started_ns"]
         report["measurement"] = metric
         if status:
             raise ContractError("native engineering measurement failed")
+        stage = "profile"
+        report["instrumented_measurement"] = True
+        report["cpu_functions"] = profile_summary(profile)
         stage = "transition"
         native = json_report(read_private(result, 64 << 10))
         if (native["schema_version"] != 1 or native["scope"] != MEASUREMENT_SCOPE

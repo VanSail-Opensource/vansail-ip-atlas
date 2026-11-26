@@ -143,9 +143,16 @@ func appendSourceEnd(ends []int, count int) []int {
 // Keep both the ordered input and the existing limit on scatter destinations.
 func scatterInputGroups(parent *bulkBucket, terminals, freeSlots int, reuse bool) [][]intelligence.RecordPartition {
 	n := len(parent.parts)
-	if reuse && parent.prefix.Bits() == 0 && len(parent.sourceEnds) != 0 && parent.sourceEnds[len(parent.sourceEnds)-1] == n {
+	depth := parent.prefix.Bits()
+	if reuse && depth <= 8 && len(parent.sourceEnds) != 0 && parent.sourceEnds[len(parent.sourceEnds)-1] == n {
 		const stableGroupSize = 32
 		maxGroups := max(1, freeSlots/(32*terminals))
+		// In the first two descendant scatters, an unaffected cohort can
+		// still cover a substantial fraction of a family. Keep a bounded
+		// number of its original contiguous groups. Finer scopes coalesce.
+		if depth != 0 {
+			maxGroups = min(8, max(1, freeSlots/(64*terminals)))
+		}
 		groups := make([][]intelligence.RecordPartition, 0, min(maxGroups, len(parent.sourceEnds)))
 		start := 0
 		for _, end := range parent.sourceEnds {
@@ -218,6 +225,9 @@ func (s *bulkSpool) scatterTerminals(ctx context.Context, parent *bulkBucket, te
 				return errors.New("cached scatter scope differs")
 			}
 			terminal[i].parts = append(terminal[i].parts, value.Parts...)
+			if s.reuse != nil && parent.prefix.Bits() <= 8 {
+				terminal[i].sourceEnds = appendSourceEnd(terminal[i].sourceEnds, len(terminal[i].parts))
+			}
 			if value.Cover.IsValid() {
 				terminal[i].cover = bulkPrefixCover(terminal[i].cover, value.Cover)
 			}

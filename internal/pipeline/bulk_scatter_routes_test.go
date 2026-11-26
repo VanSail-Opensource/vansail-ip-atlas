@@ -82,3 +82,27 @@ func TestScatterGroupsKeepUnchangedSourcesTogetherAcrossWithdrawal(t *testing.T)
 		t.Fatal("stable groups exceeded the remaining partition envelope")
 	}
 }
+
+func TestCoarseDescendantScatterPreservesUnchangedCohortsWithinAllowance(t *testing.T) {
+	var parts []intelligence.RecordPartition
+	for i := range 12 {
+		parts = append(parts, intelligence.RecordPartition{SHA256: [32]byte{byte(i + 1)}})
+	}
+	for _, scope := range []string{"16.0.0.0/4", "16.0.0.0/8", "2000::/4"} {
+		root := &bulkBucket{prefix: netip.MustParsePrefix(scope), parts: parts, sourceEnds: []int{2, 6, 12}}
+		previous := scatterInputGroups(root, 16, 16000, true)
+		current := &bulkBucket{prefix: root.prefix, parts: parts[2:], sourceEnds: []int{4, 10}}
+		retained := scatterInputGroups(current, 16, 14000, true)
+		if len(previous) != 3 || !reflect.DeepEqual(previous[1:], retained) {
+			t.Fatalf("%s changed untouched contiguous groups: %d vs %d", scope, len(previous), len(retained))
+		}
+		limited := scatterInputGroups(root, 16, 256, true)
+		if len(limited) != 1 || !slices.Equal(limited[0], parts) {
+			t.Fatalf("%s exceeded available partition slots", scope)
+		}
+		root.prefix = netip.PrefixFrom(root.prefix.Addr(), 12)
+		if fine := scatterInputGroups(root, 16, 16000, true); len(fine) != 1 || !slices.Equal(fine[0], parts) {
+			t.Fatalf("%s failed to coalesce fine scatter", root.prefix)
+		}
+	}
+}

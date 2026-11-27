@@ -4,7 +4,7 @@ const focused = ref(0)
 const ipv6 = computed(() => current.value.includes(':'))
 const mean = computed(() => {
   const profile = classC.value
-  return profile ? (profile.scoreSum / profile.totalUnits).toFixed(ipv6.value ? 5 : 2).replace(/\.?0+$/, '') : '0'
+  return profile ? (profile.scoreSum / profile.totalUnits).toFixed(5).replace(/\.?0+$/, '') : '0'
 })
 const selected = computed(() => classC.value?.cells[focused.value])
 const cells = ref<HTMLButtonElement[]>([])

@@ -549,7 +549,12 @@ try {
       assert.deepEqual(await page.locator('.graph-node').evaluateAll(nodes => nodes.map(node => node.getAttribute('transform'))), geometry.layout)
       await page.getByRole('combobox', { name:'Focus observed route' }).selectOption('11')
       assert.deepEqual(await page.locator('.graph-node').evaluateAll(nodes => nodes.map(node => node.getAttribute('transform'))), geometry.layout)
+      assert(await page.locator('.graph-node.dimmed').count() > 0)
+      assert(await page.locator('.graph-node:not(.dimmed)').count() > 0)
+      assert(await page.locator('.graph-edge.dimmed').count() > 0)
+      assert(await page.locator('.graph-edge:not(.dimmed)').count() > 0)
       await page.getByRole('combobox', { name:'Focus observed route' }).selectOption('-1')
+      assert.equal(await page.locator('.graph-node.dimmed,.graph-edge.dimmed').count(), 0)
       populations.push({ width, nodes:24, world_bounds:geometry.bounds, overlapping_items:0, clipped_items:0, default_scroll_max:scroll.maximum })
     }
     const bounds = await page.locator('.bgp-graph svg').evaluate(svg => ({ width:svg.viewBox.baseVal.width,height:svg.viewBox.baseVal.height,value:svg.getAttribute('viewBox') }))

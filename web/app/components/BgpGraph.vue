@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { projectGraph } from '~/lib/bgpGraph'
-import type { GraphPath, GraphRelation } from '~/lib/bgpGraph'
+import type { GraphPath, GraphRelation, ProjectedEdge } from '~/lib/bgpGraph'
 import { fitGraphLabel, graphIdentityName, graphRelationshipLegend, type GraphIdentity, type GraphNodeName } from '~/lib/bgpGraphPresentation'
 const props = defineProps<{ paths: GraphPath[]; relationships: GraphRelation[]; origin: number; identities: readonly GraphIdentity[];
   loadNames: (asns: readonly number[], signal: AbortSignal) => Promise<readonly GraphNodeName[]> }>()
@@ -32,6 +32,9 @@ const nodeTitle = (asn: number) => {
   const name = nodeName(asn)
   return `${name ? `${name} · ` : ''}AS${asn}${projection.value.truncatedTerminals.includes(asn) ? ' · a route suffix is clipped here' : ''}`
 }
+const focusedASNs = computed(() => activePath.value === -1 ? null : new Set(projection.value.routes[activePath.value]?.asns))
+const nodeDimmed = (asn: number) => focusedASNs.value !== null && !focusedASNs.value.has(asn)
+const edgeDimmed = (edge: ProjectedEdge) => activePath.value !== -1 && !edge.routeIds.includes(activePath.value)
 const contentTransform = computed(() => {
   const { width, height } = projection.value.bounds
   return `translate(${x.value} ${y.value}) translate(${width / 2} ${height / 2}) scale(${scale.value}) translate(${-width / 2} ${-height / 2})`
@@ -175,8 +178,10 @@ watch(() => props.origin, () => { activePath.value = -1; originalOpen.value = fa
     <div ref="viewport" class="graph-viewport">
     <svg ref="svg" role="img" aria-label="Observed BGP paths. Arrow keys pan; plus and minus zoom; Home fits." tabindex="0" :viewBox="`0 0 ${projection.bounds.width} ${projection.bounds.height}`" :style="{ minWidth: fitted ? '0' : `${projection.bounds.width}px`, height: fitted ? 'min(60vh, 600px)' : undefined, minHeight: fitted ? '0' : undefined }" @wheel="wheel" @keydown="key" @pointerdown="down" @pointermove="move" @pointerup="up" @pointercancel="up">
       <g :transform="contentTransform">
-        <path v-for="edge in projection.edges" :key="edge.key" :d="`M ${projection.byId.get(edge.from)!.x} ${projection.byId.get(edge.from)!.y} L ${projection.byId.get(edge.to)!.x} ${projection.byId.get(edge.to)!.y}`" class="graph-edge" :data-relation="edge.relation" :class="{ dimmed: activePath !== -1 && !edge.routeIds.includes(activePath) }"><title>{{ `AS${edge.from} → AS${edge.to}: ${edge.relation.replaceAll('_', ' ')}; observed adjacency; original hops ${edge.fromOriginalPosition} → ${edge.toOriginalPosition}${edge.inferred ? '; inferred relationship' : ''}` }}</title></path>
-        <g v-for="node in projection.nodes" :key="node.asn" class="graph-node" :transform="`translate(${node.x} ${node.y})`" :class="{ origin: node.asn === origin, truncated: projection.truncatedTerminals.includes(node.asn), dimmed: activePath !== -1 && !projection.routes[activePath]?.asns.includes(node.asn) }"><title>{{ nodeTitle(node.asn) }}</title><circle r="20"/><foreignObject x="-62" y="26" width="124" height="20"><div xmlns="http://www.w3.org/1999/xhtml" class="graph-node-label" dir="auto">{{ nodeLabel(node.asn) }}</div></foreignObject></g>
+        <!-- Pan/zoom only changes the outer transform. Reuse each child until
+             its projection, label or route emphasis actually changes. -->
+        <path v-for="edge in projection.edges" :key="edge.key" v-memo="[edge, edgeDimmed(edge)]" :d="`M ${projection.byId.get(edge.from)!.x} ${projection.byId.get(edge.from)!.y} L ${projection.byId.get(edge.to)!.x} ${projection.byId.get(edge.to)!.y}`" class="graph-edge" :data-relation="edge.relation" :class="{ dimmed: edgeDimmed(edge) }"><title>{{ `AS${edge.from} → AS${edge.to}: ${edge.relation.replaceAll('_', ' ')}; observed adjacency; original hops ${edge.fromOriginalPosition} → ${edge.toOriginalPosition}${edge.inferred ? '; inferred relationship' : ''}` }}</title></path>
+        <g v-for="node in projection.nodes" :key="node.asn" v-memo="[node, nodeDimmed(node.asn), nodeName(node.asn)]" class="graph-node" :transform="`translate(${node.x} ${node.y})`" :class="{ origin: node.asn === origin, truncated: projection.truncatedTerminals.includes(node.asn), dimmed: nodeDimmed(node.asn) }"><title>{{ nodeTitle(node.asn) }}</title><circle r="20"/><foreignObject x="-62" y="26" width="124" height="20"><div xmlns="http://www.w3.org/1999/xhtml" class="graph-node-label" dir="auto">{{ nodeLabel(node.asn) }}</div></foreignObject></g>
       </g>
       <foreignObject v-if="!projection.nodes.length" :x="projection.bounds.width / 2 - 180" :y="projection.bounds.height / 2 - 13" width="360" height="26"><div xmlns="http://www.w3.org/1999/xhtml" class="empty-graph-label">No observed path is available</div></foreignObject>
     </svg>

@@ -15,6 +15,8 @@ import re
 import unicodedata
 from urllib.parse import unquote
 
+VIA3_FORMAT_VERSION = 3
+VIA3_PUBLIC_SCHEMA_VERSION = 6
 NATIVE_LOOKUP_P95_LIMIT_NS = 25_000
 MAX_FILES = 18_500
 MAX_ASSET_BYTES = 24 * 1024 * 1024
@@ -147,7 +149,8 @@ def rollback_eligible(valid_from: int, valid_until: int, now: int, *, withdrawn:
 def validate_descriptor(descriptor: object) -> dict:
     value = _exact_keys(descriptor, {"format_version", "schema_version", "codec", "mode",
                                    "valid_from", "valid_until", "objects"}, "descriptor")
-    if value["format_version"] != 3 or value["schema_version"] != 5 or value["codec"] != "zstd-1":
+    if (value["format_version"] != VIA3_FORMAT_VERSION or value["schema_version"] != VIA3_PUBLIC_SCHEMA_VERSION
+            or value["codec"] != "zstd-1"):
         _fail("unsupported release version or codec")
     if value["mode"] not in ("synthetic", "production"):
         _fail("unknown release mode")
@@ -195,7 +198,7 @@ def make_manifest(descriptor: dict) -> tuple[bytes, bytes]:
     value = validate_descriptor(descriptor)
     release_id = sha256(canonical_bytes(value))
     manifest = canonical_bytes({**value, "release_id": release_id})
-    pointer = canonical_bytes({"format_version": 3, "release_id": release_id,
+    pointer = canonical_bytes({"format_version": VIA3_FORMAT_VERSION, "release_id": release_id,
                                "manifest_path": f"/_atlas/releases/{release_id}/manifest.json",
                                "manifest_sha256": sha256(manifest)})
     return manifest, pointer
@@ -216,7 +219,7 @@ def verify_manifest(manifest_bytes: bytes, pointer_bytes: bytes, now: int) -> di
     validate_descriptor(descriptor)
     release_id = sha256(canonical_bytes(descriptor))
     expected_path = f"/_atlas/releases/{release_id}/manifest.json"
-    if (pointer["format_version"] != 3 or pointer["release_id"] != release_id or
+    if (pointer["format_version"] != VIA3_FORMAT_VERSION or pointer["release_id"] != release_id or
             manifest["release_id"] != release_id or pointer["manifest_path"] != expected_path or
             pointer["manifest_sha256"] != sha256(manifest_bytes)):
         _fail("pointer/manifest identity mismatch")

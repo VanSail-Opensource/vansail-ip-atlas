@@ -22,7 +22,7 @@ class CandidateTests(unittest.TestCase):
         for index in range(extra_objects):
             data = index.to_bytes(4, "big") + bytes(124)
             objects[sha256(data)] = data
-        manifest, pointer = make_manifest({"format_version": 3, "schema_version": 5,
+        manifest, pointer = make_manifest({"format_version": 3, "schema_version": 6,
             "codec": "zstd-1", "mode": mode, "valid_from": 100, "valid_until": 200,
             "objects": [{"sha256": key, "bytes": len(objects[key]),
                          "kind": 1 if key == digest else 2, "partition": "all"} for key in sorted(objects)]})

@@ -25,7 +25,7 @@ const report = {
     mobile_cpu_slowdown: 4, desktop_cpu_slowdown: 1,
     network_rtt_ms: 150, network_down_bits_per_second: 1600000,
     network_up_bits_per_second: 750000, reduced_motion: 'no-preference',
-    map_tiles: 'mocked-excluded-from-atlas-byte-accounting',
+    external_network: 'same-origin only; third-party requests fail',
     initial_js: 'all-unique-JavaScript-responses-before-settled-hero-gzip-level9-conservative',
     atlas_bytes: 'actual-response-body-size-including-pointer-manifest-router-dictionaries-and-shards',
     graph_latency: 'trusted-event-capture-to-second-animation-frame-including-handler-and-paint-opportunity',
@@ -74,7 +74,6 @@ const summary = values => ({ samples: values.length, p50: percentile(values, .5)
   p95: percentile(values, .95), p99: percentile(values, .99),
   maximum: values.length && values.every(value => typeof value === 'number' && Number.isFinite(value)) ? Math.max(...values) : null })
 const within = (value, limit) => value == null ? 'unmeasured' : value < limit ? 'within_limit' : 'over_limit'
-const tile = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j9zEAAAAASUVORK5CYII=', 'base64')
 let browser
 
 async function contextForSample(mobile = true) {
@@ -83,8 +82,6 @@ async function contextForSample(mobile = true) {
   await context.route('**/*', route => {
     const url = new URL(route.request().url())
     if (url.origin === base.origin) return route.continue()
-    if (url.origin === 'https://tile.openstreetmap.org')
-      return route.fulfill({ status: 200, contentType: 'image/png', body: tile })
     report.errors.push(`Unexpected external request origin: ${url.origin}`)
     return route.abort('blockedbyclient')
   })

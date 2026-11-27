@@ -18,14 +18,10 @@ try {
   page.on('pageerror', error => report.errors.push(error.message))
   context.on('request', request => {
     const url = new URL(request.url())
-    if (url.origin !== new URL(base).origin && url.protocol !== 'data:') {
-      report.network.push(url.origin)
-      assert.equal(url.origin, 'https://tile.openstreetmap.org', `Unexpected external request: ${url.origin}`)
-      assert(!request.headers().referer, 'Query-bearing referrer must never reach tiles')
-    }
+    if (url.origin !== new URL(base).origin && url.protocol !== 'data:') report.network.push(url.origin)
   })
-  // Tiles are not needed to verify atlas logic; avoid dependency on their availability.
-  await page.route('https://tile.openstreetmap.org/**', route => route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j9zEAAAAASUVORK5CYII=', 'base64') }))
+  await context.route('**/*', route => new URL(route.request().url()).origin === new URL(base).origin
+    ? route.continue() : route.abort('blockedbyclient'))
   async function test(name, fn) {
     try { await fn(); report.tests.push({ name, status: 'passed' }) }
     catch (error) { report.tests.push({ name, status: 'failed', error: String(error) }); throw error }
@@ -272,18 +268,15 @@ try {
       await page.locator('.demo-label').waitFor({ timeout: 20000 })
       assert.equal(await page.getByTestId('dataset-credits').count(), 1, 'One shared global credits display per view')
       assert.equal(await page.getByRole('alert').count(), 0)
-      const owners = { '.map-panel': 'overview', '.score-value': 'quality', '.ip-grid': 'class-c', '.bgp-graph': 'bgp', '.asn-card': 'asn' }
+      const owners = { '.fact-list': 'overview', '.score-value': 'quality', '.ip-grid': 'class-c', '.bgp-graph': 'bgp', '.asn-card': 'asn' }
       await page.locator(Object.keys(owners).find(selector => owners[selector] === view)).first().waitFor({ timeout: 20000 })
       for (const [selector, owner] of Object.entries(owners)) assert.equal((await page.locator(selector).count()) > 0, owner === view)
       if (view === 'overview') {
         const values = await page.locator('.fact-list > div').evaluateAll(rows => Object.fromEntries(
           rows.map(row => [row.querySelector('dt').textContent.trim(), row.querySelector('dd').textContent.trim()]),
         ))
-        assert.equal(values['Matched prefix'], '203.0.113.0/24')
-        assert.equal(values['Network name'], 'Atlas Transit')
-        assert.equal(values['Network organization'], 'Example Organization')
-        assert.equal(values['Registration country'], 'GB')
-        assert.equal(values.Country, 'US')
+        assert.deepEqual(values, { Country: 'US', 'Registration country': 'GB', 'Matched prefix': '203.0.113.0/24', Usage: 'residential' })
+        assert.equal(await page.locator('.map-panel, .map-empty, .geo-map, .leaflet-container').count(), 0)
       }
       for (const width of [320, 390, 1280, 1440]) {
         await page.setViewportSize({ width, height: 900 })
@@ -573,7 +566,7 @@ try {
       await broken.goto(`${base}/ip/overview/?q=203.0.113.1`)
       await broken.getByRole('alert').waitFor({ timeout: 20000 })
       assert.match(await broken.getByRole('alert').innerText(), /could not be verified/)
-      assert.equal(await broken.locator('.demo-label, .map-panel, .asn-card').count(), 0)
+      assert.equal(await broken.locator('.demo-label, .fact-list, .asn-card').count(), 0)
     } finally { await isolated.close() }
   })
   await test('a cancelled slow query cannot replace a newer query', async () => {
@@ -597,14 +590,17 @@ try {
       await late.locator('.demo-label').waitFor({ timeout: 20000 })
       assert.equal(new URL(late.url()).searchParams.get('q'), '8.8.8.8')
       assert.equal(await late.getByRole('textbox').inputValue(), '8.8.8.8')
-      assert(!await late.locator('.fact-list').innerText().then(text => text.includes('Atlas Harbor')))
+      const noStaleFacts = async () => assert.deepEqual(await late.locator('.fact-list dd').allTextContents(), Array(4).fill('Unknown'))
+      await noStaleFacts()
       release()
       await late.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
       assert.equal(await late.getByRole('textbox').inputValue(), '8.8.8.8')
       assert.equal(await late.getByRole('alert').count(), 0)
+      await noStaleFacts()
     } finally { release(); await isolated.close() }
   })
   assert.deepEqual(report.errors, [], 'Browser runtime errors')
+  assert.deepEqual(report.network, [], 'Unexpected third-party network requests')
   report.status = 'passed'
 } catch (error) { report.status = 'failed'; report.failure = String(error); process.exitCode = 1 }
 finally {

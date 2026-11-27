@@ -42,7 +42,7 @@ function ipv4Population(corpus) {
     proof.covered_addresses===2**32&&Number.isSafeInteger(proof.network_objects)&&proof.network_objects>=1&&proof.network_objects<18500&&
     Number.isSafeInteger(proof.router_intervals)&&proof.router_intervals>=proof.network_objects&&proof.router_intervals<=2**32&&
     proof.lookup?.kind==='ip'&&proof.lookup.q==='0.0.0.0'&&proof.lookup.releaseId===candidate.release_id&&proof.lookup.synthetic===false&&
-    typeof proof.lookup.network?.prefix==='string'&&(proof.class_c===null||proof.class_c?.prefix==='0.0.0.0/24'&&proof.class_c.cells?.length===256)
+    typeof proof.lookup.network?.prefix==='string'&&validSubnetProfile(proof.class_c,proof.lookup.q)
 }
 if (!keys(corpus,['format_version','graph_query','interaction_query','map_query','mode','queries','release_id','availability','unknown_queries','ipv4_network_coverage']) || corpus.format_version !== 3 || corpus.mode !== 'production' || corpus.release_id !== candidate.release_id ||
     !Array.isArray(corpus.queries) || corpus.queries.length !== 10000 || !validQuery(corpus.interaction_query) || isIP(corpus.interaction_query) !== 4 ||
@@ -261,8 +261,57 @@ async function workerAnswer(page,action,q) {
 }
 async function noFacts(page,q,synthetic=false) {
   const answer=await workerAnswer(page,'lookup',q)
-  const origins=isIP(q)?[]:[Number(q.slice(2))]
-  if(answer.releaseId!==(synthetic?fixtureRelease:candidate.release_id)||answer.synthetic!==synthetic||answer.geo!==null||answer.network!==null||answer.usage!==null||answer.observedRisk!==null||answer.asns.length||['paths','relationships','tier1'].some(key=>answer.bgp[key].length)||answer.bgp.rpki.some(row=>row.status!=='unavailable')||JSON.stringify(answer.bgp.origins)!==JSON.stringify(origins))throw new BrowserContractFailure('Unknown corpus query manufactured facts')
+  const family=isIP(q),origins=family?[]:[Number(q.slice(2))]
+  if(answer.releaseId!==(synthetic?fixtureRelease:candidate.release_id)||answer.synthetic!==synthetic||answer.geo!==null||answer.network!==null||answer.usage!==null||answer.asns.length||['paths','relationships','tier1'].some(key=>answer.bgp[key].length)||answer.bgp.rpki.some(row=>row.status!=='unavailable')||canonical(answer.bgp.origins)!==canonical(origins))throw new BrowserContractFailure('Unknown corpus query manufactured facts')
+  const expectedRisk=family?{
+    score:0,confidence:'unrated',reasons:[],layers:{exact:0,prefix:0,asn:0,neighbors:family===6?null:0},
+    coverage:{status:'incomplete',layers:{exact:'unassessed',prefix:'unassessed',asn:'unassessed',neighbors:family===6?'not_applicable':'unassessed'}},
+  }:null
+  if(canonical(answer.observedRisk)!==canonical(expectedRisk))throw new BrowserContractFailure('Unknown corpus query did not preserve zero risk and unassessed coverage')
+  return answer
+}
+function subnetPrefix(q,family) {
+  if(family===4)return `${q.split('.').slice(0,3).join('.')}.0/24`
+  const [left,right]=q.split('::').map(part=>part.split(':').filter(Boolean))
+  const words=right?[...left,...Array(8-left.length-right.length).fill('0'),...right]:left
+  return `${parseInput([...words.slice(0,3),'0','0','0','0','0'].join(':')).canonical}/48`
+}
+function validSubnetProfile(profile,q) {
+  const family=isIP(q),totalUnits=family===6?65536:256
+  return Boolean(family&&profile&&profile.prefix===subnetPrefix(q,family)&&profile.unit===(family===6?'ipv6-/64':'ipv4-address')&&
+    profile.totalUnits===totalUnits&&Array.isArray(profile.cells)&&profile.cells.length===(family===6?0:256)&&
+    Number.isSafeInteger(profile.observedCount)&&profile.observedCount>=0&&profile.observedCount<=totalUnits&&
+    ['assessedCount','positiveCount','scoredCount'].every(key=>Number.isSafeInteger(profile[key])&&profile[key]>=0&&profile[key]<=profile.observedCount)&&
+    Number.isSafeInteger(profile.scoreSum)&&profile.scoreSum>=0&&profile.scoreSum<=100*profile.scoredCount&&
+    profile.meanObservedRisk===Math.floor((profile.scoreSum+totalUnits/2)/totalUnits))
+}
+async function visibleRisk(page,answer) {
+  const risk=answer.observedRisk,family=isIP(answer.q)
+  if(!risk||!Number.isInteger(risk.score)||risk.score<0||risk.score>100)throw new BrowserContractFailure('Address risk is not a bounded numeric score')
+  const layerKeys=['exact','prefix','asn','neighbors']
+  if(!keys(risk.layers,layerKeys)||!layerKeys.every(key=>key==='neighbors'&&family===6?
+    risk.layers[key]===null&&risk.coverage.layers[key]==='not_applicable':Number.isFinite(risk.layers[key])&&risk.layers[key]>=0&&risk.layers[key]<=1&&['assessed','unassessed'].includes(risk.coverage.layers[key])))throw new BrowserContractFailure('Address risk layers do not match their applicability')
+  const projection=await workerAnswer(page,'risk',answer.q)
+  if(projection.q!==answer.q||projection.releaseId!==answer.releaseId||projection.synthetic!==answer.synthetic||canonical(projection.observedRisk)!==canonical(risk))throw new BrowserContractFailure('Observed risk focused answer differs from lookup')
+  const value=page.getByTestId('observed-risk-value')
+  await value.waitFor()
+  // A supported value can round to zero. It remains visibly positive, unlike
+  // the distinct no-scored-observations state.
+  const expected=risk.score===0&&risk.confidence!=='unrated'?'<1':String(risk.score)
+  if((await value.innerText()).trim()!==expected)throw new BrowserContractFailure('Observed risk display differs from its score and confidence')
+  if(risk.confidence==='unrated')await page.getByRole('heading',{name:'No scored observations',exact:true}).waitFor()
+}
+async function visibleSubnet(page,answer,expected) {
+  const {q,releaseId,synthetic}=answer
+  const profile=await workerAnswer(page,'classC',q)
+  if(!validSubnetProfile(profile,q))throw new BrowserContractFailure('Subnet risk answer has invalid prefix, units or mean')
+  if(expected!==undefined&&canonical(profile)!==canonical(expected))throw new BrowserContractFailure('IPv4 coverage witness Class C answer differs between readers')
+  const view=await workerAnswer(page,'classCView',q)
+  if(view.q!==q||view.releaseId!==releaseId||view.synthetic!==synthetic||canonical(view.profile)!==canonical(profile))throw new BrowserContractFailure('Subnet risk focused answer differs from the full answer')
+  const ratio=Number((profile.scoreSum/profile.totalUnits).toFixed(profile.unit==='ipv6-/64'?5:2))
+  if((await page.getByTestId('subnet-risk-mean').innerText()).trim()!==`${ratio} / 100`)throw new BrowserContractFailure('Subnet risk display uses the wrong address scope or denominator')
+  await page.getByRole('heading',{name:profile.prefix,exact:true,level:2}).waitFor()
+  return profile
 }
 const overviewLabels = ['Country', 'Registration country', 'Matched prefix', 'Usage']
 async function overviewFacts(page) {
@@ -276,14 +325,15 @@ async function overviewFacts(page) {
   return Object.fromEntries(rows)
 }
 async function unknownIPv4(page,q,synthetic=false) {
-  await submit(page,q,{synthetic});await noFacts(page,q,synthetic)
+  await submit(page,q,{synthetic});const answer=await noFacts(page,q,synthetic)
   if (Object.values(await overviewFacts(page)).some(value => value !== 'Unknown'))
     throw new BrowserContractFailure('Unknown IPv4 displayed identity')
-  await owner(page,'Observed risk','.quality-layout',{synthetic});await page.getByRole('heading',{name:'Unrated',exact:true}).waitFor()
-  if(await page.locator('.reason-chip').count()||(await page.locator('.score-value').innerText()).trim()!=='—')throw new BrowserContractFailure('Unknown IPv4 displayed scored evidence')
+  await owner(page,'Observed risk','.quality-layout',{synthetic});await visibleRisk(page,answer)
+  if(await page.locator('.reason-chip').count())throw new BrowserContractFailure('Unknown IPv4 displayed scored evidence')
   await owner(page,'Class C','.ip-grid',{synthetic})
+  const profile=await visibleSubnet(page,answer),cell=profile.cells[Number(q.split('.').at(-1))]
   const target=page.getByRole('gridcell',{name:`${q}, unknown`,exact:true})
-  if(await page.getByRole('gridcell').count()!==256||await target.count()!==1||await target.evaluate(node=>node.classList.contains('observed')||node.classList.contains('positive')))throw new BrowserContractFailure('Unknown IPv4 cell was treated as observed')
+  if(cell?.ip!==q||cell.observed!==false||cell.coverage!=='incomplete'||cell.observedRiskScore!==0||cell.confidence!=='unrated'||cell.reasons.length||await page.getByRole('gridcell').count()!==256||await target.count()!==1||await target.evaluate(node=>node.classList.contains('observed')||node.classList.contains('positive')))throw new BrowserContractFailure('Unknown IPv4 cell was treated as scored evidence')
   await owner(page,'ASN','.asn-list,.status-panel:not([role])',{synthetic});await page.getByText('No origin is evidenced for this query.',{exact:true}).waitFor()
   if(await page.locator('.asn-card').count())throw new BrowserContractFailure('Unknown IPv4 displayed an ASN')
   await owner(page,'BGP','.bgp-controls',{synthetic});await page.getByRole('heading',{name:'No observed origin',exact:true}).waitFor()
@@ -298,14 +348,11 @@ async function coveredIPv4(page,proof) {
   const visible=await overviewFacts(page)
   if(canonical(visible)!==canonical(Object.fromEntries(Object.entries(facts).map(([k,v])=>[k,v??'Unknown']))))throw new BrowserContractFailure('IPv4 coverage witness overview differs from its native facts')
   await owner(page,'Observed risk','.quality-layout')
-  if(expected.observedRisk?.score==null){await page.getByRole('heading',{name:'Unrated',exact:true}).waitFor();if((await page.locator('.score-value').innerText()).trim()!=='—')throw new BrowserContractFailure('IPv4 witness acquired an unknown score')}
+  await visibleRisk(page,expected)
   await owner(page,'Class C','.ip-grid')
-  if(canonical(await workerAnswer(page,'classC',q))!==canonical(proof.class_c))throw new BrowserContractFailure('IPv4 coverage witness Class C answer differs between readers')
+  await visibleSubnet(page,expected,proof.class_c)
   const grid=await page.getByRole('gridcell').evaluateAll(cells=>cells.map(cell=>[cell.getAttribute('aria-label'),cell.classList.contains('observed'),cell.classList.contains('positive')]))
-  const expectedGrid=Array.from({length:256},(_,i)=>{
-    const cell=proof.class_c?.cells[i],observed=cell?.observed??false,ip=cell?.ip??`0.0.0.${i}`
-    return [`${ip}, ${observed?'observed':'unknown'}`,observed,Boolean(cell?.reasons.length)]
-  })
+  const expectedGrid=proof.class_c.cells.map(cell=>[`${cell.ip}, ${cell.observed?'observed':'unknown'}`,cell.observed,Boolean(cell.reasons.length)])
   if(canonical(grid)!==canonical(expectedGrid))throw new BrowserContractFailure('IPv4 witness grid displayed different observed evidence')
   await owner(page,'ASN','.asn-list,.status-panel:not([role])')
   if(!expected.asns.length)await page.getByText('No origin is evidenced for this query.',{exact:true}).waitFor()
@@ -319,9 +366,12 @@ async function coveredIPv4(page,proof) {
 async function unknownStates(page) {
   if(corpus.unknown_queries.ipv4!==null)await unknownIPv4(page,corpus.unknown_queries.ipv4)
   else await coveredIPv4(page,corpus.ipv4_network_coverage)
-  await submit(page,corpus.unknown_queries.ipv6);await overviewFacts(page);await noFacts(page,corpus.unknown_queries.ipv6)
-  await owner(page,'Class C','.status-panel:not([role])');await page.getByRole('heading',{name:'IPv4 only',exact:true}).waitFor()
-  if(await page.getByRole('gridcell').count())throw new BrowserContractFailure('Unknown IPv6 acquired a /24')
+  await submit(page,corpus.unknown_queries.ipv6);await overviewFacts(page)
+  const ipv6=await noFacts(page,corpus.unknown_queries.ipv6)
+  await owner(page,'Observed risk','.quality-layout');await visibleRisk(page,ipv6)
+  if(await page.locator('.reason-chip').count())throw new BrowserContractFailure('Unknown IPv6 displayed scored evidence')
+  await owner(page,'Class C','.subnet-summary',{heading:'IPv6 subnet risk'});await visibleSubnet(page,ipv6)
+  if(await page.getByRole('grid').count()||await page.getByRole('gridcell').count())throw new BrowserContractFailure('IPv6 displayed an address grid instead of the /48 summary')
   await submit(page,corpus.unknown_queries.asn);await noFacts(page,corpus.unknown_queries.asn);await page.getByText('No origin is evidenced for this query.',{exact:true}).waitFor()
   if(await page.locator('.asn-card').count())throw new BrowserContractFailure('Unknown ASN displayed aggregate facts')
   await owner(page,'BGP','.bgp-graph svg');await page.getByText('No observed path is available',{exact:true}).waitFor()

@@ -268,7 +268,7 @@ try {
       await page.locator('.demo-label').waitFor({ timeout: 20000 })
       assert.equal(await page.getByTestId('dataset-credits').count(), 1, 'One shared global credits display per view')
       assert.equal(await page.getByRole('alert').count(), 0)
-      const owners = { '.fact-list': 'overview', '.score-value': 'quality', '.ip-grid': 'class-c', '.bgp-graph': 'bgp', '.asn-card': 'asn' }
+      const owners = { '.fact-list': 'overview', '.score-value': 'quality', '.ip-grid,.subnet-summary': 'class-c', '.bgp-graph': 'bgp', '.asn-card': 'asn' }
       await page.locator(Object.keys(owners).find(selector => owners[selector] === view)).first().waitFor({ timeout: 20000 })
       for (const [selector, owner] of Object.entries(owners)) assert.equal((await page.locator(selector).count()) > 0, owner === view)
       if (view === 'overview') {
@@ -571,17 +571,51 @@ try {
     await writeFile(new URL('../../reports/bgp-export-24.svg',import.meta.url),xml)
     report.graph_readability_populations=populations
   })
-  await test('IPv6 Class C not applicable', async () => {
-    await page.goto(`${base}/ip/class-c/?q=2001%3Adb8%3A%3A1`)
-    await page.getByRole('heading', { name: 'IPv4 only' }).waitFor()
-    assert.equal(await page.getByRole('gridcell').count(), 0)
+  await test('IPv6 /48 summaries distinguish observed evidence from zero without a grid', async () => {
+    for (const [query, prefix, average, observed] of [
+      ['2001:db8::1', '2001:db8::/48', '0.00015 / 100', 1],
+      ['2001:db8:1::1', '2001:db8:1::/48', '0 / 100', 0],
+    ]) {
+      await page.goto(`${base}/ip/class-c/?q=${encodeURIComponent(query)}`)
+      await page.getByRole('heading', { name: 'IPv6 subnet risk', level: 1, exact: true }).waitFor()
+      const summary = page.locator('.subnet-summary'), mean = summary.getByTestId('subnet-risk-mean')
+      await mean.waitFor()
+      assert.equal(await summary.getByRole('heading', { name: prefix, level: 2, exact: true }).count(), 1)
+      assert.equal((await mean.innerText()).trim(), average)
+      const details = await summary.locator('.layer-list > div').evaluateAll(nodes => Object.fromEntries(
+        nodes.map(node => [node.querySelector('dt').textContent.trim(), node.querySelector('dd').textContent.trim()]),
+      ))
+      assert.equal(details['/64 blocks with exact observations'], `${observed} / 65536`)
+      assert.equal(details['/64 blocks with positive risk'], String(observed))
+      assert.equal(await page.getByRole('grid').count(), 0)
+      assert.equal(await page.getByRole('gridcell').count(), 0)
+    }
   })
-  await test('unknown IPv4 retains an unknown 256-cell view', async () => {
-    await page.goto(`${base}/ip/class-c/?q=8.8.8.8`)
+  await test('unobserved IPs render a numeric zero without scored evidence', async () => {
+    for (const query of ['198.51.100.77', '2001:db8:1::1']) {
+      await page.goto(`${base}/ip/quality/?q=${encodeURIComponent(query)}`)
+      await page.getByRole('heading', { name: 'No scored observations', exact: true }).waitFor()
+      const value = page.getByTestId('observed-risk-value')
+      assert.equal(await value.evaluate(node => node.tagName), 'B')
+      assert.equal((await value.innerText()).trim(), '0')
+      assert.equal(await page.locator('.reason-chip').count(), 0)
+      const layers = await page.locator('.quality-layout .layer-list > div').evaluateAll(nodes => Object.fromEntries(
+        nodes.map(node => [node.querySelector('dt').textContent.trim(), node.querySelector('dd').textContent.trim()]),
+      ))
+      assert.deepEqual(layers, { 'Exact IP': '0.00 points', Prefix: '0.00 points', 'ASN context': '0.00 points',
+        ...(query.includes(':') ? {} : { '/24 neighbors': '0.00 points' }),
+      })
+    }
+  })
+  await test('unknown IPv4 retains 256 unknown cells and a numeric zero mean', async () => {
+    await page.goto(`${base}/ip/class-c/?q=198.51.100.77`)
     await page.getByRole('grid').waitFor()
     assert.equal(await page.getByRole('gridcell').count(), 256)
-    assert.equal(await page.locator('.ip-grid .observed').count(), 0)
-    assert.equal(await page.getByRole('heading', { name: 'IPv4 only' }).count(), 0)
+    assert.equal(await page.locator('.ip-grid .observed,.ip-grid .positive').count(), 0)
+    const cell = page.getByRole('gridcell', { name: '198.51.100.77, unknown', exact: true })
+    await cell.click()
+    assert(await page.locator('.cell-detail').getByText('Observed risk 0 / 100', { exact: true }).isVisible())
+    assert.equal((await page.getByTestId('subnet-risk-mean').innerText()).trim(), '0 / 100')
   })
   await test('unknown IPv4 BGP has no invented origin', async () => {
     await page.goto(`${base}/ip/bgp/?q=8.8.8.8`)

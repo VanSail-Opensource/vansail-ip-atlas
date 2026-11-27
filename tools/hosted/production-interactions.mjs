@@ -6,12 +6,12 @@ export async function waitForAtlasView(page) {
   await page.locator('.view-page > .status-panel[role=status]').waitFor({state:'hidden'})
 }
 
-export async function visitOwner(page,name,ready,{synthetic=false}={}) {
+export async function visitOwner(page,name,ready,{synthetic=false,heading=name==='ASN'?'Autonomous systems':name}={}) {
   await page.getByRole('navigation',{name:'Atlas views'}).getByRole('link',{name,exact:true}).click()
-  await page.getByRole('heading',{name:name==='ASN'?'Autonomous systems':name,exact:true,level:1}).waitFor()
+  await page.getByRole('heading',{name:heading,exact:true,level:1}).waitFor()
   await waitForAtlasView(page);await page.locator(ready).waitFor()
   if(Boolean(await page.locator('.demo-label').count())!==synthetic||await page.getByRole('alert').count())throw new Error('Owner route unavailable or labelled with a different release mode')
-  for(const [owner,selector]of Object.entries({Overview:'.fact-list','Observed risk':'.quality-layout','Class C':'.ip-grid',BGP:'.bgp-graph',ASN:'.asn-list'}))
+  for(const [owner,selector]of Object.entries({Overview:'.fact-list','Observed risk':'.quality-layout','Class C':'.ip-grid,.subnet-summary',BGP:'.bgp-graph',ASN:'.asn-list'}))
     if(owner!==name&&await page.locator(selector).count())throw new Error('A route duplicated another canonical fact owner')
 }
 

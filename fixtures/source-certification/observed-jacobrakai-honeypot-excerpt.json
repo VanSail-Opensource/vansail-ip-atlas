@@ -1,0 +1,46 @@
+{
+  "meta": {
+    "updated": "2026-11-22T03:00:02Z",
+    "license": "CC0-1.0",
+    "count": 414,
+    "count_by_tier": {
+      "credential": 277,
+      "scanner": 109,
+      "loader": 28
+    },
+    "window_days": 30,
+    "scanner_min_events": 1000
+  },
+  "ips": [
+    {
+      "ip": "47.236.54.176",
+      "tier": "credential",
+      "bans": 10,
+      "attempts": 1200,
+      "first_seen": "2026-11-19T23:37:25Z",
+      "last_seen": "2026-11-22T02:43:00Z",
+      "first_banned": "2026-02-15T21:30:52Z",
+      "asn": "AS45102"
+    },
+    {
+      "ip": "168.144.58.137",
+      "tier": "scanner",
+      "bans": 0,
+      "attempts": 41949,
+      "first_seen": "2026-11-16T20:43:29Z",
+      "last_seen": "2026-11-22T02:57:00Z",
+      "first_banned": null,
+      "asn": "AS14061"
+    },
+    {
+      "ip": "176.65.148.126",
+      "tier": "loader",
+      "bans": 0,
+      "attempts": 14,
+      "first_seen": "2026-11-15T06:09:08Z",
+      "last_seen": "2026-11-15T16:05:12Z",
+      "first_banned": null,
+      "asn": "AS51396"
+    }
+  ]
+}

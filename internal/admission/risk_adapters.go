@@ -27,6 +27,8 @@ func selectRiskAdapter(s Source) bool {
 		return false
 	}
 	switch s.Parser.ID {
+	case jacobrakaiParserID:
+		return jacobrakaiSource(s)
 	case "tweetfeed-week-csv":
 		return tweetFeedSource(s)
 	case "ffraud-csv":
@@ -60,6 +62,9 @@ func parseRiskPayload(ctx context.Context, input io.Reader, s Source, published 
 	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if s.Parser.ID == jacobrakaiParserID {
+		return parseJacobrakai(ctx, input, s, published, maximum, emit)
 	}
 	if s.Parser.ID == "tweetfeed-week-csv" {
 		_, err := scanTweetFeed(ctx, input, published, maximum, emit)

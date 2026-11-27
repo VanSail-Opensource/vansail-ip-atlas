@@ -1292,6 +1292,73 @@ sources:
   - spam
   - tor
   - vpn
+- id: jacobrakai-honeypot
+  evidence_family: jacobrakai-honeypot
+  source_group: jacobrakai-honeypot
+  category: abuse
+  admission: active
+  discovery: https://github.com/jacobyoby/honeypot-blocklist
+  download:
+    url: https://jacobrakai.org/feed/blocklist.json
+    format: json
+    max_compressed_mib: 1
+  refresh:
+    interval: 24h
+    max_stale: 720h
+  fields: [meta.updated, ip, tier, attempts, bans, first_seen, last_seen, first_banned, asn]
+  depends_on: []
+  license:
+    status: reviewed
+    identifier: CC0-1.0
+    distribution: allow
+    evidence_url: https://github.com/jacobyoby/honeypot-blocklist#license
+    attribution_required: false
+    review_basis: The publisher expressly dedicates the original sensor export to CC0 1.0 in its documentation
+      and the actual downloadable JSON metadata. Peer feeds are consulted only for overlap measurement, not
+      incorporated in the export. The original dedication does not require attribution.
+  trust:
+    source_weight: 25
+    correlation_group: jacobrakai-honeypot
+  scope: exact_ip
+  notes: One first-party honeypot vantage point. Credential-tier repeated decoy logins yield abuse and
+    sustained credential-less probes meeting the publisher threshold yield scanner. The loader tier is
+    validated but never interpreted as malware or command and control. No attempt count, ASN, protocol,
+    host identity, coverage negative or generalized safety claim is published. The original per-IP last_seen
+    governs expiry. Retain only observations with more than 48 hours remaining at intake, without changing clocks.
+    The active entry still requires the independently verified complete current payload and certification ledger.
+  publication_proof:
+    kind: embedded
+    locator: https://jacobrakai.org/feed/blocklist.json
+    field: meta.updated
+  coverage:
+    kind: positive_only
+    scope: exact_ip
+  fixture:
+    status: passed
+    path: fixtures/source-certification/observed-jacobrakai-honeypot-excerpt.json
+    sha256: 949abcc6a23f88575ed2bd27053cc391b28e0b532ed4c0936dbf36659233dc6c
+    parser: jacobrakai-honeypot-json
+    schema: jacobrakai-honeypot-tiered-json-v1
+    schema_observed: true
+    tested_at: '2026-11-27T10:39:45Z'
+    synthetic: false
+    payload_format: jacobrakai-honeypot-excerpt
+  parser:
+    id: jacobrakai-honeypot-json
+    schema: jacobrakai-honeypot-tiered-json-v1
+    version: 1
+  public_fields: [reason_flags]
+  field_mappings:
+    meta.updated: null
+    ip: reason_flags
+    tier: reason_flags
+    attempts: null
+    bans: null
+    first_seen: null
+    last_seen: null
+    first_banned: null
+    asn: null
+  signals: [abuse, scanner]
 - id: google-network-organization
   evidence_family: google-network-owner
   source_group: google-network-owner

@@ -16,6 +16,11 @@ CLASSES = frozenset({
     'contract', 'playwright-timeout', 'runtime', 'report-validation', 'unexpected-request',
     'page-exception', 'asset-accounting', 'resource-observation', 'privacy-contract',
 })
+REPORT_GATE_CLASSES = frozenset({
+    'gate-graph', 'gate-accessibility', 'gate-lcp', 'gate-initial-js', 'gate-cls', 'gate-inp',
+    'gate-population', 'gate-candidate-states', 'gate-unknown-states', 'gate-ipv4', 'gate-synthetic-ipv4',
+    'gate-worker-memory', 'gate-cold-payload', 'gate-hot-lookup',
+})
 
 
 def failure_label(line):
@@ -23,7 +28,11 @@ def failure_label(line):
     if len(parts) != 4:
         return None
     prefix, phase, sample, classification = parts
-    if prefix != 'ATLAS_BROWSER_FAILURE' or classification not in CLASSES:
+    if prefix != 'ATLAS_BROWSER_FAILURE':
+        return None
+    if phase == 'report-validation' and sample == '-' and classification in REPORT_GATE_CLASSES:
+        return f'browser-report-validation-{classification}'
+    if classification not in CLASSES:
         return None
     if phase in SAMPLE_PHASES and re.fullmatch(r'[1-9]|[12][0-9]|30', sample):
         return f'browser-{phase}-sample-{sample}-{classification}'

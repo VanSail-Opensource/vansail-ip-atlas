@@ -703,6 +703,10 @@ func decodeRecordFrame(data []byte) (NormalizedRecord, error) {
 		record := NormalizedRecord{Version: 3, Kind: RecordGeo, Geo: geo}
 		return record, record.Validate()
 	}
+	if evidence, ok := decodeWriterExactEvidence(data); ok {
+		record := NormalizedRecord{Version: 3, Kind: RecordEvidence, Evidence: evidence}
+		return record, record.Validate()
+	}
 	if record, ok := decodeWriterRouting(data); ok {
 		return record, record.Validate()
 	}

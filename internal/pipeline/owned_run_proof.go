@@ -218,6 +218,11 @@ func (w *ownedRunWriter) enablePartitionPlan(s scope) {
 	}
 	w.proof.cost += ownedScatterPlanCost
 	w.proof.scatter = plan
+	if s.group == qualityFacts && !s.asn && s.prefix.Addr().Is4() && s.prefix.Bits() == 0 &&
+		w.proof.registry.charge(ownedQualityScatterPlanCost) {
+		w.proof.cost += ownedQualityScatterPlanCost
+		plan.deep = newOwnedScatterPlanDepth(s, qualityScatterDepth)
+	}
 }
 
 func (w *ownedRunWriter) appendPartitionFrame(frame ownedRunFrame, record via3.PublicRecord) error {
@@ -237,6 +242,13 @@ func (w *ownedRunWriter) appendPartitionFrame(frame ownedRunFrame, record via3.P
 			proof.scatter = nil
 			proof.cost -= ownedScatterPlanCost
 			proof.registry.used -= ownedScatterPlanCost
+		}
+		if deep := plan.deep; deep != nil {
+			if proof.scatter == nil || record.Kind != 6 || record.Inherited || deep.count(record, frame) != nil {
+				plan.deep = nil
+				proof.cost -= ownedQualityScatterPlanCost
+				proof.registry.used -= ownedQualityScatterPlanCost
+			}
 		}
 	}
 	return nil

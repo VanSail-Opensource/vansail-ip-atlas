@@ -479,3 +479,203 @@ func TestOwnedScatterPlansKeepBinaryScopesAndBytes(t *testing.T) {
 		})
 	}
 }
+
+func qualityScatterFixture(t *testing.T, width int, overlay bool) (*compiler, string, scope) {
+	t.Helper()
+	c := proofMergeCompiler(t)
+	c.options.Limits.PartitionRecords = 8
+	s := scope{prefix: netip.MustParsePrefix("0.0.0.0/0"), group: qualityFacts}
+	path := c.next()
+	w, err := c.newOwnedRunWriter(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	w.enablePartitionPlan(s)
+	var size partitionSize
+	quality := &via3.QualityData{}
+	add := func(p netip.Prefix) {
+		t.Helper()
+		r := via3.PublicRecord{Version: 3, Kind: 6, Prefix: p, Quality: quality}
+		frame, err := c.newCanonicalRunFrame(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = w.appendPartitionFrame(frame, r); err != nil {
+			t.Fatal(err)
+		}
+		size.records++
+		size.bytes += frame.row.logicalBytes + 512
+	}
+	if overlay {
+		add(s.prefix)
+	}
+	for first := range 256 {
+		for second := range width {
+			addr := netip.AddrFrom4([4]byte{byte(first), byte(second * 256 / width), 33, 0})
+			add(netip.PrefixFrom(addr, 24))
+		}
+	}
+	if err := w.Finish(); err != nil {
+		t.Fatal(err)
+	}
+	c.rememberPartitionSize(path, size)
+	if proof := c.runProofs.lookup(path); proof == nil || proof.scatter == nil || proof.scatter.deep == nil {
+		t.Fatal("writer did not produce the bounded quality plan")
+	}
+	return c, path, s
+}
+
+func TestDeepQualityScatterPreservesExactBinaryFirstFit(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		width   int
+		overlay bool
+	}{{"fitting-targets", 4, false}, {"multiple-scatter-tiers", 20, false}, {"inherited-fallback", 4, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			old, oldPath, s := qualityScatterFixture(t, tc.width, tc.overlay)
+			want := partitionFrameMap(t, old, oldPath, s, false)
+			current, path, _ := qualityScatterFixture(t, tc.width, tc.overlay)
+			runs, applied, err := current.scatterPartition(path, s)
+			if err != nil || !applied || (len(runs) > 16) == tc.overlay {
+				t.Fatalf("deep branch or prior overlay fallback not reached: %d, %v, %v", len(runs), applied, err)
+			}
+			got := make(map[string][]string)
+			for _, run := range runs {
+				for key, values := range partitionFrameMap(t, current, run.path, run.scope, true) {
+					got[key] = append(got[key], values...)
+				}
+			}
+			if !reflect.DeepEqual(want, got) {
+				t.Fatal("quality scatter changed first-fitting scopes or bytes")
+			}
+		})
+	}
+}
+
+func TestDeepQualityScatterLeavesSchema6IPv6ProfilesIndivisible(t *testing.T) {
+	c := proofMergeCompiler(t)
+	c.options.Limits.PartitionRecords = 1
+	quality := &via3.QualityData{}
+	var records []via3.PublicRecord
+	for i := range 40 {
+		addr := netip.AddrFrom4([4]byte{byte(i * 6), 99, 201, 0})
+		records = append(records, via3.PublicRecord{Version: 3, Kind: 6, Prefix: netip.PrefixFrom(addr, 24), Quality: quality})
+	}
+	block := netip.MustParsePrefix("2001:db8::/46")
+	for i := range 4 {
+		addr := netip.MustParseAddr(fmt.Sprintf("2001:db8:%x::1", i))
+		records = append(records, via3.PublicRecord{Version: 3, Kind: 6, Prefix: netip.PrefixFrom(addr, 128), Exact: true, Quality: quality})
+	}
+	paths, err := c.sort(producer(records))
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, err = c.prepareMerge(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups, err := c.classify(paths)
+	if err != nil || len(groups) != 3 {
+		t.Fatalf("classification lost family-specific fact groups: %d, %v", len(groups), err)
+	}
+	var ipv4, ipv6, profile bool
+	for _, group := range groups {
+		proof := c.runProofs.lookup(group.path)
+		if proof == nil || proof.scatter == nil {
+			t.Fatal("missing authenticated plan for classified run")
+		}
+		switch {
+		case group.group == qualityFacts && group.prefix.Addr().Is4():
+			ipv4 = true
+			if proof.scatter.deep == nil {
+				t.Fatal("IPv4 quality did not get a deep plan")
+			}
+			runs, applied, err := c.scatterPartition(group.path, group.scope)
+			if err != nil || !applied || len(runs) <= 16 {
+				t.Fatalf("did not exercise deep IPv4 path: %d, %v, %v", len(runs), applied, err)
+			}
+		case group.group == qualityFacts && group.prefix.Addr().Is6():
+			ipv6 = true
+			if proof.scatter.deep != nil {
+				t.Fatal("IPv6 address quality used the IPv4-only plan")
+			}
+		case group.group == ipv6ProfileFacts:
+			profile = true
+			if proof.scatter.deep != nil {
+				t.Fatal("IPv6 summaries used the IPv4-only plan")
+			}
+			runs, applied, err := c.scatterPartition(group.path, group.scope)
+			if err != nil || !applied || len(runs) != 1 || runs[0].prefix != block {
+				t.Fatalf("profile did not narrow to its common /46: %v, %v, %v", runs, applied, err)
+			}
+			leafPlan := newOwnedScatterPlan(runs[0].scope)
+			if leafPlan == nil || leafPlan.bins != nil {
+				t.Fatal("profile plan looked beyond the /48 width")
+			}
+			leaves, applied, err := c.scatterPartition(runs[0].path, runs[0].scope)
+			if err != nil || !applied || len(leaves) != 4 {
+				t.Fatalf("profile did not produce four indivisible leaves: %v, %v, %v", leaves, applied, err)
+			}
+			for i, leaf := range leaves {
+				expected := netip.MustParsePrefix(fmt.Sprintf("2001:db8:%x::/48", i))
+				if leaf.prefix != expected || leaf.group != ipv6ProfileFacts {
+					t.Fatalf("unexpected IPv6 profile leaf: %+v", leaf)
+				}
+				r, err := openRun(leaf.path, c.options.Limits.RecordBytes)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer r.file.Close()
+				if err = r.next(); err != nil || r.record.Kind != 7 || r.record.Prefix != expected || r.record.Inherited || r.record.Exact || r.record.Profile == nil || r.record.Profile.IPv6 == nil {
+					t.Fatalf("profile was changed, inherited or removed: %v", err)
+				}
+				if err = r.next(); err != io.EOF {
+					t.Fatalf("extra rows in one profile leaf: %v", err)
+				}
+			}
+		default:
+			t.Fatalf("unexpected classified scope: %+v", group)
+		}
+	}
+	if !ipv4 || !ipv6 || !profile {
+		t.Fatal("mixed fixture did not exercise all fact groups")
+	}
+}
+
+func TestDeepQualityScatterAuthenticatesTailAndRespectsScratch(t *testing.T) {
+	for _, mutate := range []bool{false, true} {
+		t.Run(fmt.Sprint(mutate), func(t *testing.T) {
+			c, path, s := qualityScatterFixture(t, 8, false)
+			before := c.used
+			if !mutate {
+				c.options.Limits.ScratchBytes = c.used
+			} else {
+				c.options.externalScratch = func() uint64 {
+					info, err := os.Stat(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					f, err := os.OpenFile(path, os.O_WRONLY, 0)
+					if err != nil {
+						t.Fatal(err)
+					}
+					_, err = f.WriteAt([]byte{1}, info.Size()-1)
+					if closeErr := f.Close(); err != nil || closeErr != nil {
+						t.Fatalf("mutate authenticated run tail: %v %v", err, closeErr)
+					}
+					c.options.externalScratch = nil
+					return 0
+				}
+			}
+			_, applied, err := c.scatterPartition(path, s)
+			if applied || (err != nil) != mutate || c.used != before {
+				t.Fatalf("limit or integrity failure changed parent: %v %v %d (want %d)", applied, err, c.used, before)
+			}
+			files, err := os.ReadDir(c.scratch)
+			if err != nil || len(files) != 1 || len(c.partitionSizes) != 1 || files[0].Name() != filepath.Base(path) {
+				t.Fatal("failed scatter retained a child or changed scratch ownership", err)
+			}
+		})
+	}
+}

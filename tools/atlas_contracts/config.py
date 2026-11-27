@@ -158,7 +158,7 @@ def validate_mrt_archive_policy(source):
         raise ContractError("MRT archive rotation slot invalid")
 
 
-def validate_sources(config):
+def validate_sources(config, *, implementation=None):
     sources = config["sources"]
     ids = [s["id"] for s in sources]
     if len(ids) != len(set(ids)):
@@ -215,7 +215,7 @@ def validate_sources(config):
                 from .policy import fixture_issues
                 controls = {**source, "id": sid + "-updates", "fixture": companion,
                             "parser": {"id": "mrt-bgp4mp", "schema": "mrt-bgp4mp-unicast-v1", "version": 1}}
-                if fixture_issues(controls, ROOT):
+                if fixture_issues(controls, ROOT, implementation):
                     raise ContractError(f"{sid}: MRT UPDATE fixture is not certified")
         if source["category"] == "proxy_subscription_ip" and (
             source["evidence_family"] != "public-subscription-aggregators"
@@ -235,11 +235,11 @@ def validate_sources(config):
             raise ContractError(f"{sid}: unsafe publication-proof URL")
         if source["admission"] in ("fixture_tested", "active"):
             from .policy import fixture_issues
-            if fixture_issues(source, ROOT):
+            if fixture_issues(source, ROOT, implementation):
                 raise ContractError(f"{sid}: fixture milestone is not certified")
         if source["admission"] == "active":
             from .policy import static_issues
-            if static_issues(source, ROOT):
+            if static_issues(source, ROOT, implementation):
                 raise ContractError(f"{sid}: active admission gates failed")
     by_id = {s["id"]: s for s in sources}
     if any("mrt_updates_fixture" in s and s["id"] + "-updates" in by_id for s in sources):
@@ -270,7 +270,7 @@ def validate_sources(config):
         raise ContractError("CAIDA requires deterministic current-snapshot discovery")
 
 
-def load_configs(root: Path = ROOT):
+def load_configs(root: Path = ROOT, *, implementation=None):
     configs = {}
     paths = {path.stem for path in (root / "configs").glob("*.yaml")}
     if paths != set(CONFIG_NAMES):
@@ -279,7 +279,7 @@ def load_configs(root: Path = ROOT):
         config = load_yaml(root / "configs" / f"{name}.yaml")
         validate_schema(name, config, root)
         configs[name] = config
-    validate_sources(configs["sources"])
+    validate_sources(configs["sources"], implementation=implementation)
     if configs["sources"]["build"]["bgp"]["relationship_classes"] != configs["tier1"]["relationships"]["classifications"]:
         raise ContractError("cross-config relationship enum mismatch")
     approval = configs["release-approval"]

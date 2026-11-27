@@ -6,12 +6,20 @@ const samples = new Set(['ui-context','hero','root-redirect','dataset-credits','
   'component-wheel-zoom','component-route-focus','component-accessibility','component-unknown-ipv4'])
 const classes = new Set(['contract','playwright-timeout','runtime','report-validation','unexpected-request',
   'page-exception','asset-accounting','resource-observation','privacy-contract'])
+// Only exact Python validator exit codes select a gate class. Raw child
+// streams stay ignored. Keep in sync with preview_shards.py and browser_failures.py.
+const reportGates = new Map([
+  [41,'gate-graph'],[42,'gate-accessibility'],[43,'gate-lcp'],[44,'gate-initial-js'],[45,'gate-cls'],[46,'gate-inp'],
+  [47,'gate-population'],[48,'gate-candidate-states'],[49,'gate-unknown-states'],[50,'gate-ipv4'],[51,'gate-synthetic-ipv4'],
+  [52,'gate-worker-memory'],[53,'gate-cold-payload'],[54,'gate-hot-lookup'],
+])
+const gateClasses = new Set(reportGates.values())
 
 export class BrowserContractFailure extends Error {}
 
 export function browserFailureMarker(phase, sample, classification) {
   if (!setup.has(phase) && !samples.has(phase)) phase = 'startup'
-  if (!classes.has(classification)) classification = 'runtime'
+  if (!classes.has(classification) && !(phase === 'report-validation' && gateClasses.has(classification))) classification = 'runtime'
   if (!samples.has(phase) || !Number.isInteger(sample) || sample < 1 || sample > 30) sample = '-'
   // A phase that needs a real sample index may not claim one without it.
   if (samples.has(phase) && sample === '-') phase = 'startup'
@@ -29,6 +37,9 @@ export function browserDiagnostics(TimeoutError, emit = line => console.error(li
       emit(marker(classification))
     },
     note(classification) { deferred ??= marker(classification) },
-    failedReport() { emit(deferred ?? marker('report-validation')) },
+    failedReport(status) {
+      const classification = phase === 'report-validation' ? reportGates.get(status) : undefined
+      emit(deferred ?? marker(classification ?? 'report-validation'))
+    },
   }
 }

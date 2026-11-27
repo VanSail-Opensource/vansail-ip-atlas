@@ -6,11 +6,16 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 import subprocess
 import sys
 
 from tools.atlas_contracts.config import ContractError, ROOT, load_configs, load_yaml, validate_schema, validate_sources
-from tools.atlas_contracts.policy import OPTIONAL_ROUTING_CAPABILITIES, Snapshot, adapter_code_hash, capability_report, fixture_issues, runtime_state, static_issues, utc
+from tools.atlas_contracts.policy import (
+    OPTIONAL_ROUTING_CAPABILITIES, Snapshot, adapter_certified, adapter_code_hash,
+    capability_report, checked_adapter_implementation, fixture_issues, runtime_state,
+    static_issues, utc,
+)
 
 
 class ConfigurationTests(unittest.TestCase):
@@ -54,6 +59,17 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(report["blocked_required_capability_count"], 7)
         subscriptions = [s for s in self.configs["sources"]["sources"] if s["category"] == "proxy_subscription_ip"]
         self.assertEqual(subscriptions, [])
+
+    def test_checked_fingerprint_keeps_complete_catalog_report_identical(self):
+        now = utc("2026-11-27T13:00:00Z")
+        expected = capability_report(self.configs["sources"], now, ROOT)
+        with patch("tools.atlas_contracts.policy.adapter_code_hash", wraps=adapter_code_hash) as fingerprint:
+            with checked_adapter_implementation(ROOT) as implementation:
+                configs = load_configs(implementation=implementation)
+                actual = capability_report(configs["sources"], now, ROOT, implementation=implementation)
+            self.assertEqual(fingerprint.call_count, 2)
+        self.assertEqual(configs, self.configs)
+        self.assertEqual(json.dumps(actual, sort_keys=True), json.dumps(expected, sort_keys=True))
 
     def test_ripe_ipv6_registry_scopes_network_name_and_subscriber_isp(self):
         catalog = self.configs["sources"]
@@ -454,6 +470,31 @@ class AdmissionClockTests(unittest.TestCase):
         self.assertEqual(runtime_state(self.source, None, self.now, self.root)[0], "missing")
         self.source["admission"] = "retired"
         self.assertEqual(self.state(), "quarantined")
+
+    def test_checked_fingerprint_rejects_mutation_before_committing_report(self):
+        self.assertTrue(adapter_certified(self.source, self.root))
+        with self.assertRaisesRegex(ContractError, "implementation changed"):
+            with checked_adapter_implementation(self.root) as implementation:
+                self.assertTrue(adapter_certified(self.source, self.root, implementation))
+                (self.root / "internal/test.go").write_text("package changed\n", encoding="utf-8")
+                self.assertFalse(adapter_certified(self.source, self.root))
+        self.assertFalse(adapter_certified(self.source, self.root, implementation))
+        with checked_adapter_implementation(self.root) as newer:
+            self.assertFalse(adapter_certified(self.source, self.root, newer))
+
+    def test_checked_fingerprint_is_not_reusable_by_another_root_or_invocation(self):
+        with tempfile.TemporaryDirectory() as other:
+            other = Path(other)
+            for name in ("internal/test.go", "fixtures/source-certification/adapter-certifications.json"):
+                destination = other / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes((self.root / name).read_bytes())
+            self.assertTrue(adapter_certified(self.source, other))
+            with checked_adapter_implementation(self.root) as implementation:
+                self.assertTrue(adapter_certified(self.source, self.root, implementation))
+                self.assertFalse(adapter_certified(self.source, other, implementation))
+            self.assertFalse(adapter_certified(self.source, self.root, implementation))
+            self.assertTrue(adapter_certified(self.source, self.root))
 
     def test_labels_and_changed_code_cannot_bypass_adapter_certification(self):
         self.source["parser"]["id"] = "guessed-parser"

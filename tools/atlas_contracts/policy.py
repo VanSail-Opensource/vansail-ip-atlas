@@ -1,4 +1,5 @@
 """Executable build-private P0 admission/freshness contracts; no network actions."""
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
@@ -34,7 +35,44 @@ def adapter_code_hash(root):
     return digest.hexdigest()
 
 
-def adapter_certified(source, root):
+class _AdapterImplementation:
+    """One validation invocation's code identity, never a process cache."""
+
+    def __init__(self, root: Path, digest: str):
+        self._root = root
+        self._digest = digest
+
+    def fingerprint(self, root: Path) -> str:
+        if self._digest is None or root.absolute() != self._root:
+            raise ValueError("adapter implementation scope differs")
+        return self._digest
+
+
+@contextmanager
+def checked_adapter_implementation(root: Path):
+    """Share one fingerprint while repeatedly checking current fixtures and ledger entries.
+
+    Finish the independent second code-tree hash before publishing any report.
+    On failure or scope exit the binding cannot certify another invocation.
+    """
+    from .config import ContractError
+    root = root.absolute()
+    resolved = root.resolve(strict=True)
+    before = adapter_code_hash(resolved)
+    if not HEX.fullmatch(before):
+        raise ContractError("adapter implementation fingerprint unavailable")
+    implementation = _AdapterImplementation(root, before)
+    try:
+        yield implementation
+        if root.resolve(strict=True) != resolved or adapter_code_hash(resolved) != before:
+            raise ContractError("adapter implementation changed during validation")
+    finally:
+        implementation._digest = None
+
+
+def adapter_certified(source, root, implementation=None):
+    if implementation is not None and type(implementation) is not _AdapterImplementation:
+        return False
     path = root / "fixtures/source-certification/adapter-certifications.json"
     try:
         if path.stat().st_size > 1024 * 1024 or not path.resolve().is_relative_to(root.resolve()):
@@ -63,7 +101,8 @@ def adapter_certified(source, root):
             return (entry["parser"] == source["parser"]["id"] and entry["schema"] == source["parser"]["schema"]
                     and type(entry["version"]) is int and entry["version"] == source["parser"]["version"]
                     and HEX.fullmatch(entry["implementation_sha256"] or "") is not None
-                    and entry["implementation_sha256"] == adapter_code_hash(root)
+                    and entry["implementation_sha256"] == (
+                        adapter_code_hash(root) if implementation is None else implementation.fingerprint(root))
                     and entry["fixture_sha256"] == source["fixture"]["sha256"]
                     and entry["tested_at"] == source["fixture"]["tested_at"])
         return False
@@ -77,10 +116,10 @@ def utc(value):
     return datetime.fromisoformat(value[:-1] + "+00:00").astimezone(timezone.utc)
 
 
-def fixture_issues(source, root: Path):
+def fixture_issues(source, root: Path, implementation=None):
     fixture, parser = source["fixture"], source["parser"]
     issues = []
-    if not adapter_certified(source, root):
+    if not adapter_certified(source, root, implementation):
         issues.append("reviewed_adapter_certification_required")
     if (fixture["status"] != "passed" or not fixture["schema_observed"]
             or not HEX.fullmatch(fixture["sha256"] or "") or fixture.get("synthetic") is not False):
@@ -197,8 +236,8 @@ def caida_discovery_supported(source):
             and source.get("field_mappings") == {"as_relationship": "as_relationships"})
 
 
-def static_issues(source, root: Path):
-    issues = fixture_issues(source, root)
+def static_issues(source, root: Path, implementation=None):
+    issues = fixture_issues(source, root, implementation)
     rights, proof = source["license"], source["publication_proof"]
     if not reviewed_distribution_decision(rights):
         issues.append("reviewed_redistribution_rights_required")
@@ -259,10 +298,10 @@ class Snapshot:
     item_published_at: str | None = None
 
 
-def runtime_state(source, snapshot, now, root):
+def runtime_state(source, snapshot, now, root, implementation=None):
     if source["admission"] != "active":
         return "quarantined", ["not_active"]
-    issues = static_issues(source, root)
+    issues = static_issues(source, root, implementation)
     if issues:
         return "quarantined", issues
     if snapshot is None:
@@ -294,11 +333,11 @@ def runtime_state(source, snapshot, now, root):
     return "current", []
 
 
-def capability_report(config, now, root, snapshots=None):
+def capability_report(config, now, root, snapshots=None, *, implementation=None):
     snapshots = snapshots or {}
     decisions, eligible = [], []
     by_id = {s["id"]: s for s in config["sources"]}
-    states = {sid: runtime_state(source, snapshots.get(sid), now, root) for sid, source in by_id.items()}
+    states = {sid: runtime_state(source, snapshots.get(sid), now, root, implementation) for sid, source in by_id.items()}
     resolved, visiting = {}, set()
 
     def resolve(sid):
@@ -317,7 +356,7 @@ def capability_report(config, now, root, snapshots=None):
     for source in config["sources"]:
         state, issues = resolve(source["id"])
         decisions.append({"id": source["id"], "admission": source["admission"], "runtime": state,
-                          "blockers": sorted(set(issues + static_issues(source, root)))})
+                          "blockers": sorted(set(issues + static_issues(source, root, implementation)))})
         if state == "current":
             eligible.append(source)
 

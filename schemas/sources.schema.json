@@ -1475,6 +1475,16 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {"properties": {"id": {"const": "ffraud-ip"}}},
+            "then": {"properties": {"fields": {"const": ["ip", "ffraud_score", "confirmations", "category", "type"]}}}
+          },
+          {
+            "if": {"properties": {"id": {"const": "jacobrakai-honeypot"}}},
+            "then": {"properties": {"fields": {"const": ["meta.updated", "ip", "tier", "attempts", "bans", "first_seen", "last_seen", "first_banned", "asn"]}}}
+          }
+        ],
         "if": {"properties": {"id": {"const": "apple-private-relay"}}},
         "then": {
           "properties": {

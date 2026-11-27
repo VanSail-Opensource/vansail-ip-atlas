@@ -382,7 +382,7 @@ test('length, version, overflow and checksum failures remain closed', async () =
   const good = new Uint8Array(Buffer.from(golden.objects[0].base64, 'base64'))
   await assert.rejects(parseShard(good.subarray(0, 63)), { message: 'length' })
   await assert.rejects(parseShard(new Uint8Array(24 * 1024 * 1024)), { message: 'length' })
-  for (const oldSchema of [3, 4]) {
+  for (const oldSchema of [3, 4, 5]) {
     const version = good.slice(); version[6] = oldSchema
     await assert.rejects(parseShard(version), { message: 'version' })
   }

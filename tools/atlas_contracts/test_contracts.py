@@ -34,11 +34,11 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_actual_catalog_is_blocked_and_has_shared_family(self):
         report = capability_report(self.configs["sources"], utc("2026-11-08T00:00:00Z"), ROOT)
-        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (23, 23, 0))
+        self.assertEqual((report["source_count"], report["active_count"], report["current_count"]), (24, 24, 0))
         self.assertEqual({s["id"] for s in self.configs["sources"]["sources"] if s["admission"] == "active"}, {
             "sapics-user-country-v4", "sapics-user-country-v6", "sapics-server-country-v4", "ipverse-as-metadata",
             "dbip-lite-direct", "apple-private-relay", "mullvad-relay-geolocation", "ipapi-free-geo-v4", "ipapi-free-geo-v6", "x4b-vpn-v4", "tor-exits", "ipverse-asn-usage",
-            "google-network-organization", "ripe-ipv6-network-names", "nro-delegated-registration", "ffraud-ip", "iana-root-anycast", "tweetfeed-week", "azure-appservice-public", "routeviews-wide-rib", "ripe-mrt-rrc18", "caida-asrel2", "rpki-client-vrps"})
+            "google-network-organization", "ripe-ipv6-network-names", "nro-delegated-registration", "ffraud-ip", "jacobrakai-honeypot", "iana-root-anycast", "tweetfeed-week", "azure-appservice-public", "routeviews-wide-rib", "ripe-mrt-rrc18", "caida-asrel2", "rpki-client-vrps"})
         self.assertFalse(report["production_eligible"])
         self.assertEqual(report["schema_version"], 3)
         self.assertEqual(report["release_scope"], "release-scope-v6")
@@ -186,7 +186,7 @@ class ConfigurationTests(unittest.TestCase):
                                 cwd=ROOT, capture_output=True, text=True, check=False)
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn("7/7 required capabilities", result.stdout)
-        self.assertIn("Observed risk: positive evidence only", result.stdout)
+        self.assertIn("Observed risk: missing observations score zero; coverage remains independent", result.stdout)
         production_line = next(line for line in result.stdout.splitlines() if line.startswith("Production BLOCKED"))
         self.assertNotIn("numeric_quality", production_line)
         self.assertIn("pages_release", production_line)

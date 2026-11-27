@@ -308,7 +308,7 @@ async function visibleSubnet(page,answer,expected) {
   if(expected!==undefined&&canonical(profile)!==canonical(expected))throw new BrowserContractFailure('IPv4 coverage witness Class C answer differs between readers')
   const view=await workerAnswer(page,'classCView',q)
   if(view.q!==q||view.releaseId!==releaseId||view.synthetic!==synthetic||canonical(view.profile)!==canonical(profile))throw new BrowserContractFailure('Subnet risk focused answer differs from the full answer')
-  const ratio=Number((profile.scoreSum/profile.totalUnits).toFixed(profile.unit==='ipv6-/64'?5:2))
+  const ratio=Number((profile.scoreSum/profile.totalUnits).toFixed(5))
   if((await page.getByTestId('subnet-risk-mean').innerText()).trim()!==`${ratio} / 100`)throw new BrowserContractFailure('Subnet risk display uses the wrong address scope or denominator')
   await page.getByRole('heading',{name:profile.prefix,exact:true,level:2}).waitFor()
   return profile

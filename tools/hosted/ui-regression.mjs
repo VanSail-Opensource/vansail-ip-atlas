@@ -284,6 +284,8 @@ try {
       }
       if (view === 'class-c') {
         assert.equal(await page.getByRole('gridcell').count(), 256)
+        // Three fixture scores sum to 125, but the mean includes all 256 addresses.
+        assert.equal((await page.getByTestId('subnet-risk-mean').innerText()).trim(), '0.48828 / 100')
         await page.getByRole('gridcell').first().focus(); await page.keyboard.press('ArrowDown')
         assert.equal(await page.getByRole('gridcell').nth(16).getAttribute('tabindex'), '0')
       }

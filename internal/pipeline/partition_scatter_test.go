@@ -553,6 +553,96 @@ func TestDeepQualityScatterPreservesExactBinaryFirstFit(t *testing.T) {
 	}
 }
 
+func TestDeepQualityScatterLeavesSchema6IPv6ProfilesIndivisible(t *testing.T) {
+	c := proofMergeCompiler(t)
+	c.options.Limits.PartitionRecords = 1
+	quality := &via3.QualityData{}
+	var records []via3.PublicRecord
+	for i := range 40 {
+		addr := netip.AddrFrom4([4]byte{byte(i * 6), 99, 201, 0})
+		records = append(records, via3.PublicRecord{Version: 3, Kind: 6, Prefix: netip.PrefixFrom(addr, 24), Quality: quality})
+	}
+	block := netip.MustParsePrefix("2001:db8::/46")
+	for i := range 4 {
+		addr := netip.MustParseAddr(fmt.Sprintf("2001:db8:%x::1", i))
+		records = append(records, via3.PublicRecord{Version: 3, Kind: 6, Prefix: netip.PrefixFrom(addr, 128), Exact: true, Quality: quality})
+	}
+	paths, err := c.sort(producer(records))
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, err = c.prepareMerge(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups, err := c.classify(paths)
+	if err != nil || len(groups) != 3 {
+		t.Fatalf("classification lost family-specific fact groups: %d, %v", len(groups), err)
+	}
+	var ipv4, ipv6, profile bool
+	for _, group := range groups {
+		proof := c.runProofs.lookup(group.path)
+		if proof == nil || proof.scatter == nil {
+			t.Fatal("missing authenticated plan for classified run")
+		}
+		switch {
+		case group.group == qualityFacts && group.prefix.Addr().Is4():
+			ipv4 = true
+			if proof.scatter.deep == nil {
+				t.Fatal("IPv4 quality did not get a deep plan")
+			}
+			runs, applied, err := c.scatterPartition(group.path, group.scope)
+			if err != nil || !applied || len(runs) <= 16 {
+				t.Fatalf("did not exercise depth-eight IPv4 path: %d, %v, %v", len(runs), applied, err)
+			}
+		case group.group == qualityFacts && group.prefix.Addr().Is6():
+			ipv6 = true
+			if proof.scatter.deep != nil {
+				t.Fatal("IPv6 address quality used the IPv4-only plan")
+			}
+		case group.group == ipv6ProfileFacts:
+			profile = true
+			if proof.scatter.deep != nil {
+				t.Fatal("IPv6 summaries used the IPv4-only plan")
+			}
+			runs, applied, err := c.scatterPartition(group.path, group.scope)
+			if err != nil || !applied || len(runs) != 1 || runs[0].prefix != block {
+				t.Fatalf("profile did not narrow to its common /46: %v, %v, %v", runs, applied, err)
+			}
+			leafPlan := newOwnedScatterPlan(runs[0].scope)
+			if leafPlan == nil || leafPlan.bins != nil {
+				t.Fatal("profile plan looked beyond the /48 width")
+			}
+			leaves, applied, err := c.scatterPartition(runs[0].path, runs[0].scope)
+			if err != nil || !applied || len(leaves) != 4 {
+				t.Fatalf("profile did not produce four indivisible leaves: %v, %v, %v", leaves, applied, err)
+			}
+			for i, leaf := range leaves {
+				expected := netip.MustParsePrefix(fmt.Sprintf("2001:db8:%x::/48", i))
+				if leaf.prefix != expected || leaf.group != ipv6ProfileFacts {
+					t.Fatalf("unexpected IPv6 profile leaf: %+v", leaf)
+				}
+				r, err := openRun(leaf.path, c.options.Limits.RecordBytes)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer r.file.Close()
+				if err = r.next(); err != nil || r.record.Kind != 7 || r.record.Prefix != expected || r.record.Inherited || r.record.Exact || r.record.Profile == nil || r.record.Profile.IPv6 == nil {
+					t.Fatalf("profile was changed, inherited or removed: %v", err)
+				}
+				if err = r.next(); err != io.EOF {
+					t.Fatalf("extra rows in one profile leaf: %v", err)
+				}
+			}
+		default:
+			t.Fatalf("unexpected classified scope: %+v", group)
+		}
+	}
+	if !ipv4 || !ipv6 || !profile {
+		t.Fatal("mixed fixture did not exercise all fact groups")
+	}
+}
+
 func TestDeepQualityScatterAuthenticatesTailAndRespectsScratch(t *testing.T) {
 	for _, mutate := range []bool{false, true} {
 		t.Run(fmt.Sprint(mutate), func(t *testing.T) {

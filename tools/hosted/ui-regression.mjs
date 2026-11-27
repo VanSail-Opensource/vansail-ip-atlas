@@ -3,6 +3,8 @@ import { chromium } from 'playwright'
 import assert from 'node:assert/strict'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
+import { createRequire } from 'node:module'
+import { auditAccessibility } from './browser-accessibility.mjs'
 const base = process.env.ATLAS_PREVIEW_URL ?? 'http://127.0.0.1:4173'
 const candidate = JSON.parse(await readFile(new URL('../../reports/static-candidate.json', import.meta.url), 'utf8'))
 if (candidate.status !== 'passed' || !/^[0-9a-f]{64}$/.test(candidate.candidate_bundle_sha256) || !/^[0-9a-f]{64}$/.test(candidate.release_id))
@@ -436,6 +438,61 @@ try {
       } finally { await isolated.close() }
     }
     assert.notDeepEqual(...palettes)
+  })
+  await test('every narrow Atlas tab fits and stays reachable after BGP route focus', async () => {
+    const axeSource = await readFile(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8')
+    const names = ['Overview', 'Observed risk', 'Class C', 'BGP', 'ASN']
+    const paths = ['/ip/overview', '/ip/quality', '/ip/class-c', '/ip/bgp', '/ip/asn']
+    for (const theme of ['light', 'dark']) {
+      const isolated = await browser.newContext({ viewport: { width: 320, height: 844 }, deviceScaleFactor: 2,
+        colorScheme: theme, reducedMotion: 'no-preference', serviceWorkers: 'block' })
+      try {
+        await isolated.route('**/*', route => new URL(route.request().url()).origin === new URL(base).origin
+          ? route.continue() : route.abort('blockedbyclient'))
+        await isolated.addInitScript(value => localStorage.setItem('nuxt-color-mode', value), theme)
+        const graph = await isolated.newPage()
+        await graph.goto(`${base}/ip/bgp/?q=AS424240`)
+        await graph.waitForFunction(value => document.documentElement.classList.contains(value), theme)
+        await graph.locator('.graph-node').nth(23).waitFor()
+        const svg = graph.locator('.bgp-graph svg'), focus = graph.getByRole('combobox', { name: 'Focus observed route' })
+        const nav = graph.getByRole('navigation', { name: 'Atlas views' }), links = nav.getByRole('link')
+        assert.deepEqual(await links.allTextContents(), names)
+        assert.deepEqual(await links.evaluateAll(nodes => nodes.map(a => [new URL(a.href).pathname, new URL(a.href).searchParams.get('q')])),
+          paths.map(path => [path, 'AS424240']))
+
+        for (const largerText of [false, true]) {
+          // Exercise both the shipped styles and a wider-font case that used
+          // to clip the last tab even if this machine's default font fitted.
+          if (largerText) await graph.addStyleTag({ content: '.view-nav a { font-size: 16px; }' })
+          await graph.getByRole('button', { name: 'Fit', exact: true }).click()
+          await svg.scrollIntoViewIfNeeded()
+          await svg.focus()
+          await focus.focus()
+          await focus.selectOption('-1')
+          await graph.keyboard.press('ArrowDown')
+          assert.notEqual(await focus.inputValue(), '-1')
+          const fittedNav = await nav.evaluate(element => {
+            const rect = element.getBoundingClientRect()
+            return getComputedStyle(element).overflowX === 'visible' && element.scrollWidth <= element.clientWidth + 1 &&
+              [...element.querySelectorAll('a')].every(link => {
+                const box = link.getBoundingClientRect()
+                return box.width > 0 && box.height > 0 && box.left >= Math.max(0, rect.left) - 0.5 &&
+                  box.right <= Math.min(innerWidth, rect.right) + 0.5
+              })
+          })
+          assert(fittedNav, `Atlas navigation clips at 320px in ${theme} theme with larger text=${largerText}`)
+          const a11y = await auditAccessibility(graph, axeSource)
+          assert.deepEqual(a11y.violations, [])
+          assert.deepEqual(a11y.incomplete, [])
+          await links.first().focus()
+          for (let i = 0; i < names.length; i++) {
+            if (i > 0) await graph.keyboard.press('Tab')
+            assert(await links.nth(i).evaluate(link => link === document.activeElement), `Atlas tab not keyboard reachable: ${names[i]}`)
+          }
+          assert.equal(await nav.evaluate(element => element.scrollLeft), 0)
+        }
+      } finally { await isolated.close() }
+    }
   })
   await test('downloaded BGP SVG is standalone and keeps geometry under route focus', async () => {
     await page.goto(`${base}/ip/bgp/?q=203.0.113.1`)

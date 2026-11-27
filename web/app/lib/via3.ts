@@ -3,7 +3,7 @@ export type NetworkAnswer = { prefix: string; name: string | null; organization:
 export type UsageAnswer = { type: string; assignment: string; anycast: boolean | null; directedBroadcast: boolean | null }
 export type LayerCoverage = 'assessed' | 'unassessed' | 'not_applicable'
 export type CoverageAnswer = { status: 'complete' | 'incomplete'; layers: { exact: LayerCoverage; prefix: LayerCoverage; asn: LayerCoverage; neighbors: LayerCoverage } }
-export type QualityAnswer = { coverage: CoverageAnswer; score: number | null; confidence: string; reasons: string[]; layers: { exact: number | null; prefix: number | null; asn: number | null; neighbors: number | null } }
+export type QualityAnswer = { coverage: CoverageAnswer; score: number; confidence: string; reasons: string[]; layers: { exact: number; prefix: number; asn: number; neighbors: number | null } }
 export type ASNAnswer = { asn: number; name: string | null; organization: string | null; country: string | null; risk: number | null; riskBand: string; confidence: string; prefixes: string[]; prefixCursor: number | null; customerCone: number | null; transitDegree: number | null; networkClass: string; stability: string }
 export type ASNPrefixPage = { asn: number; prefixes: string[]; nextCursor: number | null }
 export type RPKIAnswer = { origin: number; status: string; observedAt: number | null; validUntil: number | null }
@@ -13,8 +13,8 @@ export type AddressView = Pick<LookupAnswer, 'q' | 'releaseId' | 'synthetic' | '
 export type RiskView = AddressView & Pick<LookupAnswer, 'observedRisk'>
 export type ClassCView = AddressView & { profile: ClassCAnswer | null }
 export type OverviewAnswer = Pick<LookupAnswer, 'q' | 'releaseId' | 'synthetic' | 'validUntil' | 'geo' | 'network' | 'usage'> & { kind: 'ip' }
-export type CellAnswer = { ip: string; observed: boolean; coverage: 'complete' | 'incomplete'; observedRiskScore: number | null; confidence: string; reasons: string[]; usage: string; origins: number[] }
-export type ClassCAnswer = { prefix: string; cells: CellAnswer[]; observedCount: number; assessedCount: number; positiveCount: number; scoredCount: number; meanObservedRisk: number | null }
+export type CellAnswer = { ip: string; observed: boolean; coverage: 'complete' | 'incomplete'; observedRiskScore: number; confidence: string; reasons: string[]; usage: string; origins: number[] }
+export type ClassCAnswer = { prefix: string; cells: CellAnswer[]; observedCount: number; assessedCount: number; positiveCount: number; scoredCount: number; meanObservedRisk: number; unit: 'ipv4-address' | 'ipv6-/64'; totalUnits: number; scoreSum: number }
 
 /** Only an evidenced city or finer area can support the approximate map. */
 export function hasMapLocation(answer: Pick<LookupAnswer, 'geo' | 'usage'> | null | undefined): boolean {

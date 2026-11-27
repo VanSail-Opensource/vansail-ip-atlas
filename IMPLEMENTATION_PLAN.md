@@ -8,6 +8,13 @@ and authorizes automatic gated publishing from the existing public repository on
 official GitHub runners. `AGENTS.md` is normative. Earlier dated reports remain
 historical evidence, not proof of current source or production qualification.
 
+The November 27 display amendment keeps only country, registration country,
+matched prefix and usage in Overview. The map and the visible Tier-1 stability
+label are removed. BGP links use accessible relationship styling, and nodes use
+evidenced ASN names. IP risk now displays zero when observations are absent,
+without changing assessment coverage. The IPv4 `/24` mean includes all 256
+addresses. IPv6 uses a separate `/48` risk summary with no grid.
+
 The explicit educational source-use amendment (2026-11-15) permits the reviewed
 per-source decision `user_authorized_educational_use` alongside `allow`. It records
 the user's project-use authorization without claiming a publisher grant or
@@ -40,7 +47,7 @@ p95 below 25 microseconds. Integration and production independently evaluate
 - Root returns HTTP 302 to `/ip`. One input opens overview, quality, class-c, BGP
   and ASN routes. The quality route owns observed risk and retains its deep links.
   Each view has one canonical fact display; reserved diagnostics stay unimplemented.
-- VIA3 container version 3 carries public schema 5. Go and browser readers reject
+- VIA3 container version 3 carries public schema 6. Go and browser readers reject
   incompatible schemas and share golden answers and hostile corruption fixtures.
 - No source IDs, provenance, credentials, domains, ports, protocols, collectors,
   latency, timezone, postal or continent fields enter public facts. Only separate
@@ -78,11 +85,13 @@ Higher means more supported adverse evidence, neither probability nor safety.
 Preserve signal coefficients, decay, independence, exact/prefix specificity,
 ASN caps and leave-one-out neighbor calculations.
 
-`observedRisk` has nullable score, confidence, reasons, four contributions and
-explicit assessment coverage. No scored positive support yields null. Positive
-support can produce a number with incomplete coverage; rounded positive zero
-displays `<1`. IPv6 omits /24 influence without redistributing its weight. The
-/24 mean includes only scored observed cells and exposes its denominator.
+`observedRisk` reports an integer score for every IP, confidence, reasons, four
+contributions and explicit assessment coverage. No scored positive support
+yields zero with unrated confidence. Positive support can produce a number
+with incomplete coverage. Rounded positive zero displays `<1`. IPv6 omits
+IPv4 `/24` influence without redistributing its weight. The IPv4 mean includes
+all 256 addresses. The separate IPv6 `/48` mean uses one maximum weighted
+exact score per `/64` and a fixed denominator of 65,536.
 
 Preserve all MOAS origins and origin-specific RPKI. AS_PATH adjacency does not
 establish a business relationship; conflicts and missing data yield unknown.
@@ -135,7 +144,7 @@ Measure three isolated cold-full, warm-changed, warm-unchanged, expiry and
 withdrawal samples. Change `ceil(N/100)` actual normalized records in isolated
 engineering copies and prove the deltas. Every scenario executes the same
 materializer as production; no benchmark-only shortcut or production receipt.
-Derive lookup strata, map and graph cases from actual current indexes. Report
+Derive lookup strata, subnet and graph cases from actual current indexes. Report
 p50/p95/p99, allocation counts, RSS, scratch, input size and browser metrics.
 Absent routing populations are recorded and tested as unknown; they never count
 as observed production data. Applicable unmeasured bounds and failed original
@@ -143,8 +152,8 @@ ceilings block release. The exact application also retains independent synthetic
 24-node graph and maximum-memory capacity tests.
 
 Keep fewer than 18,500 files and each asset below 24 MiB. Verify all object hashes,
-public fields and legal assets before upload and on the hosted preview. OSM tiles
-are the sole remote runtime data exception.
+public fields and legal assets before upload and on the hosted preview. No
+runtime data origin other than the same static site is permitted.
 
 A failed candidate preserves the previous deployment. Rollback independently
 revalidates the exact previously verified artifact against current freshness,

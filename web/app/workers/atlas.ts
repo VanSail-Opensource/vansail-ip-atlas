@@ -14,6 +14,7 @@ const PUBLIC_LIVE = 96 * 1024 * 1024
 const PUBLIC_ANSWER = 8 * 1024 * 1024
 const PUBLIC_ORIGINS = 4096
 const PUBLIC_PATH_ASNS = 49152
+const PUBLIC_SCHEMA = 6
 const NONE = 0xffffffff
 const fail = (code: string): never => { throw new Error(code) }
 const view = (b: Uint8Array) => new DataView(b.buffer, b.byteOffset, b.byteLength)
@@ -386,7 +387,12 @@ function validate(shard: Shard): void {
     const index = shard.rows(id)
     for (let p = 0; p < index.length; p += 32) {
       const record = u32(index, p + 20)
-      if (!prefixKeyValid(index, p, 32) || record >= count || (shard.kind === 7 && (index[p] !== 4 || index[p + 1] !== 24 || u16(index, p + 2) !== 0))) fail('record')
+      if (!prefixKeyValid(index, p, 32) || record >= count) fail('record')
+      if (shard.kind === 7) {
+        const row = shard.record(record)
+        const ipv6 = index[p] === 6
+        if (u16(index, p + 2) !== 0 || index[p + 1] !== (ipv6 ? 48 : 24) || row[22] !== (ipv6 ? 1 : 0) || (ipv6 && id !== 1)) fail('record')
+      }
       if ((shard.kind === 9 || shard.kind === 10) && u16(index, p + 2) !== 0) fail('record')
       if (shard.kind === 6 && index[p] === 6) { const row = shard.record(record); if (has(row, 13) || (row[11]! & 24)) fail('record') }
       if (shard.kind === 9) { const row = shard.record(record); if (row[9]! > (index[p] === 4 ? 32 : 128) || (row[8] === 1 && row[9]! < index[p + 1]!) || ((row[8] === 0 || row[8] === 3) && row[9] !== 0)) fail('record') }
@@ -437,6 +443,11 @@ function validate(shard: Shard): void {
         if (has(row, 9)) { const sum = u32(row, 12) + u32(row, 16) + u32(row, 20) + u32(row, 24); const lowScore = Math.floor((Math.max(0, sum - 2) + 5000) / 10000); const highScore = Math.floor((Math.min(1000000, sum + 2) + 5000) / 10000); if (row[9]! < lowScore || row[9]! > highScore) fail('record') } else if ([12,16,20,24].some(p => u32(row,p)>0)) fail('record')
         break
       case 7: {
+        if (row[22] === 1) {
+          const seen = u32(row, 4), positive = u32(row, 8), sum = u32(row, 12)
+          if (u32(row, 0) !== mask(21, 22) || seen === 0 || seen > 65536 || positive > seen || sum > 55 * positive || u32(row, 16) !== 0 || row[21] !== 0 || row[23] !== 0 || row[20] !== Math.floor((sum + 32768) / 65536) || cells.length !== 0 || objects.length !== 0) fail('record')
+          break
+        }
         const first = u32(row, 4); const count = u16(row, 8)
         if (!range(first, count, cells.length / 32) || count > 256 || u16(row, 10) > count || u16(row, 12) > count || u16(row, 14) > count || !zero(row.subarray(22)) || row[20]! > 100 || row[21]! > 3 || (has(row, 22) ? u16(row, 14) === 0 || row[21] === 0 : row[20] !== 0 || row[21] !== 0 || u16(row, 14) !== 0)) fail('record')
         let previous = -1; let assessed = 0; let positive = 0; let scored = 0; let sum = 0; let minimumConfidence = 3
@@ -453,7 +464,7 @@ function validate(shard: Shard): void {
           if (!(c[1]! & 64) && (c[24]! & 1) || !(c[1]! & 128) && (c[24]! & 2)) fail('record')
         }
         if (assessed !== u16(row, 10) || positive !== u16(row, 12) || scored !== u16(row, 14)) fail('record')
-        if (scored > 0 && (row[20] !== Math.floor((2*sum+scored)/(2*scored)) || row[21] !== minimumConfidence)) fail('record')
+        if (scored > 0 && (row[20] !== Math.floor((sum + 128) / 256) || row[21] !== minimumConfidence)) fail('record')
         break
       }
       case 8:
@@ -508,7 +519,7 @@ export function parseShard(bytes: Uint8Array, signal?: AbortSignal): Promise<Sha
 async function decodeShard(bytes: Uint8Array, knownSchema: boolean, signal?: AbortSignal): Promise<Shard> {
   checkAbort(signal)
   if (bytes.length < 64 || bytes.length >= MAX_FILE) return fail('length')
-  if (bytes[0] !== 86 || bytes[1] !== 73 || bytes[2] !== 65 || bytes[3] !== 51 || u16(bytes, 4) !== 3 || u16(bytes, 6) !== 5) return fail('version')
+  if (bytes[0] !== 86 || bytes[1] !== 73 || bytes[2] !== 65 || bytes[3] !== 51 || u16(bytes, 4) !== 3 || u16(bytes, 6) !== PUBLIC_SCHEMA) return fail('version')
   if (u16(bytes, 8) !== 64 || u32(bytes, 12) !== 0 || bytes[44] !== 1 || !zero(bytes.subarray(45, 64))) return fail('header')
   if (view(bytes).getBigUint64(36, true) > BigInt(PUBLIC_OBJECT)) return fail('resource_limit')
   const kind = u16(bytes, 10); const expected = schema(kind)
@@ -590,7 +601,7 @@ class ObjectCache {
   private db(): Promise<IDBDatabase | null> {
     if (typeof indexedDB === 'undefined') return Promise.resolve(null)
     this.database ??= new Promise(resolve => {
-      const request = indexedDB.open('via3-schema5', 1)
+      const request = indexedDB.open(`via3-schema${PUBLIC_SCHEMA}`, 1)
       request.onupgradeneeded = () => { const db = request.result; db.createObjectStore('objects'); db.createObjectStore('meta', { keyPath: 'hash' }) }
       request.onsuccess = () => resolve(request.result)
       request.onerror = request.onblocked = () => resolve(null)
@@ -636,16 +647,16 @@ class ObjectCache {
   }
 }
 
-function riskAt(shard: Shard | undefined, address: string): QualityAnswer | null {
+function riskAt(shard: Shard | undefined, address: string): QualityAnswer {
+  const ipv6 = address.includes(':')
   const row = shard?.prefix(address)?.row
-  if (!row) return null
-  const layer = (bit: number, offset: number) => has(row, bit) ? u32(row, offset) / 1e6 : null
+  const layer = (bit: number, offset: number) => row && has(row, bit) ? u32(row, offset) / 1e6 : 0
   return {
-    coverage: coverageAnswer(row[11]!, address.includes(':')),
-    score: has(row, 9) ? row[9]! : null,
-    confidence: confidence(row[10]!),
-    reasons: reasons(u32(row, 4)),
-    layers: { exact: layer(10,12), prefix: layer(11,16), asn: layer(12,20), neighbors: layer(13,24) },
+    coverage: coverageAnswer(row?.[11] ?? 0, ipv6),
+    score: row && has(row, 9) ? row[9]! : 0,
+    confidence: confidence(row?.[10] ?? 0),
+    reasons: row ? reasons(u32(row, 4)) : [],
+    layers: { exact: layer(10,12), prefix: layer(11,16), asn: layer(12,20), neighbors: ipv6 ? null : layer(13,24) },
   }
 }
 
@@ -817,7 +828,7 @@ export class AtlasReader {
     const bytes = await this.read(pointer.manifest_path, 4 * 1024 * 1024, signal)
     if (await hash(bytes) !== pointer.manifest_sha256) return fail('integrity')
     const manifest = parseCanonical<Manifest>(bytes)
-    if (!manifest || !exactKeys(manifest, ['codec', 'format_version', 'mode', 'objects', 'release_id', 'schema_version', 'valid_from', 'valid_until']) || manifest.codec !== 'zstd-1' || manifest.format_version !== 3 || manifest.schema_version !== 5 || !['synthetic', 'production'].includes(manifest.mode) || manifest.release_id !== pointer.release_id || !Number.isSafeInteger(manifest.valid_from) || !Number.isSafeInteger(manifest.valid_until) || manifest.valid_from < 0 || manifest.valid_until <= manifest.valid_from || manifest.valid_until - manifest.valid_from > 720 * 3600 || !Array.isArray(manifest.objects) || manifest.objects.length === 0 || manifest.objects.length >= 18500) return fail('manifest')
+    if (!manifest || !exactKeys(manifest, ['codec', 'format_version', 'mode', 'objects', 'release_id', 'schema_version', 'valid_from', 'valid_until']) || manifest.codec !== 'zstd-1' || manifest.format_version !== 3 || manifest.schema_version !== PUBLIC_SCHEMA || !['synthetic', 'production'].includes(manifest.mode) || manifest.release_id !== pointer.release_id || !Number.isSafeInteger(manifest.valid_from) || !Number.isSafeInteger(manifest.valid_until) || manifest.valid_from < 0 || manifest.valid_until <= manifest.valid_from || manifest.valid_until - manifest.valid_from > 720 * 3600 || !Array.isArray(manifest.objects) || manifest.objects.length === 0 || manifest.objects.length >= 18500) return fail('manifest')
     const { release_id: _id, ...descriptor } = manifest
     if (await hash(new TextEncoder().encode(canonical(descriptor))) !== manifest.release_id) return fail('manifest')
     let previous = ''; let routerHash = ''
@@ -1232,13 +1243,28 @@ export class AtlasReader {
     return this.runQuery(() => this.classCInput(input, signal))
   }
   private async classCInput(input: Input, signal?: AbortSignal): Promise<ClassCAnswer | null> {
-    const budget = new AnswerBudget(); budget.charge(256 * 512); await this.ready(signal); this.current(); if (input.kind !== 'ip' || input.canonical.includes(':')) return null
+    await this.ready(signal); this.current(); if (input.kind !== 'ip') return null
+    const ipv6 = input.canonical.includes(':'), bits = ipv6 ? 48 : 24
+    const budget = new AnswerBudget(); if (!ipv6) budget.charge(256 * 512)
     const dest = await this.destinations(input, signal, 7); const shard = dest.get(7); const found = shard?.prefix(input.canonical)
-    if (!shard || !found) return null
-    const row = found.row; const base = input.canonical.split('.').slice(0, 3).join('.')
-    const answer: ClassCAnswer = { prefix: found.prefix, cells: Array.from({ length: 256 }, (_, suffix) => ({ ip: `${base}.${suffix}`, observed: false, observedRiskScore: null, confidence: 'unrated', coverage: 'incomplete' as const, reasons: [], usage: 'unknown', origins: [] })), observedCount: u16(row, 8), assessedCount: u16(row, 10), positiveCount: u16(row, 12), scoredCount: u16(row, 14), meanObservedRisk: has(row, 22) ? row[20]! : null }
-    const cells = shard.rows(10)
-    for (let index = u32(row, 4); index < u32(row, 4) + u16(row, 8); index++) { const cell = cells.subarray(index * 32, (index + 1) * 32); const target = answer.cells[cell[0]!]!; target.observed = true; target.confidence = confidence(cell[9]!); target.reasons = reasons(u32(cell, 4)); target.usage = usage(cell[2]!); target.coverage = cell[10] === 1 ? 'complete' : 'incomplete'; target.observedRiskScore = cell[1]! & 8 ? cell[8]! : null; if (cell[1]! & 32) { const network = await this.reference(shard, u32(cell, 16), signal); const row = network.record(u32(cell, 20)); budget.cellOrigins(u32(row, 8)); target.origins = this.originList(network, row) } }
+    const row = found?.row
+    const answer: ClassCAnswer = { prefix: prefixText(keyFor(input.canonical, bits, false)), cells: [], observedCount: 0, assessedCount: 0, positiveCount: 0, scoredCount: 0, meanObservedRisk: 0, scoreSum: 0, unit: ipv6 ? 'ipv6-/64' : 'ipv4-address', totalUnits: ipv6 ? 65536 : 256 }
+    if (ipv6) {
+      if (row) { answer.observedCount = u32(row, 4); answer.positiveCount = u32(row, 8); answer.scoredCount = answer.positiveCount; answer.scoreSum = u32(row, 12); answer.meanObservedRisk = row[20]! }
+    } else {
+      const base = input.canonical.split('.').slice(0, 3).join('.')
+      answer.cells = Array.from({ length: 256 }, (_, suffix) => ({ ip: `${base}.${suffix}`, observed: false, observedRiskScore: 0, confidence: 'unrated', coverage: 'incomplete' as const, reasons: [], usage: 'unknown', origins: [] }))
+      if (row && shard) {
+        answer.observedCount = u16(row, 8); answer.assessedCount = u16(row, 10); answer.positiveCount = u16(row, 12); answer.scoredCount = u16(row, 14); answer.meanObservedRisk = row[20]!
+        const cells = shard.rows(10)
+        for (let index = u32(row, 4); index < u32(row, 4) + u16(row, 8); index++) {
+          const cell = cells.subarray(index * 32, (index + 1) * 32); const target = answer.cells[cell[0]!]!
+          target.observed = true; target.confidence = confidence(cell[9]!); target.reasons = reasons(u32(cell, 4)); target.usage = usage(cell[2]!); target.coverage = cell[10] === 1 ? 'complete' : 'incomplete'; target.observedRiskScore = cell[1]! & 8 ? cell[8]! : 0
+          answer.scoreSum += target.observedRiskScore
+          if (cell[1]! & 32) { const network = await this.reference(shard, u32(cell, 16), signal); const networkRow = network.record(u32(cell, 20)); budget.cellOrigins(u32(networkRow, 8)); target.origins = this.originList(network, networkRow) }
+        }
+      }
+    }
     checkAbort(signal); this.current(); answerFits(answer); return answer
   }
 }

@@ -90,12 +90,7 @@ export function useAtlas() {
         validateOrigin(origin.value, answer.bgp.origins)
       }
       if ('profile' in answer) {
-        const cells = answer.profile
-        if (!cells && state.kind === 'ip' && !state.q.includes(':')) {
-          const base = state.q.split('.').slice(0, 3).join('.')
-          pendingClassC = { prefix: `${base}.0/24`, observedCount: 0, assessedCount: 0, scoredCount: 0, positiveCount: 0, meanObservedRisk: null,
-            cells: Array.from({ length: 256 }, (_, suffix) => ({ ip: `${base}.${suffix}`, observed: false, observedRiskScore: null, confidence: 'unrated', coverage: 'incomplete', reasons: [], usage: 'unknown', origins: [] })) }
-        } else pendingClassC = cells
+        pendingClassC = answer.profile
       }
       // Reviewed credits are part of a production release. Verify their exact
       // release document before showing facts that depend on those datasets.

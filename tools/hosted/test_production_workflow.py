@@ -181,6 +181,46 @@ class CandidateClockTests(unittest.TestCase):
                          'Production failure category: pages-asset-token-network-timeout\n')
         self.assertIn(private, (self.private / 'stage.log').read_text())
 
+    def test_browser_failure_category_rejects_stale_partial_and_opaque_inputs(self):
+        log = self.private / 'stage.log'
+        phase = 'measure-production-browser'
+        previous = b'ATLAS_BROWSER_FAILURE overview 4 contract\n'
+        marker = b'ATLAS_BROWSER_FAILURE component-wheel-zoom 30 playwright-timeout'
+        log.write_bytes(previous + b'x'*70000 + b'\n' + marker + b'\r\n')
+        self.assertEqual(workflow.failure_category(log, len(previous), phase=phase),
+                         'browser-component-wheel-zoom-sample-30-playwright-timeout')
+        self.assertEqual(workflow.failure_category(log, len(previous), phase='pages-deployment'), 'command-failed')
+        for malformed in (
+            b'prior marker is not a current observation\n', marker, marker + b' private?q=source\n',
+            b'outside-record\r' + marker + b'\n', b'ATLAS_BROWSER_FAILURE overview 31 contract\n',
+            b'ATLAS_BROWSER_FAILURE overview 01 contract\n', b'ATLAS_BROWSER_FAILURE overview - contract\n',
+            b'ATLAS_BROWSER_FAILURE report-validation 1 report-validation\n',
+            b'ATLAS_BROWSER_FAILURE overview 1 unlisted-error-text\n',
+            b'ATLAS_BROWSER_FAILURE https://example.invalid 1 contract\n',
+            b'x'*100 + marker + b'\n' + b'z'*(65536-len(marker)-1),
+        ):
+            with self.subTest(malformed=malformed[:100]):
+                log.write_bytes(previous + malformed)
+                self.assertEqual(workflow.failure_category(log, len(previous), phase=phase), 'command-failed')
+        log.write_bytes(b'ATLAS_BROWSER_FAILURE report-validation - report-validation\n')
+        self.assertEqual(workflow.failure_category(log, 0, phase=phase), 'browser-report-validation-report-validation')
+
+    def test_failed_browser_child_logs_only_route_sample_and_failure_class(self):
+        private = 'https://example.invalid/path?query=private-source'
+        public_out, public_err = io.StringIO(), io.StringIO()
+
+        def failed_child(argv, **kwargs):
+            kwargs['stderr'].write((private + '\nATLAS_BROWSER_FAILURE class-c 1 contract\n').encode())
+            return subprocess.CompletedProcess(argv, 1)
+
+        with (patch.object(workflow, 'ROOT', self.root), patch.object(workflow.subprocess, 'run', side_effect=failed_child),
+              contextlib.redirect_stdout(public_out), contextlib.redirect_stderr(public_err), self.assertRaises(ContractError)):
+            workflow.run(['node', 'tools/hosted/production-browser.mjs', private])
+        self.assertEqual(public_out.getvalue(), 'Production step started: measure-production-browser\n')
+        self.assertEqual(public_err.getvalue(), 'Production step failed: measure-production-browser\n'
+                         'Production failure category: browser-class-c-sample-1-contract\n')
+        self.assertIn(private, (self.private / 'stage.log').read_text())
+
     def test_intake_waits_for_longer_exact_head_integration_without_relaxing_identity(self):
         head = 'a' * 40
         event = self.root / 'event.json'

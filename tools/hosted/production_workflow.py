@@ -14,6 +14,7 @@ import time
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT))
 from tools.hosted.checkpoint import api, REPOSITORY, WORKFLOWS
+from tools.hosted.browser_failures import failure_label as browser_failure_label
 from tools.release_contract.contracts import ContractError, canonical_bytes, sha256
 from tools.release_contract.pages_failures import failure_label as pages_failure_label
 from tools.release_contract.production import read_private
@@ -156,20 +157,21 @@ def failure_category(path, start, *, phase=None):
     # Classify only bounded current-command output into fixed labels. Raw text,
     # filenames, source identities and arbitrary exception messages stay private.
     try:
+        parser={'pages-deployment':pages_failure_label,'measure-production-browser':browser_failure_label}.get(phase)
         with path.open('rb') as stream:
             stream.seek(0,2);end=stream.tell();offset=max(start,end-65536)
-            partial_pages_line=False
-            if phase=='pages-deployment' and offset>start:
+            partial_line=False
+            if parser is not None and offset>start:
                 stream.seek(offset-1)
-                partial_pages_line=stream.read(1)!=b'\n'
+                partial_line=stream.read(1)!=b'\n'
             stream.seek(offset)
             text=stream.read(65536).decode('utf-8',errors='replace')
-        if phase=='pages-deployment':
+        if parser is not None:
             # Match only complete exact lines from this child. A truncated
-            # suffix or arbitrary exception output is not a Pages diagnostic.
-            records=text.split('\n')[int(partial_pages_line):-1]
+            # suffix or arbitrary exception output is not a typed diagnostic.
+            records=text.split('\n')[int(partial_line):-1]
             for record in reversed(records):
-                label=pages_failure_label(record.removesuffix('\r'))
+                label=parser(record.removesuffix('\r'))
                 if label is not None: return label
         lines=text.splitlines()
         for line in reversed(lines):

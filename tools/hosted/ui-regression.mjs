@@ -379,6 +379,62 @@ try {
         graph_state_preserved: true, whole_release_expiry_enforced: true }
     } finally { await isolated.close() }
   })
+  await test('routing relationships and evidenced intermediate ASN labels are legible on narrow light and dark views', async () => {
+    const palettes = []
+    for (const theme of ['light', 'dark']) {
+      const isolated = await browser.newContext({ viewport: { width: 320, height: 844 }, colorScheme: theme, reducedMotion: 'reduce' })
+      try {
+        await isolated.addInitScript(theme => {
+          localStorage.setItem('nuxt-color-mode', theme)
+          window.graphNameBatches = 0
+          const post = Worker.prototype.postMessage
+          Worker.prototype.postMessage = function (message, ...rest) {
+            if (message.action === 'graphNames') window.graphNameBatches++
+            return post.call(this, message, ...rest)
+          }
+        }, theme)
+        const graph = await isolated.newPage()
+        await graph.goto(`${base}/ip/bgp/?q=AS13335`)
+        await graph.locator('.graph-node-label').filter({ hasText: 'Atlas Access' }).waitFor()
+        const legend = graph.getByRole('list', { name: 'Relationship legend' })
+        assert.deepEqual(await legend.getByRole('listitem').allTextContents(), ['Upstream', 'Peer', 'Customer', 'Sibling', 'Unknown'])
+        const paint = await legend.evaluate(list => {
+          const rgb = color => color.match(/[\d.]+/g).slice(0, 3).map(Number)
+          const luminance = color => rgb(color).reduce((sum, value, index) => {
+            const s = value / 255
+            return sum + [0.2126, 0.7152, 0.0722][index] * (s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4)
+          }, 0)
+          const background = luminance(getComputedStyle(list.closest('.graph-caption')).backgroundColor)
+          return [...list.querySelectorAll('.relation-sample')].map(sample => {
+            const style = getComputedStyle(sample), y = luminance(style.backgroundColor)
+            return { color: style.backgroundColor, pattern: style.maskImage, contrast: (Math.max(y, background) + 0.05) / (Math.min(y, background) + 0.05) }
+          })
+        })
+        assert.equal(new Set(paint.map(sample => sample.color)).size, 5)
+        assert.equal(new Set(paint.map(sample => sample.pattern)).size, 5)
+        assert(paint.every(sample => sample.contrast >= 3))
+        palettes.push(paint.map(sample => sample.color))
+        assert.deepEqual(await graph.locator('.graph-node-label').allTextContents(), ['AS3356', 'Atlas Transit', 'Atlas Access'])
+        assert.deepEqual(await graph.locator('.graph-node title').allTextContents(), ['AS3356', 'Atlas Transit · AS13335', 'Atlas Access · AS15169'])
+        const edges = await graph.locator('.graph-edge').evaluateAll(edges => edges.map(edge => ({ relation: edge.dataset.relation,
+          color: getComputedStyle(edge).stroke, title: edge.querySelector('title').textContent })))
+        assert.deepEqual(edges, [
+          { relation: 'transit_upstream', color: paint[0].color, title: 'AS13335 → AS15169: transit upstream; observed adjacency; original hops 0 → 1; inferred relationship' },
+          { relation: 'transit_upstream', color: paint[0].color, title: 'AS15169 → AS3356: transit upstream; observed adjacency; original hops 1 → 2; inferred relationship' },
+        ])
+        assert.deepEqual(await graph.locator('.tier1-list p').allTextContents(), ['AS13335 · global transit'])
+        const before = await graph.locator('.graph-node').evaluateAll(nodes => nodes.map(node => node.getAttribute('transform')))
+        await graph.getByRole('combobox', { name: 'Focus observed route' }).selectOption('0')
+        await graph.getByRole('button', { name: 'Fit', exact: true }).click()
+        assert.deepEqual(await graph.locator('.graph-node').evaluateAll(nodes => nodes.map(node => node.getAttribute('transform'))), before)
+        await graph.locator('.graph-original summary').click()
+        assert.equal(await graph.locator('.graph-original code').textContent(), 'sequence [AS13335 AS15169 AS3356]')
+        assert(await graph.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+        assert.equal(await graph.evaluate(() => window.graphNameBatches), 1)
+      } finally { await isolated.close() }
+    }
+    assert.notDeepEqual(...palettes)
+  })
   await test('downloaded BGP SVG is standalone and keeps geometry under route focus', async () => {
     await page.goto(`${base}/ip/bgp/?q=203.0.113.1`)
     await page.locator('.graph-node').first().waitFor()
@@ -444,6 +500,8 @@ try {
       })
       assert.equal(geometry.items.length, 48)
       assert.equal(await page.locator('.graph-edge').count(), 23)
+      assert.equal(await page.locator('.graph-edge[data-relation="unknown"]').count(), 23)
+      assert((await page.locator('.graph-edge title').allTextContents()).every(title => title.includes(': unknown; observed adjacency') && !title.includes('inferred relationship')))
       for (const box of geometry.items) {
         assert(box.width > 0 && box.height > 0, `Empty graph content ${box.id} at width ${width}`)
         assert(box.left >= geometry.svg.left - .5 && box.right <= geometry.svg.right + .5 &&

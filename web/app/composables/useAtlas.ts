@@ -123,6 +123,13 @@ export function useAtlas() {
     }
   }
   function resume() { if (document.visibilityState === 'visible') { atlas?.clear(); void load(true) } }
+  async function loadGraphNames(asns: readonly number[], signal: AbortSignal) {
+    const answer = data.value
+    if (!atlas || !active || !answer) return []
+    const run = serial
+    const names = await atlas.graphNames(asns, answer.releaseId, AbortSignal.any([active.signal, signal, AbortSignal.timeout(5000)]))
+    return run === serial && data.value?.releaseId === answer.releaseId ? names : []
+  }
   async function loadPrefixes(asn: number, cursor: number) {
     if (!atlas || !active || prefixBusy.value) return false
     const run = serial
@@ -159,5 +166,5 @@ export function useAtlas() {
     document.removeEventListener('visibilitychange', resume)
     atlas?.removeEventListener('invalidate', invalidate)
   })
-  return { data, overview, quality, grid, classC, error, loading, current, origin, prefixBusy, now, loadPrefixes, reload: () => load() }
+  return { data, overview, quality, grid, classC, error, loading, current, origin, prefixBusy, now, loadPrefixes, loadGraphNames, reload: () => load() }
 }

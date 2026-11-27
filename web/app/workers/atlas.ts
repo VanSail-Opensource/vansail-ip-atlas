@@ -5,6 +5,7 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import { parseInput } from '../lib/query.ts'
 import type { Input } from '../lib/query.ts'
 import type { AddressView, ClassCView, LookupAnswer, OverviewAnswer, QualityAnswer, RiskView, ClassCAnswer, ASNAnswer, BGPAnswer, ASNPrefixPage, CoverageAnswer } from '../lib/via3.ts'
+import { graphIdentityName, maxAdditionalGraphNames, type GraphNodeName } from '../lib/bgpGraphPresentation.ts'
 
 const MAX_FILE = 24 * 1024 * 1024
 const MAX_SECTION = 64 * 1024 * 1024
@@ -1121,6 +1122,32 @@ export class AtlasReader {
     const input = parseInput(q)
     return this.runQuery(() => this.lookupInput(input, signal))
   }
+  async graphNames(asns: readonly number[], releaseId: string, signal?: AbortSignal): Promise<GraphNodeName[]> {
+    if (!Array.isArray(asns) || !asns.length || asns.length > maxAdditionalGraphNames || !digest(releaseId)) return fail('invalid_input')
+    const requested = new Set(asns)
+    if (requested.size !== asns.length || [...requested].some(asn => !publicASN(asn))) return fail('invalid_input')
+    return this.runQuery(async () => {
+      // Names supplement a rendered result from the already proven current
+      // release. Never load a different release or return mixed identities.
+      checkAbort(signal)
+      if (this.current().release_id !== releaseId) return fail('release_changed')
+      const labels: GraphNodeName[] = []
+      for (const asn of requested) {
+        checkAbort(signal)
+        const info = (await this.routeInfos({ kind: 'asn', canonical: `AS${asn}` }, signal)).find(info => info.kind === 8)
+        if (!info) continue
+        const shard = this.components.get<Shard>(`${info.sha256}/asn/${asn}`) ?? await this.object(info.sha256, signal)
+        const row = shard.asn(asn)[0]
+        if (!row) continue
+        const name = await this.label(shard, row, 8, signal)
+        const label = graphIdentityName({ asn, name, organization: name?.trim() ? null : await this.label(shard, row, 16, signal) })
+        if (label) labels.push({ asn, label })
+      }
+      checkAbort(signal)
+      if (this.current().release_id !== releaseId) return fail('release_changed')
+      return labels
+    })
+  }
   private async lookupInput(input: Input, signal?: AbortSignal): Promise<LookupAnswer> {
     const budget = new AnswerBudget(); await this.ready(signal); const manifest = this.current(); const ipRoutes = input.kind === 'ip' ? await this.routeInfos(input,signal) : []
     const ipKinds = [2,3,4,5,6,10]
@@ -1275,23 +1302,27 @@ if (typeof self !== 'undefined' && typeof window === 'undefined') {
   const controllers = new Map<number, AbortController>()
   let queue = Promise.resolve()
   self.addEventListener('message', (event: MessageEvent) => {
-    const { action, id, q, cursor } = event.data
+    const { action, id, q, cursor, asns, releaseId } = event.data
     if (action === 'cancel') { controllers.get(id)?.abort(); return }
     if (action === 'clear') { for (const controller of controllers.values()) controller.abort(); reader.clear(); return }
-    if (!Number.isSafeInteger(id) || typeof q !== 'string' || !['lookup', 'overview', 'risk', 'classCView', 'classC', 'prefixes'].includes(action)) return
-    if (new TextEncoder().encode(q).byteLength > 128) { self.postMessage({ id, error: 'invalid_input' }); return }
+    if (!Number.isSafeInteger(id) || !['lookup', 'overview', 'risk', 'classCView', 'classC', 'prefixes', 'graphNames'].includes(action)) return
+    if (action !== 'graphNames') {
+      if (typeof q !== 'string') return
+      if (new TextEncoder().encode(q).byteLength > 128) { self.postMessage({ id, error: 'invalid_input' }); return }
+    }
     if (controllers.size >= 8) { self.postMessage({ id, error: 'resource_limit' }); return }
     const controller = new AbortController(); controllers.set(id, controller)
     queue = queue.then(async () => {
       try {
         checkAbort(controller.signal)
-        let answer: LookupAnswer | OverviewAnswer | RiskView | ClassCView | ClassCAnswer | ASNPrefixPage | null
+        let answer: LookupAnswer | OverviewAnswer | RiskView | ClassCView | ClassCAnswer | ASNPrefixPage | GraphNodeName[] | null
         switch (action) {
           case 'lookup': answer = await reader.lookup(q, controller.signal); break
           case 'overview': answer = await reader.overview(q, controller.signal); break
           case 'risk': answer = await reader.risk(q, controller.signal); break
           case 'classCView': answer = await reader.classCView(q, controller.signal); break
           case 'prefixes': answer = await reader.prefixes(q, cursor, controller.signal); break
+          case 'graphNames': answer = await reader.graphNames(asns, releaseId, controller.signal); break
           default: answer = await reader.classC(q, controller.signal)
         }
         checkAbort(controller.signal); answerFits(answer); self.postMessage({ id, answer })

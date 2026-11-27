@@ -1,3 +1,5 @@
+import type { GraphNodeName } from './bgpGraphPresentation.ts'
+
 export type GeoAnswer = { country: string | null; registrationCountry: string | null; region: string | null; city: string | null; latitude: number | null; longitude: number | null; precision: string | null }
 export type NetworkAnswer = { prefix: string; name: string | null; organization: string | null; isp: string | null; origins: number[] }
 export type UsageAnswer = { type: string; assignment: string; anycast: boolean | null; directedBroadcast: boolean | null }
@@ -48,7 +50,7 @@ export class AtlasClient extends EventTarget {
     }
   }
 
-  private request<T>(action: string, q: string, signal?: AbortSignal, cursor?: number): Promise<T> {
+  private request<T>(action: string, payload: { q: string; cursor?: number } | { asns: readonly number[]; releaseId: string }, signal?: AbortSignal): Promise<T> {
     if (signal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'))
     const id = ++this.sequence
     return new Promise((resolve, reject) => {
@@ -59,16 +61,17 @@ export class AtlasClient extends EventTarget {
       }
       signal?.addEventListener('abort', abort, { once: true })
       this.pending.set(id, { resolve: value => resolve(value as T), reject, dispose: () => signal?.removeEventListener('abort', abort) })
-      this.worker.postMessage({ action, id, q, cursor })
+      this.worker.postMessage({ action, id, ...payload })
     })
   }
 
-  lookup(q: string, signal?: AbortSignal): Promise<LookupAnswer> { return this.request('lookup', q, signal) }
-  overview(q: string, signal?: AbortSignal): Promise<OverviewAnswer> { return this.request('overview', q, signal) }
-  risk(q: string, signal?: AbortSignal): Promise<RiskView> { return this.request('risk', q, signal) }
-  classCView(q: string, signal?: AbortSignal): Promise<ClassCView> { return this.request('classCView', q, signal) }
-  classC(q: string, signal?: AbortSignal): Promise<ClassCAnswer | null> { return this.request('classC', q, signal) }
-  prefixes(asn: string, cursor = 0, signal?: AbortSignal): Promise<ASNPrefixPage> { return this.request('prefixes', asn, signal, cursor) }
+  lookup(q: string, signal?: AbortSignal): Promise<LookupAnswer> { return this.request('lookup', { q }, signal) }
+  overview(q: string, signal?: AbortSignal): Promise<OverviewAnswer> { return this.request('overview', { q }, signal) }
+  risk(q: string, signal?: AbortSignal): Promise<RiskView> { return this.request('risk', { q }, signal) }
+  classCView(q: string, signal?: AbortSignal): Promise<ClassCView> { return this.request('classCView', { q }, signal) }
+  classC(q: string, signal?: AbortSignal): Promise<ClassCAnswer | null> { return this.request('classC', { q }, signal) }
+  prefixes(asn: string, cursor = 0, signal?: AbortSignal): Promise<ASNPrefixPage> { return this.request('prefixes', { q: asn, cursor }, signal) }
+  graphNames(asns: readonly number[], releaseId: string, signal?: AbortSignal): Promise<GraphNodeName[]> { return this.request('graphNames', { asns, releaseId }, signal) }
   clear(): void {
     for (const [id, request] of this.pending) { this.worker.postMessage({ action: 'cancel', id }); request.dispose(); request.reject(new DOMException('Aborted', 'AbortError')) }
     this.pending.clear()

@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import sys
 from atlas_contracts.config import ContractError, ROOT, load_configs
-from atlas_contracts.policy import capability_report, utc
+from atlas_contracts.policy import capability_report, checked_adapter_implementation, utc
 
 
 def main():
@@ -17,10 +17,11 @@ def main():
     parser.add_argument("--require-production", action="store_true")
     args = parser.parse_args()
     try:
-        configs = load_configs()
-        now = utc(args.now) if args.now else datetime.now(timezone.utc)
-        report = capability_report(configs["sources"], now, ROOT)
-        report["config_sha256"] = {name: sha256((ROOT / "configs" / f"{name}.yaml").read_bytes()).hexdigest() for name in configs}
+        with checked_adapter_implementation(ROOT) as implementation:
+            configs = load_configs(implementation=implementation)
+            now = utc(args.now) if args.now else datetime.now(timezone.utc)
+            report = capability_report(configs["sources"], now, ROOT, implementation=implementation)
+            report["config_sha256"] = {name: sha256((ROOT / "configs" / f"{name}.yaml").read_bytes()).hexdigest() for name in configs}
         if args.report:
             destination = args.report.resolve()
             if destination.is_relative_to((ROOT / "web").resolve()):

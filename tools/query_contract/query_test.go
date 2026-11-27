@@ -132,7 +132,13 @@ type layoutCorpus struct {
 		Flags   int    `json:"flags"`
 		Hex     string `json:"hex"`
 	} `json:"prefix_keys"`
-	Cell       string `json:"cell_hex"`
+	Cell        string `json:"cell_hex"`
+	IPv6Profile struct {
+		Kind       int    `json:"kind"`
+		PrefixBits int    `json:"prefix_bits"`
+		TotalUnits int    `json:"total_units"`
+		Record     string `json:"record_hex"`
+	} `json:"ipv6_profile"`
 	Dictionary struct {
 		Strings []string `json:"strings"`
 		Offsets []int    `json:"offsets"`
@@ -145,8 +151,16 @@ type layoutCorpus struct {
 func TestFrozenBinaryLayoutCorpus(t *testing.T) {
 	var data layoutCorpus
 	readFixture(t, "via3-layouts.json", &data)
-	if data.Format != 3 || data.Schema != 5 || data.Revision != 3 || !data.Synthetic || len(data.Shards) != 14 {
+	if data.Format != 3 || data.Schema != 6 || data.Revision != 4 || !data.Synthetic || len(data.Shards) != 14 {
 		t.Fatal("wrong contract version or missing shard layout")
+	}
+	profile := data.IPv6Profile
+	row, err := hex.DecodeString(profile.Record)
+	if err != nil || len(row) != 24 || profile.Kind != 7 || profile.PrefixBits != 48 || profile.TotalUnits != 65536 ||
+		binary.LittleEndian.Uint32(row) != (1<<21)|(1<<22) || binary.LittleEndian.Uint32(row[4:]) != 1 ||
+		binary.LittleEndian.Uint32(row[8:]) != 1 || binary.LittleEndian.Uint32(row[12:]) != 10 ||
+		!bytes.Equal(row[16:], []byte{0, 0, 0, 0, 0, 0, 1, 0}) {
+		t.Fatal("invalid IPv6 subnet summary fixture")
 	}
 	if data.FileLimit != 24<<20 || data.SectionLimit != 64<<20 || data.TotalLimit != 256<<20 || data.WindowLimit != 8<<20 {
 		t.Fatal("changed bounds require reviewed amendment")

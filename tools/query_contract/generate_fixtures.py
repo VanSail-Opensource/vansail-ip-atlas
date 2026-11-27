@@ -132,7 +132,7 @@ def layouts():
         [("presence", 4), ("origins_first", 4), ("origins_count", 4), ("reserved", 4), ("as_name", 8), ("organization", 8), ("isp", 8)],
         [("presence", 4), ("usage_type", 1), ("assignment_mode", 1), ("bools", 1), ("reserved", 1)],
         [("presence", 4), ("reason_flags", 4), ("status", 1), ("score", 1), ("confidence", 1), ("coverage_flags", 1), ("exact_contribution", 4), ("prefix_contribution", 4), ("asn_contribution", 4), ("neighbor_contribution", 4), ("reserved", 4)],
-        [("presence", 4), ("cells_first", 4), ("cells_count", 2), ("assessed_count", 2), ("positive_count", 2), ("scored_count", 2), ("dominant_asn", 4), ("mean_observed_risk", 1), ("confidence", 1), ("reserved", 2)],
+        [("presence", 4), ("cells_first", 4), ("cells_count", 2), ("assessed_count", 2), ("positive_count", 2), ("scored_count", 2), ("dominant_asn", 4), ("mean_observed_risk", 1), ("confidence", 1), ("profile_family", 1), ("reserved", 1)],
         [("presence", 4), ("asn", 4), ("as_name", 8), ("organization", 8), ("country", 2), ("risk_band", 1), ("confidence", 1), ("risk", 4), ("reason_flags", 4), ("prefix_pages_first", 4), ("prefix_pages_count", 4), ("customer_cone", 4), ("transit_degree", 4), ("network_class", 1), ("stability", 1), ("reserved", 10)],
         [("presence", 4), ("origin_asn", 4), ("status", 1), ("maximum_length", 1), ("reserved", 6), ("observed_at", 8), ("valid_until", 8)],
         [("presence", 4), ("origins_first", 4), ("origins_count", 4), ("reserved", 4)],
@@ -160,12 +160,15 @@ def layouts():
         keys.append({"address": addr, "bits": bits, "flags": flags, "hex": struct.pack("<BBH", ip.version, bits, flags).hex() + encoded.hex() + struct.pack("<IQ", 0, 0).hex()})
     cell = struct.pack("<BBBBIBBHIIIB7x", 1, 0xff, 1, 1, 1, 0, 3, 1, 0, 0, 0, 0)
     assert len(cell) == 32
+    ipv6_profile_row = struct.pack("<IIIIIBBBB", mask(21, 22), 1, 1, 10, 0, 0, 0, 1, 0)
+    assert len(ipv6_profile_row) == 24
     put("via3-layouts.json", {
-        "format_version": 3, "schema_version": 6, "contract_revision": 3, "synthetic": True,
+        "format_version": 3, "schema_version": 6, "contract_revision": 4, "synthetic": True,
         "max_file_exclusive": 24 * 1024 * 1024, "max_decoded_section": 64 * 1024 * 1024,
         "max_decoded_total": 256 * 1024 * 1024, "max_window": 8 * 1024 * 1024,
         "presence_bits": dict(zip(pres_names, range(32))), "reason_bits": dict(zip(reason_names, range(14))),
         "shards": shards, "prefix_keys": keys, "cell_hex": cell.hex(),
+        "ipv6_profile": {"kind": 7, "prefix_bits": 48, "total_units": 65536, "record_hex": ipv6_profile_row.hex()},
         "dictionary": {"strings": ["Example City", "Example Region", "Example Transit"],
                        "offsets": [0, 12, 26, 41], "utf8_hex": b"Example CityExample RegionExample Transit".hex()},
         "required_corruption_vectors": ["short_header", "exactly_24_mib", "u64_overflow", "bad_magic", "unknown_format", "unknown_schema", "reserved_header", "unknown_codec", "duplicate_section", "unknown_section", "missing_section", "overlap", "gap", "trailing_bytes", "truncation", "decoded_length_mismatch", "checksum_mismatch", "window_limit", "output_limit", "bad_dictionary_id", "unsorted_index", "bad_prefix_host_bits", "bad_origin_order", "partial_null_reference", "withdrawn_overlay"],

@@ -1,4 +1,4 @@
-# Data model - public schema 5, contract revision 3
+# Data model - public schema 6, contract revision 4
 
 `docs/binary-format-via3.md` fixes serialized widths; this document fixes their
 meaning. The initial unimplemented schema is frozen here without pretending
@@ -125,10 +125,10 @@ physical location.
 The approved `release-scope-v5` scoring amendment publishes `observedRisk` in
 canonical lookup answers, replacing the former higher-is-better `quality`.
 The exact model is `via-observed-risk-v1` in `configs/scoring.yaml`. IPv4 and IPv6
-scores are half-up `100 * sum(present weighted positive contributions)` and are
-null when that unrounded sum is zero. Missing evidence never becomes a safe zero.
-Tiny supported values rounded to zero display `<1 / 100`. A null object means no
-observed-risk record and no known assessment coverage.
+scores are half-up `100 * sum(present weighted positive contributions)`. An
+empty sum yields zero without asserting safety or changing assessment coverage.
+Tiny supported values rounded to zero display `<1 / 100`. ASN queries have no
+per-address `observedRisk` object.
 
 `confidence` describes the weakest positive contributing layer's independent
 support: one or two families low, three medium, at least four high. It is not
@@ -140,15 +140,18 @@ assessment remains incomplete. No support IDs or source counts are public.
 
 Four contributions encode the unchanged weighted terms, not a distribution
 rescaled to 100%. Store integer millionths, half-up once after the full-precision
-calculation. The score uses the unrounded formula independently. Unknown layers
-are null with unset presence bits. Public schema 5 must be decoded atomically
-with its same-version manifest and reader; old schema 3 is rejected and cached
-objects use a separate namespace.
+calculation. The score uses the unrounded formula independently. Missing
+applicable layers keep unset presence bits but are projected as zero in public
+IP answers. IPv6's inapplicable IPv4 neighbor layer remains null. Public schema
+6 is decoded atomically with its same-version manifest and reader. Older schema
+objects are rejected and the cache uses a separate namespace.
 
-The `/24` answer has `scoredCount` and nullable `meanObservedRisk` over non-null
-scores of actually observed cells. Cells use `observedRiskScore` and independent
-complete/incomplete assessment coverage. `assessedCount` is not a scored count.
-Unknown cells stay unknown and never enter the observed-only mean.
+The IPv4 `/24` answer uses all 256 addresses for its mean and assigns missing
+cells a numeric zero. Cells retain independent `observed` and assessment flags.
+The summary separately exposes `scoredCount`, `assessedCount`, `scoreSum`,
+`totalUnits` and `unit`. For IPv6, the separate `/48` answer has no cells. It
+summarizes the maximum weighted exact risk contribution from each `/64`, using
+zero for absent observations and a denominator of 65,536 `/64` blocks.
 
 Reason bits in order are:
 
@@ -258,7 +261,7 @@ when full notices are collapsed.
 ## Typed compilation boundary
 
 `internal/via3.PublicRecord` retains private input union version 3 while its output
-uses public schema 5. It is a tagged union of the twelve public fact
+uses public schema 6. It is a tagged union of the twelve public fact
 kinds. `CompilePartition` derives dictionaries/pages; `Build` derives the router
 and immutable manifest. It accepts at most 32768 records and 32 MiB estimated
 input per partition, then enforces the deployed object profile. A production

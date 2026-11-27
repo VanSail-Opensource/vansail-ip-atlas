@@ -60,7 +60,7 @@ The header is exactly 64 bytes:
 |---:|---:|---|
 | 0 | 4 | ASCII `VIA3` |
 | 4 | 2 | format version = 3 |
-| 6 | 2 | public schema = 5 |
+| 6 | 2 | public schema = 6 |
 | 8 | 2 | header length = 64 |
 | 10 | 2 | shard kind, below |
 | 12 | 4 | flags = 0 |
@@ -77,7 +77,7 @@ Each descriptor is exactly 64 bytes:
 |---:|---:|---|
 | 0 | 2 | section ID |
 | 2 | 1 | codec = 1 |
-| 3 | 1 | flags = 0; all schema-5 sections are required when present |
+| 3 | 1 | flags = 0, all required public schema sections must be present |
 | 4 | 4 | reserved |
 | 8 | 8 | compressed offset |
 | 16 | 8 | compressed length, nonzero |

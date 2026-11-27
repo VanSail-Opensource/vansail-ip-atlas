@@ -1,7 +1,7 @@
 {
   "format_version": 3,
-  "schema_version": 5,
-  "contract_revision": 3,
+  "schema_version": 6,
+  "contract_revision": 4,
   "synthetic": true,
   "max_file_exclusive": 25165824,
   "max_decoded_section": 67108864,
@@ -384,9 +384,14 @@
           "bytes": 1
         },
         {
-          "name": "reserved",
+          "name": "profile_family",
           "offset": 22,
-          "bytes": 2
+          "bytes": 1
+        },
+        {
+          "name": "reserved",
+          "offset": 23,
+          "bytes": 1
         }
       ],
       "record_hex": "000060000000000001000100010001001734000000030000",
@@ -742,6 +747,12 @@
     }
   ],
   "cell_hex": "01ff010101000000000301000000000000000000000000000000000000000000",
+  "ipv6_profile": {
+    "kind": 7,
+    "prefix_bits": 48,
+    "total_units": 65536,
+    "record_hex": "0000600001000000010000000a0000000000000000000100"
+  },
   "dictionary": {
     "strings": [
       "Example City",

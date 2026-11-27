@@ -75,7 +75,7 @@ func TestMRTUnknownOriginBoundaryPreservesPublicLookupAndUsage(t *testing.T) {
 				t.Fatalf("streamed=%v ip=%s lost observed origin boundary: %+v err=%v", streamed, tc.ip, answer, err)
 			}
 			if len(tc.origins) == 0 {
-				if len(answer.ASNs) != 0 || len(answer.BGP.Paths) != 0 || len(answer.BGP.RPKI) != 0 || len(answer.BGP.Relationships) != 0 || len(answer.BGP.Tier1) != 0 || answer.Usage == nil || answer.Usage.Type != "unknown" || answer.Quality != nil && answer.Quality.Layers.ASN != nil {
+				if len(answer.ASNs) != 0 || len(answer.BGP.Paths) != 0 || len(answer.BGP.RPKI) != 0 || len(answer.BGP.Relationships) != 0 || len(answer.BGP.Tier1) != 0 || answer.Usage == nil || answer.Usage.Type != "unknown" || answer.Quality == nil || answer.Quality.Layers.ASN == nil || *answer.Quality.Layers.ASN != 0 || answer.Quality.Coverage.Layers.ASN != "unassessed" {
 					t.Fatalf("streamed=%v ip=%s inherited unsupported routing/ASN context: %+v", streamed, tc.ip, answer)
 				}
 			} else if answer.Usage == nil || answer.Usage.Type != "hosting" {

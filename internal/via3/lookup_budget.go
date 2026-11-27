@@ -5,7 +5,7 @@ import "math"
 // lookupJSONBound conservatively counts the complete canonical answer without
 // creating a second serialized copy. Fixed per-record allowances exceed all
 // field names, punctuation, booleans, nulls and finite numeric encodings in the
-// frozen schema-5 answer. Strings allow six bytes per input byte, covering JSON
+// frozen public answer. Strings allow six bytes per input byte, covering JSON
 // escapes, HTML escapes and invalid UTF-8 replacement. Audit this bound when
 // changing LookupAnswer or any nested answer schema.
 //

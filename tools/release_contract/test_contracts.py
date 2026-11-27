@@ -12,7 +12,7 @@ from tools.release_contract.contracts import (
 
 
 def descriptor(mode="synthetic"):
-    return {"format_version": 3, "schema_version": 5, "codec": "zstd-1", "mode": mode,
+    return {"format_version": 3, "schema_version": 6, "codec": "zstd-1", "mode": mode,
             "valid_from": 1_800_000_000, "valid_until": 1_800_000_100,
             "objects": [{"sha256": "a" * 64, "bytes": 64, "kind": 1, "partition": "all"}]}
 
@@ -33,6 +33,25 @@ class CanonicalTests(unittest.TestCase):
 
 
 class IdentityTests(unittest.TestCase):
+    def test_schema_six_requires_its_own_version_and_rejects_legacy_identity(self):
+        current = descriptor()
+        manifest, pointer = make_manifest(current)
+        self.assertEqual(verify_manifest(manifest, pointer, 1_800_000_050)["schema_version"], 6)
+        self.assertEqual(parse_canonical(pointer)["format_version"], 3)
+
+        # A valid hash and path must not make incompatible schema bytes eligible.
+        for version in (3, 4, 5, 7):
+            legacy = {**current, "schema_version": version}
+            release_id = sha256(canonical_bytes(legacy))
+            old_manifest = canonical_bytes({**legacy, "release_id": release_id})
+            old_pointer = canonical_bytes({
+                "format_version": 3, "release_id": release_id,
+                "manifest_path": f"/_atlas/releases/{release_id}/manifest.json",
+                "manifest_sha256": sha256(old_manifest),
+            })
+            with self.subTest(version=version), self.assertRaisesRegex(ContractError, "unsupported release version"):
+                verify_manifest(old_manifest, old_pointer, 1_800_000_050)
+
     def test_private_engineering_data_cannot_be_packaged_as_public_fixture(self):
         value=descriptor()
         value["mode"]="engineering"

@@ -54,8 +54,10 @@ func TestTypedCompilerAllFactFamiliesAndProductionGate(t *testing.T) {
 		t.Fatal("typed facts changed during assembly")
 	}
 	profile, err := reader.ClassC(context.Background(), "203.0.113.1")
-	if err != nil || profile == nil || profile.Cells[1].Score == nil || profile.Cells[2].Score != nil || profile.AggregateScore == nil || *profile.AggregateScore != 11 {
-		t.Fatal("sparse profile became clean", err)
+	if err != nil || profile == nil || profile.ScoreSum != 11 || profile.Cells[1].Score == nil || *profile.Cells[1].Score != 11 ||
+		profile.Cells[2].Score == nil || *profile.Cells[2].Score != 0 || profile.Cells[2].Observed || profile.Cells[2].Coverage != "incomplete" ||
+		profile.AggregateScore == nil || *profile.AggregateScore != 0 {
+		t.Fatal("sparse profile lost observations or invented assessment", err)
 	}
 	input.Mode = "production"
 	if _, err = Build(context.Background(), input); ErrorCode(err) != "production_blocked" {

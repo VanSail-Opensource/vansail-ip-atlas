@@ -211,7 +211,7 @@ func auditUncheckedContainer(t *testing.T, s Shard) []byte {
 	data := make([]byte, 64+len(s.Sections)*64)
 	copy(data, "VIA3")
 	p16(data, 4, 3)
-	p16(data, 6, 5)
+	p16(data, 6, PublicSchemaVersion)
 	p16(data, 8, 64)
 	p16(data, 10, s.Kind)
 	p32(data, 16, uint32(len(s.Sections)))
@@ -360,9 +360,9 @@ func auditReleaseFromFacts(t *testing.T, facts ...Shard) (*Release, map[string][
 	infos = append(infos, info)
 	files[info.SHA256] = data
 	sort.Slice(infos, func(i, j int) bool { return infos[i].SHA256 < infos[j].SHA256 })
-	desc := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: infos, SchemaVersion: 5, ValidFrom: 1700000000, ValidUntil: 1700003600}
+	desc := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: infos, SchemaVersion: PublicSchemaVersion, ValidFrom: 1700000000, ValidUntil: 1700003600}
 	id := Hash(canonical(desc))
-	manifest := Manifest{Codec: desc.Codec, FormatVersion: 3, Mode: desc.Mode, Objects: infos, ReleaseID: id, SchemaVersion: 5, ValidFrom: desc.ValidFrom, ValidUntil: desc.ValidUntil}
+	manifest := Manifest{Codec: desc.Codec, FormatVersion: 3, Mode: desc.Mode, Objects: infos, ReleaseID: id, SchemaVersion: PublicSchemaVersion, ValidFrom: desc.ValidFrom, ValidUntil: desc.ValidUntil}
 	pointer := Pointer{FormatVersion: 3, ManifestPath: "/_atlas/releases/" + id + "/manifest.json", ManifestSHA256: Hash(canonical(manifest)), ReleaseID: id}
 	reader, err := NewRelease(canonical(pointer), canonical(manifest), func(hash string) ([]byte, error) { return files[hash], nil }, func() int64 { return 1700000001 })
 	if err != nil {
@@ -608,9 +608,9 @@ func auditRelease(t *testing.T, item auditCase) auditReleaseCase {
 	routerInfo := ObjectInfo{Bytes: len(encoded), Kind: 1, Partition: "all", SHA256: Hash(encoded)}
 	objects := []ObjectInfo{routerInfo, fact.Info}
 	sort.Slice(objects, func(i, j int) bool { return objects[i].SHA256 < objects[j].SHA256 })
-	desc := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: objects, SchemaVersion: 5, ValidFrom: 1700000000, ValidUntil: 1700003600}
+	desc := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: objects, SchemaVersion: PublicSchemaVersion, ValidFrom: 1700000000, ValidUntil: 1700003600}
 	id := Hash(canonical(desc))
-	manifest := Manifest{Codec: desc.Codec, FormatVersion: 3, Mode: desc.Mode, Objects: objects, ReleaseID: id, SchemaVersion: 5, ValidFrom: desc.ValidFrom, ValidUntil: desc.ValidUntil}
+	manifest := Manifest{Codec: desc.Codec, FormatVersion: 3, Mode: desc.Mode, Objects: objects, ReleaseID: id, SchemaVersion: PublicSchemaVersion, ValidFrom: desc.ValidFrom, ValidUntil: desc.ValidUntil}
 	pointer := Pointer{FormatVersion: 3, ManifestPath: "/_atlas/releases/" + id + "/manifest.json", ManifestSHA256: Hash(canonical(manifest)), ReleaseID: id}
 	return auditReleaseCase{item.name, pointer, manifest, []auditObject{{routerInfo.SHA256, base64.StdEncoding.EncodeToString(encoded)}, {fact.Info.SHA256, base64.StdEncoding.EncodeToString(data)}}, item.query, "record", 1700000001}
 }

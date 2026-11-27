@@ -368,6 +368,15 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		}
 	} else if adapter == torExits {
 		published, err = verifyTorExitFile(ctx, payload, source, now)
+	} else if jacobrakaiSource(source) {
+		proofFile, openErr := os.Open(payload)
+		if openErr != nil {
+			return deny("invalid", "payload_read_failed")
+		}
+		published, err = verifyJacobrakaiFile(ctx, proofFile, source, now)
+		if closeErr := proofFile.Close(); err == nil {
+			err = closeErr
+		}
 	} else if adapter == rpkiClientJSON {
 		proof, proofErr := verifyRPKIClientFile(ctx, payload, size, source, now)
 		err = proofErr
@@ -408,6 +417,9 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 	if !now.Before(published.Add(source.MaxAge)) {
 		return deny("stale", "publication_expired")
 	}
+	if jacobrakaiSource(source) && !jacobrakaiEligible(published, now) {
+		return deny("stale", "publication_lacks_serving_window")
+	}
 	if !contentValidUntil.IsZero() && !now.Before(contentValidUntil) {
 		return deny("stale", "content_expired")
 	}
@@ -437,6 +449,11 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 		}
 		keepRecord = func(r intelligence.NormalizedRecord) bool {
 			return r.Evidence != nil && azureHosts[r.Evidence.Address]
+		}
+	}
+	if jacobrakaiSource(source) {
+		keepRecord = func(r intelligence.NormalizedRecord) bool {
+			return r.Evidence != nil && jacobrakaiEligible(r.Evidence.ItemPublishedAt, now)
 		}
 	}
 	if adapter == ipverseUsageJSON {
@@ -482,7 +499,10 @@ func (e *Engine) ingest(ctx context.Context, source Source, now time.Time, norma
 			records = out
 		}
 	}
-	if err == nil && (partitioned || adapter == ipverseUsageJSON) && len(records) == 0 && len(partitions) == 0 {
+	if err == nil && (partitioned || adapter == ipverseUsageJSON || jacobrakaiSource(source)) && len(records) == 0 && len(partitions) == 0 {
+		if jacobrakaiSource(source) {
+			return deny("stale", "no_honeypot_observation_survives_serving_window")
+		}
 		if adapter == ipverseUsageJSON {
 			return deny("quarantined", "no_asn_role_survives_serving_window")
 		}

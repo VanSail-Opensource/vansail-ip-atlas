@@ -18,14 +18,10 @@ try {
   page.on('pageerror', error => report.errors.push(error.message))
   context.on('request', request => {
     const url = new URL(request.url())
-    if (url.origin !== new URL(base).origin && url.protocol !== 'data:') {
-      report.network.push(url.origin)
-      assert.equal(url.origin, 'https://tile.openstreetmap.org', `Unexpected external request: ${url.origin}`)
-      assert(!request.headers().referer, 'Query-bearing referrer must never reach tiles')
-    }
+    if (url.origin !== new URL(base).origin && url.protocol !== 'data:') report.network.push(url.origin)
   })
-  // Tiles are not needed to verify atlas logic; avoid dependency on their availability.
-  await page.route('https://tile.openstreetmap.org/**', route => route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j9zEAAAAASUVORK5CYII=', 'base64') }))
+  await context.route('**/*', route => new URL(route.request().url()).origin === new URL(base).origin
+    ? route.continue() : route.abort('blockedbyclient'))
   async function test(name, fn) {
     try { await fn(); report.tests.push({ name, status: 'passed' }) }
     catch (error) { report.tests.push({ name, status: 'failed', error: String(error) }); throw error }
@@ -272,18 +268,15 @@ try {
       await page.locator('.demo-label').waitFor({ timeout: 20000 })
       assert.equal(await page.getByTestId('dataset-credits').count(), 1, 'One shared global credits display per view')
       assert.equal(await page.getByRole('alert').count(), 0)
-      const owners = { '.map-panel': 'overview', '.score-value': 'quality', '.ip-grid': 'class-c', '.bgp-graph': 'bgp', '.asn-card': 'asn' }
+      const owners = { '.fact-list': 'overview', '.score-value': 'quality', '.ip-grid,.subnet-summary': 'class-c', '.bgp-graph': 'bgp', '.asn-card': 'asn' }
       await page.locator(Object.keys(owners).find(selector => owners[selector] === view)).first().waitFor({ timeout: 20000 })
       for (const [selector, owner] of Object.entries(owners)) assert.equal((await page.locator(selector).count()) > 0, owner === view)
       if (view === 'overview') {
         const values = await page.locator('.fact-list > div').evaluateAll(rows => Object.fromEntries(
           rows.map(row => [row.querySelector('dt').textContent.trim(), row.querySelector('dd').textContent.trim()]),
         ))
-        assert.equal(values['Matched prefix'], '203.0.113.0/24')
-        assert.equal(values['Network name'], 'Atlas Transit')
-        assert.equal(values['Network organization'], 'Example Organization')
-        assert.equal(values['Registration country'], 'GB')
-        assert.equal(values.Country, 'US')
+        assert.deepEqual(values, { Country: 'US', 'Registration country': 'GB', 'Matched prefix': '203.0.113.0/24', Usage: 'residential' })
+        assert.equal(await page.locator('.map-panel, .map-empty, .geo-map, .leaflet-container').count(), 0)
       }
       for (const width of [320, 390, 1280, 1440]) {
         await page.setViewportSize({ width, height: 900 })
@@ -291,6 +284,8 @@ try {
       }
       if (view === 'class-c') {
         assert.equal(await page.getByRole('gridcell').count(), 256)
+        // Three fixture scores sum to 125, but the mean includes all 256 addresses.
+        assert.equal((await page.getByTestId('subnet-risk-mean').innerText()).trim(), '0.48828 / 100')
         await page.getByRole('gridcell').first().focus(); await page.keyboard.press('ArrowDown')
         assert.equal(await page.getByRole('gridcell').nth(16).getAttribute('tabindex'), '0')
       }
@@ -386,6 +381,62 @@ try {
         graph_state_preserved: true, whole_release_expiry_enforced: true }
     } finally { await isolated.close() }
   })
+  await test('routing relationships and evidenced intermediate ASN labels are legible on narrow light and dark views', async () => {
+    const palettes = []
+    for (const theme of ['light', 'dark']) {
+      const isolated = await browser.newContext({ viewport: { width: 320, height: 844 }, colorScheme: theme, reducedMotion: 'reduce' })
+      try {
+        await isolated.addInitScript(theme => {
+          localStorage.setItem('nuxt-color-mode', theme)
+          window.graphNameBatches = 0
+          const post = Worker.prototype.postMessage
+          Worker.prototype.postMessage = function (message, ...rest) {
+            if (message.action === 'graphNames') window.graphNameBatches++
+            return post.call(this, message, ...rest)
+          }
+        }, theme)
+        const graph = await isolated.newPage()
+        await graph.goto(`${base}/ip/bgp/?q=AS13335`)
+        await graph.locator('.graph-node-label').filter({ hasText: 'Atlas Access' }).waitFor()
+        const legend = graph.getByRole('list', { name: 'Relationship legend' })
+        assert.deepEqual(await legend.getByRole('listitem').allTextContents(), ['Upstream', 'Peer', 'Customer', 'Sibling', 'Unknown'])
+        const paint = await legend.evaluate(list => {
+          const rgb = color => color.match(/[\d.]+/g).slice(0, 3).map(Number)
+          const luminance = color => rgb(color).reduce((sum, value, index) => {
+            const s = value / 255
+            return sum + [0.2126, 0.7152, 0.0722][index] * (s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4)
+          }, 0)
+          const background = luminance(getComputedStyle(list.closest('.graph-caption')).backgroundColor)
+          return [...list.querySelectorAll('.relation-sample')].map(sample => {
+            const style = getComputedStyle(sample), y = luminance(style.backgroundColor)
+            return { color: style.backgroundColor, pattern: style.maskImage, contrast: (Math.max(y, background) + 0.05) / (Math.min(y, background) + 0.05) }
+          })
+        })
+        assert.equal(new Set(paint.map(sample => sample.color)).size, 5)
+        assert.equal(new Set(paint.map(sample => sample.pattern)).size, 5)
+        assert(paint.every(sample => sample.contrast >= 3))
+        palettes.push(paint.map(sample => sample.color))
+        assert.deepEqual(await graph.locator('.graph-node-label').allTextContents(), ['AS3356', 'Atlas Transit', 'Atlas Access'])
+        assert.deepEqual(await graph.locator('.graph-node title').allTextContents(), ['AS3356', 'Atlas Transit · AS13335', 'Atlas Access · AS15169'])
+        const edges = await graph.locator('.graph-edge').evaluateAll(edges => edges.map(edge => ({ relation: edge.dataset.relation,
+          color: getComputedStyle(edge).stroke, title: edge.querySelector('title').textContent })))
+        assert.deepEqual(edges, [
+          { relation: 'transit_upstream', color: paint[0].color, title: 'AS13335 → AS15169: transit upstream; observed adjacency; original hops 0 → 1; inferred relationship' },
+          { relation: 'transit_upstream', color: paint[0].color, title: 'AS15169 → AS3356: transit upstream; observed adjacency; original hops 1 → 2; inferred relationship' },
+        ])
+        assert.deepEqual(await graph.locator('.tier1-list p').allTextContents(), ['AS13335 · global transit'])
+        const before = await graph.locator('.graph-node').evaluateAll(nodes => nodes.map(node => node.getAttribute('transform')))
+        await graph.getByRole('combobox', { name: 'Focus observed route' }).selectOption('0')
+        await graph.getByRole('button', { name: 'Fit', exact: true }).click()
+        assert.deepEqual(await graph.locator('.graph-node').evaluateAll(nodes => nodes.map(node => node.getAttribute('transform'))), before)
+        await graph.locator('.graph-original summary').click()
+        assert.equal(await graph.locator('.graph-original code').textContent(), 'sequence [AS13335 AS15169 AS3356]')
+        assert(await graph.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+        assert.equal(await graph.evaluate(() => window.graphNameBatches), 1)
+      } finally { await isolated.close() }
+    }
+    assert.notDeepEqual(...palettes)
+  })
   await test('downloaded BGP SVG is standalone and keeps geometry under route focus', async () => {
     await page.goto(`${base}/ip/bgp/?q=203.0.113.1`)
     await page.locator('.graph-node').first().waitFor()
@@ -451,6 +502,8 @@ try {
       })
       assert.equal(geometry.items.length, 48)
       assert.equal(await page.locator('.graph-edge').count(), 23)
+      assert.equal(await page.locator('.graph-edge[data-relation="unknown"]').count(), 23)
+      assert((await page.locator('.graph-edge title').allTextContents()).every(title => title.includes(': unknown; observed adjacency') && !title.includes('inferred relationship')))
       for (const box of geometry.items) {
         assert(box.width > 0 && box.height > 0, `Empty graph content ${box.id} at width ${width}`)
         assert(box.left >= geometry.svg.left - .5 && box.right <= geometry.svg.right + .5 &&
@@ -496,7 +549,12 @@ try {
       assert.deepEqual(await page.locator('.graph-node').evaluateAll(nodes => nodes.map(node => node.getAttribute('transform'))), geometry.layout)
       await page.getByRole('combobox', { name:'Focus observed route' }).selectOption('11')
       assert.deepEqual(await page.locator('.graph-node').evaluateAll(nodes => nodes.map(node => node.getAttribute('transform'))), geometry.layout)
+      assert(await page.locator('.graph-node.dimmed').count() > 0)
+      assert(await page.locator('.graph-node:not(.dimmed)').count() > 0)
+      assert(await page.locator('.graph-edge.dimmed').count() > 0)
+      assert(await page.locator('.graph-edge:not(.dimmed)').count() > 0)
       await page.getByRole('combobox', { name:'Focus observed route' }).selectOption('-1')
+      assert.equal(await page.locator('.graph-node.dimmed,.graph-edge.dimmed').count(), 0)
       populations.push({ width, nodes:24, world_bounds:geometry.bounds, overlapping_items:0, clipped_items:0, default_scroll_max:scroll.maximum })
     }
     const bounds = await page.locator('.bgp-graph svg').evaluate(svg => ({ width:svg.viewBox.baseVal.width,height:svg.viewBox.baseVal.height,value:svg.getAttribute('viewBox') }))
@@ -520,17 +578,51 @@ try {
     await writeFile(new URL('../../reports/bgp-export-24.svg',import.meta.url),xml)
     report.graph_readability_populations=populations
   })
-  await test('IPv6 Class C not applicable', async () => {
-    await page.goto(`${base}/ip/class-c/?q=2001%3Adb8%3A%3A1`)
-    await page.getByRole('heading', { name: 'IPv4 only' }).waitFor()
-    assert.equal(await page.getByRole('gridcell').count(), 0)
+  await test('IPv6 /48 summaries distinguish observed evidence from zero without a grid', async () => {
+    for (const [query, prefix, average, observed] of [
+      ['2001:db8::1', '2001:db8::/48', '0.00015 / 100', 1],
+      ['2001:db8:1::1', '2001:db8:1::/48', '0 / 100', 0],
+    ]) {
+      await page.goto(`${base}/ip/class-c/?q=${encodeURIComponent(query)}`)
+      await page.getByRole('heading', { name: 'IPv6 subnet risk', level: 1, exact: true }).waitFor()
+      const summary = page.locator('.subnet-summary'), mean = summary.getByTestId('subnet-risk-mean')
+      await mean.waitFor()
+      assert.equal(await summary.getByRole('heading', { name: prefix, level: 2, exact: true }).count(), 1)
+      assert.equal((await mean.innerText()).trim(), average)
+      const details = await summary.locator('.layer-list > div').evaluateAll(nodes => Object.fromEntries(
+        nodes.map(node => [node.querySelector('dt').textContent.trim(), node.querySelector('dd').textContent.trim()]),
+      ))
+      assert.equal(details['/64 blocks with exact observations'], `${observed} / 65536`)
+      assert.equal(details['/64 blocks with positive risk'], String(observed))
+      assert.equal(await page.getByRole('grid').count(), 0)
+      assert.equal(await page.getByRole('gridcell').count(), 0)
+    }
   })
-  await test('unknown IPv4 retains an unknown 256-cell view', async () => {
-    await page.goto(`${base}/ip/class-c/?q=8.8.8.8`)
+  await test('unobserved IPs render a numeric zero without scored evidence', async () => {
+    for (const query of ['198.51.100.77', '2001:db8:1::1']) {
+      await page.goto(`${base}/ip/quality/?q=${encodeURIComponent(query)}`)
+      await page.getByRole('heading', { name: 'No scored observations', exact: true }).waitFor()
+      const value = page.getByTestId('observed-risk-value')
+      assert.equal(await value.evaluate(node => node.tagName), 'B')
+      assert.equal((await value.innerText()).trim(), '0')
+      assert.equal(await page.locator('.reason-chip').count(), 0)
+      const layers = await page.locator('.quality-layout .layer-list > div').evaluateAll(nodes => Object.fromEntries(
+        nodes.map(node => [node.querySelector('dt').textContent.trim(), node.querySelector('dd').textContent.trim()]),
+      ))
+      assert.deepEqual(layers, { 'Exact IP': '0.00 points', Prefix: '0.00 points', 'ASN context': '0.00 points',
+        ...(query.includes(':') ? {} : { '/24 neighbors': '0.00 points' }),
+      })
+    }
+  })
+  await test('unknown IPv4 retains 256 unknown cells and a numeric zero mean', async () => {
+    await page.goto(`${base}/ip/class-c/?q=198.51.100.77`)
     await page.getByRole('grid').waitFor()
     assert.equal(await page.getByRole('gridcell').count(), 256)
-    assert.equal(await page.locator('.ip-grid .observed').count(), 0)
-    assert.equal(await page.getByRole('heading', { name: 'IPv4 only' }).count(), 0)
+    assert.equal(await page.locator('.ip-grid .observed,.ip-grid .positive').count(), 0)
+    const cell = page.getByRole('gridcell', { name: '198.51.100.77, unknown', exact: true })
+    await cell.click()
+    assert(await page.locator('.cell-detail').getByText('Observed risk 0 / 100', { exact: true }).isVisible())
+    assert.equal((await page.getByTestId('subnet-risk-mean').innerText()).trim(), '0 / 100')
   })
   await test('unknown IPv4 BGP has no invented origin', async () => {
     await page.goto(`${base}/ip/bgp/?q=8.8.8.8`)
@@ -573,7 +665,7 @@ try {
       await broken.goto(`${base}/ip/overview/?q=203.0.113.1`)
       await broken.getByRole('alert').waitFor({ timeout: 20000 })
       assert.match(await broken.getByRole('alert').innerText(), /could not be verified/)
-      assert.equal(await broken.locator('.demo-label, .map-panel, .asn-card').count(), 0)
+      assert.equal(await broken.locator('.demo-label, .fact-list, .asn-card').count(), 0)
     } finally { await isolated.close() }
   })
   await test('a cancelled slow query cannot replace a newer query', async () => {
@@ -597,14 +689,17 @@ try {
       await late.locator('.demo-label').waitFor({ timeout: 20000 })
       assert.equal(new URL(late.url()).searchParams.get('q'), '8.8.8.8')
       assert.equal(await late.getByRole('textbox').inputValue(), '8.8.8.8')
-      assert(!await late.locator('.fact-list').innerText().then(text => text.includes('Atlas Harbor')))
+      const noStaleFacts = async () => assert.deepEqual(await late.locator('.fact-list dd').allTextContents(), Array(4).fill('Unknown'))
+      await noStaleFacts()
       release()
       await late.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
       assert.equal(await late.getByRole('textbox').inputValue(), '8.8.8.8')
       assert.equal(await late.getByRole('alert').count(), 0)
+      await noStaleFacts()
     } finally { release(); await isolated.close() }
   })
   assert.deepEqual(report.errors, [], 'Browser runtime errors')
+  assert.deepEqual(report.network, [], 'Unexpected third-party network requests')
   report.status = 'passed'
 } catch (error) { report.status = 'failed'; report.failure = String(error); process.exitCode = 1 }
 finally {

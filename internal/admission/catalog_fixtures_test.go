@@ -55,7 +55,9 @@ func TestReviewedObservedCatalogFixtures(t *testing.T) {
 			defer input.Close()
 			var count uint64
 			emit := func(record intelligence.NormalizedRecord) error { count++; return record.Validate() }
-			if source.Fixture.PayloadFormat == "ripe-inet6num-excerpt" {
+			if source.Fixture.PayloadFormat == jacobrakaiFixture {
+				count, err = validateJacobrakaiExcerpt(ctx, input, source, implementation, clock)
+			} else if source.Fixture.PayloadFormat == "ripe-inet6num-excerpt" {
 				count, err = validateRIPENamesExcerpt(ctx, input, source, implementation, clock)
 			} else if source.Fixture.PayloadFormat == "nro-delegated-excerpt" {
 				count, err = validateNROExcerpt(ctx, input, source, implementation, clock)

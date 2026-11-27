@@ -3,10 +3,11 @@ from copy import deepcopy
 import json
 from pathlib import Path
 import struct
+import tempfile
 import unittest
 
-from tools.hosted.memory_profile import BUDGETS, _verify_observation, inspect_object
-from tools.release_contract.contracts import ContractError
+from tools.hosted.memory_profile import BUDGETS, _verify_observation, inspect_object, verify_memory_profile
+from tools.release_contract.contracts import ContractError, canonical_bytes, sha256
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -46,6 +47,26 @@ class MemoryProfileTests(unittest.TestCase):
         with self.assertRaises(ContractError):
             _verify_observation(profile, observed, objects)
 
+    def test_memory_fixture_rejects_hash_bound_legacy_manifest(self):
+        descriptor = {"format_version": 3, "schema_version": 5, "codec": "zstd-1", "mode": "synthetic",
+                      "valid_from": 1_800_000_000, "valid_until": 1_800_000_100,
+                      "objects": [{"sha256": "a" * 64, "bytes": 64, "kind": 1, "partition": "all"}]}
+        release_id = sha256(canonical_bytes(descriptor))
+        manifest = canonical_bytes({**descriptor, "release_id": release_id})
+        pointer = canonical_bytes({"format_version": 3, "release_id": release_id,
+                                   "manifest_path": f"/_atlas/releases/{release_id}/manifest.json",
+                                   "manifest_sha256": sha256(manifest)})
+        profile = {"schema_version": 1, "scope": "accepted-worst-case-browser-profile",
+                   "budgets": BUDGETS, "coverage": BUDGETS, "release_id": release_id}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            release = root / "releases" / release_id
+            release.mkdir(parents=True)
+            (release / "manifest.json").write_bytes(manifest)
+            (root / "current.json").write_bytes(pointer)
+            with self.assertRaisesRegex(ContractError, "unsupported release version"):
+                verify_memory_profile(profile, {}, root)
+
     def test_actual_go_golden_frames_and_corrupt_envelopes(self):
         fixture = json.loads((ROOT / "fixtures/bin/synthetic-via3.json").read_bytes())
         objects = [obj for obj in fixture["objects"] if obj["info"]["kind"] in (1, 2, 4, 5, 8, 11, 13, 14)]
@@ -57,7 +78,7 @@ class MemoryProfileTests(unittest.TestCase):
             self.assertEqual(metric["decoded_bytes"], struct.unpack_from("<Q", data, 36)[0])
             self.assertLessEqual(metric["decoder_window_bytes"], BUDGETS["decoder_window_bytes"])
         data = base64.b64decode(objects[0]["base64"])
-        for offset, value in ((4, 2), (6, 3), (6, 4), (6, 6), (36, 1), (44, 0), (64 + 2, 0)):
+        for offset, value in ((4, 2), (6, 3), (6, 4), (6, 5), (6, 7), (36, 1), (44, 0), (64 + 2, 0)):
             changed = bytearray(data)
             changed[offset] = value
             with self.subTest(offset=offset), self.assertRaises(ContractError):

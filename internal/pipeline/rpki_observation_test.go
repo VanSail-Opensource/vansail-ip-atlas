@@ -32,7 +32,7 @@ func TestExpiredRPKISnapshotMaterializesExactAnnouncementStatusAndClocks(t *test
 		options := testOptions(t)
 		options.Limits = DefaultLimits()
 		candidate, err := BuildIntelligence(context.Background(), options, state, policy, inputs)
-		if err != nil || candidate.Manifest.SchemaVersion != 5 || candidate.Manifest.ValidUntil != options.ValidUntil {
+		if err != nil || candidate.Manifest.SchemaVersion != via3.PublicSchemaVersion || candidate.Manifest.ValidUntil != options.ValidUntil {
 			t.Fatal("snapshot expiry altered whole-release eligibility", err)
 		}
 		hasObservations := false

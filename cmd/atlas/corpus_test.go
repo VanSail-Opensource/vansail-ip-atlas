@@ -84,6 +84,25 @@ func TestCorpusMapAndUnknownClassificationsUseActualFacts(t *testing.T) {
 	if corpusUnknown(unknown) {
 		t.Fatal("observed RPKI classified as unknown")
 	}
+	zero, zeroScore := 0.0, uint8(0)
+	unknownIP := via3.LookupAnswer{Kind: "ip", Q: "2001:db8::1", Quality: &via3.QualityAnswer{
+		Score: &zeroScore, Confidence: "unrated", Layers: via3.LayerAnswer{Exact: &zero, Prefix: &zero, ASN: &zero},
+		Coverage: via3.CoverageAnswer{Status: "incomplete", Layers: via3.CoverageLayers{
+			Exact: "unassessed", Prefix: "unassessed", ASN: "unassessed", Neighbors: "not_applicable"}},
+	}}
+	if !corpusUnknown(unknownIP) {
+		t.Fatal("numeric zero is not evidence for an unassessed IP")
+	}
+	unknownIP.Quality.Coverage.Layers.Exact = "assessed"
+	if corpusUnknown(unknownIP) {
+		t.Fatal("assessed zero lost its positive coverage evidence")
+	}
+	unknownIP.Quality.Coverage.Layers.Exact = "unassessed"
+	unknownIP.Quality.Confidence = "low"
+	unknownIP.Quality.Reasons = []string{"proxy"}
+	if corpusUnknown(unknownIP) {
+		t.Fatal("positive observation rounded to zero disappeared from corpus")
+	}
 	if (&productionCorpus{}).selectQueries(map[string][]string{"unknown": {"192.0.2.1"}}) == nil {
 		t.Fatal("unknown-only corpus accepted")
 	}
@@ -221,9 +240,10 @@ func TestProductionCorpusCertifiesCoveredIPv4AndPreservesRealUnknowns(t *testing
 	if len(c.Queries) != 10000 || c.UnknownQueries.IPv4 != nil || c.UnknownQueries.IPv6 == "" || c.UnknownQueries.ASN == "" || !c.IPv4Coverage.Valid(built.Manifest.ReleaseID) {
 		t.Fatal("missing evidence for covered IPv4 population")
 	}
-	if c.IPv4Coverage.NetworkObjects != 1 || c.IPv4Coverage.RouterIntervals != 1 || c.IPv4Coverage.Lookup.Network.Prefix != "0.0.0.0/0" || c.IPv4Coverage.ClassC != nil {
+	if c.IPv4Coverage.NetworkObjects != 1 || c.IPv4Coverage.RouterIntervals != 1 || c.IPv4Coverage.Lookup.Network.Prefix != "0.0.0.0/0" {
 		t.Fatal("covered witness changed")
 	}
+	requireUnobservedIPv4Profile(t, c.IPv4Coverage.ClassC, "0.0.0.0/24")
 	r, err := via3.OpenRelease(filepath.Join(root, "atlas"), func() int64 { return 1700000001 })
 	if err != nil {
 		t.Fatal(err)

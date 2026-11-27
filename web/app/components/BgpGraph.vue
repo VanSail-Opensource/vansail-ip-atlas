@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { projectGraph } from '~/lib/bgpGraph'
-import type { GraphPath, GraphRelation } from '~/lib/bgpGraph'
-const props = defineProps<{ paths: GraphPath[]; relationships: GraphRelation[]; origin: number }>()
+import type { GraphPath, GraphRelation, ProjectedEdge } from '~/lib/bgpGraph'
+import { fitGraphLabel, graphIdentityName, graphRelationshipLegend, type GraphIdentity, type GraphNodeName } from '~/lib/bgpGraphPresentation'
+const props = defineProps<{ paths: GraphPath[]; relationships: GraphRelation[]; origin: number; identities: readonly GraphIdentity[];
+  loadNames: (asns: readonly number[], signal: AbortSignal) => Promise<readonly GraphNodeName[]> }>()
 const scale = ref(1), x = ref(0), y = ref(0), activePath = ref(-1)
 const originalOpen = ref(false)
 const svg = ref<SVGSVGElement>()
@@ -10,6 +12,29 @@ const fitted = ref(false)
 const pointers = new Map<number, { x: number; y: number }>()
 let previous: { x: number; y: number; distance: number } | undefined
 const projection = computed(() => projectGraph(props.paths, props.relationships, props.origin))
+const identityNames = computed(() => new Map(props.identities.map(identity => [identity.asn, graphIdentityName(identity)])))
+const supplementalNames = shallowRef(new Map<number, string>())
+const neededNames = computed(() => projection.value.nodes.map(node => node.asn)
+  .filter(asn => asn !== props.origin && !identityNames.value.has(asn)))
+watchPostEffect(onCleanup => {
+  const asns = neededNames.value
+  supplementalNames.value = new Map()
+  if (!asns.length) return
+  const controller = new AbortController()
+  onCleanup(() => controller.abort())
+  void props.loadNames(asns, controller.signal).then(names => {
+    if (!controller.signal.aborted) supplementalNames.value = new Map(names.map(row => [row.asn, row.label]))
+  }).catch(() => { /* Fallback to ASN IDs when optional labels are unavailable. */ })
+})
+const nodeName = (asn: number) => identityNames.value.get(asn) || supplementalNames.value.get(asn)
+const nodeLabel = (asn: number) => nodeName(asn) || `AS${asn}`
+const nodeTitle = (asn: number) => {
+  const name = nodeName(asn)
+  return `${name ? `${name} · ` : ''}AS${asn}${projection.value.truncatedTerminals.includes(asn) ? ' · a route suffix is clipped here' : ''}`
+}
+const focusedASNs = computed(() => activePath.value === -1 ? null : new Set(projection.value.routes[activePath.value]?.asns))
+const nodeDimmed = (asn: number) => focusedASNs.value !== null && !focusedASNs.value.has(asn)
+const edgeDimmed = (edge: ProjectedEdge) => activePath.value !== -1 && !edge.routeIds.includes(activePath.value)
 const contentTransform = computed(() => {
   const { width, height } = projection.value.bounds
   return `translate(${x.value} ${y.value}) translate(${width / 2} ${height / 2}) scale(${scale.value}) translate(${-width / 2} ${-height / 2})`
@@ -51,6 +76,7 @@ function exportGraph() {
   // HTML labels have an opaque backing in the interactive SVG so their
   // contrast does not depend on crossing edges or the page decoration.
   // The download remains self-contained native SVG, with the same paint.
+  const measure = document.createElement('canvas').getContext('2d')
   const liveLabels = [...svg.value.querySelectorAll('foreignObject')]
   for (const [index, label] of [...snapshot.querySelectorAll('foreignObject')].entries()) {
     const live = liveLabels[index]!.firstElementChild!
@@ -65,7 +91,14 @@ function exportGraph() {
     text.setAttribute('x', String(left + width / 2)); text.setAttribute('y', String(top + 14))
     text.setAttribute('text-anchor', 'middle'); text.setAttribute('fill', style.color)
     text.setAttribute('font-family', style.fontFamily); text.setAttribute('font-size', style.fontSize)
-    text.setAttribute('font-weight', style.fontWeight); text.textContent = live.textContent
+    text.setAttribute('font-weight', style.fontWeight); text.setAttribute('direction', style.direction)
+    const value = live.textContent ?? ''
+    if (measure && live.classList.contains('graph-node-label')) {
+      measure.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
+      measure.direction = style.direction === 'rtl' ? 'rtl' : 'ltr'
+      text.textContent = fitGraphLabel(value, width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+        label => measure.measureText(label).width)
+    } else text.textContent = value
     label.replaceWith(backing, text)
   }
   const { width, height } = projection.value.bounds
@@ -80,7 +113,7 @@ function exportGraph() {
   title.id = 'atlas-graph-title'; title.textContent = `AS${props.origin} observed AS paths`
   const description = document.createElementNS(namespace, 'desc')
   description.id = 'atlas-graph-description'
-  description.textContent = `Observed origin-outward adjacencies; business relationships may be inferred. ${projection.value.nodes.length} visible nodes. ${projection.value.truncated ? 'The bounded projection clips some routes or suffixes; dashed terminal nodes mark clipped suffixes.' : 'The selected linear routes fit within the bounded projection.'} Original segments and prepends are retained in the interactive view.`
+  description.textContent = `Observed origin-outward adjacencies. Known relationships are inferred: solid upstream, dashed peer, long-short customer and short-short sibling. Dotted means the relationship is unknown. ${projection.value.nodes.length} visible nodes. ${projection.value.truncated ? 'The bounded projection clips some routes or suffixes; dashed terminal nodes mark clipped suffixes.' : 'The selected linear routes fit within the bounded projection.'} Original segments and prepends are retained in the interactive view.`
   const background = document.createElementNS(namespace, 'rect')
   background.setAttribute('width', String(width)); background.setAttribute('height', String(height))
   background.setAttribute('fill', getComputedStyle(document.body).backgroundColor)
@@ -145,13 +178,20 @@ watch(() => props.origin, () => { activePath.value = -1; originalOpen.value = fa
     <div ref="viewport" class="graph-viewport">
     <svg ref="svg" role="img" aria-label="Observed BGP paths. Arrow keys pan; plus and minus zoom; Home fits." tabindex="0" :viewBox="`0 0 ${projection.bounds.width} ${projection.bounds.height}`" :style="{ minWidth: fitted ? '0' : `${projection.bounds.width}px`, height: fitted ? 'min(60vh, 600px)' : undefined, minHeight: fitted ? '0' : undefined }" @wheel="wheel" @keydown="key" @pointerdown="down" @pointermove="move" @pointerup="up" @pointercancel="up">
       <g :transform="contentTransform">
-        <path v-for="edge in projection.edges" :key="edge.key" :d="`M ${projection.byId.get(edge.from)!.x} ${projection.byId.get(edge.from)!.y} L ${projection.byId.get(edge.to)!.x} ${projection.byId.get(edge.to)!.y}`" class="graph-edge" :class="{ dimmed: activePath !== -1 && !edge.routeIds.includes(activePath), inferred: edge.inferred }"><title>{{ `AS${edge.from} → AS${edge.to}: ${edge.relation.replaceAll('_', ' ')}; observed adjacency; original hops ${edge.fromOriginalPosition} → ${edge.toOriginalPosition}${edge.inferred ? '; inferred relationship' : ''}` }}</title></path>
-        <g v-for="node in projection.nodes" :key="node.asn" class="graph-node" :transform="`translate(${node.x} ${node.y})`" :class="{ origin: node.asn === origin, truncated: projection.truncatedTerminals.includes(node.asn), dimmed: activePath !== -1 && !projection.routes[activePath]?.asns.includes(node.asn) }"><circle r="20"/><foreignObject x="-62" y="26" width="124" height="20"><div xmlns="http://www.w3.org/1999/xhtml" class="graph-node-label">AS{{ node.asn }}</div></foreignObject><title>AS{{ node.asn }}{{ projection.truncatedTerminals.includes(node.asn) ? ' · a route suffix is clipped here' : '' }}</title></g>
+        <!-- Pan/zoom only changes the outer transform. Reuse each child until
+             its projection, label or route emphasis actually changes. -->
+        <path v-for="edge in projection.edges" :key="edge.key" v-memo="[edge, edgeDimmed(edge)]" :d="`M ${projection.byId.get(edge.from)!.x} ${projection.byId.get(edge.from)!.y} L ${projection.byId.get(edge.to)!.x} ${projection.byId.get(edge.to)!.y}`" class="graph-edge" :data-relation="edge.relation" :class="{ dimmed: edgeDimmed(edge) }"><title>{{ `AS${edge.from} → AS${edge.to}: ${edge.relation.replaceAll('_', ' ')}; observed adjacency; original hops ${edge.fromOriginalPosition} → ${edge.toOriginalPosition}${edge.inferred ? '; inferred relationship' : ''}` }}</title></path>
+        <g v-for="node in projection.nodes" :key="node.asn" v-memo="[node, nodeDimmed(node.asn), nodeName(node.asn)]" class="graph-node" :transform="`translate(${node.x} ${node.y})`" :class="{ origin: node.asn === origin, truncated: projection.truncatedTerminals.includes(node.asn), dimmed: nodeDimmed(node.asn) }"><title>{{ nodeTitle(node.asn) }}</title><circle r="20"/><foreignObject x="-62" y="26" width="124" height="20"><div xmlns="http://www.w3.org/1999/xhtml" class="graph-node-label" dir="auto">{{ nodeLabel(node.asn) }}</div></foreignObject></g>
       </g>
       <foreignObject v-if="!projection.nodes.length" :x="projection.bounds.width / 2 - 180" :y="projection.bounds.height / 2 - 13" width="360" height="26"><div xmlns="http://www.w3.org/1999/xhtml" class="empty-graph-label">No observed path is available</div></foreignObject>
     </svg>
     </div>
-    <p class="graph-caption">Observed AS paths · relationships may be inferred · {{ projection.nodes.length }}/24 nodes{{ projection.truncated ? ' · view clipped' : '' }}</p>
+    <div class="graph-caption">
+      <p>Observed AS paths{{ projection.edges.length ? ' · known relationships are inferred' : '' }} · {{ projection.nodes.length }}/24 nodes{{ projection.truncated ? ' · view clipped' : '' }}</p>
+      <ul v-if="projection.edges.length" class="graph-legend" role="list" aria-label="Relationship legend">
+        <li v-for="item in graphRelationshipLegend" :key="item.key" :data-relation="item.key"><span class="relation-sample" aria-hidden="true" />{{ item.label }}</li>
+      </ul>
+    </div>
     <details v-if="originalPaths.length" :open="originalOpen" class="graph-original" @toggle="toggleOriginal">
       <summary>Original route structure{{ projection.omittedPathIndexes.length ? ` · ${projection.omittedPathIndexes.length} omitted from view` : '' }}</summary>
       <ol v-if="originalOpen"><li v-for="(path, index) in originalPaths" :key="index"><span>Route {{ index + 1 }} · prepends retained{{ path.graphEligible ? '' : ' · linear graph unavailable' }}</span><code>{{ originalText(path) }}</code></li></ol>
@@ -167,6 +207,27 @@ watch(() => props.origin, () => { activePath.value = -1; originalOpen.value = fa
 }
 .graph-node.truncated circle { stroke-dasharray:3 2; }
 .graph-viewport { overflow-x:auto; overscroll-behavior-x:contain; background:var(--content); }
+.graph-caption { background:var(--content); }
+.graph-caption p { margin:0; }
+.graph-legend { display:flex; flex-wrap:wrap; gap:6px 16px; margin:8px 0 0; padding:0; list-style:none; }
+.graph-legend li { display:flex; align-items:center; gap:6px; color:var(--ink); }
+.relation-sample { width:28px; height:2px; flex:none; background:var(--relation-color); mask-image:var(--relation-mask,none); }
+.graph-edge { fill:none; stroke:var(--relation-color); stroke-width:1.75; stroke-dasharray:var(--relation-dash,none); vector-effect:non-scaling-stroke; }
+.graph-node-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+[data-relation='transit_upstream'] { --relation-color:#135f9d; }
+[data-relation='peer'] { --relation-color:#963a09; --relation-dash:8 4; --relation-mask:repeating-linear-gradient(90deg,#000 0 8px,transparent 8px 12px); }
+[data-relation='customer'] { --relation-color:#236335; --relation-dash:11 3 3 3; --relation-mask:repeating-linear-gradient(90deg,#000 0 11px,transparent 11px 14px,#000 14px 17px,transparent 17px 20px); }
+[data-relation='sibling'] { --relation-color:#743892; --relation-dash:4 3 2 3; --relation-mask:repeating-linear-gradient(90deg,#000 0 4px,transparent 4px 7px,#000 7px 9px,transparent 9px 12px); }
+[data-relation='unknown'] { --relation-color:#4d5963; --relation-dash:1 3; --relation-mask:repeating-linear-gradient(90deg,#000 0 1px,transparent 1px 4px); }
+.dark [data-relation='transit_upstream'] { --relation-color:#83c4ff; }
+.dark [data-relation='peer'] { --relation-color:#ffb477; }
+.dark [data-relation='customer'] { --relation-color:#94dcaa; }
+.dark [data-relation='sibling'] { --relation-color:#dbacf8; }
+.dark [data-relation='unknown'] { --relation-color:#b6c1ca; }
+@media (forced-colors:active) {
+  .graph-edge { stroke:CanvasText; }
+  .relation-sample { forced-color-adjust:none; background:CanvasText; }
+}
 /* Route focus dims the geometry while every ASN label remains readable. */
 .graph-node.dimmed { opacity:1; }
 .graph-node.dimmed circle { opacity:.25; }

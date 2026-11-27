@@ -14,7 +14,9 @@ import time
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT))
 from tools.hosted.checkpoint import api, REPOSITORY, WORKFLOWS
+from tools.hosted.browser_failures import failure_label as browser_failure_label
 from tools.release_contract.contracts import ContractError, canonical_bytes, sha256
+from tools.release_contract.pages_failures import failure_label as pages_failure_label
 from tools.release_contract.production import read_private
 
 # Integration now includes intake plus the separately bounded real cold compile.
@@ -151,13 +153,27 @@ def compile_phase_records(stream, start=0):
         return []
     return records
 
-def failure_category(path, start):
+def failure_category(path, start, *, phase=None):
     # Classify only bounded current-command output into fixed labels. Raw text,
     # filenames, source identities and arbitrary exception messages stay private.
     try:
+        parser={'pages-deployment':pages_failure_label,'measure-production-browser':browser_failure_label}.get(phase)
         with path.open('rb') as stream:
-            stream.seek(0,2);end=stream.tell();stream.seek(max(start,end-65536))
-            lines=stream.read(65536).decode('utf-8',errors='replace').splitlines()
+            stream.seek(0,2);end=stream.tell();offset=max(start,end-65536)
+            partial_line=False
+            if parser is not None and offset>start:
+                stream.seek(offset-1)
+                partial_line=stream.read(1)!=b'\n'
+            stream.seek(offset)
+            text=stream.read(65536).decode('utf-8',errors='replace')
+        if parser is not None:
+            # Match only complete exact lines from this child. A truncated
+            # suffix or arbitrary exception output is not a typed diagnostic.
+            records=text.split('\n')[int(partial_line):-1]
+            for record in reversed(records):
+                label=parser(record.removesuffix('\r'))
+                if label is not None: return label
+        lines=text.splitlines()
         for line in reversed(lines):
             if line in SAFE_FAILURES: return SAFE_FAILURES[line]
             if line.startswith('production_blocked: unqualified source capabilities: '):
@@ -188,7 +204,7 @@ def run(argv, *, output=None):
                 print('Production compiler counters: '+json.dumps(row,sort_keys=True,separators=(',',':')),flush=True)
     if result.returncode:
         print('Production step failed: '+phase,file=sys.stderr,flush=True)
-        print('Production failure category: '+failure_category(private/'stage.log',start),file=sys.stderr,flush=True)
+        print('Production failure category: '+failure_category(private/'stage.log',start,phase=phase),file=sys.stderr,flush=True)
         raise ContractError('production stage command failed; private diagnostics remain on runner')
     print('Production step completed: '+phase,flush=True)
 

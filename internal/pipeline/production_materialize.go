@@ -182,7 +182,7 @@ func buildStreamedCandidate(ctx context.Context, options Options, state intellig
 		Limits         Limits
 		Mode           string
 		Schema         int
-	}{implementation, options.PrivateLabelValues, options.Limits, options.Mode, 5})
+	}{implementation, options.PrivateLabelValues, options.Limits, options.Mode, via3.PublicSchemaVersion})
 	if err != nil {
 		return Candidate{}, err
 	}

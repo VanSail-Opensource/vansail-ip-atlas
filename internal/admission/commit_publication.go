@@ -53,6 +53,9 @@ func publicationSupported(source Source) bool {
 	if source.Parser.ID == "root-zone-anycast" {
 		return rootZoneSource(source)
 	}
+	if source.Parser.ID == jacobrakaiParserID {
+		return jacobrakaiSource(source)
+	}
 	if source.Parser.ID == "tweetfeed-week-csv" {
 		return tweetFeedSource(source)
 	}

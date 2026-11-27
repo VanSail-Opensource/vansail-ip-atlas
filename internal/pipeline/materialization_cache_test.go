@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"vansail-ip-atlas/internal/intelligence"
+	"vansail-ip-atlas/internal/via3"
 )
 
 func TestMaterializationCacheReusesExactStateAndRunsBothGates(t *testing.T) {
@@ -40,8 +41,8 @@ func TestMaterializationCacheReusesExactStateAndRunsBothGates(t *testing.T) {
 	}
 }
 
-func TestMaterializationCacheSchema4MigrationRequiresAuthenticatedClosedMiss(t *testing.T) {
-	for _, scenario := range []string{"old_generation", "same_identity", "bad_mac", "extra_file", "unknown_schema"} {
+func TestMaterializationCacheSchemaMigrationRequiresAuthenticatedClosedMiss(t *testing.T) {
+	for _, scenario := range []string{"old_schema4", "old_schema5", "same_identity", "bad_mac", "extra_file", "unknown_schema"} {
 		t.Run(scenario, func(t *testing.T) {
 			state, policy, _, _, _ := intelligenceFixture(t)
 			options := testOptions(t)
@@ -61,6 +62,9 @@ func TestMaterializationCacheSchema4MigrationRequiresAuthenticatedClosedMiss(t *
 				t.Fatal("cache key unavailable", err)
 			}
 			index.Descriptor.SchemaVersion = 4
+			if scenario == "old_schema5" {
+				index.Descriptor.SchemaVersion = 5
+			}
 			if scenario != "same_identity" {
 				index.Identity[0] ^= 1
 			}
@@ -80,11 +84,11 @@ func TestMaterializationCacheSchema4MigrationRequiresAuthenticatedClosedMiss(t *
 					t.Fatal(err)
 				}
 			}
-			options.Output = filepath.Join(options.Workspace, "build-private", "schema5-migration")
+			options.Output = filepath.Join(options.Workspace, "build-private", "schema6-migration")
 			candidate, err := BuildStreamedIntelligence(context.Background(), options, state, policy)
-			if scenario == "old_generation" {
-				if err != nil || candidate.Manifest.SchemaVersion != 5 || candidate.Stats.MaterializationCacheHits != 0 || candidate.Stats.SortRuns == 0 {
-					t.Fatal("authenticated schema4 miss did not rebuild", err)
+			if scenario == "old_schema4" || scenario == "old_schema5" {
+				if err != nil || candidate.Manifest.SchemaVersion != via3.PublicSchemaVersion || candidate.Stats.MaterializationCacheHits != 0 || candidate.Stats.SortRuns == 0 {
+					t.Fatal("authenticated obsolete-schema miss did not rebuild", err)
 				}
 			} else {
 				if err == nil {

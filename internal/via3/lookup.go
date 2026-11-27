@@ -157,10 +157,13 @@ type CellAnswer struct {
 type ClassCAnswer struct {
 	Prefix         string       `json:"prefix"`
 	Cells          []CellAnswer `json:"cells"`
+	Unit           string       `json:"unit"`
+	TotalUnits     int          `json:"totalUnits"`
 	ObservedCount  int          `json:"observedCount"`
 	AssessedCount  int          `json:"assessedCount"`
 	PositiveCount  int          `json:"positiveCount"`
 	ScoredCount    int          `json:"scoredCount"`
+	ScoreSum       int          `json:"scoreSum"`
 	AggregateScore *uint8       `json:"meanObservedRisk"`
 }
 type ASNPrefixPage struct {
@@ -463,10 +466,10 @@ func NewRelease(pointerBytes, manifestBytes []byte, load func(string) ([]byte, e
 		pointer.BrowserSHA256 != "" && !validHash(pointer.BrowserSHA256) {
 		return nil, fail("manifest")
 	}
-	if len(pointerBytes) > 4096 || len(manifestBytes) > 4<<20 || !validHash(pointer.ReleaseID) || !validHash(pointer.ManifestSHA256) || pointer.FormatVersion != 3 || manifest.FormatVersion != 3 || manifest.SchemaVersion != 5 || manifest.Codec != "zstd-1" || (manifest.Mode != "synthetic" && manifest.Mode != "production") || len(manifest.Objects) == 0 || len(manifest.Objects) >= 18500 || pointer.ManifestPath != "/_atlas/releases/"+manifest.ReleaseID+"/manifest.json" || pointer.ReleaseID != manifest.ReleaseID || Hash(manifestBytes) != pointer.ManifestSHA256 || manifest.ValidFrom < 0 || manifest.ValidUntil <= manifest.ValidFrom || manifest.ValidUntil-manifest.ValidFrom > 720*3600 || manifest.ValidUntil > 9007199254740991 {
+	if len(pointerBytes) > 4096 || len(manifestBytes) > 4<<20 || !validHash(pointer.ReleaseID) || !validHash(pointer.ManifestSHA256) || pointer.FormatVersion != 3 || manifest.FormatVersion != 3 || manifest.SchemaVersion != PublicSchemaVersion || manifest.Codec != "zstd-1" || (manifest.Mode != "synthetic" && manifest.Mode != "production") || len(manifest.Objects) == 0 || len(manifest.Objects) >= 18500 || pointer.ManifestPath != "/_atlas/releases/"+manifest.ReleaseID+"/manifest.json" || pointer.ReleaseID != manifest.ReleaseID || Hash(manifestBytes) != pointer.ManifestSHA256 || manifest.ValidFrom < 0 || manifest.ValidUntil <= manifest.ValidFrom || manifest.ValidUntil-manifest.ValidFrom > 720*3600 || manifest.ValidUntil > 9007199254740991 {
 		return nil, fail("manifest")
 	}
-	desc := Descriptor{Codec: manifest.Codec, FormatVersion: 3, Mode: manifest.Mode, Objects: manifest.Objects, SchemaVersion: 5, ValidFrom: manifest.ValidFrom, ValidUntil: manifest.ValidUntil}
+	desc := Descriptor{Codec: manifest.Codec, FormatVersion: 3, Mode: manifest.Mode, Objects: manifest.Objects, SchemaVersion: PublicSchemaVersion, ValidFrom: manifest.ValidFrom, ValidUntil: manifest.ValidUntil}
 	if Hash(canonical(desc)) != manifest.ReleaseID {
 		return nil, fail("manifest")
 	}
@@ -985,6 +988,36 @@ func riskValue(row []byte, p int, bit uint, target *float64) *float64 {
 	*target = float64(u32(row, p)) / 1000000
 	return target
 }
+
+func addressRiskValue(row []byte, p int, bit uint, target *float64) *float64 {
+	if row != nil && riskValue(row, p, bit, target) != nil {
+		return target
+	}
+	*target = 0
+	return target
+}
+
+func riskAnswer(row []byte, ipv6 bool, values *qualityLookupValues) *QualityAnswer {
+	var flags, confidenceBand byte
+	var reasonBits uint32
+	values.score = 0
+	if row != nil {
+		flags, confidenceBand, reasonBits = row[11], row[10], u32(row, 4)
+		if present(row, 9) {
+			values.score = row[9]
+		}
+	}
+	layers := LayerAnswer{
+		Exact: addressRiskValue(row, 12, 10, &values.exact), Prefix: addressRiskValue(row, 16, 11, &values.prefix),
+		ASN: addressRiskValue(row, 20, 12, &values.asn),
+	}
+	if !ipv6 {
+		layers.Neighbors = addressRiskValue(row, 24, 13, &values.neighbors)
+	}
+	values.answer = QualityAnswer{Score: &values.score, Coverage: coverageAnswer(flags, ipv6),
+		Confidence: confidence(confidenceBand), Reasons: reasons(reasonBits), Layers: layers}
+	return &values.answer
+}
 func origins(s *Shard, row []byte) []uint32 {
 	var c *nativeComponents
 	var key componentKey
@@ -1128,21 +1161,10 @@ func (r *Release) lookupOnce(ctx context.Context, q string) (result LookupAnswer
 				}
 			}
 		}
-		if s := dest[6]; s != nil {
-			if row := qualityRow; row != nil {
-				values := quality
-				if values == nil {
-					values = new(qualityLookupValues)
-				}
-				q := &values.answer
-				*q = QualityAnswer{Coverage: coverageAnswer(row[11], addr.Is6()), Confidence: confidence(row[10]), Reasons: reasons(u32(row, 4)), Layers: LayerAnswer{Exact: riskValue(row, 12, 10, &values.exact), Prefix: riskValue(row, 16, 11, &values.prefix), ASN: riskValue(row, 20, 12, &values.asn), Neighbors: riskValue(row, 24, 13, &values.neighbors)}}
-				if present(row, 9) {
-					values.score = row[9]
-					q.Score = &values.score
-				}
-				answer.Quality = q
-			}
+		if quality == nil {
+			quality = new(qualityLookupValues)
 		}
+		answer.Quality = riskAnswer(qualityRow, addr.Is6(), quality)
 		if s := dest[10]; s != nil {
 			if row, prefix, ok := s.findPrefix(addr); ok {
 				if present(row, 19) {
@@ -1326,12 +1348,27 @@ func (r *Release) ClassC(ctx context.Context, q string) (result *ClassCAnswer, r
 	return answer, err
 }
 func (r *Release) classC(ctx context.Context, addr netip.Addr) (*ClassCAnswer, error) {
-	budget := newAnswerBudget()
-	if err := budget.charge(256 * 512); err != nil {
-		return nil, err
-	}
-	if !addr.Is4() {
+	if !addr.IsValid() {
 		return nil, nil
+	}
+	budget := newAnswerBudget()
+	var answer *ClassCAnswer
+	if addr.Is4() {
+		if err := budget.charge(IPv4ProfileUnits * 512); err != nil {
+			return nil, err
+		}
+		answer = &ClassCAnswer{Prefix: netip.PrefixFrom(addr, 24).Masked().String(), Unit: "ipv4-address",
+			TotalUnits: IPv4ProfileUnits, Cells: make([]CellAnswer, IPv4ProfileUnits), AggregateScore: new(uint8)}
+		scores := new([IPv4ProfileUnits]uint8)
+		a := addr.As4()
+		for suffix := range answer.Cells {
+			a[3] = byte(suffix)
+			answer.Cells[suffix] = CellAnswer{IP: netip.AddrFrom4(a).String(), Score: &scores[suffix],
+				Confidence: "unrated", Coverage: "incomplete", Reasons: []string{}, Usage: "unknown", Origins: []uint32{}}
+		}
+	} else {
+		answer = &ClassCAnswer{Prefix: netip.PrefixFrom(addr, 48).Masked().String(), Unit: "ipv6-/64",
+			TotalUnits: IPv6ProfileUnits, Cells: []CellAnswer{}, AggregateScore: new(uint8)}
 	}
 	routed, _, known := r.router.findPrefix(addr)
 	s, err := r.rowDestination(ctx, routed, known, 7)
@@ -1339,23 +1376,23 @@ func (r *Release) classC(ctx context.Context, addr netip.Addr) (*ClassCAnswer, e
 		return nil, err
 	}
 	if s == nil {
-		return nil, nil
+		return answer, nil
 	}
-	row, prefix, ok := s.FindPrefix(addr)
+	row, prefix, ok := s.findPrefix(addr)
 	if !ok {
-		return nil, nil
+		return answer, nil
 	}
-	answer := &ClassCAnswer{Prefix: prefix, Cells: make([]CellAnswer, 256), ObservedCount: int(u16(row, 8)), AssessedCount: int(u16(row, 10)), PositiveCount: int(u16(row, 12)), ScoredCount: int(u16(row, 14))}
-	if present(row, 22) {
-		v := row[20]
-		answer.AggregateScore = &v
+	if prefix.String() != answer.Prefix || (row[22] == 1) != addr.Is6() {
+		return nil, fail("record")
 	}
-	a := addr.As4()
-	a[3] = 0
-	for suffix := 0; suffix < 256; suffix++ {
-		a[3] = byte(suffix)
-		answer.Cells[suffix] = CellAnswer{IP: netip.AddrFrom4(a).String(), Confidence: "unrated", Coverage: "incomplete", Reasons: []string{}, Usage: "unknown", Origins: []uint32{}}
+	*answer.AggregateScore = row[20]
+	if addr.Is6() {
+		answer.ObservedCount, answer.PositiveCount, answer.ScoreSum = int(u32(row, 4)), int(u32(row, 8)), int(u32(row, 12))
+		answer.ScoredCount = answer.PositiveCount
+		return answer, nil
 	}
+	answer.ObservedCount, answer.AssessedCount = int(u16(row, 8)), int(u16(row, 10))
+	answer.PositiveCount, answer.ScoredCount = int(u16(row, 12)), int(u16(row, 14))
 	for j := u32(row, 4); j < u32(row, 4)+uint32(u16(row, 8)); j++ {
 		cell := s.row(10, j)
 		c := &answer.Cells[cell[0]]
@@ -1367,8 +1404,8 @@ func (r *Release) classC(ctx context.Context, addr netip.Addr) (*ClassCAnswer, e
 		c.Reasons = reasons(u32(cell, 4))
 		c.Usage = usageName(cell[2])
 		if cell[1]&8 != 0 {
-			score := cell[8]
-			c.Score = &score
+			*c.Score = cell[8]
+			answer.ScoreSum += int(cell[8])
 		}
 		if cell[1]&32 != 0 {
 			network, err := r.reference(ctx, s, u32(cell, 16))

@@ -1,9 +1,12 @@
-# VIA3 Binary Format - public schema 5, contract revision 3
+# VIA3 Binary Format - public schema 6, contract revision 4
 
-This version adds explicit observation and evidence-expiry clocks to RPKI snapshot
-results while retaining observed-risk scoring and independent coverage.
-Magic/format/public-schema are `VIA3`/`3`/`5`. Schemas 3 and 4 are rejected; old
-quality semantics and undated RPKI results cannot be interpreted as this schema. Machine-readable tables and
+This version adds an IPv6 `/48` summary, zero-risk projection for absent
+observations, and an all-address denominator in IPv4 `/24` profiles. It retains
+both RPKI observation and expiry clocks and independent risk assessment coverage.
+Magic/format/public-schema are `VIA3`/`3`/`6`. Schema 5 and earlier are rejected.
+Recompile from authenticated normalized source state instead of relabelling an
+old release, because its stored `/24` mean uses a different denominator.
+Machine-readable tables and
 uncompressed synthetic vectors are in `fixtures/contracts/via3-layouts.json`.
 They are contract fixtures, not a compiled real-source database or source
 certification. The compressed engineering corpus is now
@@ -57,7 +60,7 @@ The header is exactly 64 bytes:
 |---:|---:|---|
 | 0 | 4 | ASCII `VIA3` |
 | 4 | 2 | format version = 3 |
-| 6 | 2 | public schema = 5 |
+| 6 | 2 | public schema = 6 |
 | 8 | 2 | header length = 64 |
 | 10 | 2 | shard kind, below |
 | 12 | 4 | flags = 0 |
@@ -74,7 +77,7 @@ Each descriptor is exactly 64 bytes:
 |---:|---:|---|
 | 0 | 2 | section ID |
 | 2 | 1 | codec = 1 |
-| 3 | 1 | flags = 0; all schema-5 sections are required when present |
+| 3 | 1 | flags = 0, all required public schema sections must be present |
 | 4 | 4 | reserved |
 | 8 | 8 | compressed offset |
 | 16 | 8 | compressed length, nonzero |
@@ -189,7 +192,9 @@ RPKI and BGP-origin keys are prefix facts and never set the exact-address flag.
   16 prefix_contribution:u32;20 asn_contribution:u32;24 neighbor_contribution:u32;
   28 reserved:u32`. Contributions remain millionths with respective caps
   550000,180000,150000,120000. Score is half-up `100*sum` of unrounded positive
-  contributions, or absent when the sum is zero; higher means more observed risk.
+  contributions, or stored as absent when the sum is zero. Public IP lookups
+  project missing scores and applicable contributions as zero. Absent coverage
+  or evidence confidence does not become assessed. Higher means more observed risk.
   Status 0 absent,1 scored; confidence 0 unrated,1 low,2 medium,3 high. A scored row
   needs supported reasons and at least one present contribution, but may round
   to score zero. Readers accept only scores within the rounded contribution
@@ -199,17 +204,30 @@ RPKI and BGP-origin keys are prefix facts and never set the exact-address flag.
   contribution presence, including authoritative zero. IPv6 allows scores but
   forbids neighbor contribution/assessment and overall complete assessment.
   Unknown contributions remain absent and confidence does not certify coverage.
-* **IPv4 `/24` (24):** `0 presence:u32;4 cells_first:u32;8 cells_count:u16;
+* **IPv4 `/24` (kind 7, 24):** `0 presence:u32;4 cells_first:u32;8 cells_count:u16;
   10 assessed_count:u16;12 positive_count:u16;14 scored_count:u16;
   16 dominant_asn:u32;20 mean_observed_risk:u8;21 confidence:u8;22 reserved:u16`.
   Only exact observed cells exist; a prefix is never expanded into 256 facts.
-  Counts are recomputed from the cells and at most cells_count <=256. Mean risk
-  exists iff scored_count>0 and is the half-up mean of those integer scores;
-  confidence is their minimum band. Unknown cells never enter the denominator.
+  Counts are recomputed from the cells and at most cells_count <=256. The mean
+  bit is present iff scored_count>0. The encoded mean is the half-up sum of the
+  scored integers divided by all 256 addresses, and confidence is their minimum
+  band. The public score for each missing cell is zero, without adding an
+  observation. The public summary exposes scoreSum, totalUnits=256 and unit
+  `ipv4-address`, including when no profile rows are stored.
   Cell byte 10 is complete-assessment flag 0/1; byte 11 remains zero. The existing
   score-present bit marks observed-risk score, independently of assessment.
   Dominant ASN is absent on ties or MOAS ambiguity. `/24` distributions are
   computed from the bounded cell range without duplicated scalars.
+* **IPv6 `/48` (kind 7, 24):** mask contains bits 21 and 22. Offset 4 holds the
+  observed `/64` count (u32), offset 8 the positive `/64` count (u32), and
+  offset 12 the score sum (u32), bounded by 55 times the positive count. Offset
+  16 is reserved zero (u32), byte 20 is the half-up mean over 65,536, byte 21 is
+  zero, byte 22 equals one and byte 23 is zero. The canonical indexed key is an
+  IPv6 `/48` with no exact flag and no inheritance. This shard contains no
+  cell or referenced object rows. The public summary has `cells: []`,
+  `assessedCount: 0`, `scoredCount: positiveCount`, `unit: "ipv6-/64"` and
+  `totalUnits: 65536`. An unstored profile has zero scores and counts, not
+  complete coverage. The `/48` summary does not affect the K6 address score.
 * **ASN (64):** `0 presence:u32;4 asn:u32;8 name:StringRef;
   16 organization:StringRef;24 country:u16;26 risk_band:u8;27 confidence:u8;
   28 risk:u32;32 reason_bits:u32;36 prefix_pages_first:u32;

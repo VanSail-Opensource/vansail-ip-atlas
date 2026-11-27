@@ -125,11 +125,7 @@ func newScatterPrefixes(root *scatterNode) *scatterPrefixes {
 		return nil
 	}
 	bits := root.prefix.Bits()
-	ceiling := root.prefix.Addr().BitLen()
-	if root.prefix.Addr().Is4() {
-		ceiling = 24
-	}
-	if bits+4 > ceiling {
+	if bits+4 > root.ipCeiling() {
 		return nil
 	}
 	return &scatterPrefixes{root: root, bits: bits}
@@ -259,10 +255,7 @@ func (node *scatterNode) narrow() {
 			}
 		}
 	} else if node.cover.IsValid() && node.cover.Bits() > node.prefix.Bits() {
-		depth := node.cover.Bits()
-		if node.cover.Addr().Is4() {
-			depth = min(depth, 24)
-		}
+		depth := min(node.cover.Bits(), node.ipCeiling())
 		node.prefix = netip.PrefixFrom(node.cover.Addr(), depth).Masked()
 	}
 }

@@ -96,10 +96,10 @@ func LoadPolicy(r io.Reader) (Policy, error) {
 	}
 	var revision int
 	var observedFormula string
-	if err := yamlField(root, "contract_revision").Decode(&revision); err != nil || revision != 2 {
+	if err := yamlField(root, "contract_revision").Decode(&revision); err != nil || revision != 3 {
 		return Policy{}, errors.New("unsupported observed-risk contract")
 	}
-	if err := yamlField(yamlField(root, "layers"), "observed_risk").Decode(&observedFormula); err != nil || observedFormula != "S=floor(100*R+0.5) if R>0 else null" {
+	if err := yamlField(yamlField(root, "layers"), "observed_risk").Decode(&observedFormula); err != nil || observedFormula != "S=floor(100*R+0.5)" {
 		return Policy{}, errors.New("unsupported observed-risk formula")
 	}
 	p := Policy{Signals: make(map[Signal]SignalPolicy), MaxAge: 720 * time.Hour, SubscriptionAge: 168 * time.Hour}

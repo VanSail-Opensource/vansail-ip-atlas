@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"vansail-ip-atlas/internal/intelligence"
+	"vansail-ip-atlas/internal/subscription"
 )
 
 // sourceRecordScan validates all source-specific predicates against the actual
@@ -20,6 +21,7 @@ type sourceRecordScan struct {
 	nroDigest      *intelligence.NRORegistrationDigest
 	rootAddresses  rootAddressSet
 	azureHosts     map[netip.Addr]bool
+	jacobrakaiIPs  map[netip.Addr]bool
 	source         Source
 	clocks         intelligence.SourceRecordClocks
 	now            time.Time
@@ -48,6 +50,9 @@ func newSourceRecordScan(s Source, clocks intelligence.SourceRecordClocks, now t
 	}
 	if azureServiceSource(s) {
 		scan.azureHosts = map[netip.Addr]bool{}
+	}
+	if jacobrakaiSource(s) {
+		scan.jacobrakaiIPs = make(map[netip.Addr]bool)
 	}
 	if rootZoneSource(s) {
 		scan.rootAddresses = make(rootAddressSet, 2*rootServerCount)
@@ -96,6 +101,16 @@ func (scan *sourceRecordScan) accept(record intelligence.NormalizedRecord) error
 			return errors.New("unqualified Azure hosting observation")
 		}
 		scan.azureHosts[record.Evidence.Address] = true
+	}
+
+	if scan.jacobrakaiIPs != nil {
+		x := record.Evidence
+		if record.Kind != intelligence.RecordEvidence || x.Scope != intelligence.Exact || !x.Address.Is4() || !subscription.Public(x.Address) ||
+			x.SubscriptionLiteral || x.Weight != s.Weight || x.ItemPublishedAt.IsZero() || x.ItemPublishedAt.After(v.PublishedAt) ||
+			x.ItemPublishedAt.Before(v.PublishedAt.Add(-jacobrakaiWindow)) || scan.jacobrakaiIPs[x.Address] || len(scan.jacobrakaiIPs) >= jacobrakaiRowLimit {
+			return errJacobrakai
+		}
+		scan.jacobrakaiIPs[x.Address] = true
 	}
 
 	stat.Records++

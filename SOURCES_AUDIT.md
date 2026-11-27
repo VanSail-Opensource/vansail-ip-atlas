@@ -421,3 +421,30 @@ most-specific observed origins, direct IP/prefix priority and MOAS unknowns.
 P0 contract revision 1 normalizes source scopes and field aliases, separates raw fields from public allowlists, removes the dated CAIDA asset and defines two-family sequential MRT acquisition without enabling MRT. Parser IDs, schemas and public field mappings remain explicitly unresolved rather than guessed from these descriptions. No license was newly approved and no source was activated. The derived private capability report, not this audit narrative, determines the current blockers.
 
 No repository description is proof of fresh source data, a working URI, valid credentials or commercial IP classification. All public quality claims must be inferred from the validated downloaded records and bounded rules.
+
+## Original single-vantage honeypot observations — November 27, 2026
+
+The complete canonical Jacob Rakai export contained 414 distinct public IPv4
+addresses: 277 credential, 109 scanner and 28 loader tier records. The body
+SHA-256 was `7cfc302f8a3a54de85a5da685a22514a7614bd19ae028e16d8f3dd4077f2fa3b`.
+Its original generation clock is `2026-11-22T03:00:02Z` even though it was
+retrieved November 27. The actual export metadata and first-party publisher
+license both attest CC0 1.0 without mandatory attribution. The publisher reports
+that peer feeds inform overlap measurements only and are not incorporated in
+this original single-sensor dataset.
+
+At 10:39 UTC on November 27, 188 credential and 88 scanner observations retained
+more than 48 hours before their original 30-day item expiry. The earliest of
+those expiries was `2026-11-29T10:47:49Z`. Credential observations supply abuse;
+qualified scanner observations supply scanning only. Each address contributes at
+most one signal with a modest source weight. A complete exact-address join
+against the 1,651,503-row FFraud export found 226 overlaps and 50 additional
+addresses (11 credential and 39 scanner). FFraud does not disclose community
+origins, so this source retains its own withdrawable identity but deliberately
+shares FFraud's evidence family. Loader records are checked for completeness
+but supply no finding. This is not negative assessment coverage,
+IPv6 evidence, or proof of malicious software, endpoint ownership or suitability.
+It does not change existing scoring coefficients. No endpoint was contacted.
+The reviewed local bytes do not substitute for independent protected intake.
+[Original export](https://jacobrakai.org/feed/blocklist.json) ·
+[Publisher method and license](https://github.com/jacobyoby/honeypot-blocklist)

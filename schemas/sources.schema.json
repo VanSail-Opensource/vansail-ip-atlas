@@ -298,7 +298,7 @@
             },
             "schema_version": {
               "type": "integer",
-              "const": 5
+              "const": 6
             },
             "checksum": {
               "type": "string",
@@ -1475,6 +1475,16 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {"properties": {"id": {"const": "ffraud-ip"}}},
+            "then": {"properties": {"fields": {"const": ["ip", "ffraud_score", "confirmations", "category", "type"]}}}
+          },
+          {
+            "if": {"properties": {"id": {"const": "jacobrakai-honeypot"}}},
+            "then": {"properties": {"fields": {"const": ["meta.updated", "ip", "tier", "attempts", "bans", "first_seen", "last_seen", "first_banned", "asn"]}}}
+          }
+        ],
         "if": {"properties": {"id": {"const": "apple-private-relay"}}},
         "then": {
           "properties": {
@@ -1783,7 +1793,14 @@
                 "active",
                 "include_in_country",
                 "ipv4_addr_in",
-                "ipv6_addr_in"
+                "ipv6_addr_in",
+                "meta.updated",
+                "tier",
+                "attempts",
+                "bans",
+                "first_seen",
+                "last_seen",
+                "first_banned"
               ]
             },
             "uniqueItems": true,
@@ -7223,6 +7240,13 @@
               "include_in_country": {"type": "null"},
               "ipv4_addr_in": {"type": "null"},
               "ipv6_addr_in": {"type": "null"},
+              "meta.updated": {"type": "null"},
+              "tier": {"enum": [null, "reason_flags"]},
+              "attempts": {"type": "null"},
+              "bans": {"type": "null"},
+              "first_seen": {"type": "null"},
+              "last_seen": {"type": "null"},
+              "first_banned": {"type": "null"},
               "source": {"type": "null"},
               "last-modified": {"type": "null"},
               "start": {"type": "null"},
@@ -7603,7 +7627,8 @@
                   "rpki-client-excerpt",
                   "nro-delegated-excerpt",
                   "ripe-inet6num-excerpt",
-                  "mullvad-relay-excerpt"
+                  "mullvad-relay-excerpt",
+                  "jacobrakai-honeypot-excerpt"
                 ]
               }
             },

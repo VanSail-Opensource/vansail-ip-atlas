@@ -61,3 +61,15 @@ test('the loading wait also completes when no live status is rendered',{timeout:
   try {await page.setContent('<section class="view-page"><h1>Overview</h1></section>');await waitForAtlasView(page)}
   finally {await page.close()}
 })
+
+test('IPv6 subnet navigation admits its distinct title but rejects a duplicated summary',{timeout:10000},async()=>{
+  const page=await browser.newPage()
+  try {
+    await page.setContent(`<nav aria-label="Atlas views">
+      <a href="#subnet" onclick="document.querySelector('h1').textContent='IPv6 subnet risk'">Class C</a>
+      <a href="#overview" onclick="document.querySelector('h1').textContent='Overview';document.querySelector('.view-page').append(Object.assign(document.createElement('dl'),{className:'fact-list',textContent:'Overview fact'}))">Overview</a>
+    </nav><section class="view-page"><h1>Overview</h1><section class="subnet-summary">Subnet summary</section></section>`)
+    await visitOwner(page,'Class C','.subnet-summary',{heading:'IPv6 subnet risk'})
+    await assert.rejects(visitOwner(page,'Overview','.fact-list'),/duplicated another canonical fact owner/)
+  } finally {await page.close()}
+})

@@ -119,12 +119,28 @@ func TestCompileStateCommandRoundTripAndWithdrawal(t *testing.T) {
 		t.Fatal(err)
 	}
 	answer, err = reader.Lookup(context.Background(), "203.0.113.0")
-	if err != nil || answer.Quality == nil || len(answer.Quality.Reasons) != 0 {
+	if err != nil || answer.Quality == nil || answer.Quality.Score == nil || *answer.Quality.Score != 0 ||
+		answer.Quality.Confidence != "unrated" || answer.Quality.Coverage.Layers.Exact != "unassessed" || len(answer.Quality.Reasons) != 0 {
 		t.Fatal("withdrawn evidence survived recompilation", answer.Quality, err)
 	}
 	profile, err := reader.ClassC(context.Background(), "203.0.113.0")
-	if err != nil || profile != nil {
-		t.Fatal("withdrawn exact cell survived", profile, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireUnobservedIPv4Profile(t, profile, "203.0.113.0/24")
+}
+
+func requireUnobservedIPv4Profile(t *testing.T, profile *via3.ClassCAnswer, prefix string) {
+	t.Helper()
+	if profile == nil || profile.Prefix != prefix || profile.Unit != "ipv4-address" || profile.TotalUnits != 256 || len(profile.Cells) != 256 ||
+		profile.ObservedCount != 0 || profile.AssessedCount != 0 || profile.PositiveCount != 0 || profile.ScoredCount != 0 ||
+		profile.ScoreSum != 0 || profile.AggregateScore == nil || *profile.AggregateScore != 0 {
+		t.Fatal("incorrect unobserved IPv4 profile")
+	}
+	for _, cell := range profile.Cells {
+		if cell.Observed || cell.Score == nil || *cell.Score != 0 || cell.Confidence != "unrated" || cell.Coverage != "incomplete" || len(cell.Reasons) != 0 {
+			t.Fatal("an unobserved grid cell acquired evidence or assessment", cell)
+		}
 	}
 }
 

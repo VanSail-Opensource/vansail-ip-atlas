@@ -1,9 +1,11 @@
+import type { GraphNodeName } from './bgpGraphPresentation.ts'
+
 export type GeoAnswer = { country: string | null; registrationCountry: string | null; region: string | null; city: string | null; latitude: number | null; longitude: number | null; precision: string | null }
 export type NetworkAnswer = { prefix: string; name: string | null; organization: string | null; isp: string | null; origins: number[] }
 export type UsageAnswer = { type: string; assignment: string; anycast: boolean | null; directedBroadcast: boolean | null }
 export type LayerCoverage = 'assessed' | 'unassessed' | 'not_applicable'
 export type CoverageAnswer = { status: 'complete' | 'incomplete'; layers: { exact: LayerCoverage; prefix: LayerCoverage; asn: LayerCoverage; neighbors: LayerCoverage } }
-export type QualityAnswer = { coverage: CoverageAnswer; score: number | null; confidence: string; reasons: string[]; layers: { exact: number | null; prefix: number | null; asn: number | null; neighbors: number | null } }
+export type QualityAnswer = { coverage: CoverageAnswer; score: number; confidence: string; reasons: string[]; layers: { exact: number; prefix: number; asn: number; neighbors: number | null } }
 export type ASNAnswer = { asn: number; name: string | null; organization: string | null; country: string | null; risk: number | null; riskBand: string; confidence: string; prefixes: string[]; prefixCursor: number | null; customerCone: number | null; transitDegree: number | null; networkClass: string; stability: string }
 export type ASNPrefixPage = { asn: number; prefixes: string[]; nextCursor: number | null }
 export type RPKIAnswer = { origin: number; status: string; observedAt: number | null; validUntil: number | null }
@@ -13,8 +15,8 @@ export type AddressView = Pick<LookupAnswer, 'q' | 'releaseId' | 'synthetic' | '
 export type RiskView = AddressView & Pick<LookupAnswer, 'observedRisk'>
 export type ClassCView = AddressView & { profile: ClassCAnswer | null }
 export type OverviewAnswer = Pick<LookupAnswer, 'q' | 'releaseId' | 'synthetic' | 'validUntil' | 'geo' | 'network' | 'usage'> & { kind: 'ip' }
-export type CellAnswer = { ip: string; observed: boolean; coverage: 'complete' | 'incomplete'; observedRiskScore: number | null; confidence: string; reasons: string[]; usage: string; origins: number[] }
-export type ClassCAnswer = { prefix: string; cells: CellAnswer[]; observedCount: number; assessedCount: number; positiveCount: number; scoredCount: number; meanObservedRisk: number | null }
+export type CellAnswer = { ip: string; observed: boolean; coverage: 'complete' | 'incomplete'; observedRiskScore: number; confidence: string; reasons: string[]; usage: string; origins: number[] }
+export type ClassCAnswer = { prefix: string; cells: CellAnswer[]; observedCount: number; assessedCount: number; positiveCount: number; scoredCount: number; meanObservedRisk: number; unit: 'ipv4-address' | 'ipv6-/64'; totalUnits: number; scoreSum: number }
 
 /** Only an evidenced city or finer area can support the approximate map. */
 export function hasMapLocation(answer: Pick<LookupAnswer, 'geo' | 'usage'> | null | undefined): boolean {
@@ -48,7 +50,7 @@ export class AtlasClient extends EventTarget {
     }
   }
 
-  private request<T>(action: string, q: string, signal?: AbortSignal, cursor?: number): Promise<T> {
+  private request<T>(action: string, payload: { q: string; cursor?: number } | { asns: readonly number[]; releaseId: string }, signal?: AbortSignal): Promise<T> {
     if (signal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'))
     const id = ++this.sequence
     return new Promise((resolve, reject) => {
@@ -59,16 +61,17 @@ export class AtlasClient extends EventTarget {
       }
       signal?.addEventListener('abort', abort, { once: true })
       this.pending.set(id, { resolve: value => resolve(value as T), reject, dispose: () => signal?.removeEventListener('abort', abort) })
-      this.worker.postMessage({ action, id, q, cursor })
+      this.worker.postMessage({ action, id, ...payload })
     })
   }
 
-  lookup(q: string, signal?: AbortSignal): Promise<LookupAnswer> { return this.request('lookup', q, signal) }
-  overview(q: string, signal?: AbortSignal): Promise<OverviewAnswer> { return this.request('overview', q, signal) }
-  risk(q: string, signal?: AbortSignal): Promise<RiskView> { return this.request('risk', q, signal) }
-  classCView(q: string, signal?: AbortSignal): Promise<ClassCView> { return this.request('classCView', q, signal) }
-  classC(q: string, signal?: AbortSignal): Promise<ClassCAnswer | null> { return this.request('classC', q, signal) }
-  prefixes(asn: string, cursor = 0, signal?: AbortSignal): Promise<ASNPrefixPage> { return this.request('prefixes', asn, signal, cursor) }
+  lookup(q: string, signal?: AbortSignal): Promise<LookupAnswer> { return this.request('lookup', { q }, signal) }
+  overview(q: string, signal?: AbortSignal): Promise<OverviewAnswer> { return this.request('overview', { q }, signal) }
+  risk(q: string, signal?: AbortSignal): Promise<RiskView> { return this.request('risk', { q }, signal) }
+  classCView(q: string, signal?: AbortSignal): Promise<ClassCView> { return this.request('classCView', { q }, signal) }
+  classC(q: string, signal?: AbortSignal): Promise<ClassCAnswer | null> { return this.request('classC', { q }, signal) }
+  prefixes(asn: string, cursor = 0, signal?: AbortSignal): Promise<ASNPrefixPage> { return this.request('prefixes', { q: asn, cursor }, signal) }
+  graphNames(asns: readonly number[], releaseId: string, signal?: AbortSignal): Promise<GraphNodeName[]> { return this.request('graphNames', { asns, releaseId }, signal) }
   clear(): void {
     for (const [id, request] of this.pending) { this.worker.postMessage({ action: 'cancel', id }); request.dispose(); request.reject(new DOMException('Aborted', 'AbortError')) }
     this.pending.clear()

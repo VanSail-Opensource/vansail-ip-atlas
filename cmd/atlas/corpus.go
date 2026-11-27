@@ -408,11 +408,32 @@ func corpusPartitionPrefix(value string) (netip.Prefix, error) {
 }
 
 func corpusUnknown(answer via3.LookupAnswer) bool {
-	if answer.Geo != nil || answer.Network != nil || answer.Usage != nil || answer.Quality != nil || len(answer.ASNs) != 0 || len(answer.BGP.Paths) != 0 || len(answer.BGP.Relationships) != 0 || len(answer.BGP.Tier1) != 0 {
+	if answer.Geo != nil || answer.Network != nil || answer.Usage != nil || len(answer.ASNs) != 0 || len(answer.BGP.Paths) != 0 || len(answer.BGP.Relationships) != 0 || len(answer.BGP.Tier1) != 0 {
 		return false
 	}
-	if answer.Kind != "asn" && len(answer.BGP.Origins) != 0 {
-		return false
+	if answer.Kind == "asn" {
+		if answer.Quality != nil {
+			return false
+		}
+	} else {
+		if len(answer.BGP.Origins) != 0 {
+			return false
+		}
+		q := answer.Quality
+		zero := func(value *float64) bool { return value != nil && *value == 0 }
+		if q == nil || q.Score == nil || *q.Score != 0 || q.Confidence != "unrated" ||
+			len(q.Reasons) != 0 || q.Coverage.Status != "incomplete" ||
+			q.Coverage.Layers.Exact != "unassessed" || q.Coverage.Layers.Prefix != "unassessed" || q.Coverage.Layers.ASN != "unassessed" ||
+			!zero(q.Layers.Exact) || !zero(q.Layers.Prefix) || !zero(q.Layers.ASN) {
+			return false
+		}
+		if strings.Contains(answer.Q, ":") {
+			if q.Layers.Neighbors != nil || q.Coverage.Layers.Neighbors != "not_applicable" {
+				return false
+			}
+		} else if !zero(q.Layers.Neighbors) || q.Coverage.Layers.Neighbors != "unassessed" {
+			return false
+		}
 	}
 	for _, vrp := range answer.BGP.RPKI {
 		if vrp.Status != "unavailable" {

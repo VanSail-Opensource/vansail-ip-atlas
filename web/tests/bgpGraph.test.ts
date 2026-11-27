@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { readFileSync } from 'node:fs'
 import { projectGraph } from '../app/lib/bgpGraph.ts'
+import { fitGraphLabel, graphIdentityName, graphRelationshipLegend } from '../app/lib/bgpGraphPresentation.ts'
 import { AtlasReader } from '../app/workers/atlas.ts'
 
 const path = (asns: number[], graphEligible = true) => ({ origin: asns[0]!, asns, graphEligible, visibility: 'high' })
@@ -109,6 +110,28 @@ test('missing, reversed and conflicting relationship rows stay unknown, while su
   ])
 })
 
+test('the relationship legend describes all five projection classes in their exact meanings', () => {
+  const classes = ['transit_upstream', 'peer', 'customer', 'sibling', 'unknown']
+  const route = path([100, 101, 102, 103, 104, 105])
+  const graph = projectGraph([route], classes.slice(0, 4).map((value, index) => relation(100 + index, 101 + index, value)), 100)
+  assert.deepEqual(graphRelationshipLegend.map(row => row.key), classes)
+  assert.deepEqual(graph.edges.map(edge => edge.relation), classes)
+  assert(graph.edges.slice(0, 4).every(edge => edge.observed && edge.inferred))
+  assert.equal(graph.edges[4]!.inferred, false)
+  assert.deepEqual(graph.routes[0]!.original, route)
+})
+
+test('evidenced graph labels prefer ASN name then organization and exports clip whole characters', () => {
+  assert.equal(graphIdentityName({ asn: 100, name: '  Transit Name', organization: 'Holding Organization' }), 'Transit Name')
+  assert.equal(graphIdentityName({ asn: 100, name: ' ', organization: 'Holding Organization' }), 'Holding Organization')
+  assert.equal(graphIdentityName({ asn: 100, name: null, organization: ' ' }), undefined)
+  assert.equal(graphIdentityName(), undefined)
+  const measure = (label: string) => [...new Intl.Segmenter().segment(label)].length
+  assert.equal(fitGraphLabel('AS13335', 8, measure), 'AS13335')
+  assert.equal(fitGraphLabel('é🌐漢字', 3, measure), 'é🌐…')
+  assert.equal(fitGraphLabel('Transit Name', 0, measure), '')
+})
+
 test('shared trunks merge only identical actual endpoint positions, never different prepend gaps', () => {
   const graph = projectGraph([path([100, 200, 300]), path([100, 100, 200, 300]), path([100, 200, 300])], [], 100)
   const first = graph.edges.filter(edge => edge.from === 100 && edge.to === 200)
@@ -174,5 +197,37 @@ test('Go-produced synthetic graph24 release has twelve complete routes and exact
       assert.equal(edge.toOriginalPosition, edge.fromOriginalPosition + 1)
       assert.equal(edge.relation, 'unknown')
     }
+  } finally { reader.clear() }
+})
+
+test('visible intermediate names come only from bounded K8 identity reads from the lookup release', async () => {
+  const fixture = JSON.parse(readFileSync(new URL('../../fixtures/bin/synthetic-graph24-via3.json', import.meta.url), 'utf8'))
+  const stable = (value: any): string => value === null || typeof value !== 'object' ? JSON.stringify(value) : Array.isArray(value)
+    ? `[${value.map(stable).join(',')}]` : `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stable(value[key])}`).join(',')}}`
+  const files = new Map<string, { bytes: Uint8Array; kind: number }>(fixture.objects.map((object: any) =>
+    [`/_atlas/objects/${object.info.sha256}.via3`, { bytes: Buffer.from(object.base64, 'base64'), kind: object.info.kind }]))
+  files.set('/_atlas/current.json', { bytes: Buffer.from(stable(fixture.pointer)), kind: 0 })
+  files.set(fixture.pointer.manifest_path, { bytes: Buffer.from(stable(fixture.manifest)), kind: 0 })
+  const requests: number[] = []
+  const reader = new AtlasReader(async input => {
+    const object = files.get(input)
+    requests.push(object?.kind ?? -1)
+    return new Response(object?.bytes, { status: object ? 200 : 404, headers: { 'content-length': String(object?.bytes.length ?? 0) } })
+  }, () => fixture.clock)
+  try {
+    const lookup = await reader.lookup('AS13335')
+    assert.deepEqual(lookup.asns.map(row => row.asn), [13335])
+    assert.deepEqual(lookup.bgp.paths[0]!.asns, [13335, 15169, 3356])
+    requests.length = 0
+    await assert.rejects(reader.graphNames([15169], '0'.repeat(64)), /release_changed/)
+    await assert.rejects(reader.graphNames([15169, 15169], lookup.releaseId), /invalid_input/)
+    await assert.rejects(reader.graphNames(Array.from({ length: 24 }, (_, index) => 15169 + index), lookup.releaseId), /invalid_input/)
+    await assert.rejects(reader.graphNames(new Array<number>(1), lookup.releaseId), /invalid_input/)
+    await assert.rejects(reader.graphNames([64512], lookup.releaseId), /invalid_input/)
+    await assert.rejects(reader.graphNames([15169], lookup.releaseId, AbortSignal.abort()), /[Aa]bort/)
+    assert.deepEqual(requests, [])
+    assert.deepEqual(await reader.graphNames([15169, 3356], lookup.releaseId), [{ asn: 15169, label: 'Atlas Access' }])
+    assert(requests.every(kind => kind === 8 || kind === 14))
+    assert.deepEqual(lookup.asns.map(row => row.asn), [13335])
   } finally { reader.clear() }
 })

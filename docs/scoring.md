@@ -1,4 +1,4 @@
-# Scoring and fusion contract, revision 2 - observed risk
+# Scoring and fusion contract, revision 3 - observed risk
 
 `configs/scoring.yaml` is authoritative. This amendment changes numeric-score
 semantics and separates positive support from assessment coverage. It preserves
@@ -11,8 +11,8 @@ tools/contract_vectors -p "test_*.py"` checks the synthetic vectors.
 
 Model `via-observed-risk-v1` replaces higher-is-better quality with a 0-100
 **observed risk** index, where higher means more supported adverse evidence.
-VIA3 public schema 5 retains the observed-risk meaning introduced in schema 4; schema-3 readers and data
-cannot be mixed with it. This is not a probability, a safety rating or a claim
+VIA3 public schema 6 retains the observed-risk meaning introduced in schema 4.
+Older readers and data cannot be mixed with it. This is not a probability, a safety rating or a claim
 that absent evidence establishes safety. The historical scope amendments below
 record earlier decisions; this amendment supersedes their numeric-score rules.
 All signal coefficients, age decay, independence, scope specificity, layer weights
@@ -97,20 +97,36 @@ and their unrounded binary64 values:
 
 `Robs = clamp(sum of present contributions, 0, 1)`
 
-`S = floor(100*Robs + 0.5)` if the unrounded sum is positive, otherwise `null`.
+`S = floor(100*Robs + 0.5)`, including zero when observations are missing.
 
-Missing contributions are null, never authoritative zero. Summing supported
+Missing applicable contributions are returned as numeric zero without changing
+their unassessed status. The storage format keeps their presence mask. Summing supported
 contributions is a lower-information observed-evidence model, not an estimate
 of total real-world risk. Do not renormalize missing layers, invert the former
 integer quality, or compute the score from rounded serialized contributions.
 Authoritative complete negative observations may produce present zero layers,
-but no positive weighted contribution means no observed-risk number even when
-assessment coverage is complete. A tiny positive number may round to zero;
-the UI displays `<1 / 100` with its positive reasons, never "safe".
+but without a scored positive contribution the public number is zero and
+confidence is unrated. A tiny supported positive number may round to zero. The
+UI displays `<1 / 100` with its positive reasons, never "safe".
 
 IPv4 and IPv6 both support observed-risk numbers. IPv6 has no `/24` layer: its
 neighbor contribution remains null/not applicable and the remaining weights
-stay 0.55, 0.18 and 0.15. The absent 0.12 weight is not redistributed.
+stay 0.55, 0.18 and 0.15. The absent 0.12 weight is not redistributed. The IPv6
+`/48` summary is separate and does not change the address score.
+
+### Subnet summary denominators
+
+The IPv4 `/24` summary sums its published per-address scores and divides by 256.
+Unobserved addresses contribute zero to that mean, but are never assessment or
+observation counts. The grid still distinguishes observed from unobserved cells.
+
+The IPv6 `/48` summary groups current deduplicated exact host observations by
+their `/64` prefix. Each nonempty `/64` contributes the highest rounded weighted
+exact-IP risk contribution, at most 55 points. Missing `/64` blocks contribute
+zero. Sum all bucket contributions and divide by 65,536, with no expansion to
+individual addresses and no grid. Expose the score sum, denominator and counts of
+observed and positive `/64` blocks. Neither these counts nor a numeric zero assert
+complete assessment. Prefix and ASN signals are not multiplied across the blocks.
 
 Confidence describes independent positive support, separately from assessment
 coverage. For each strictly positive contributing layer, one or two current

@@ -10,7 +10,7 @@
     },
     "contract_revision": {
       "type": "integer",
-      "const": 2
+      "const": 3
     },
     "model_id": {
       "type": "string",
@@ -59,11 +59,11 @@
           "type": "boolean",
           "const": true
         },
-        "public_score_requires_positive_weighted_evidence": {
+        "public_score_zero_without_positive_weighted_evidence": {
           "type": "boolean",
           "const": true
         },
-        "explicit_authoritative_risk_reasons_survive_null_score": {
+        "explicit_authoritative_risk_reasons_survive_zero_score": {
           "type": "boolean",
           "const": true
         },
@@ -83,8 +83,8 @@
         "classification_is_not_abuse_proof",
         "uncalibrated_risk_is_not_probability",
         "public_reasons_without_source_metadata",
-        "public_score_requires_positive_weighted_evidence",
-        "explicit_authoritative_risk_reasons_survive_null_score",
+        "public_score_zero_without_positive_weighted_evidence",
+        "explicit_authoritative_risk_reasons_survive_zero_score",
         "assessment_coverage_independent_of_score",
         "family_key"
       ]
@@ -605,15 +605,15 @@
         },
         "observed_risk": {
           "type": "string",
-          "const": "S=floor(100*R+0.5) if R>0 else null"
+          "const": "S=floor(100*R+0.5)"
         },
         "normalization": {
           "type": "string",
-          "const": "do_not_renormalize_missing_layers_to_zero-risk"
+          "const": "missing_layers_contribute_zero_without_renormalization"
         },
         "unknown_layers": {
-          "type": "null",
-          "const": null
+          "type": "string",
+          "const": "zero_without_assessment"
         },
         "preserve_layer_presence_mask": {
           "type": "boolean",
@@ -822,7 +822,7 @@
         },
         "mean_observed_risk": {
           "type": "string",
-          "const": "null_unless_scored_observed_cells_then_half_up_mean"
+          "const": "half_up_mean_over_256_with_missing_scores_zero"
         },
         "classful_boundary_is_visual_label_only": {
           "type": "boolean",
@@ -880,7 +880,7 @@
           "type": "boolean",
           "const": true
         },
-        "authoritative_positive_emits_reasons_even_if_score_null": {
+        "authoritative_positive_emits_reasons_even_if_score_zero": {
           "type": "boolean",
           "const": true
         },
@@ -969,7 +969,7 @@
         "qualifying_families",
         "numeric_risk_address_family",
         "positive_only_absence_is_unknown",
-        "authoritative_positive_emits_reasons_even_if_score_null",
+        "authoritative_positive_emits_reasons_even_if_score_zero",
         "min_current_source_age_hours",
         "max_source_age_hours",
         "data_quality_flag",
@@ -1288,6 +1288,64 @@
         "deterministic_sorting_and_rounding",
         "property_based_tests"
       ]
+    },
+    "ipv6_48": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "const": true
+        },
+        "prefix_bits": {
+          "type": "integer",
+          "const": 48
+        },
+        "bucket_bits": {
+          "type": "integer",
+          "const": 64
+        },
+        "buckets_per_prefix": {
+          "type": "integer",
+          "const": 65536
+        },
+        "exact_observations_only": {
+          "type": "boolean",
+          "const": true
+        },
+        "per_bucket_score": {
+          "type": "string",
+          "const": "highest_rounded_weighted_exact_contribution"
+        },
+        "missing_bucket_score": {
+          "type": "integer",
+          "const": 0
+        },
+        "mean_observed_risk": {
+          "type": "string",
+          "const": "half_up_mean_over_65536_buckets"
+        },
+        "separate_from_address_score": {
+          "type": "boolean",
+          "const": true
+        },
+        "show_grid": {
+          "type": "boolean",
+          "const": false
+        }
+      },
+      "required": [
+        "enabled",
+        "prefix_bits",
+        "bucket_bits",
+        "buckets_per_prefix",
+        "exact_observations_only",
+        "per_bucket_score",
+        "missing_bucket_score",
+        "mean_observed_risk",
+        "separate_from_address_score",
+        "show_grid"
+      ]
     }
   },
   "required": [
@@ -1302,6 +1360,7 @@
     "layers",
     "asn_wide",
     "ipv4_24",
+    "ipv6_48",
     "coverage",
     "geo_fusion",
     "rounding",

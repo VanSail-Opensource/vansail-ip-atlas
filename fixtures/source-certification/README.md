@@ -183,3 +183,13 @@ proxy signal. The sample SHA-256 is
 The complete original and edition witnesses are recorded in the source audit.
 [Publisher CSV](https://mask-api.icloud.com/egress-ip-ranges.csv) ·
 [Source audit](../../SOURCES_AUDIT.md) · [Notice](notices/apple-private-relay.txt)
+
+`observed-jacobrakai-honeypot-excerpt.json` retains the latest complete
+published row of each tier and the unchanged publication, license, observation
+window and count fields from the November 22, 2026 canonical JSON. Whitespace
+is normalized and unrelated publisher metadata omitted. The original totals
+remain 414 observations. The fixture-only validation mode permits the excerpt
+and certifies the observed schema. Live verification requires all original rows
+matching the totals in the same SHA-256-bound JSON bytes. Both the original
+publisher documentation and the export dedicate that data to CC0 1.0.
+[Dataset and license](https://github.com/jacobyoby/honeypot-blocklist#license)

@@ -23,7 +23,9 @@ func TestCompileFactsCommandRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	answer, err := reader.Lookup(context.Background(), "203.0.113.42")
-	if err != nil || !answer.Synthetic || answer.Usage == nil || answer.Usage.Type != "residential" || answer.Quality != nil {
+	if err != nil || !answer.Synthetic || answer.Usage == nil || answer.Usage.Type != "residential" || answer.Quality == nil ||
+		answer.Quality.Score == nil || *answer.Quality.Score != 0 || answer.Quality.Confidence != "unrated" ||
+		answer.Quality.Coverage.Status != "incomplete" || answer.Quality.Coverage.Layers.Exact != "unassessed" || len(answer.Quality.Reasons) != 0 {
 		t.Fatalf("typed synthetic facts changed: %v %+v", err, answer)
 	}
 }

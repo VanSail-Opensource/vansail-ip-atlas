@@ -1,6 +1,6 @@
-# VanSail IP Atlas: evidence-based quality, ASN context and /24 context.
+# VanSail IP Atlas: observed risk, ASN context, IPv4 /24 and IPv6 /48.
 schema_version: 3
-contract_revision: 2
+contract_revision: 3
 model_id: via-observed-risk-v1
 contract: docs/scoring.md
 contract_vectors: fixtures/scoring/observed-risk-v1.json
@@ -12,8 +12,8 @@ semantics:
   classification_is_not_abuse_proof: true
   uncalibrated_risk_is_not_probability: true
   public_reasons_without_source_metadata: true
-  public_score_requires_positive_weighted_evidence: true
-  explicit_authoritative_risk_reasons_survive_null_score: true
+  public_score_zero_without_positive_weighted_evidence: true
+  explicit_authoritative_risk_reasons_survive_zero_score: true
   assessment_coverage_independent_of_score: true
   family_key: evidence_family
 category_evidence:
@@ -49,9 +49,9 @@ category_evidence:
 layers:
   weights: { exact: 0.55, explicit_prefix: 0.18, asn: 0.15, neighbors24: 0.12 }
   formula: "R=clamp(0,1,0.55*R_exact+0.18*R_prefix+0.15*C_asn*R_asn+0.12*C24*R24)"
-  observed_risk: "S=floor(100*R+0.5) if R>0 else null"
-  normalization: do_not_renormalize_missing_layers_to_zero-risk
-  unknown_layers: null
+  observed_risk: "S=floor(100*R+0.5)"
+  normalization: missing_layers_contribute_zero_without_renormalization
+  unknown_layers: zero_without_assessment
   preserve_layer_presence_mask: true
   max_asn_contribution_to_total_risk: 0.15
   max_neighbor24_contribution_to_total_risk: 0.12
@@ -97,9 +97,20 @@ ipv4_24:
     - ip_cell_reason_flags
     - mean_observed_risk
   no_unobserved_host_imputation: true
-  mean_observed_risk: null_unless_scored_observed_cells_then_half_up_mean
+  mean_observed_risk: half_up_mean_over_256_with_missing_scores_zero
   classful_boundary_is_visual_label_only: true
   ipv6_equivalent: separate_ipv6_prefix_profile_not_class_c
+ipv6_48:
+  enabled: true
+  prefix_bits: 48
+  bucket_bits: 64
+  buckets_per_prefix: 65536
+  exact_observations_only: true
+  per_bucket_score: highest_rounded_weighted_exact_contribution
+  missing_bucket_score: 0
+  mean_observed_risk: half_up_mean_over_65536_buckets
+  separate_from_address_score: true
+  show_grid: false
 coverage:
   family_key: evidence_family
   min_independent_assessment_families: 2
@@ -107,7 +118,7 @@ coverage:
   qualifying_families: intersection_of_complete_families_across_all_required_scopes
   numeric_risk_address_family: ipv4_and_ipv6_no_neighbor_renormalization
   positive_only_absence_is_unknown: true
-  authoritative_positive_emits_reasons_even_if_score_null: true
+  authoritative_positive_emits_reasons_even_if_score_zero: true
   min_current_source_age_hours: 0
   max_source_age_hours: 720
   data_quality_flag: incomplete_coverage_is_explicit

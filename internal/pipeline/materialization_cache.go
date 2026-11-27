@@ -125,12 +125,12 @@ func openMaterializationCache(ctx context.Context, options Options, state intell
 		return nil, errMaterializationCache
 	}
 	expected := cacheMAC(c.key, index)
-	// A known schema4 generation may be removed after the same authenticated,
-	// bounded closed-inventory checks. It can never be a schema5 cache hit.
-	legacySchema := index.Descriptor.SchemaVersion == 4
+	// A known older generation may be removed after the same authenticated,
+	// bounded closed-inventory checks. It can never be a current cache hit.
+	legacySchema := index.Descriptor.SchemaVersion == 4 || index.Descriptor.SchemaVersion == 5
 	descriptor := index.Descriptor
 	if legacySchema {
-		descriptor.SchemaVersion = 5
+		descriptor.SchemaVersion = via3.PublicSchemaVersion
 	}
 	if !hmac.Equal(expected[:], index.MAC[:]) || !validCacheDescriptor(descriptor, DefaultLimits()) {
 		return nil, errMaterializationCache
@@ -181,7 +181,7 @@ func openMaterializationCache(ctx context.Context, options Options, state intell
 }
 
 func validCacheDescriptor(d via3.Descriptor, limits Limits) bool {
-	if d.Codec != "zstd-1" || d.FormatVersion != 3 || d.SchemaVersion != 5 || (d.Mode != "synthetic" && d.Mode != "engineering" && d.Mode != "production") || d.ValidFrom < 0 || d.ValidUntil <= d.ValidFrom || d.ValidUntil-d.ValidFrom > 720*3600 || len(d.Objects) == 0 || len(d.Objects) > limits.MaxObjects {
+	if d.Codec != "zstd-1" || d.FormatVersion != 3 || d.SchemaVersion != via3.PublicSchemaVersion || (d.Mode != "synthetic" && d.Mode != "engineering" && d.Mode != "production") || d.ValidFrom < 0 || d.ValidUntil <= d.ValidFrom || d.ValidUntil-d.ValidFrom > 720*3600 || len(d.Objects) == 0 || len(d.Objects) > limits.MaxObjects {
 		return false
 	}
 	last := ""

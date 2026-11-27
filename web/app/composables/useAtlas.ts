@@ -90,12 +90,7 @@ export function useAtlas() {
         validateOrigin(origin.value, answer.bgp.origins)
       }
       if ('profile' in answer) {
-        const cells = answer.profile
-        if (!cells && state.kind === 'ip' && !state.q.includes(':')) {
-          const base = state.q.split('.').slice(0, 3).join('.')
-          pendingClassC = { prefix: `${base}.0/24`, observedCount: 0, assessedCount: 0, scoredCount: 0, positiveCount: 0, meanObservedRisk: null,
-            cells: Array.from({ length: 256 }, (_, suffix) => ({ ip: `${base}.${suffix}`, observed: false, observedRiskScore: null, confidence: 'unrated', coverage: 'incomplete', reasons: [], usage: 'unknown', origins: [] })) }
-        } else pendingClassC = cells
+        pendingClassC = answer.profile
       }
       // Reviewed credits are part of a production release. Verify their exact
       // release document before showing facts that depend on those datasets.
@@ -128,6 +123,13 @@ export function useAtlas() {
     }
   }
   function resume() { if (document.visibilityState === 'visible') { atlas?.clear(); void load(true) } }
+  async function loadGraphNames(asns: readonly number[], signal: AbortSignal) {
+    const answer = data.value
+    if (!atlas || !active || !answer) return []
+    const run = serial
+    const names = await atlas.graphNames(asns, answer.releaseId, AbortSignal.any([active.signal, signal, AbortSignal.timeout(5000)]))
+    return run === serial && data.value?.releaseId === answer.releaseId ? names : []
+  }
   async function loadPrefixes(asn: number, cursor: number) {
     if (!atlas || !active || prefixBusy.value) return false
     const run = serial
@@ -164,5 +166,5 @@ export function useAtlas() {
     document.removeEventListener('visibilitychange', resume)
     atlas?.removeEventListener('invalidate', invalidate)
   })
-  return { data, overview, quality, grid, classC, error, loading, current, origin, prefixBusy, now, loadPrefixes, reload: () => load() }
+  return { data, overview, quality, grid, classC, error, loading, current, origin, prefixBusy, now, loadPrefixes, loadGraphNames, reload: () => load() }
 }

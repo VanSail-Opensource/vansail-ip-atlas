@@ -91,9 +91,9 @@ type scatterPrefixes struct {
 // run-proof memory ceiling. The plan does not retain any frame or fact body.
 const ownedScatterPlanCost = 8192
 
-// At most 511 nodes and 256 bounded bins, with no additional record buffers.
-const ownedQualityScatterPlanCost = 96 << 10
-const qualityScatterDepth = 8
+// At most 2047 nodes and 1024 bounded bins, with no additional record buffers.
+const ownedQualityScatterPlanCost = 384 << 10
+const qualityScatterDepth = 10
 
 type ownedScatterPlan struct {
 	tree *scatterNode
@@ -316,7 +316,7 @@ func (c *compiler) scatterPartition(path string, s scope) (runs []scatteredRun, 
 		plan, proof.scatter = proof.scatter, nil
 		if deep := plan.deep; deep != nil {
 			deep.bins.addTotals()
-			// The depth-eight path keeps one writer alive. It is safe only
+			// The deeper path keeps one writer alive. It is safe only
 			// for one ordered fact kind with no inherited target rows.
 			if selected := c.deepQualityTargets(deep.tree, total); len(selected) > 0 && c.fitsScatterScratch(selected) {
 				if err := r.file.Close(); err != nil {

@@ -593,7 +593,7 @@ func TestDeepQualityScatterLeavesSchema6IPv6ProfilesIndivisible(t *testing.T) {
 			}
 			runs, applied, err := c.scatterPartition(group.path, group.scope)
 			if err != nil || !applied || len(runs) <= 16 {
-				t.Fatalf("did not exercise depth-eight IPv4 path: %d, %v, %v", len(runs), applied, err)
+				t.Fatalf("did not exercise deep IPv4 path: %d, %v, %v", len(runs), applied, err)
 			}
 		case group.group == qualityFacts && group.prefix.Addr().Is6():
 			ipv6 = true

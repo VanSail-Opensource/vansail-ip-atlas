@@ -191,8 +191,8 @@ def browser_gates(report: dict) -> dict[str, str]:
         unknowns = ipv4 = len(rows) >= 30
         for row in rows:
             mapping, graph = row.get("map", {}), row.get("graph", {})
-            actual_states &= (type(mapping) is dict and mapping.get("state") == ("observed" if features["map"] else "unavailable")
-                and (features["map"] or mapping.get("unknown_state_verified") is True)
+            actual_states &= (type(mapping) is dict and set(mapping) == {"state", "hidden_verified"}
+                and mapping.get("state") == "not_displayed" and mapping.get("hidden_verified") is True
                 and type(graph) is dict and graph.get("state") == ("observed" if features["graph"] else "unavailable")
                 and type(graph.get("visible_nodes")) is int and 0 <= graph["visible_nodes"] <= 24
                 and type(graph.get("observed_routes")) is int and graph["observed_routes"] >= 0

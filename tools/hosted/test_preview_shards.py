@@ -59,7 +59,7 @@ def part(expected, shard):
             report["populations"].append({**identity, "complete_interaction_script": True, "event_timing_supported": True,
                 "completed_routes": ["overview", "quality", "class-c", "asn", "bgp"], "interaction_durations_ms": [16],
                 "lcp_ms": 999, "initial_js_gzip_bytes": 1024, "interaction_cls": 0, "accessibility": axe,
-                "map": {"state": "unavailable", "unknown_state_verified": True}, "graph": {"state": "unavailable",
+                "map": {"state": "not_displayed", "hidden_verified": True}, "graph": {"state": "unavailable",
                 "visible_nodes": 0, "observed_routes": 0, "empty_state_verified": True},
                 "unknown_states": {"ipv4": True, "ipv6": True, "asn": True}, "ipv4_network_coverage_verified": None})
             report["component_populations"].append({**identity, "worker_sha256": report["worst_case_worker_memory"]["worker_sha256"],

@@ -129,7 +129,7 @@ class AcceptanceTests(unittest.TestCase):
                         "interaction_cls": 0, "interaction_durations_ms": [16], "complete_interaction_script": True,
                         "completed_routes": ["overview", "quality", "class-c", "asn", "bgp"], "event_timing_supported": True,
                         "accessibility": {"engine": "axe-core", "violations": [], "incomplete": []},
-                        "map": {"state": "unavailable", "unknown_state_verified": True},
+                        "map": {"state": "not_displayed", "hidden_verified": True},
                         "graph": {"state": "unavailable", "visible_nodes": 0, "observed_routes": 0, "empty_state_verified": True},
                         "ipv4_network_coverage_verified": None, "unknown_states": {"ipv4": True, "ipv6": True, "asn": True}})
                     report["component_populations"].append({**identity, "ipv4_unknown_state_verified": True, "worker_sha256": "d" * 64, "graph": graph(),
@@ -138,15 +138,22 @@ class AcceptanceTests(unittest.TestCase):
         self.assertTrue(all(value == "passed" for key, value in gates.items() if key.startswith("browser_320_light_")))
         report["corpus_features"] = {"map": True, "graph": True}
         for row in report["populations"]:
-            row["map"] = {"state": "observed", "unknown_state_verified": False}
             # Nonlinear observed paths can be retained while projecting no SVG nodes.
             row["graph"] = {"state": "observed", "visible_nodes": 0, "observed_routes": 2, "empty_state_verified": False}
         self.assertEqual(browser_gates(report)["browser_320_light_candidate_states"], "passed")
+        for invalid in (
+            {},
+            {"state": "observed", "unknown_state_verified": False},
+            {"state": "not_displayed", "hidden_verified": 1},
+        ):
+            with self.subTest(map_evidence=invalid):
+                report["populations"][0]["map"] = invalid
+                self.assertEqual(browser_gates(report)["browser_320_light_candidate_states"], "unmeasured")
+        report["populations"][0]["map"] = {"state": "not_displayed", "hidden_verified": True}
         report["populations"][0]["graph"]["observed_routes"] = 0
         self.assertEqual(browser_gates(report)["browser_320_light_candidate_states"], "unmeasured")
         report["corpus_features"] = {"map": False, "graph": False}
         for row in report["populations"]:
-            row["map"] = {"state": "unavailable", "unknown_state_verified": True}
             row["graph"] = {"state": "unavailable", "visible_nodes": 0, "observed_routes": 0, "empty_state_verified": True}
         report["component_populations"][0]["graph"] = {"visible_nodes": 0, "active_frames": []}
         self.assertEqual(browser_gates(report)["browser_320_light_graph"], "unmeasured")

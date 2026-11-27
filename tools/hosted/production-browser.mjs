@@ -13,7 +13,6 @@ import { auditAccessibility } from './browser-accessibility.mjs'
 import { BrowserContractFailure, browserDiagnostics } from './browser-failures.mjs'
 import { previewBrowserPlan } from './preview-browser-plan.mjs'
 import { visitOwner as owner, submitLookup, waitForAtlasView } from './production-interactions.mjs'
-import { hasMapLocation } from '../../web/app/lib/via3.ts'
 import { parseInput } from '../../web/app/lib/query.ts'
 
 const diagnostics=browserDiagnostics(playwrightErrors.TimeoutError)
@@ -87,7 +86,6 @@ fixtureFiles.set(fixtureCreditsPath,fixtureCredits)
 fixtureFiles.set('/dataset-credits.json',Buffer.from(canonical({format_version:1,current_release_id:fixtureRelease,releases:[{release_id:fixtureRelease,credits_path:fixtureCreditsPath,credits_sha256:fixtureCreditsHash}]})))
 diagnostics.mark('accessibility-setup')
 const axeSource = await readFile(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8')
-const tile = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j9zEAAAAASUVORK5CYII=', 'base64')
 diagnostics.mark('worker-memory-report')
 const report = { scope:'hosted-production-browser-v3',release_scope:'release-scope-v6',mode:'production',url:base.origin,
   release_id:candidate.release_id,candidate_bundle_sha256:candidate.candidate_bundle_sha256,
@@ -107,7 +105,7 @@ const report = { scope:'hosted-production-browser-v3',release_scope:'release-sco
     CLS:'maximum-layout-shift-session-window-through-complete-trusted-interaction-script',
     memory:'100ms-browser-process-tree-RSS-diagnostic-only; between-poll peaks and separate worst-case worker proof remain unmeasured',
     accessibility:'axe-core4.14.0 WCAG2A/AA+2.1AA on every owner route; incomplete rules require review and cannot pass',
-    map_tiles:'same-origin-atlas-real-HTTP;external-OSM-tiles-mocked-and-excluded-from-atlas-payload'}}
+    external_network:'same-origin-atlas-real-HTTP;third-party-requests-fail'}}
 report.graph_component_fixture={scope:'isolated-synthetic-capacity',fixture_sha256:sha256(fixtureBytes),worker_sha256:report.worst_case_worker_memory.worker_sha256,candidate_bundle_sha256:report.candidate_bundle_sha256}
 if (!/^[a-f0-9]{64}$/.test(report.graph_component_fixture.worker_sha256 ?? '')) throw new BrowserContractFailure('Component capacity must bind the exact measured emitted worker')
 
@@ -142,7 +140,6 @@ async function newSample(width,theme,{componentFixture=false,measureColdPayload=
   await context.route('**/*',route=>{
     const url=new URL(route.request().url())
     if(url.origin===base.origin)return route.continue()
-    if(url.origin==='https://tile.openstreetmap.org')return route.fulfill({status:200,contentType:'image/png',body:tile})
     recordError('Unexpected external request origin','unexpected-request');return route.abort('blockedbyclient')
   })
   await context.addInitScript(({theme})=>{
@@ -267,10 +264,21 @@ async function noFacts(page,q,synthetic=false) {
   const origins=isIP(q)?[]:[Number(q.slice(2))]
   if(answer.releaseId!==(synthetic?fixtureRelease:candidate.release_id)||answer.synthetic!==synthetic||answer.geo!==null||answer.network!==null||answer.usage!==null||answer.observedRisk!==null||answer.asns.length||['paths','relationships','tier1'].some(key=>answer.bgp[key].length)||answer.bgp.rpki.some(row=>row.status!=='unavailable')||JSON.stringify(answer.bgp.origins)!==JSON.stringify(origins))throw new BrowserContractFailure('Unknown corpus query manufactured facts')
 }
+const overviewLabels = ['Country', 'Registration country', 'Matched prefix', 'Usage']
+async function overviewFacts(page) {
+  await page.locator('.fact-list').waitFor()
+  const rows = await page.locator('.fact-list > div').evaluateAll(nodes =>
+    nodes.map(node => [node.querySelector('dt').textContent.trim(), node.querySelector('dd').textContent.trim()]))
+  if (rows.length !== overviewLabels.length || rows.some(([label], index) => label !== overviewLabels[index]))
+    throw new BrowserContractFailure('Overview displayed unexpected fact labels')
+  if (await page.locator('.map-panel,.map-empty,.geo-map,.leaflet-container').count())
+    throw new BrowserContractFailure('Overview displayed a retired map')
+  return Object.fromEntries(rows)
+}
 async function unknownIPv4(page,q,synthetic=false) {
-  await submit(page,q,{synthetic});await page.locator('.fact-list').waitFor();await noFacts(page,q,synthetic)
-  if(!await page.locator('.fact-list dd').evaluateAll(nodes=>nodes.length>0&&nodes.every(node=>node.textContent.trim()==='Unknown'))||await page.locator('.leaflet-container').count())throw new BrowserContractFailure('Unknown IPv4 displayed identity or coordinates')
-  await page.getByText('No evidenced city location.',{exact:true}).waitFor()
+  await submit(page,q,{synthetic});await noFacts(page,q,synthetic)
+  if (Object.values(await overviewFacts(page)).some(value => value !== 'Unknown'))
+    throw new BrowserContractFailure('Unknown IPv4 displayed identity')
   await owner(page,'Observed risk','.quality-layout',{synthetic});await page.getByRole('heading',{name:'Unrated',exact:true}).waitFor()
   if(await page.locator('.reason-chip').count()||(await page.locator('.score-value').innerText()).trim()!=='—')throw new BrowserContractFailure('Unknown IPv4 displayed scored evidence')
   await owner(page,'Class C','.ip-grid',{synthetic})
@@ -284,16 +292,11 @@ async function unknownIPv4(page,q,synthetic=false) {
 async function coveredIPv4(page,proof) {
   const expected=proof.lookup, q=expected.q
   await submit(page,q)
-  await page.locator('.fact-list').waitFor()
   if(canonical(await workerAnswer(page,'lookup',q))!==canonical(expected))throw new BrowserContractFailure('IPv4 coverage witness differs between the native and browser readers')
-  const boolLabel=value=>value==null?null:value?'Yes':'No'
-  const facts={'Country':expected.geo?.country,'Region':expected.geo?.region,'City':expected.usage?.anycast?null:expected.geo?.city,
-    'Registration country':expected.geo?.registrationCountry,'Matched prefix':expected.network?.prefix,'Network name':expected.network?.name,
-    'Network organization':expected.network?.organization,'ISP':expected.network?.isp,'Usage':expected.usage?.type,'Assignment':expected.usage?.assignment,
-    'Anycast':boolLabel(expected.usage?.anycast),'Directed broadcast':boolLabel(expected.usage?.directedBroadcast)}
-  const visible=await page.locator('.fact-list > div').evaluateAll(rows=>Object.fromEntries(rows.map(row=>[row.querySelector('dt').textContent.trim(),row.querySelector('dd').textContent.trim()])))
+  const facts={'Country':expected.geo?.country,'Registration country':expected.geo?.registrationCountry,
+    'Matched prefix':expected.network?.prefix,'Usage':expected.usage?.type}
+  const visible=await overviewFacts(page)
   if(canonical(visible)!==canonical(Object.fromEntries(Object.entries(facts).map(([k,v])=>[k,v??'Unknown']))))throw new BrowserContractFailure('IPv4 coverage witness overview differs from its native facts')
-  await page.locator(hasMapLocation(expected)?'.leaflet-container':'.map-empty').waitFor()
   await owner(page,'Observed risk','.quality-layout')
   if(expected.observedRisk?.score==null){await page.getByRole('heading',{name:'Unrated',exact:true}).waitFor();if((await page.locator('.score-value').innerText()).trim()!=='—')throw new BrowserContractFailure('IPv4 witness acquired an unknown score')}
   await owner(page,'Class C','.ip-grid')
@@ -316,7 +319,7 @@ async function coveredIPv4(page,proof) {
 async function unknownStates(page) {
   if(corpus.unknown_queries.ipv4!==null)await unknownIPv4(page,corpus.unknown_queries.ipv4)
   else await coveredIPv4(page,corpus.ipv4_network_coverage)
-  await submit(page,corpus.unknown_queries.ipv6);await page.locator('.fact-list').waitFor();await noFacts(page,corpus.unknown_queries.ipv6)
+  await submit(page,corpus.unknown_queries.ipv6);await overviewFacts(page);await noFacts(page,corpus.unknown_queries.ipv6)
   await owner(page,'Class C','.status-panel:not([role])');await page.getByRole('heading',{name:'IPv4 only',exact:true}).waitFor()
   if(await page.getByRole('gridcell').count())throw new BrowserContractFailure('Unknown IPv6 acquired a /24')
   await submit(page,corpus.unknown_queries.asn);await noFacts(page,corpus.unknown_queries.asn);await page.getByText('No origin is evidenced for this query.',{exact:true}).waitFor()
@@ -387,13 +390,13 @@ async function measureQueries() {
   if(ipQueries.length<100)throw new BrowserContractFailure('Cold payload corpus needs at least100 real IP queries')
   for(let index=0;index<100;index++){
     const s=await newSample(390,'light',{measureColdPayload:true}),query=ipQueries[Math.floor(index*ipQueries.length/100)]
-    try{await s.page.goto(new URL(`/ip/overview/?q=${encodeURIComponent(query.q)}`,base).href,{waitUntil:'networkidle'});await s.page.getByRole('heading',{name:'Overview',exact:true}).waitFor();await waitForAtlasView(s.page);await s.page.locator('.fact-list').waitFor();if(await s.page.getByRole('alert').count())throw new BrowserContractFailure('Cold lookup failed');await s.settle();if(s.atlas.length<2)throw new BrowserContractFailure('Cold lookup did not fetch required controls');report.cold_queries.push({sample:index+1,stratum:query.stratum,atlas_body_bytes:s.atlas.reduce((sum,x)=>sum+x.body_bytes,0),responses:s.atlas})}finally{await s.context.close()}
+    try{await s.page.goto(new URL(`/ip/overview/?q=${encodeURIComponent(query.q)}`,base).href,{waitUntil:'networkidle'});await s.page.getByRole('heading',{name:'Overview',exact:true}).waitFor();await waitForAtlasView(s.page);await overviewFacts(s.page);if(await s.page.getByRole('alert').count())throw new BrowserContractFailure('Cold lookup failed');await s.settle();if(s.atlas.length<2)throw new BrowserContractFailure('Cold lookup did not fetch required controls');report.cold_queries.push({sample:index+1,stratum:query.stratum,atlas_body_bytes:s.atlas.reduce((sum,x)=>sum+x.body_bytes,0),responses:s.atlas})}finally{await s.context.close()}
   }
   diagnostics.mark('hot-queries')
   for(let index=1;index<=3;index++){
     const s=await newSample(1280,'light')
     try{
-      await s.page.goto(new URL(`/ip/overview/?q=${encodeURIComponent(corpus.interaction_query)}`,base).href,{waitUntil:'networkidle'});await s.page.locator('.fact-list').waitFor()
+      await s.page.goto(new URL(`/ip/overview/?q=${encodeURIComponent(corpus.interaction_query)}`,base).href,{waitUntil:'networkidle'});await overviewFacts(s.page)
       const result=await s.page.evaluate(async queries=>{const worker=window.__atlasWorkers[0];if(!worker)throw new Error('No actual atlas worker');let id=-1;const lookup=q=>new Promise((resolve,reject)=>{const current=id--;const timeout=setTimeout(()=>{worker.removeEventListener('message',receive);reject(new Error('Worker timing timeout'))},30000);const receive=e=>{if(e.data.id!==current)return;clearTimeout(timeout);worker.removeEventListener('message',receive);if(e.data.error)reject(new Error('Worker lookup failed'));else resolve(e.data.answer)};worker.addEventListener('message',receive);worker.postMessage({action:'lookup',id:current,q})});for(const query of queries)await lookup(query);const samples=[];for(const query of queries){const start=performance.now();await lookup(query);samples.push(performance.now()-start)}return {samples_ms:samples,warmups:queries.length}},corpus.queries.slice(0,1000).map(q=>q.q))
       report.hot_queries.push({context:index,timing:'actual-worker-indexed-lookups',...result})
     }finally{await s.context.close()}
@@ -424,9 +427,9 @@ try {
       diagnostics.mark('dataset-credits',index)
       row.dataset_credits=await credits(s)
       diagnostics.mark('overview',index)
-      await submit(s.page,corpus.interaction_query);await s.page.locator('.fact-list').waitFor()
-      if(corpus.map_query!==null){await s.page.locator('.leaflet-container').waitFor();await s.page.locator('.leaflet-control-attribution').waitFor();row.map={state:'observed',unknown_state_verified:false}}
-      else {await s.page.locator('.map-empty').waitFor();if(await s.page.locator('.leaflet-container').count())throw new BrowserContractFailure('Unavailable map corpus displayed a map');row.map={state:'unavailable',unknown_state_verified:true}}
+      await submit(s.page,corpus.interaction_query);await overviewFacts(s.page)
+      // Keep the qualified location population in the corpus independently of presentation.
+      row.map={state:'not_displayed',hidden_verified:true}
       checks.push(await accessible(s.page))
       diagnostics.mark('quality',index)
       await owner(s.page,'Observed risk','.quality-layout,.unrated-panel,.quality-panel');checks.push(await accessible(s.page))

@@ -437,8 +437,12 @@ At 10:39 UTC on November 27, 188 credential and 88 scanner observations retained
 more than 48 hours before their original 30-day item expiry. The earliest of
 those expiries was `2026-11-29T10:47:49Z`. Credential observations supply abuse;
 qualified scanner observations supply scanning only. Each address contributes at
-most one signal within one low-weight family. Loader records are checked for
-completeness but supply no finding. This is not negative assessment coverage,
+most one signal with a modest source weight. A complete exact-address join
+against the 1,651,503-row FFraud export found 226 overlaps and 50 additional
+addresses (11 credential and 39 scanner). FFraud does not disclose community
+origins, so this source retains its own withdrawable identity but deliberately
+shares FFraud's evidence family. Loader records are checked for completeness
+but supply no finding. This is not negative assessment coverage,
 IPv6 evidence, or proof of malicious software, endpoint ownership or suitability.
 It does not change existing scoring coefficients. No endpoint was contacted.
 The reviewed local bytes do not substitute for independent protected intake.

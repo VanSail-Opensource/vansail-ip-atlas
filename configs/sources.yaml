@@ -1293,7 +1293,7 @@ sources:
   - tor
   - vpn
 - id: jacobrakai-honeypot
-  evidence_family: jacobrakai-honeypot
+  evidence_family: ffraud-original
   source_group: jacobrakai-honeypot
   category: abuse
   admission: active
@@ -1318,13 +1318,15 @@ sources:
       incorporated in the export. The original dedication does not require attribution.
   trust:
     source_weight: 25
-    correlation_group: jacobrakai-honeypot
+    correlation_group: ffraud-original
   scope: exact_ip
   notes: One first-party honeypot vantage point. Credential-tier repeated decoy logins yield abuse and
     sustained credential-less probes meeting the publisher threshold yield scanner. The loader tier is
     validated but never interpreted as malware or command and control. No attempt count, ASN, protocol,
     host identity, coverage negative or generalized safety claim is published. The original per-IP last_seen
     governs expiry. Retain only observations with more than 48 hours remaining at intake, without changing clocks.
+    Keep scoring in the FFraud family because overlap and unknown FFraud community origins do not establish
+    independence. This separately withdrawable source can still add exact observations.
     The active entry still requires the independently verified complete current payload and certification ledger.
   publication_proof:
     kind: embedded

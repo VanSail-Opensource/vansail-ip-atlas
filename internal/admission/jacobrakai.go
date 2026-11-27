@@ -14,6 +14,7 @@ import (
 
 const (
 	jacobrakaiID         = "jacobrakai-honeypot"
+	jacobrakaiFamily     = "ffraud-original"
 	jacobrakaiParserID   = "jacobrakai-honeypot-json"
 	jacobrakaiSchema     = "jacobrakai-honeypot-tiered-json-v1"
 	jacobrakaiURL        = "https://jacobrakai.org/feed/blocklist.json"
@@ -27,7 +28,7 @@ const (
 var errJacobrakai = errors.New("honeypot export lacks a complete dated tier observation")
 
 func jacobrakaiSource(s Source) bool {
-	return s.ID == jacobrakaiID && s.Family == jacobrakaiID && s.SourceGroup == jacobrakaiID &&
+	return s.ID == jacobrakaiID && s.Family == jacobrakaiFamily && s.SourceGroup == jacobrakaiID &&
 		s.Category == "abuse" && s.Coverage == "positive_only" && s.Scope == "exact_ip" &&
 		s.URL == jacobrakaiURL && s.Format == "json" && s.MaxCompressedBytes == jacobrakaiByteLimit &&
 		s.MaxAge == jacobrakaiWindow && s.Weight == 25 && s.Parser == (Parser{jacobrakaiParserID, jacobrakaiSchema, 1}) &&

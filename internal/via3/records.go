@@ -180,8 +180,12 @@ func Validate(s Shard) error {
 		}
 		return a != None && b != None && uint64(a) < uint64(len(objects)/40) && u16(objects, int(a)*40) == expected
 	}
+	var hasIPv4Profile, hasIPv6Profile bool
 	for _, id := range []uint16{1, 8} {
 		index, _ := s.Rows(id)
+		if s.Kind == 7 && id == 1 && len(index)/32 != recordCount {
+			return fail("record")
+		}
 		for p := 0; p < len(index); p += 32 {
 			key := index[p : p+32]
 			if !validKey(key) || int(u32(key, 20)) >= recordCount {
@@ -197,8 +201,15 @@ func Validate(s Shard) error {
 					return fail("record")
 				}
 			}
-			if s.Kind == 7 && (key[0] != 4 || key[1] != 24 || u16(key, 2) != 0) {
-				return fail("record")
+			if s.Kind == 7 {
+				r := s.Record(u32(key, 20))
+				ipv4 := key[0] == 4 && key[1] == 24 && r[22] == 0
+				ipv6 := key[0] == 6 && key[1] == 48 && r[22] == 1
+				if !(ipv4 || ipv6) || u16(key, 2) != 0 || u32(key, 20) != uint32(p/32) {
+					return fail("record")
+				}
+				hasIPv4Profile = hasIPv4Profile || ipv4
+				hasIPv6Profile = hasIPv6Profile || ipv6
 			}
 			if (s.Kind == 9 || s.Kind == 10) && u16(key, 2) != 0 {
 				return fail("record")
@@ -268,6 +279,9 @@ func Validate(s Shard) error {
 	ints, _ := s.Rows(4)
 	segments, _ := s.Rows(9)
 	cells, _ := s.Rows(10)
+	if hasIPv6Profile && (hasIPv4Profile || len(cells) != 0 || len(objects) != 0) {
+		return fail("record")
+	}
 	pages, _ := s.Rows(12)
 	for p := 0; p < len(records); p += rw {
 		r := records[p : p+rw]
@@ -364,6 +378,14 @@ func Validate(s Shard) error {
 				return fail("record")
 			}
 		case 7:
+			if r[22] == 1 {
+				v := IPv6ProfileData{ObservedCount: u32(r, 4), PositiveCount: u32(r, 8), ScoreSum: u32(r, 12)}
+				if u32(r, 0) != bits(21, 22) || !validIPv6Profile(v) || !zero(r[16:20]) ||
+					r[20] != profileMean(v.ScoreSum, IPv6ProfileUnits) || r[21] != 0 || r[23] != 0 {
+					return fail("record")
+				}
+				break
+			}
 			if !zero(r[22:]) || !rangeOK(u32(r, 4), uint32(u16(r, 8)), len(cells)/32) || u16(r, 8) > 256 || u16(r, 10) > u16(r, 8) || u16(r, 12) > u16(r, 8) || u16(r, 14) > u16(r, 8) || r[20] > 100 || r[21] > 3 {
 				return fail("record")
 			}
@@ -426,7 +448,7 @@ func Validate(s Shard) error {
 			if assessed != u16(r, 10) || positive != u16(r, 12) || scored != u16(r, 14) {
 				return fail("record")
 			}
-			if scored > 0 && (int(r[20]) != (2*sum+int(scored))/(2*int(scored)) || r[21] != minimumConfidence) {
+			if scored > 0 && (r[20] != profileMean(uint32(sum), IPv4ProfileUnits) || r[21] != minimumConfidence) {
 				return fail("record")
 			}
 		case 8:

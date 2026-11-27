@@ -295,13 +295,13 @@ func Build(ctx context.Context, options Options, produce Producer) (Candidate, e
 		infos = append(infos, info)
 	}
 	sort.Slice(infos, func(i, j int) bool { return infos[i].SHA256 < infos[j].SHA256 })
-	result.Descriptor = via3.Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: options.Mode, Objects: infos, SchemaVersion: 5, ValidFrom: options.Clock, ValidUntil: options.ValidUntil}
+	result.Descriptor = via3.Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: options.Mode, Objects: infos, SchemaVersion: via3.PublicSchemaVersion, ValidFrom: options.Clock, ValidUntil: options.ValidUntil}
 	descriptor, err := canonical(result.Descriptor)
 	if err != nil {
 		return result, err
 	}
 	id := via3.Hash(descriptor)
-	result.Manifest = via3.Manifest{Codec: "zstd-1", FormatVersion: 3, Mode: options.Mode, Objects: infos, ReleaseID: id, SchemaVersion: 5, ValidFrom: options.Clock, ValidUntil: options.ValidUntil}
+	result.Manifest = via3.Manifest{Codec: "zstd-1", FormatVersion: 3, Mode: options.Mode, Objects: infos, ReleaseID: id, SchemaVersion: via3.PublicSchemaVersion, ValidFrom: options.Clock, ValidUntil: options.ValidUntil}
 	manifest, err := canonical(result.Manifest)
 	if err != nil {
 		return result, err
@@ -847,8 +847,7 @@ func (c *compiler) classify(inputs []string) ([]classifiedRun, error) {
 	var writers [3 * factGroupCount]*ownedRunWriter
 	completed := false
 	defer func() { c.closePartitionWriters(writers[:], paths[:], completed) }()
-	proved, err := c.walkMerged(inputs, func(r *runReader) error {
-		record := r.record
+	write := func(record via3.PublicRecord, frame ownedRunFrame) error {
 		i := 0
 		if record.Kind == 8 || record.Kind >= 11 {
 			i = 2
@@ -856,6 +855,9 @@ func (c *compiler) classify(inputs []string) ([]classifiedRun, error) {
 			i = 1
 		}
 		group := groupForKind(record.Kind)
+		if record.Kind == 7 && record.Prefix.Addr().Is6() {
+			group = ipv6ProfileFacts
+		}
 		if group == allFacts {
 			return errFactGroup
 		}
@@ -869,15 +871,43 @@ func (c *compiler) classify(inputs []string) ([]classifiedRun, error) {
 			writers[i] = w
 			w.enablePartitionPlan(classifiedScope(i))
 		}
-		if err := writers[i].appendPartitionFrame(r.frame(), record); err != nil {
+		if err := writers[i].appendPartitionFrame(frame, record); err != nil {
 			return err
 		}
 		sizes[i].records++
-		sizes[i].bytes += r.row.logicalBytes + 512
+		sizes[i].bytes += frame.row.logicalBytes + 512
+		return nil
+	}
+	emitProfile := func(record via3.PublicRecord) error {
+		frame, err := c.newCanonicalRunFrame(record)
+		if err != nil {
+			return err
+		}
+		return write(record, frame)
+	}
+	var profiles ipv6RiskProfiles
+	proved, err := c.walkMerged(inputs, func(r *runReader) error {
+		if r.record.Kind == 7 && r.record.Prefix.Addr().Is6() {
+			// These summaries must be derived from this merge, never provided by
+			// an individual spatial leaf or inherited from an older release.
+			return errFactGroup
+		}
+		if r.record.Kind == 6 && r.record.Exact && r.record.Prefix.Addr().Is6() {
+			if err := profiles.add(r, emitProfile); err != nil {
+				return err
+			}
+		}
+		if err := write(r.record, r.frame()); err != nil {
+			return err
+		}
+		// Source statistics describe input facts, not compiler-derived rows.
 		c.stats.UniqueRecords++
 		return nil
 	})
 	if err != nil {
+		return nil, err
+	}
+	if err := profiles.flush(emitProfile); err != nil {
 		return nil, err
 	}
 	for i, w := range writers {
@@ -929,6 +959,16 @@ func (s scope) name() string {
 	}
 	return family + hex.EncodeToString(a[:]) + "/" + strconv.Itoa(s.prefix.Bits())
 }
+func (s scope) ipCeiling() int {
+	if s.prefix.Addr().Is4() {
+		return 24 // A /24 profile owns its complete IPv4 grid.
+	}
+	if s.group == ipv6ProfileFacts {
+		return 48 // A /48 summary is never replicated as an inherited overlay.
+	}
+	return s.prefix.Addr().BitLen()
+}
+
 func (s scope) children() (scope, scope, error) {
 	if s.asn {
 		if s.first == s.last {
@@ -937,12 +977,7 @@ func (s scope) children() (scope, scope, error) {
 		mid := s.first + (s.last-s.first)/2
 		return scope{group: s.group, asn: true, first: s.first, last: mid}, scope{group: s.group, asn: true, first: mid + 1, last: s.last}, nil
 	}
-	// A /24 is indivisible because its sparse profile owns all 256 cells.
-	ceiling := s.prefix.Addr().BitLen()
-	if s.prefix.Addr().Is4() {
-		ceiling = 24
-	}
-	if s.prefix.Bits() >= ceiling {
+	if s.prefix.Bits() >= s.ipCeiling() {
 		return scope{}, scope{}, errors.New("single IP/profile scope cannot be repacked without truncation")
 	}
 	n := s.prefix.Bits() + 1
@@ -1202,10 +1237,7 @@ func (c *compiler) split(path string, children *[2]scope) ([2]string, error) {
 				}
 			}
 		} else if cover.IsValid() && cover.Bits() > children[i].prefix.Bits() {
-			if cover.Addr().Is4() && cover.Bits() > 24 {
-				cover = netip.PrefixFrom(cover.Addr(), 24).Masked()
-			}
-			children[i].prefix = cover
+			children[i].prefix = netip.PrefixFrom(cover.Addr(), min(cover.Bits(), children[i].ipCeiling())).Masked()
 		}
 	}
 	completed = true

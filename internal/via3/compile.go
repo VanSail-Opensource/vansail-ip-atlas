@@ -73,7 +73,27 @@ type CellData struct {
 type ProfileData struct {
 	Cells       []CellData
 	DominantASN uint32
+	IPv6        *IPv6ProfileData `json:",omitempty"`
 }
+
+// IPv6ProfileData represents exact observations, one maximum score per /64.
+// No cell identities, subnet inventory or assessment claim are stored.
+type IPv6ProfileData struct {
+	ObservedCount, PositiveCount, ScoreSum uint32
+}
+
+const (
+	IPv4ProfileUnits = 256
+	IPv6ProfileUnits = 65536
+)
+
+func profileMean(sum uint32, units uint32) byte { return byte((sum + units/2) / units) }
+
+func validIPv6Profile(v IPv6ProfileData) bool {
+	return v.ObservedCount > 0 && v.ObservedCount <= IPv6ProfileUnits &&
+		v.PositiveCount <= v.ObservedCount && v.ScoreSum <= 55*v.PositiveCount
+}
+
 type ASNData struct {
 	Name, Organization, Country string
 	Risk                        *float64
@@ -706,10 +726,22 @@ func (encoder *PublicEncoder) compilePartition(ctx context.Context, input Partit
 					}
 				}
 			case 7:
-				if !r.Prefix.Addr().Is4() || r.Prefix.Bits() != 24 {
+				v := r.Profile
+				if v.IPv6 != nil {
+					if !r.Prefix.Addr().Is6() || r.Prefix.Bits() != 48 || r.Exact ||
+						len(v.Cells) != 0 || v.DominantASN != 0 || !validIPv6Profile(*v.IPv6) {
+						return out, fail("record")
+					}
+					p32(row, 0, bits(21, 22))
+					p32(row, 4, v.IPv6.ObservedCount)
+					p32(row, 8, v.IPv6.PositiveCount)
+					p32(row, 12, v.IPv6.ScoreSum)
+					row[20], row[22] = profileMean(v.IPv6.ScoreSum, IPv6ProfileUnits), 1
+					break
+				}
+				if !r.Prefix.Addr().Is4() || r.Prefix.Bits() != 24 || r.Exact {
 					return out, fail("record")
 				}
-				v := r.Profile
 				cells := append([]CellData(nil), v.Cells...)
 				sort.Slice(cells, func(i, j int) bool { return cells[i].Address.Unmap().Less(cells[j].Address.Unmap()) })
 				p32(row, 0, bits(21))
@@ -797,7 +829,7 @@ func (encoder *PublicEncoder) compilePartition(ctx context.Context, input Partit
 				p16(row, 14, uint16(scored))
 				if scored > 0 {
 					p32(row, 0, u32(row, 0)|bits(22))
-					row[20] = byte((2*sum + scored) / (2 * scored))
+					row[20] = profileMean(uint32(sum), IPv4ProfileUnits)
 					row[21] = minimumConfidence
 				}
 			case 8:
@@ -1169,9 +1201,9 @@ func Build(ctx context.Context, input CompileInput) (BuiltRelease, error) {
 	for i, object := range objects {
 		infos[i] = object.Info
 	}
-	descriptor := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: input.Mode, Objects: infos, SchemaVersion: 5, ValidFrom: input.Clock, ValidUntil: input.ValidUntil}
+	descriptor := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: input.Mode, Objects: infos, SchemaVersion: PublicSchemaVersion, ValidFrom: input.Clock, ValidUntil: input.ValidUntil}
 	id := Hash(canonical(descriptor))
-	manifest := Manifest{Codec: descriptor.Codec, FormatVersion: 3, Mode: descriptor.Mode, Objects: infos, ReleaseID: id, SchemaVersion: 5, ValidFrom: input.Clock, ValidUntil: input.ValidUntil}
+	manifest := Manifest{Codec: descriptor.Codec, FormatVersion: 3, Mode: descriptor.Mode, Objects: infos, ReleaseID: id, SchemaVersion: PublicSchemaVersion, ValidFrom: input.Clock, ValidUntil: input.ValidUntil}
 	pointer := Pointer{FormatVersion: 3, ManifestPath: "/_atlas/releases/" + id + "/manifest.json", ManifestSHA256: Hash(canonical(manifest)), ReleaseID: id}
 	if input.Mode == "production" {
 		if err := input.ProductionGate(ctx); err != nil {

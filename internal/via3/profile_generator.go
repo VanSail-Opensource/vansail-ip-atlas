@@ -114,6 +114,7 @@ func profileAnswer(clock int64) (LookupAnswer, [][2]string, error) {
 	a := LookupAnswer{Q: "203.0.113.1", Kind: "ip", ReleaseID: strings.Repeat("0", 64), Synthetic: true, ValidUntil: clock + 720*3600,
 		Network: &NetworkAnswer{Prefix: "203.0.113.1/32", Origins: []uint32{}}, ASNs: []ASNAnswer{},
 		BGP: BGPAnswer{Origins: []uint32{}, Paths: []PathAnswer{}, Relationships: []RelationshipAnswer{}, Tier1: []TierAnswer{}, RPKI: []RPKIAnswer{}}}
+	a.Quality = riskAnswer(nil, false, new(qualityLookupValues))
 	for i := 0; i < PublicOrigins; i++ {
 		origin := profileOrigin + uint32(i)
 		a.Network.Origins = append(a.Network.Origins, origin)
@@ -358,9 +359,9 @@ func BuildMemoryProfile(ctx context.Context, clock int64) (BuiltRelease, MemoryP
 		infos[i] = object.Info
 		byHash[object.Info.SHA256] = object.Bytes
 	}
-	descriptor := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: infos, SchemaVersion: 5, ValidFrom: clock, ValidUntil: clock + 720*3600}
+	descriptor := Descriptor{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: infos, SchemaVersion: PublicSchemaVersion, ValidFrom: clock, ValidUntil: clock + 720*3600}
 	releaseID := Hash(canonical(descriptor))
-	manifest := Manifest{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: infos, ReleaseID: releaseID, SchemaVersion: 5, ValidFrom: clock, ValidUntil: descriptor.ValidUntil}
+	manifest := Manifest{Codec: "zstd-1", FormatVersion: 3, Mode: "synthetic", Objects: infos, ReleaseID: releaseID, SchemaVersion: PublicSchemaVersion, ValidFrom: clock, ValidUntil: descriptor.ValidUntil}
 	pointer := Pointer{FormatVersion: 3, ManifestPath: "/_atlas/releases/" + releaseID + "/manifest.json", ManifestSHA256: Hash(canonical(manifest)), ReleaseID: releaseID}
 	out = BuiltRelease{Descriptor: descriptor, Manifest: manifest, Pointer: pointer, Objects: objects}
 	reader, err := NewRelease(canonical(pointer), canonical(manifest), func(hash string) ([]byte, error) {

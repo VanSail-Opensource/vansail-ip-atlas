@@ -131,7 +131,7 @@ func browserInputs(ctx context.Context, dir string) (browserPointer, Manifest, *
 	if err != nil {
 		return p, m, nil, nil, err
 	}
-	if Hash(input) != p.ManifestSHA256 || strictJSON(input, &m) != nil || m.ReleaseID != p.ReleaseID || m.FormatVersion != 3 || m.SchemaVersion != 5 ||
+	if Hash(input) != p.ManifestSHA256 || strictJSON(input, &m) != nil || m.ReleaseID != p.ReleaseID || m.FormatVersion != 3 || m.SchemaVersion != PublicSchemaVersion ||
 		m.Codec != "zstd-1" || m.Mode != "production" && m.Mode != "synthetic" && m.Mode != "engineering" ||
 		m.ValidFrom < 0 || m.ValidUntil <= m.ValidFrom || m.ValidUntil-m.ValidFrom > 720*3600 || m.ValidUntil > 9007199254740991 ||
 		len(m.Objects) == 0 || len(m.Objects) >= 18500 {

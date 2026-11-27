@@ -18,7 +18,7 @@ import (
 
 // The grouped partition layout changes public identities, not lookup facts.
 // The answer digest excludes only releaseId and is shared with the original
-// ungrouped schema5 compiler; inventory and logical bounds remain exact.
+// ungrouped compiler; inventory and logical bounds remain exact.
 type sparseRunParityGolden struct {
 	Release, Manifest, Inventory, Answers string
 	Files, SortRuns, Partitions           int64
@@ -27,13 +27,13 @@ type sparseRunParityGolden struct {
 
 var sparseRunParityGoldens = map[string]sparseRunParityGolden{
 	"count": {
-		Release: "53eb9f2b1c6154439104f8769478aef96bf21adc783199b99b88c1ad12434cdb", Manifest: "ec14f92377754b990a2d2c0e0a91de5b8f78325155fb39ef2a83229598d38e85",
-		Inventory: "37942b060209e584217fd9c6fc2873242920484d2766377c3b0a1b48d9b15627", Answers: "1311fc3c126452fc094777e4787e736bd8ac3ff7139373c0a532c956aa9ab141",
+		Release: "e6423de4297c584754beeb40b64c134c8222e7d72d688c54cef90f3e0a39a8b6", Manifest: "e7ec25db0df15261c34a9548f056edfdd979c1cc5ea0af7229e2ab0236e2e508",
+		Inventory: "52ff09d4b21789fae5e6abb0ca766c36b1022277b7dbe3a8f4216507a57426c0", Answers: "b60ed5679ca968b4c78f3b661e89f276892ffd799f7a4e20e28bd56b05663b3b",
 		Files: 139, SortRuns: 43, Partitions: 91, SortPeak: 8115, PartitionPeak: 15360,
 	},
 	"bytes": {
-		Release: "583e52cb5ba398de32db717f31006dbe4a4f819b252490c989ec974dbc933039", Manifest: "e1a8ba7dad52a5eea37130602b91e6094d71a318e3173a350980112edc889d3a",
-		Inventory: "162d4f6d129da3e594a77a11c4941b28aa053224ba5a8ae5143551f98ea774b5", Answers: "1311fc3c126452fc094777e4787e736bd8ac3ff7139373c0a532c956aa9ab141",
+		Release: "798f15d2e852f49da24a49c55c6e48ab96d5afa2e9f23fdd82e3381346620119", Manifest: "c55a46c061045f8ea043e490788b3dd2af4d70a65de6634294ea836fdeee5b4b",
+		Inventory: "64283e7c3b2bf1f89c4d9e0488828d4af8ef7735040a4f38790644ef07749646", Answers: "b60ed5679ca968b4c78f3b661e89f276892ffd799f7a4e20e28bd56b05663b3b",
 		Files: 155, SortRuns: 43, Partitions: 107, SortPeak: 8115, PartitionPeak: 9432,
 	},
 }
@@ -130,7 +130,8 @@ func sparseRunPublicAnswers(t *testing.T, options Options) string {
 		}
 	}
 	profile, err := reader.ClassC(context.Background(), "203.0.113.1")
-	if err != nil || profile == nil || len(profile.Cells) != 256 || profile.Cells[1].Score == nil || *profile.Cells[1].Score != 11 || profile.Cells[2].Score != nil || profile.AggregateScore == nil || *profile.AggregateScore != 11 {
+	if err != nil || profile == nil || len(profile.Cells) != 256 || profile.ScoreSum != 11 || profile.Cells[1].Score == nil || *profile.Cells[1].Score != 11 ||
+		profile.Cells[2].Score == nil || *profile.Cells[2].Score != 0 || profile.Cells[2].Observed || profile.AggregateScore == nil || *profile.AggregateScore != 0 {
 		t.Fatal("scored and unknown Class-C cells changed", err)
 	}
 	if err = encoder.Encode(profile); err != nil {

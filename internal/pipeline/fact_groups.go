@@ -22,7 +22,8 @@ const (
 	pathFacts
 	relationshipFacts
 	tierFacts
-	factGroupCount = int(tierFacts)
+	ipv6ProfileFacts // IPv6 profiles have neither IPv4 cells nor network references.
+	factGroupCount   = int(ipv6ProfileFacts)
 )
 
 func groupForKind(kind uint16) factGroup {
@@ -51,7 +52,7 @@ func groupForKind(kind uint16) factGroup {
 }
 
 func (g factGroup) contains(kind uint16) bool {
-	return groupForKind(kind) != allFacts && (g == allFacts || groupForKind(kind) == g)
+	return groupForKind(kind) != allFacts && (g == allFacts || groupForKind(kind) == g || g == ipv6ProfileFacts && kind == 7)
 }
 
 type classifiedRun struct {

@@ -79,6 +79,10 @@ func normalizePayload(record via3.PublicRecord) (via3.PublicRecord, error) {
 	}
 	if record.Profile != nil {
 		p := *record.Profile
+		if p.IPv6 != nil {
+			v := *p.IPv6
+			p.IPv6 = &v
+		}
 		if len(p.Cells) > 256 {
 			return record, errors.New("profile exceeds 256 cells")
 		}

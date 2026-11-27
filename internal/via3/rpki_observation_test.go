@@ -28,7 +28,7 @@ func TestRPKISnapshotStatusSurvivesExpiryWithOwnedClocks(t *testing.T) {
 			old := append([]byte(nil), object.Bytes...)
 			p16(old, 6, 4)
 			if _, err := Read(context.Background(), old); ErrorCode(err) != "version" {
-				t.Fatal("schema4 accepted by schema5 reader", err)
+				t.Fatal("schema4 accepted by schema6 reader", err)
 			}
 		}
 		now := input.Clock

@@ -115,7 +115,7 @@ func TestCorruptionClosedBeforeAllocation(t *testing.T) {
 	}{
 		{"short_header", "length", func(b []byte) []byte { return b[:63] }},
 		{"exactly_24_mib", "length", func([]byte) []byte { return make([]byte, MaxFile) }},
-		{"unknown_schema", "version", func(b []byte) []byte { p16(b, 6, 6); return b }},
+		{"unknown_schema", "version", func(b []byte) []byte { p16(b, 6, PublicSchemaVersion+1); return b }},
 		{"unknown_format", "version", func(b []byte) []byte { p16(b, 4, 4); return b }},
 		{"bad_magic", "version", func(b []byte) []byte { b[0] = 255; return b }},
 		{"reserved_header", "header", func(b []byte) []byte { b[45] = 1; return b }},

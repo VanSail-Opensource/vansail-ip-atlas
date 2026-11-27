@@ -36,3 +36,25 @@ test('early browser harness rejection prints only a fixed marker and fails', () 
   assert.equal(result.stdout,'')
   assert.equal(result.stderr,'ATLAS_BROWSER_FAILURE preview-origin - contract\n')
 })
+
+test('report gate codes are closed, phase-bound and preserve an earlier diagnosis', () => {
+  const lines=[]
+  const log=browserDiagnostics(undefined,line=>lines.push(line))
+  log.mark('report-validation')
+  log.failedReport(41)
+  log.failedReport(54)
+  log.failedReport('41\nprivate?q=source')
+  log.failedReport(null)
+  log.failedReport(55)
+  log.mark('dataset-credits',2)
+  log.note('asset-accounting')
+  log.mark('report-validation')
+  log.failedReport(41)
+  assert.deepEqual(lines,[
+    'ATLAS_BROWSER_FAILURE report-validation - gate-graph',
+    'ATLAS_BROWSER_FAILURE report-validation - gate-hot-lookup',
+    ...Array(3).fill('ATLAS_BROWSER_FAILURE report-validation - report-validation'),
+    'ATLAS_BROWSER_FAILURE dataset-credits 2 asset-accounting',
+  ])
+  assert.equal(browserFailureMarker('overview',1,'gate-graph'),'ATLAS_BROWSER_FAILURE overview 1 runtime')
+})

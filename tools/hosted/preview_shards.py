@@ -24,6 +24,21 @@ SHARDS = (*DIMENSIONS, "queries")
 ARRAYS = ("populations", "component_populations", "cold_queries", "hot_queries")
 VARIABLE = {*ARRAYS, "worker_memory_samples", "browser_process_tree_rss_peak_bytes", "execution_host"}
 PART_NAME = "production-browser-part.json"
+# Closed exit-code channel for the existing --part validator. Keep this in
+# sync with the report-gate classes in browser-failures.mjs.
+GATE_FAILURE_EXIT = {
+    "graph": 41, "accessibility": 42, "lcp_ms": 43, "initial_js_gzip_bytes": 44,
+    "interaction_cls": 45, "lab_INP": 46, "population": 47, "candidate_states": 48,
+    "ipv6_asn_unknown_states": 49, "ipv4_unknown_state": 50, "ipv4_network_coverage": 50,
+    "synthetic_ipv4_unknown_state": 51, "worker_memory": 52, "cold_payload": 53,
+    "1": 54, "2": 54, "3": 54,  # browser_hot_lookup_ contexts
+}
+
+
+class BrowserGateFailure(ContractError):
+    def __init__(self, exit_code):
+        super().__init__("mandatory production browser gate incomplete")
+        self.exit_code = exit_code
 
 
 def require(ok, message):
@@ -155,9 +170,20 @@ def validate_part(packet, shard, expected):
             require(all(type(row.get("width")) is int and (row["width"], row.get("theme")) == (width, theme)
                         for row in report[field]), "browser population attributed to the wrong shard")
         prefix = f"browser_{width}_{theme}_"
-    gates = browser_gates(report)
-    require_all({k: v for k, v in gates.items() if k.startswith(prefix) or k == "worker_memory" or
-                 (shard == "queries" and k == "cold_payload")})
+    gates = {k: v for k, v in browser_gates(report).items() if k.startswith(prefix) or k == "worker_memory" or
+             (shard == "queries" and k == "cold_payload")}
+    try:
+        require_all(gates)
+    except ContractError as error:
+        # A measured failure is more actionable than a missing result. Report
+        # one class in stable gate order, never a metric, key, or exception.
+        for status in ("failed", "unmeasured"):
+            for key, value in gates.items():
+                if value == status:
+                    code = GATE_FAILURE_EXIT.get(key.removeprefix(prefix))
+                    if code is not None:
+                        raise BrowserGateFailure(code) from error
+        raise
     return report
 
 
@@ -201,11 +227,19 @@ def main():
     parser.add_argument("--shard", choices=SHARDS)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-    expected = identity(ROOT, os.environ)
     if args.part:
-        require(args.shard and args.output is None, "a browser part requires its expected shard ID")
-        validate_part(json_object(read_data(args.part)), args.shard, expected)
+        try:
+            expected = identity(ROOT, os.environ)
+            require(args.shard and args.output is None, "a browser part requires its expected shard ID")
+            validate_part(json_object(read_data(args.part)), args.shard, expected)
+        except BrowserGateFailure as error:
+            return error.exit_code
+        except Exception:
+            # Unexpected validator errors are still a hard failure. Do not
+            # emit path, argument, report, or exception diagnostics here.
+            return 1
     else:
+        expected = identity(ROOT, os.environ)
         require(args.shard is None and args.output, "a joined browser report requires an output path")
         result = join(args.directory, expected)
         args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -222,4 +256,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -522,7 +522,7 @@ const validationArgs = plan.identity
   : ['-c','import json,sys;from tools.release_contract.acceptance import browser_gates,require_all;g=browser_gates(json.load(open(sys.argv[1])));print(json.dumps(g,indent=2));require_all(g)',fileURLToPath(reportPath)]
 diagnostics.mark('report-validation')
 const validation=spawnSync('python',validationArgs,{cwd:root,stdio:'ignore'})
-if(validation.status!==0&&!scenarioFailed)diagnostics.failedReport()
+if(validation.status!==0&&!scenarioFailed)diagnostics.failedReport(plan.identity?validation.status:undefined)
 process.exitCode=validation.status===0?0:1
 } catch(error) {
   diagnostics.fail(error)

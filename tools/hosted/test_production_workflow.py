@@ -195,6 +195,10 @@ class CandidateClockTests(unittest.TestCase):
             b'outside-record\r' + marker + b'\n', b'ATLAS_BROWSER_FAILURE overview 31 contract\n',
             b'ATLAS_BROWSER_FAILURE overview 01 contract\n', b'ATLAS_BROWSER_FAILURE overview - contract\n',
             b'ATLAS_BROWSER_FAILURE report-validation 1 report-validation\n',
+            b'ATLAS_BROWSER_FAILURE report-validation 1 gate-graph\n',
+            b'ATLAS_BROWSER_FAILURE overview 1 gate-graph\n',
+            b'ATLAS_BROWSER_FAILURE report-validation - gate-graph private?q=source\n',
+            b'ATLAS_BROWSER_FAILURE report-validation - gate-arbitrary-text\n',
             b'ATLAS_BROWSER_FAILURE overview 1 unlisted-error-text\n',
             b'ATLAS_BROWSER_FAILURE https://example.invalid 1 contract\n',
             b'x'*100 + marker + b'\n' + b'z'*(65536-len(marker)-1),
@@ -204,6 +208,8 @@ class CandidateClockTests(unittest.TestCase):
                 self.assertEqual(workflow.failure_category(log, len(previous), phase=phase), 'command-failed')
         log.write_bytes(b'ATLAS_BROWSER_FAILURE report-validation - report-validation\n')
         self.assertEqual(workflow.failure_category(log, 0, phase=phase), 'browser-report-validation-report-validation')
+        log.write_bytes(b'ATLAS_BROWSER_FAILURE report-validation - gate-graph\n')
+        self.assertEqual(workflow.failure_category(log, 0, phase=phase), 'browser-report-validation-gate-graph')
 
     def test_failed_browser_child_logs_only_route_sample_and_failure_class(self):
         private = 'https://example.invalid/path?query=private-source'

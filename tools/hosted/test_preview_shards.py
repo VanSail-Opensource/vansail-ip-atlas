@@ -1,8 +1,12 @@
+import contextlib
 import copy
+import io
 import json
 from pathlib import Path
+import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from tools.hosted import preview_shards as shards
 from tools.release_contract.contracts import ContractError
@@ -138,6 +142,41 @@ class BrowserShardTests(unittest.TestCase):
                 broken = copy.deepcopy(packet)
                 mutate(broken["report"])
                 shards.validate_part(broken, "queries", self.identity)
+
+    def test_closed_exit_code_identifies_existing_gate_failure(self):
+        packet = part(self.identity, "1440-dark")
+        report = packet["report"]
+        report["populations"][0]["accessibility"]["incomplete"].append("opaque browser detail")
+        report["component_populations"][0]["graph"]["active_frames"][0]["complete_second_fps"][0] = 49
+        with self.assertRaises(shards.BrowserGateFailure) as error:
+            shards.validate_part(packet, "1440-dark", self.identity)
+        self.assertEqual(error.exception.exit_code, 41)  # measured graph failure before unmeasured accessibility
+        self.assertNotIn("opaque", str(error.exception))
+        query_packet = part(self.identity, "queries")
+        query_packet["report"]["hot_queries"][0]["samples_ms"] = [15] * 1000
+        with self.assertRaises(shards.BrowserGateFailure) as error:
+            shards.validate_part(query_packet, "queries", self.identity)
+        self.assertEqual(error.exception.exit_code, 54)
+
+    def test_part_command_never_echoes_unknown_gate_error_path_or_report(self):
+        secret = "opaque-path-private-query"
+        part_path = self.root / secret
+        packet = part(self.identity, "320-light")
+        part_path.write_text(json.dumps(packet))
+        cmd = ["preview_shards.py", "--part", str(part_path), "--shard", "320-light"]
+        for gates, expected_exit in (({"browser_320_light_graph": "failed"}, 41),
+                                     ({f"browser_320_light_{secret}": "failed"}, 1),
+                                     ({}, 1)):
+            with (self.subTest(expected_exit=expected_exit), patch.object(sys, "argv", cmd),
+                  patch.object(shards, "identity", return_value=self.identity),
+                  patch.object(shards, "browser_gates", return_value=gates),
+                  contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err):
+                self.assertEqual(shards.main(), expected_exit)
+                self.assertEqual((out.getvalue(), err.getvalue()), ("", ""))
+        with (patch.object(sys, "argv", cmd), patch.object(shards, "identity", side_effect=RuntimeError(secret)),
+              contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err):
+            self.assertEqual(shards.main(), 1)
+            self.assertEqual((out.getvalue(), err.getvalue()), ("", ""))
 
     def test_only_attempt_specific_artifact_tree_accepted(self):
         directory = self.root / "parts"

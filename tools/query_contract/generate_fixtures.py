@@ -161,7 +161,7 @@ def layouts():
     cell = struct.pack("<BBBBIBBHIIIB7x", 1, 0xff, 1, 1, 1, 0, 3, 1, 0, 0, 0, 0)
     assert len(cell) == 32
     put("via3-layouts.json", {
-        "format_version": 3, "schema_version": 5, "contract_revision": 3, "synthetic": True,
+        "format_version": 3, "schema_version": 6, "contract_revision": 3, "synthetic": True,
         "max_file_exclusive": 24 * 1024 * 1024, "max_decoded_section": 64 * 1024 * 1024,
         "max_decoded_total": 256 * 1024 * 1024, "max_window": 8 * 1024 * 1024,
         "presence_bits": dict(zip(pres_names, range(32))), "reason_bits": dict(zip(reason_names, range(14))),

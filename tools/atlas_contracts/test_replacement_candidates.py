@@ -40,9 +40,10 @@ class ReplacementCandidateTests(unittest.TestCase):
         self.assertEqual(report['dataset_attributions'], [])
         self.assertTrue(all(not row['families'] for row in report['capabilities']))
 
-    def test_public_storage_schema_five_rejects_old_schema(self):
+    def test_public_storage_schema_six_rejects_other_schemas(self):
         validate_schema('sources', self.config)
-        for version in (3, 4, 6):
+        self.assertEqual(self.config['build']['storage']['schema_version'], 6)
+        for version in (3, 4, 5, 7):
             invalid = copy.deepcopy(self.config)
             invalid['build']['storage']['schema_version'] = version
             with self.subTest(version=version), self.assertRaises(ContractError):

@@ -4,7 +4,7 @@ const setup = new Set(['startup','preview-origin','candidate-report','corpus','g
 const samples = new Set(['ui-context','hero','root-redirect','dataset-credits','overview','quality','class-c','asn','bgp',
   'unknown-states','ui-metrics','component-context','component-fixture','component-worker','component-keyboard-pan',
   'component-wheel-zoom','component-route-focus','component-accessibility','component-unknown-ipv4'])
-const assetClasses = new Set(['asset-http-status','asset-js-body','asset-atlas-size','asset-atlas-transfer'])
+const assetClasses = new Set(['asset-http-status','asset-js-body','asset-js-transfer','asset-atlas-size','asset-atlas-transfer'])
 const classes = new Set(['contract','playwright-timeout','runtime','report-validation','unexpected-request',
   'page-exception','asset-accounting','resource-observation','privacy-contract',...assetClasses])
 // Only exact Python validator exit codes select a gate class. Raw child

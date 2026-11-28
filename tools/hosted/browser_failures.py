@@ -15,7 +15,7 @@ SAMPLE_PHASES = frozenset({
 CLASSES = frozenset({
     'contract', 'playwright-timeout', 'runtime', 'report-validation', 'unexpected-request',
     'page-exception', 'asset-accounting', 'resource-observation', 'privacy-contract',
-    'asset-http-status', 'asset-js-body', 'asset-atlas-size', 'asset-atlas-transfer',
+    'asset-http-status', 'asset-js-body', 'asset-js-transfer', 'asset-atlas-size', 'asset-atlas-transfer',
 })
 REPORT_GATE_CLASSES = frozenset({
     'gate-graph', 'gate-accessibility', 'gate-lcp', 'gate-initial-js', 'gate-cls', 'gate-inp',

@@ -211,7 +211,7 @@ class CandidateClockTests(unittest.TestCase):
         self.assertEqual(workflow.failure_category(log, 0, phase=phase), 'browser-report-validation-report-validation')
         log.write_bytes(b'ATLAS_BROWSER_FAILURE report-validation - gate-graph\n')
         self.assertEqual(workflow.failure_category(log, 0, phase=phase), 'browser-report-validation-gate-graph')
-        for diagnostic in ('asset-http-status', 'asset-js-body', 'asset-atlas-size', 'asset-atlas-transfer'):
+        for diagnostic in ('asset-http-status', 'asset-js-body', 'asset-js-transfer', 'asset-atlas-size', 'asset-atlas-transfer'):
             log.write_text(f'ATLAS_BROWSER_FAILURE unknown-states 3 {diagnostic}\n')
             self.assertEqual(workflow.failure_category(log, 0, phase=phase), f'browser-unknown-states-sample-3-{diagnostic}')
 

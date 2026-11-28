@@ -1,11 +1,64 @@
 import assert from 'node:assert/strict'
+import { createServer } from 'node:http'
 import { after, before, test } from 'node:test'
+import { brotliCompressSync } from 'node:zlib'
 import { chromium } from 'playwright'
 import { visitOwner, submitLookup, waitForAtlasView } from './production-interactions.mjs'
+import { accountStaticResponses } from './browser-asset-accounting.mjs'
 
 let browser
 before(async()=>{browser=await chromium.launch({channel:'chrome',headless:true,...(process.env.ATLAS_CHROME_EXECUTABLE?{executablePath:process.env.ATLAS_CHROME_EXECUTABLE}:{})})})
 after(async()=>{await browser?.close()})
+
+test('Chrome headerless Brotli abort is counted in the UI and rejected for cold wire evidence',{timeout:10000},async()=>{
+  const body=brotliCompressSync(Buffer.from('{"fixture":"static asset"}'))
+  const server=createServer((request,response)=>{
+    if(request.url==='/'){response.setHeader('content-type','text/html');response.end('<title>Fixture</title>');return}
+    response.writeHead(200,{'content-type':'application/json','content-encoding':'br','cache-control':'no-store','x-content-type-options':'nosniff'})
+    response.flushHeaders() // A Pages-style response without Content-Length.
+    if(request.url==='/_atlas/completed.json'){response.end(body);return}
+    const timer=setTimeout(()=>response.end(body),1000)
+    response.on('close',()=>clearTimeout(timer))
+  })
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
+  const origin=`http://127.0.0.1:${server.address().port}`
+  try {
+    for(const measureColdPayload of [false,true]){
+      const context=await browser.newContext({serviceWorkers:'block'}),failures=[]
+      try {
+        await context.route('**/*',route=>new URL(route.request().url()).origin===origin?route.continue():route.abort())
+        const account=accountStaticResponses(context,origin,{measureColdPayload,onFailure:value=>failures.push(value)})
+        const page=await context.newPage()
+        await page.goto(origin)
+        const completed=context.waitForEvent('response',response=>new URL(response.url()).pathname==='/_atlas/completed.json')
+        await page.evaluate(async()=>{await (await fetch('/_atlas/completed.json')).arrayBuffer()})
+        await account.settle()
+        assert.equal(account.startedAtlasRequests(),1)
+        assert.equal(account.atlas.length,measureColdPayload?1:0)
+        if(measureColdPayload){
+          const sizes=await (await completed).request().sizes()
+          assert.equal(account.atlas[0].body_bytes,sizes.responseBodySize)
+          assert(account.atlas[0].body_bytes>=body.length) // HTTP/1.1 can include chunk framing.
+        }
+        const terminal=context.waitForEvent('requestfailed',request=>new URL(request.url()).pathname==='/_atlas/cancelled.json')
+        const head=context.waitForEvent('response',response=>new URL(response.url()).pathname==='/_atlas/cancelled.json')
+        await page.evaluate(async()=>{
+          const controller=new AbortController(),response=await fetch('/_atlas/cancelled.json',{signal:controller.signal})
+          controller.abort()
+          try{await response.arrayBuffer()}catch{}
+        })
+        const [request,response]=await Promise.all([terminal,head])
+        assert.equal(response.status(),200)
+        assert.equal(request.failure()?.errorText,'net::ERR_ABORTED')
+        assert.equal((await request.sizes()).responseBodySize,0)
+        assert.equal(account.startedAtlasRequests(),2)
+        if(measureColdPayload)await assert.rejects(account.settle(),{classification:'asset-atlas-size'})
+        else await account.settle()
+        assert.deepEqual(failures,measureColdPayload?['asset-atlas-size']:[])
+      } finally {await context.close()}
+    }
+  } finally {await new Promise(resolve=>server.close(resolve))}
+})
 
 async function pageWithSnapshot() {
   const page=await browser.newPage()

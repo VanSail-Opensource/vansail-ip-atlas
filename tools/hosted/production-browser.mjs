@@ -10,7 +10,7 @@ import { spawnSync } from 'node:child_process'
 import { graphVisibleNodeCount } from './performance-gates.mjs'
 import { auditAccessibility } from './browser-accessibility.mjs'
 import { BrowserContractFailure, browserDiagnostics } from './browser-failures.mjs'
-import { accountStaticResponses } from './browser-asset-accounting.mjs'
+import { accountStaticResponses, makePrefetchByteReader } from './browser-asset-accounting.mjs'
 import { previewBrowserPlan } from './preview-browser-plan.mjs'
 import { visitOwner as owner, submitLookup, waitForAtlasView } from './production-interactions.mjs'
 import { parseInput } from '../../web/app/lib/query.ts'
@@ -111,6 +111,8 @@ if (!/^[a-f0-9]{64}$/.test(report.graph_component_fixture.worker_sha256 ?? '')) 
 
 let browser,server,memoryTimer,pendingMemorySample=null,rootPid
 let scenarioFailed=false
+const readPrefetchedJavaScript=makePrefetchByteReader(base.origin)
+
 function recordError(message,classification) {
   report.errors.push(message)
   diagnostics.note(classification)
@@ -132,7 +134,7 @@ async function processTreeRSS() {
   return {supported:count>0,at_ms:performance.now(),rss_bytes:rss,processes:count}
 }
 
-async function newSample(width,theme,{componentFixture=false,measureColdPayload=false}={}) {
+async function newSample(width,theme,{componentFixture=false,measureColdPayload=false,measureInitialJavaScript=false}={}) {
   const mobile=width<1000
   const context=await browser.newContext({viewport:{width,height:mobile?844:900},deviceScaleFactor:mobile?2:1,colorScheme:theme,reducedMotion:'no-preference',serviceWorkers:'block'})
   await context.route('**/*',route=>{
@@ -157,7 +159,8 @@ async function newSample(width,theme,{componentFixture=false,measureColdPayload=
   await cdp.send('Network.enable');await cdp.send('Network.setCacheDisabled',{cacheDisabled:true})
   await cdp.send('Emulation.setCPUThrottlingRate',{rate:mobile?4:1})
   await cdp.send('Network.emulateNetworkConditions',{offline:false,latency:150,downloadThroughput:1600000/8,uploadThroughput:750000/8,connectionType:'cellular3g'})
-  const accounting=accountStaticResponses(context,base.origin,{componentFixture,measureColdPayload,
+  const accounting=accountStaticResponses(context,base.origin,{componentFixture,measureColdPayload,measureInitialJavaScript,
+    readPrefetchedJavaScript:path=>readPrefetchedJavaScript(page,path),
     onFailure:classification=>recordError('Static response accounting failed',classification)})
   const settle=async()=>{
     await page.waitForLoadState('networkidle')
@@ -436,12 +439,15 @@ try {
   },100)
   for(const {width,theme} of plan.populations)for(let index=1;index<=30;index++){
     diagnostics.mark('ui-context',index)
-    const s=await newSample(width,theme),checks=[],row={width,theme,sample:index}
+    const s=await newSample(width,theme,{measureInitialJavaScript:true}),checks=[],row={width,theme,sample:index}
     try {
       diagnostics.mark('hero',index)
       await s.page.goto(new URL('/ip/',base).href,{waitUntil:'networkidle'});await s.page.getByRole('textbox',{name:'IP address or ASN'}).waitFor();await s.settle()
       await s.page.waitForFunction(theme=>document.documentElement.classList.contains(theme),theme)
-      row.lcp_ms=await s.page.evaluate(()=>window.__atlasProduction.lcp_ms);row.initial_js_gzip_bytes=[...s.js.values()].reduce((a,b)=>a+b,0)
+      row.lcp_ms=await s.page.evaluate(()=>window.__atlasProduction.lcp_ms)
+      await s.completeInitialJavaScript()
+      if(!s.js.size)throw new BrowserContractFailure('Hero has no measured initial JavaScript')
+      row.initial_js_gzip_bytes=[...s.js.values()].reduce((a,b)=>a+b,0)
       if(s.startedAtlasRequests())throw new BrowserContractFailure('Hero requested atlas data before an explicit action')
       checks.push(await accessible(s.page))
       diagnostics.mark('root-redirect',index)

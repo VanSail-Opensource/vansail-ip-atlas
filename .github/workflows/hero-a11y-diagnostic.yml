@@ -1,0 +1,34 @@
+name: Narrow hero accessibility diagnostic (non-qualifying)
+
+on:
+  push:
+    branches: [codex/hero-a11y-diagnostic]
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: github.repository == 'VanSail-Opensource/vansail-ip-atlas' && github.ref == 'refs/heads/codex/hero-a11y-diagnostic'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        theme: [light, dark]
+    steps:
+      - uses: actions/checkout@v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.13.1'
+      - name: Install locked diagnostic harness and Chrome
+        working-directory: tools/hosted
+        run: |
+          npm exec --yes --package pnpm@11.28.12 -- pnpm install --frozen-lockfile --ignore-scripts
+          npm exec --yes --package pnpm@11.28.12 -- pnpm exec playwright install --with-deps chrome
+      - name: Audit only the unchanged public hero
+        env:
+          ATLAS_HERO_THEME: ${{ matrix.theme }}
+        run: node tools/hosted/hero-a11y-diagnostic.mjs

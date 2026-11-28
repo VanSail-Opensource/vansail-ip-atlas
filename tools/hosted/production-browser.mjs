@@ -508,6 +508,7 @@ try {
     } finally {report.populations.push(row);await s.context.close()}
     if (realDiagnostic) {
       console.log(JSON.stringify({nonqualifying:true,theme,sample:index,findings}))
+      if (findings.length) break
       continue
     }
     await componentPopulation(width,theme,index)

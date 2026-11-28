@@ -48,6 +48,135 @@ class PagesReleaseTests(unittest.TestCase):
                 self.assertEqual(key, hashlib.sha256(content + Path(name).suffix.encode()).hexdigest()[:32])
             self.assertTrue(all(call[1].get('asset_token') == 'ephemeral-fixture-token-not-written'
                                 for call in calls if call[0].startswith('/pages/assets/')))
+            self.assertEqual([path.rsplit('/', 1)[-1] for path, _ in calls],
+                             ['upload-token', 'check-missing', 'upload', 'upsert-hashes'])
+
+    def test_upsert_400_rechecks_all_keys_with_a_fresh_token_after_partial_refresh(self):
+        with tempfile.TemporaryDirectory() as directory:
+            public = Path(directory)
+            files, candidate = candidate_fixture.CandidateTests().fixture(public, "production")
+            client = self.client()
+            first, second = 'unit-only-first-asset-token', 'unit-only-second-asset-token'
+            manifest = {f'/{path}': hashlib.sha256(data + Path(path).suffix.encode()).hexdigest()[:32]
+                        for path, data in files.items() if path not in ('_headers', '_redirects')}
+            hashes = sorted(set(manifest.values()))
+            batches = [hashes[index:index + 2] for index in range(0, len(hashes), 2)]
+            self.assertGreater(len(batches), 2)
+            calls = []
+
+            def request(path, **kwargs):
+                route = path.rsplit('/', 1)[-1]
+                token = kwargs.get('asset_token')
+                if route == 'upload-token':
+                    refresh = bool(calls)
+                    calls.append((route, token, None))
+                    return {'jwt': second if refresh else first}
+                if route == 'check-missing':
+                    requested = kwargs['value']['hashes']
+                    calls.append((route, token, requested))
+                    return [hashes[0]] if token == first and hashes[0] in requested else []
+                if route == 'upload':
+                    uploaded = [item['key'] for item in kwargs['value']]
+                    calls.append((route, token, uploaded))
+                    return None
+                if route == 'upsert-hashes':
+                    requested = kwargs['value']['hashes']
+                    calls.append((route, token, requested))
+                    if requested == batches[1]:
+                        raise PagesRequestFailure('http-400')
+                    return None
+                self.fail('unexpected route')
+
+            log = io.StringIO()
+            with (patch.object(client, 'request', side_effect=request),
+                  patch.object(pages, 'ASSET_HASH_BATCH', 2),
+                  patch.object(pages.time, 'time', return_value=150),
+                  patch.object(pages, 'check_candidate', wraps=pages.check_candidate) as local,
+                  contextlib.redirect_stderr(log)):
+                self.assertEqual(client.upload_assets(public, candidate), manifest)
+            self.assertEqual(calls, [('upload-token', None, None),
+                                    *(('check-missing', first, batch) for batch in batches),
+                                    ('upload', first, [hashes[0]]),
+                                    *(('upsert-hashes', first, batch) for batch in batches[:2]),
+                                    ('upload-token', None, None),
+                                    *(('check-missing', second, batch) for batch in batches)])
+            self.assertEqual(log.getvalue(), 'Pages advisory asset hash refresh was rejected. All staged asset keys were confirmed present.\n')
+            self.assertEqual(local.call_count, 2)
+            self.assertEqual(client.progress.phase, 'asset-final-check')
+
+    def test_upsert_400_never_accepts_missing_malformed_or_failed_presence_proof(self):
+        with tempfile.TemporaryDirectory() as directory:
+            public = Path(directory)
+            _, candidate = candidate_fixture.CandidateTests().fixture(public, "production")
+            first, second = 'unit-only-first-asset-token', 'unit-only-second-asset-token'
+            for reply in ('missing', 'map', 'foreign-key', 'duplicate', 'invalid-item', 'http-400', 'invalid-token'):
+                with self.subTest(reply=reply):
+                    client = self.client()
+                    stages, log = [], io.StringIO()
+
+                    def request(path, **kwargs):
+                        route = path.rsplit('/', 1)[-1]
+                        stages.append(route)
+                        if route == 'upload-token':
+                            if stages.count(route) == 1:
+                                return {'jwt': first}
+                            return {'jwt': second} if reply != 'invalid-token' else {'jwt': []}
+                        if route == 'upsert-hashes':
+                            raise PagesRequestFailure('http-400')
+                        if route == 'check-missing':
+                            if kwargs['asset_token'] == first:
+                                return []
+                            requested = kwargs['value']['hashes']
+                            if reply == 'http-400':
+                                raise PagesRequestFailure('http-400')
+                            return {'missing': [requested[0]], 'map': {'hashes': []}, 'foreign-key': ['0' * 32],
+                                    'duplicate': [requested[0]] * 2, 'invalid-item': [False]}[reply]
+                        self.fail('unexpected route')
+
+                    with (patch.object(client, 'request', side_effect=request),
+                          patch.object(pages.time, 'time', return_value=150),
+                          patch.object(pages, 'check_candidate', wraps=pages.check_candidate) as local,
+                          contextlib.redirect_stderr(log), self.assertRaises(ContractError) as rejected):
+                        client.upload_assets(public, candidate)
+                    self.assertEqual(stages[:4], ['upload-token', 'check-missing', 'upsert-hashes', 'upload-token'])
+                    self.assertEqual(len(stages), 4 if reply == 'invalid-token' else 5)
+                    self.assertEqual(client.progress.phase, 'asset-token' if reply == 'invalid-token' else 'asset-check')
+                    if reply == 'http-400':
+                        self.assertIsInstance(rejected.exception, PagesRequestFailure)
+                        self.assertEqual(rejected.exception.classification, 'http-400')
+                    self.assertEqual(log.getvalue(), '')
+                    local.assert_called_once()
+
+    def test_only_advisory_upsert_http_400_can_request_a_presence_recheck(self):
+        with tempfile.TemporaryDirectory() as directory:
+            public = Path(directory)
+            _, candidate = candidate_fixture.CandidateTests().fixture(public, "production")
+            for failed_route, code in (('upload', 'http-400'), ('check-missing', 'http-400'),
+                                       ('upsert-hashes', 'http-401'), ('upsert-hashes', 'http-403'),
+                                       ('upsert-hashes', 'http-503'), ('upsert-hashes', 'response')):
+                with self.subTest(route=failed_route, code=code):
+                    client = self.client()
+                    stages, log = [], io.StringIO()
+
+                    def request(path, **kwargs):
+                        route = path.rsplit('/', 1)[-1]
+                        stages.append(route)
+                        if route == failed_route:
+                            raise PagesRequestFailure(code)
+                        if route == 'upload-token':
+                            return {'jwt': 'unit-only-first-asset-token'}
+                        if route == 'check-missing':
+                            return kwargs['value']['hashes'] if failed_route == 'upload' else []
+                        self.fail('unexpected route')
+
+                    with (patch.object(client, 'request', side_effect=request),
+                          patch.object(pages.time, 'time', return_value=150),
+                          contextlib.redirect_stderr(log), self.assertRaises(PagesRequestFailure) as rejected):
+                        client.upload_assets(public, candidate)
+                    self.assertEqual(rejected.exception.classification, code)
+                    self.assertEqual(stages.count('upload-token'), 1)
+                    self.assertEqual(stages[-1], failed_route)
+                    self.assertEqual(log.getvalue(), '')
 
     def test_batch_limits_include_both_decoded_bytes_and_number_of_assets(self):
         with tempfile.TemporaryDirectory() as directory:

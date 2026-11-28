@@ -42,6 +42,7 @@ API = "https://api.cloudflare.com/client/v4"
 # per-file and whole-tree limits before uploading anything.
 UPLOAD_BUCKET_BYTES = 40 * 1024 * 1024
 UPLOAD_BUCKET_FILES = 1000 if os.name == "nt" else 2000
+ASSET_HASH_BATCH = 1000
 ASSET_ROUTES = {"/pages/assets/check-missing", "/pages/assets/upload", "/pages/assets/upsert-hashes"}
 MAX_ASSET_ATTEMPTS = 5
 TRANSIENT_HTTP = {408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524}
@@ -169,9 +170,7 @@ class Pages:
             raise PagesRequestFailure("response")
         return result.get("result")
 
-    def upload_assets(self, public: Path, candidate: dict) -> dict[str, str]:
-        self.progress.phase = "asset-preflight"
-        verified = check_candidate(public, candidate, int(time.time()))
+    def _asset_upload_token(self) -> str:
         self.progress.phase = "asset-token"
         result = self.request(self.prefix + "/upload-token")
         if not isinstance(result, dict) or not isinstance(result.get("jwt"), str):
@@ -179,6 +178,24 @@ class Pages:
         jwt = result["jwt"]
         if not jwt.isascii() or not 20 <= len(jwt) <= 8192 or any(ord(ch) <= 32 or ord(ch) == 127 for ch in jwt):
             raise ContractError("invalid ephemeral Pages asset credential")
+        return jwt
+
+    def _missing_assets(self, keys: list[str], jwt: str) -> list[str]:
+        missing = []
+        self.progress.phase = "asset-check"
+        for index in range(0, len(keys), ASSET_HASH_BATCH):
+            requested = keys[index:index + ASSET_HASH_BATCH]
+            absent = self.request("/pages/assets/check-missing", method="POST", value={"hashes": requested}, asset_token=jwt)
+            if (not isinstance(absent, list) or any(not isinstance(key, str) or key not in requested for key in absent)
+                    or len(absent) != len(set(absent))):
+                raise ContractError("invalid Pages missing-asset response")
+            missing.extend(absent)
+        return missing
+
+    def upload_assets(self, public: Path, candidate: dict) -> dict[str, str]:
+        self.progress.phase = "asset-preflight"
+        verified = check_candidate(public, candidate, int(time.time()))
+        jwt = self._asset_upload_token()
         self.progress.phase = "asset-hashes"
         manifest, assets = {}, {}
         for relative, size, digest in verified["entries"]:
@@ -199,15 +216,7 @@ class Pages:
             manifest["/" + relative] = key
             assets[key] = (relative, size, digest)
         keys = sorted(assets)
-        missing = []
-        self.progress.phase = "asset-check"
-        for index in range(0, len(keys), 1000):
-            requested = keys[index:index + 1000]
-            absent = self.request("/pages/assets/check-missing", method="POST", value={"hashes": requested}, asset_token=jwt)
-            if (not isinstance(absent, list) or any(not isinstance(key, str) or key not in requested for key in absent)
-                    or len(absent) != len(set(absent))):
-                raise ContractError("invalid Pages missing-asset response")
-            missing.extend(absent)
+        missing = self._missing_assets(keys, jwt)
         self.progress.phase = "asset-upload"
         batch, batch_size = [], 0
         def flush():
@@ -228,8 +237,20 @@ class Pages:
             batch_size += size
         flush()
         self.progress.phase = "asset-upsert"
-        for index in range(0, len(keys), 1000):
-            self.request("/pages/assets/upsert-hashes", method="POST", value={"hashes": keys[index:index + 1000]}, asset_token=jwt)
+        try:
+            for index in range(0, len(keys), ASSET_HASH_BATCH):
+                self.request("/pages/assets/upsert-hashes", method="POST",
+                             value={"hashes": keys[index:index + ASSET_HASH_BATCH]}, asset_token=jwt)
+        except PagesRequestFailure as error:
+            if error.classification != "http-400":
+                raise
+            # Wrangler treats refresh as advisory for the next upload. Accept
+            # its rejection only after a fresh, affirmative presence check for
+            # the complete manifest, not merely the rejected refresh batch.
+            if self._missing_assets(keys, self._asset_upload_token()):
+                raise ContractError("Pages asset presence could not be confirmed") from None
+            print("Pages advisory asset hash refresh was rejected. All staged asset keys were confirmed present.",
+                  file=sys.stderr, flush=True)
         self.progress.phase = "asset-final-check"
         check_candidate(public, candidate, int(time.time()))
         return manifest

@@ -322,7 +322,10 @@ has not changed. The canonical acceptance packet binds the catalog, rights,
 receipt, release, bundle, preview and exact evidence identities.
 
 `pages.py` uploads through the Cloudflare REST API with credentials and ephemeral
-asset JWTs kept out of logs. It rechecks authorization immediately before creating
+asset JWTs kept out of logs. Like [Wrangler's Pages uploader](https://github.com/cloudflare/workers-sdk/blob/main/packages/wrangler/src/pages/upload.ts),
+it treats the hash refresh as advisory. After a refresh HTTP 400, it continues only
+if a fresh upload JWT confirms every staged asset key is present. It rechecks
+authorization immediately before creating
 production, then verifies every served file, effective control policy and the
 production alias. No rebuild, legal edit or timestamp change occurs during promotion.
 A known failed new deployment may restore only a previously verified original

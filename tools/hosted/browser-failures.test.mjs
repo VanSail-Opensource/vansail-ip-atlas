@@ -125,7 +125,7 @@ test('fallback cannot replace a failed or unmeasured initial script or worker bo
     [{measureInitialJavaScript:true},'/_nuxt/app.js?q=opaque',opaque,'asset-js-body'],
     [{measureInitialJavaScript:true},'/_nuxt/app.js',{...opaque,size:0},'asset-js-body'],
     [{measureInitialJavaScript:true},'/_nuxt/app.js',{...opaque,finished:false},'asset-js-transfer'],
-    [{componentFixture:true},'/_nuxt/atlas-worker.js',opaque,'asset-js-body'],
+    [{componentFixture:true},'/_nuxt/atlas-worker.js',{body:()=>Buffer.alloc(0)},'asset-js-body'],
   ]) {
     const context=new EventEmitter(),failures=[],reads=[]
     const account=accountStaticResponses(context,origin,{...options,
@@ -140,6 +140,23 @@ test('fallback cannot replace a failed or unmeasured initial script or worker bo
   const account=accountStaticResponses(context,origin,{measureInitialJavaScript:true,onFailure:()=>{}})
   context.emit('request',request);context.emit('requestfailed',request)
   await assert.rejects(account.settle(),{classification:'asset-js-transfer'})
+})
+
+test('readable speculative responses cannot bind the component worker digest', async () => {
+  const context=new EventEmitter(),failures=[],path='/_nuxt/atlas-worker.js'
+  const account=accountStaticResponses(context,origin,{componentFixture:true,onFailure:value=>failures.push(value)})
+  let bodyReads=0
+  for (const type of ['other','script']) {
+    transfer(context,path,{type,purpose:'prefetch',finished:false,body:()=>{bodyReads++;return Buffer.from('not executable')}})
+  }
+  await account.settle()
+  assert.equal(bodyReads,0)
+  assert.equal(account.jsHashes.has(path),false)
+  assert.deepEqual(failures,[])
+  const executable=Buffer.from('export {}')
+  transfer(context,path,{body:()=>executable})
+  await account.settle()
+  assert.equal(account.jsHashes.get(path),createHash('sha256').update(executable).digest('hex'))
 })
 
 test('cold transfer rejects advertised bytes without completion and keeps unrelated JS status separate', async () => {

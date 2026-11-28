@@ -6,6 +6,8 @@ function atlasPath(path) { return path.startsWith('/_atlas/') || path === '/data
 const scriptPath=/\.(?:m?js)$/
 const emittedWorkerPath=/^\/_nuxt\/atlas-[\w-]+\.(?:m?js)$/
 const generatedJavaScriptPath=/^\/_nuxt\/[\w-]+\.(?:m?js)$/
+const prefetchPurpose=headers=>[headers['sec-purpose'],headers.purpose].some(value=>
+  typeof value==='string'&&value.toLowerCase().split(/[\s;,]+/).includes('prefetch'))
 
 export function makePrefetchByteReader(origin) {
   const verifiedPrefetchedScripts=new Map()
@@ -44,7 +46,7 @@ export function makePrefetchByteReader(origin) {
 export function accountStaticResponses(context,origin,{componentFixture=false,measureColdPayload=false,
   measureInitialJavaScript=false,readPrefetchedJavaScript,onFailure}) {
   const js=new Map(),jsHashes=new Map(),atlas=[],pending=[],unfinishedCold=new Set()
-  const capturedScripts=new Set(),unfinishedScripts=new Set(),opaquePrefetches=new Set()
+  const capturedScripts=new Map(),unfinishedScripts=new Set(),opaquePrefetches=new Set()
   let started=0, firstColdFailure, initial=measureInitialJavaScript
   const coldFailure=classification=>{firstColdFailure??=classification;onFailure(classification)}
   function recordScript(path,bytes){
@@ -61,8 +63,17 @@ export function accountStaticResponses(context,origin,{componentFixture=false,me
       started++
       if(measureColdPayload)unfinishedCold.add(request)
     }
-    if((initial&&scriptPath.test(url.pathname)||componentFixture&&emittedWorkerPath.test(url.pathname))&&request.method()==='GET'){
-      capturedScripts.add(request);unfinishedScripts.add(request)
+    if((initial&&scriptPath.test(url.pathname)||componentFixture&&emittedWorkerPath.test(url.pathname)&&
+        request.resourceType()==='script')&&request.method()==='GET'){
+      unfinishedScripts.add(request)
+      if(componentFixture){
+        // Chromium's ordinary prefetch is "other"; a speculative Request
+        // must not satisfy executable worker identity even if it supplies a body.
+        const required=Promise.resolve().then(()=>request.allHeaders()).then(headers=>!prefetchPurpose(headers))
+          .catch(()=>{onFailure('asset-js-transfer');return false})
+        capturedScripts.set(request,required)
+        pending.push(required.then(value=>{if(!value)unfinishedScripts.delete(request)}))
+      }else capturedScripts.set(request,true)
     }
   })
   if(measureColdPayload||measureInitialJavaScript||componentFixture)context.on('requestfinished',request=>{
@@ -78,6 +89,7 @@ export function accountStaticResponses(context,origin,{componentFixture=false,me
     }
     if(javascript&&capturedScripts.has(response.request())){
       pending.push((async()=>{
+        if(!await capturedScripts.get(response.request()))return
         const bytes=await response.body()
         if(bytes.length){recordScript(url.pathname,bytes);return}
         const request=response.request()

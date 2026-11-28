@@ -1,0 +1,78 @@
+name: Real narrow accessibility diagnostic (non-qualifying)
+
+on:
+  push:
+    branches: [codex/real-a11y-diagnostic]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  diagnose:
+    if: github.repository == 'VanSail-Opensource/vansail-ip-atlas' && github.ref == 'refs/heads/codex/real-a11y-diagnostic'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 80
+    strategy:
+      fail-fast: false
+      matrix:
+        theme: [light, dark]
+    steps:
+      - uses: actions/checkout@v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.13.1'
+      - name: Read the exact public candidate
+        uses: actions/download-artifact@v8.0.2
+        with:
+          artifact-ids: '15245707902'
+          path: build-private/frozen-production
+          merge-multiple: true
+          run-id: '46100491281'
+          github-token: ${{ github.token }}
+      - name: Read source-free candidate evidence
+        uses: actions/download-artifact@v8.0.2
+        with:
+          artifact-ids: '15245962311'
+          path: reports
+          merge-multiple: true
+          run-id: '46100491281'
+          github-token: ${{ github.token }}
+      - name: Read source-free immutable preview identity
+        uses: actions/download-artifact@v8.0.2
+        with:
+          artifact-ids: '15249556692'
+          path: reports
+          merge-multiple: true
+          run-id: '46109458713'
+          github-token: ${{ github.token }}
+      - name: Derive the pinned public-input corpus without logging queries
+        env:
+          GOMAXPROCS: '2'
+          GOMEMLIMIT: 5GiB
+        run: |
+          umask 077
+          mkdir -p .atlas-private
+          go build -o build-private/atlas ./cmd/atlas
+          build-private/atlas corpus -atlas build-private/frozen-production/_atlas >/dev/null 2>&1 || {
+            echo 'Diagnostic corpus derivation failed'; exit 1;
+          }
+      - name: Install the same pinned harness and Chrome
+        working-directory: tools/hosted
+        run: |
+          npm exec --yes --package pnpm@11.28.12 -- pnpm install --frozen-lockfile --ignore-scripts
+          npm exec --yes --package pnpm@11.28.12 -- pnpm exec playwright install --with-deps chrome
+      - name: Diagnose real owner views without producing qualification evidence
+        env:
+          ATLAS_REAL_A11Y_DIAGNOSTIC: ${{ matrix.theme }}
+          ATLAS_PREVIEW_URL: https://cfc6ff95.vansail-ip-atlas.pages.dev
+        run: node tools/hosted/production-browser.mjs
+      - name: Remove the temporary derived corpus
+        if: always()
+        run: rm -rf -- .atlas-private

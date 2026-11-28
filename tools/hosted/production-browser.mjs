@@ -12,6 +12,7 @@ import { graphVisibleNodeCount } from './performance-gates.mjs'
 import { auditAccessibility } from './browser-accessibility.mjs'
 import { BrowserContractFailure, browserDiagnostics } from './browser-failures.mjs'
 import { previewBrowserPlan } from './preview-browser-plan.mjs'
+import { auditRealDiagnostic, realDiagnosticPlan, verifyRealDiagnosticInputs } from './real-a11y-diagnostic.mjs'
 import { visitOwner as owner, submitLookup, waitForAtlasView } from './production-interactions.mjs'
 import { parseInput } from '../../web/app/lib/query.ts'
 
@@ -23,7 +24,8 @@ diagnostics.mark('preview-origin')
 const base = new URL(process.env.ATLAS_PREVIEW_URL ?? '')
 if (base.protocol !== 'https:' || !/^[0-9a-f]{8,64}\.[a-z0-9][a-z0-9-]*\.pages\.dev$/.test(base.host) || base.username || base.password || base.pathname !== '/' || base.search || base.hash)
   throw new BrowserContractFailure('Production browser acceptance requires an immutable HTTPS Pages preview origin')
-const plan = previewBrowserPlan(process.env)
+const realDiagnostic = realDiagnosticPlan(process.env, base)
+const plan = realDiagnostic ?? previewBrowserPlan(process.env)
 const reportPath = new URL(plan.identity ? 'reports/production-browser-part.json' : 'reports/production-browser.json', root)
 diagnostics.mark('candidate-report')
 const candidate = JSON.parse(await readFile(new URL('reports/static-candidate.json', root), 'utf8'))
@@ -31,6 +33,7 @@ if (candidate.mode !== 'production' || candidate.status !== 'passed' || !/^[a-f0
   throw new BrowserContractFailure('A qualified frozen production candidate is required')
 diagnostics.mark('corpus')
 const corpusBytes = await readFile(process.env.ATLAS_PRODUCTION_CORPUS ?? '.atlas-private/production-browser-corpus.json')
+if (realDiagnostic) await verifyRealDiagnosticInputs(root, candidate, corpusBytes)
 const corpus = JSON.parse(corpusBytes)
 const validQuery = q => { try { return typeof q === 'string' && parseInput(q).canonical === q } catch { return false } }
 const strata = ['ipv4_exact', 'ipv4_lpm', 'ipv6_exact', 'ipv6_lpm', 'moas', 'sparse_asn', 'dense_asn', 'inherited', 'unknown']
@@ -244,7 +247,11 @@ async function graphPhase(page,name,action) {
   const duration_ms=result.end-result.start,complete_second_fps=Array.from({length:Math.floor(duration_ms/1000)},(_,i)=>result.times.filter(t=>t>=result.start+i*1000&&t<result.start+(i+1)*1000).length)
   return {action:name,actions,duration_ms,complete_second_fps,frame_intervals_ms:result.times.slice(1).map((t,i)=>t-result.times[i]),population_checkpoints}
 }
-async function accessible(page) {
+async function accessible(page, checkpoint, findings) {
+  if (realDiagnostic) {
+    findings.push(...await auditRealDiagnostic(page, axeSource, checkpoint))
+    return null
+  }
   return auditAccessibility(page,axeSource)
 }
 async function submit(page,q,{synthetic=false}={}) {
@@ -464,14 +471,14 @@ try {
   },100)
   for(const {width,theme} of plan.populations)for(let index=1;index<=30;index++){
     diagnostics.mark('ui-context',index)
-    const s=await newSample(width,theme),checks=[],row={width,theme,sample:index}
+    const s=await newSample(width,theme),checks=[],findings=[],row={width,theme,sample:index}
     try {
       diagnostics.mark('hero',index)
       await s.page.goto(new URL('/ip/',base).href,{waitUntil:'networkidle'});await s.page.getByRole('textbox',{name:'IP address or ASN'}).waitFor();await s.settle()
       await s.page.waitForFunction(theme=>document.documentElement.classList.contains(theme),theme)
       row.lcp_ms=await s.page.evaluate(()=>window.__atlasProduction.lcp_ms);row.initial_js_gzip_bytes=[...s.js.values()].reduce((a,b)=>a+b,0)
       if(s.atlas.length)throw new BrowserContractFailure('Hero requested atlas data before an explicit action')
-      checks.push(await accessible(s.page))
+      checks.push(await accessible(s.page,'hero',findings))
       diagnostics.mark('root-redirect',index)
       const redirect=await s.context.request.get(new URL('/',base).href,{maxRedirects:0});if(redirect.status()!==302||redirect.headers().location!=='/ip')throw new BrowserContractFailure('Actual root HTTP302 missing')
       diagnostics.mark('dataset-credits',index)
@@ -480,25 +487,29 @@ try {
       await submit(s.page,corpus.interaction_query);await overviewFacts(s.page)
       // Keep the qualified location population in the corpus independently of presentation.
       row.map={state:'not_displayed',hidden_verified:true}
-      checks.push(await accessible(s.page))
+      checks.push(await accessible(s.page,'overview',findings))
       diagnostics.mark('quality',index)
-      await owner(s.page,'Observed risk','.quality-layout,.unrated-panel,.quality-panel');checks.push(await accessible(s.page))
+      await owner(s.page,'Observed risk','.quality-layout,.unrated-panel,.quality-panel');checks.push(await accessible(s.page,'quality',findings))
       diagnostics.mark('class-c',index)
-      await owner(s.page,'Class C','.ip-grid');const cell=s.page.getByRole('gridcell').first();await cell.focus();await s.page.keyboard.press('ArrowRight');if(await s.page.getByRole('gridcell').nth(1).getAttribute('tabindex')!=='0')throw new BrowserContractFailure('Class C keyboard selection failed');checks.push(await accessible(s.page))
+      await owner(s.page,'Class C','.ip-grid');const cell=s.page.getByRole('gridcell').first();await cell.focus();await s.page.keyboard.press('ArrowRight');if(await s.page.getByRole('gridcell').nth(1).getAttribute('tabindex')!=='0')throw new BrowserContractFailure('Class C keyboard selection failed');checks.push(await accessible(s.page,'class-c',findings))
       diagnostics.mark('asn',index)
-      await owner(s.page,'ASN','.asn-list,.status-panel:not([role])');checks.push(await accessible(s.page))
+      await owner(s.page,'ASN','.asn-list,.status-panel:not([role])');checks.push(await accessible(s.page,'asn',findings))
       diagnostics.mark('bgp',index)
-      row.graph=await actualGraph(s.page);checks.push(await accessible(s.page))
+      row.graph=await actualGraph(s.page);checks.push(await accessible(s.page,'bgp',findings))
       row.completed_routes=['overview','quality','class-c','asn','bgp']
       diagnostics.mark('unknown-states',index)
-      row.unknown_states=await unknownStates(s.page);row.ipv4_network_coverage_verified=corpus.ipv4_network_coverage?true:null;checks.push(await accessible(s.page));await s.settle()
+      row.unknown_states=await unknownStates(s.page);row.ipv4_network_coverage_verified=corpus.ipv4_network_coverage?true:null;checks.push(await accessible(s.page,'unknown-terminal-bgp',findings));await s.settle()
       diagnostics.mark('ui-metrics',index)
       const metric=await s.page.evaluate(()=>window.__atlasProduction)
       row.interaction_cls=metric.cls_supported?metric.cls:null;row.event_timing_supported=metric.event_supported
       row.interaction_durations_ms=metric.event_supported&&metric.trusted_inputs>0?[16,...Object.values(metric.interactions)]:[]
       row.trusted_input_events=metric.trusted_inputs;row.complete_interaction_script=true
-      row.accessibility={engine:checks[0].engine,version:checks[0].version,violations:checks.flatMap(x=>x.violations),incomplete:checks.flatMap(x=>x.incomplete)}
+      if (!realDiagnostic) row.accessibility={engine:checks[0].engine,version:checks[0].version,violations:checks.flatMap(x=>x.violations),incomplete:checks.flatMap(x=>x.incomplete)}
     } finally {report.populations.push(row);await s.context.close()}
+    if (realDiagnostic) {
+      console.log(JSON.stringify({nonqualifying:true,theme,sample:index,findings}))
+      continue
+    }
     await componentPopulation(width,theme,index)
     console.log(`Production browser population ${width}/${theme} ${index}/30`)
   }
@@ -513,10 +524,14 @@ finally {
   await pendingMemorySample
   if(browser)await browser.close();if(server)await server.close()
   report.browser_process_tree_rss_peak_bytes=report.worker_memory_samples.reduce((peak,sample)=>sample.supported?Math.max(peak,sample.rss_bytes):peak,0)
-  const packet = plan.identity ? {...plan.identity,report} : report
-  diagnostics.mark('report-write')
-  await mkdir(new URL('reports/',root),{recursive:true});await writeFile(reportPath,JSON.stringify(packet)+'\n')
+  if (!realDiagnostic) {
+    const packet = plan.identity ? {...plan.identity,report} : report
+    diagnostics.mark('report-write')
+    await mkdir(new URL('reports/',root),{recursive:true});await writeFile(reportPath,JSON.stringify(packet)+'\n')
+  }
 }
+if (realDiagnostic) process.exitCode=scenarioFailed?1:0
+else {
 const validationArgs = plan.identity
   ? ['tools/hosted/preview_shards.py','--part',fileURLToPath(reportPath),'--shard',plan.identity.shard]
   : ['-c','import json,sys;from tools.release_contract.acceptance import browser_gates,require_all;g=browser_gates(json.load(open(sys.argv[1])));print(json.dumps(g,indent=2));require_all(g)',fileURLToPath(reportPath)]
@@ -524,6 +539,7 @@ diagnostics.mark('report-validation')
 const validation=spawnSync('python',validationArgs,{cwd:root,stdio:'ignore'})
 if(validation.status!==0&&!scenarioFailed)diagnostics.failedReport(plan.identity?validation.status:undefined)
 process.exitCode=validation.status===0?0:1
+}
 } catch(error) {
   diagnostics.fail(error)
   process.exitCode=1

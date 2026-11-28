@@ -4,13 +4,13 @@ import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
-import { gzipSync } from 'node:zlib'
 import { isIP } from 'node:net'
 import { cpus, totalmem } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import { graphVisibleNodeCount } from './performance-gates.mjs'
 import { auditAccessibility } from './browser-accessibility.mjs'
 import { BrowserContractFailure, browserDiagnostics } from './browser-failures.mjs'
+import { accountStaticResponses } from './browser-asset-accounting.mjs'
 import { previewBrowserPlan } from './preview-browser-plan.mjs'
 import { visitOwner as owner, submitLookup, waitForAtlasView } from './production-interactions.mjs'
 import { parseInput } from '../../web/app/lib/query.ts'
@@ -132,8 +132,6 @@ async function processTreeRSS() {
   return {supported:count>0,at_ms:performance.now(),rss_bytes:rss,processes:count}
 }
 
-function atlasPath(path) { return path.startsWith('/_atlas/') || path === '/dataset-credits.json' }
-
 async function newSample(width,theme,{componentFixture=false,measureColdPayload=false}={}) {
   const mobile=width<1000
   const context=await browser.newContext({viewport:{width,height:mobile?844:900},deviceScaleFactor:mobile?2:1,colorScheme:theme,reducedMotion:'no-preference',serviceWorkers:'block'})
@@ -159,39 +157,13 @@ async function newSample(width,theme,{componentFixture=false,measureColdPayload=
   await cdp.send('Network.enable');await cdp.send('Network.setCacheDisabled',{cacheDisabled:true})
   await cdp.send('Emulation.setCPUThrottlingRate',{rate:mobile?4:1})
   await cdp.send('Network.emulateNetworkConditions',{offline:false,latency:150,downloadThroughput:1600000/8,uploadThroughput:750000/8,connectionType:'cellular3g'})
-  const js=new Map(),jsHashes=new Map(),atlas=[],pending=[]
-  const unfinished=new Set()
-  let coldRequests=0
-  if(measureColdPayload){
-    context.on('request',request=>{
-      const url=new URL(request.url())
-      if(url.origin===base.origin && atlasPath(url.pathname)){unfinished.add(request);coldRequests++}
-    })
-    context.on('requestfinished',request=>unfinished.delete(request))
-  }
-  context.on('response',response=>{
-    const url=new URL(response.url());if(url.origin!==base.origin||(!/\.(?:m?js)$/.test(url.pathname)&&!atlasPath(url.pathname)))return
-    pending.push((async()=>{
-      if(response.status()!==200)throw new BrowserContractFailure('Static asset unavailable')
-      if(/\.(?:m?js)$/.test(url.pathname)){
-        const bytes=await response.body()
-        js.set(url.pathname,gzipSync(bytes,{level:9}).length)
-        jsHashes.set(url.pathname,sha256(bytes))
-      }else if(!componentFixture){
-        const sizes=await response.request().sizes()
-        if(!Number.isFinite(sizes.responseBodySize)||sizes.responseBodySize<=0)throw new BrowserContractFailure('Wire bytes unavailable')
-        atlas.push({path:url.pathname,body_bytes:sizes.responseBodySize})
-      }
-    })().catch(()=>recordError('Static response accounting failed','asset-accounting')))
-  })
+  const accounting=accountStaticResponses(context,base.origin,{componentFixture,measureColdPayload,
+    onFailure:classification=>recordError('Static response accounting failed',classification)})
   const settle=async()=>{
     await page.waitForLoadState('networkidle')
-    await Promise.all(pending)
-    // Playwright can use Content-Length for an interrupted response. Require
-    // Chrome's successful transfer completion for every cold atlas request.
-    if(measureColdPayload && (unfinished.size || coldRequests!==atlas.length))throw new BrowserContractFailure('Incomplete cold atlas transfer')
+    await accounting.settle()
   }
-  return {context,page,cdp,js,jsHashes,atlas,settle}
+  return {context,page,cdp,...accounting,settle}
 }
 
 async function credits(s) {
@@ -470,7 +442,7 @@ try {
       await s.page.goto(new URL('/ip/',base).href,{waitUntil:'networkidle'});await s.page.getByRole('textbox',{name:'IP address or ASN'}).waitFor();await s.settle()
       await s.page.waitForFunction(theme=>document.documentElement.classList.contains(theme),theme)
       row.lcp_ms=await s.page.evaluate(()=>window.__atlasProduction.lcp_ms);row.initial_js_gzip_bytes=[...s.js.values()].reduce((a,b)=>a+b,0)
-      if(s.atlas.length)throw new BrowserContractFailure('Hero requested atlas data before an explicit action')
+      if(s.startedAtlasRequests())throw new BrowserContractFailure('Hero requested atlas data before an explicit action')
       checks.push(await accessible(s.page))
       diagnostics.mark('root-redirect',index)
       const redirect=await s.context.request.get(new URL('/',base).href,{maxRedirects:0});if(redirect.status()!==302||redirect.headers().location!=='/ip')throw new BrowserContractFailure('Actual root HTTP302 missing')

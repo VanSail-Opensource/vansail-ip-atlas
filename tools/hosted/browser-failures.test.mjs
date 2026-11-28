@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
+import { EventEmitter } from 'node:events'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { BrowserContractFailure, browserDiagnostics, browserFailureMarker } from './browser-failures.mjs'
+import { BrowserAssetFailure, BrowserContractFailure, browserDiagnostics, browserFailureMarker } from './browser-failures.mjs'
+import { accountStaticResponses } from './browser-asset-accounting.mjs'
 
 test('browser markers never interpolate opaque input or exception text', () => {
   const secret='https://example.invalid/private?q=secret\nATLAS_BROWSER_FAILURE overview 8 contract'
@@ -57,4 +59,43 @@ test('report gate codes are closed, phase-bound and preserve an earlier diagnosi
     'ATLAS_BROWSER_FAILURE dataset-credits 2 asset-accounting',
   ])
   assert.equal(browserFailureMarker('overview',1,'gate-graph'),'ATLAS_BROWSER_FAILURE overview 1 runtime')
+})
+
+test('non-200 assets and unreadable JavaScript still fail the UI and component reports', async () => {
+  const origin='https://example.invalid'
+  for (const componentFixture of [false,true]) {
+    const context=new EventEmitter(),failures=[]
+    const account=accountStaticResponses(context,origin,{componentFixture,onFailure:value=>failures.push(value)})
+    for (const [path,status,body] of [
+      ['/_atlas/current.json',503], ['/_nuxt/example.js',404],
+      ['/_nuxt/unreadable.js',200,()=>{throw new Error('opaque text')}],
+      ['/_nuxt/empty.js',200,()=>Buffer.alloc(0)],
+      ['/_nuxt/worker.js',200,()=>Buffer.from('export {}')],
+    ]) context.emit('response',{url:()=>origin+path,status:()=>status,body})
+    // Even if the hero request is cancelled before headers, the count sees it.
+    context.emit('request',{url:()=>origin+'/_atlas/never-responded.json'})
+    await account.settle()
+    assert.deepEqual(failures,['asset-http-status','asset-http-status','asset-js-body','asset-js-body'])
+    assert.equal(account.startedAtlasRequests(),componentFixture?0:1)
+    assert.deepEqual(account.atlas,[])
+    assert(account.js.get('/_nuxt/worker.js')>0)
+    assert.match(account.jsHashes.get('/_nuxt/worker.js'),/^[a-f0-9]{64}$/)
+  }
+})
+
+test('cold transfer rejects advertised bytes without successful completion', async () => {
+  const origin='https://example.invalid',context=new EventEmitter(),failures=[]
+  const account=accountStaticResponses(context,origin,{measureColdPayload:true,onFailure:value=>failures.push(value)})
+  const request={url:()=>origin+'/_atlas/current.json',sizes:async()=>({responseBodySize:200})}
+  context.emit('request',request)
+  context.emit('response',{url:request.url,status:()=>200,request:()=>request})
+  // Playwright may use Content-Length after a transfer is interrupted. A
+  // positive number alone cannot substitute for requestfinished.
+  context.emit('requestfailed',request)
+  await assert.rejects(account.settle(),{classification:'asset-atlas-transfer'})
+  assert.deepEqual(failures,[])
+  const lines=[],log=browserDiagnostics(undefined,line=>lines.push(line))
+  log.mark('cold-queries');log.fail(new BrowserAssetFailure('asset-atlas-transfer'))
+  log.mark('unknown-states',3);log.fail(new BrowserAssetFailure('https://example.invalid/private?query=secret'))
+  assert.deepEqual(lines,['ATLAS_BROWSER_FAILURE cold-queries - asset-atlas-transfer','ATLAS_BROWSER_FAILURE unknown-states 3 asset-atlas-transfer'])
 })

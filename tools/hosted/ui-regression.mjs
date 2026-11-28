@@ -73,6 +73,39 @@ try {
       assert.equal(await initial.locator('.hero-inner').evaluate(node => getComputedStyle(node).opacity), '1')
     } finally { await isolated.close() }
   })
+  await test('the narrow hero keeps text unobstructed in both themes without removing the wider ornament', async () => {
+    const axeSource = await readFile(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8')
+    for (const theme of ['light', 'dark']) {
+      const isolated = await browser.newContext({ viewport: { width: 320, height: 844 }, deviceScaleFactor: 2,
+        colorScheme: theme, reducedMotion: 'no-preference', serviceWorkers: 'block' })
+      try {
+        await isolated.addInitScript(theme => localStorage.setItem('nuxt-color-mode', theme), theme)
+        await isolated.route('**/*', route => new URL(route.request().url()).origin === new URL(base).origin
+          ? route.continue() : route.abort('blockedbyclient'))
+        const hero = await isolated.newPage()
+        await hero.goto(`${base}/ip/`, { waitUntil: 'networkidle' })
+        await hero.waitForFunction(theme => document.documentElement.classList.contains(theme), theme)
+        const text = hero.getByRole('heading', { level: 1 })
+        assert(await text.isVisible())
+        assert(await hero.getByRole('textbox', { name: 'IP address or ASN' }).isVisible())
+        assert(await hero.getByRole('button', { name: 'Look up address' }).isVisible())
+        const ornament = hero.locator('.hero-orbit')
+        assert.equal(await ornament.count(), 1)
+        assert.equal(await ornament.isVisible(), false)
+        for (const family of ['', '"Liberation Sans", Arial, sans-serif', '"DejaVu Sans", Georgia, serif']) {
+          // Installed fonts differ across systems and can change which lines wrap.
+          await hero.locator('.hero-inner').evaluate((node, family) => { node.style.fontFamily = family }, family)
+          const audit = await auditAccessibility(hero, axeSource)
+          assert.deepEqual(audit.violations, [])
+          assert.deepEqual(audit.incomplete, [])
+        }
+        await hero.locator('.hero-inner').evaluate(node => node.style.removeProperty('font-family'))
+        await hero.setViewportSize({ width: 390, height: 844 })
+        await ornament.waitFor()
+        assert(await text.isVisible())
+      } finally { await isolated.close() }
+    }
+  })
   await test('global dataset credits stay release scoped and reveal no synthetic data associations', async () => {
     const isolated = await browser.newContext({ serviceWorkers: 'block' })
     const creditRequests = [], external = [], atlasRequests = []

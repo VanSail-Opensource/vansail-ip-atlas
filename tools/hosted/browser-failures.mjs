@@ -4,8 +4,9 @@ const setup = new Set(['startup','preview-origin','candidate-report','corpus','g
 const samples = new Set(['ui-context','hero','root-redirect','dataset-credits','overview','quality','class-c','asn','bgp',
   'unknown-states','ui-metrics','component-context','component-fixture','component-worker','component-keyboard-pan',
   'component-wheel-zoom','component-route-focus','component-accessibility','component-unknown-ipv4'])
+const assetClasses = new Set(['asset-http-status','asset-js-body','asset-atlas-size','asset-atlas-transfer'])
 const classes = new Set(['contract','playwright-timeout','runtime','report-validation','unexpected-request',
-  'page-exception','asset-accounting','resource-observation','privacy-contract'])
+  'page-exception','asset-accounting','resource-observation','privacy-contract',...assetClasses])
 // Only exact Python validator exit codes select a gate class. Raw child
 // streams stay ignored. Keep in sync with preview_shards.py and browser_failures.py.
 const reportGates = new Map([
@@ -16,6 +17,12 @@ const reportGates = new Map([
 const gateClasses = new Set(reportGates.values())
 
 export class BrowserContractFailure extends Error {}
+export class BrowserAssetFailure extends BrowserContractFailure {
+  constructor(classification) {
+    super('Static asset accounting failed')
+    this.classification=assetClasses.has(classification)?classification:'asset-atlas-transfer'
+  }
+}
 
 export function browserFailureMarker(phase, sample, classification) {
   if (!setup.has(phase) && !samples.has(phase)) phase = 'startup'
@@ -32,7 +39,8 @@ export function browserDiagnostics(TimeoutError, emit = line => console.error(li
   return {
     mark(stage, index) { phase = stage; sample = index },
     fail(error) {
-      const classification=error instanceof BrowserContractFailure ? 'contract'
+      const classification=error instanceof BrowserAssetFailure && assetClasses.has(error.classification) ? error.classification
+        : error instanceof BrowserContractFailure ? 'contract'
         : typeof TimeoutError==='function' && error instanceof TimeoutError ? 'playwright-timeout' : 'runtime'
       emit(marker(classification))
     },
